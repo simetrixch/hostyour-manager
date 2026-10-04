@@ -112,27 +112,30 @@ export function splitTenantRows<T extends { status: TenantStatus }>(rows: readon
   return lists;
 }
 
-/** One tenant as the operator meets it: its guid, and the row of each environment that stands. A purged
- *  row stands nowhere, so its environment reads absent and is offered "+ add"; the row itself stays
- *  reachable at its own URL. Display only: every action still takes ONE row, so the environments stay
- *  as separate underneath as their rows are. */
-export interface TenantEnvironments<T> {
-  guid: string;
+/** One unit as the operator meets it — a tenant by its guid, a consumer by its name — and the row of
+ *  each environment that stands. A purged row stands nowhere, so its environment reads absent and is
+ *  offered "+ add"; the row itself stays reachable at its own URL. Display only: every action still
+ *  takes ONE row, so the environments stay as separate underneath as their rows are. */
+export interface UnitEnvironments<T> {
+  key: string;
   byStage: Partial<Record<Stage, T>>;
 }
 
-export function groupTenantEnvironments<T extends { guid: string; stage: Stage; status: TenantStatus }>(rows: readonly T[]): TenantEnvironments<T>[] {
-  const groups = new Map<string, TenantEnvironments<T>>();
+export function groupEnvironments<T extends { stage: Stage; status: TenantStatus }>(rows: readonly T[], keyOf: (row: T) => string): UnitEnvironments<T>[] {
+  const groups = new Map<string, UnitEnvironments<T>>();
   for (const row of rows) {
-    const group = groups.get(row.guid) ?? { guid: row.guid, byStage: {} };
-    groups.set(row.guid, group);
+    const group = groups.get(keyOf(row)) ?? { key: keyOf(row), byStage: {} };
+    groups.set(group.key, group);
     if (tenantRowOffer(row.status).listed) group.byStage[row.stage] = row;
   }
   return [...groups.values()];
 }
 
-/** The environment a tenant's card opens on: PROD, then TEST, then DEV, of those still onboarded. */
-export function defaultEnvironment<T extends { status: TenantStatus }>(group: TenantEnvironments<T>): T | undefined {
+export const groupTenantEnvironments = <T extends { guid: string; stage: Stage; status: TenantStatus }>(rows: readonly T[]): UnitEnvironments<T>[] =>
+  groupEnvironments(rows, (row) => row.guid);
+
+/** The environment a unit's card opens on: PROD, then TEST, then DEV, of those still onboarded. */
+export function defaultEnvironment<T extends { status: TenantStatus }>(group: UnitEnvironments<T>): T | undefined {
   return [...STAGE].reverse().map((s) => group.byStage[s]).find((r) => r !== undefined && !tenantRowOffer(r.status).settled);
 }
 

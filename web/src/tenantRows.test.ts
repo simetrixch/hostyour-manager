@@ -96,7 +96,7 @@ describe("groupTenantEnvironments", () => {
   const row = (id: string, stage: Stage, status: TenantStatus) => ({ id, guid: "ak64h58875qw", stage, status });
   it("shows simetrix once, with its PROD and TEST rows as its environments", () => {
     const groups = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "active"), { ...row("tnt_o", "prod", "active"), guid: "other0000000" }]);
-    expect(groups.map((g) => g.guid)).toEqual(["ak64h58875qw", "other0000000"]);
+    expect(groups.map((g) => g.key)).toEqual(["ak64h58875qw", "other0000000"]);
     expect(groups[0]!.byStage).toEqual({ prod: row("tnt_p", "prod", "active"), test: row("tnt_t", "test", "active") });
   });
   it("reads a purged environment as absent, while the row stands beside a later one of that stage", () => {

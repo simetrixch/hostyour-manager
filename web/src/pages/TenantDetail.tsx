@@ -181,7 +181,7 @@ export function TenantDetail() {
         </div>
       </header>
 
-      {groupTenantEnvironments(environments.filter((e) => e.guid === t.guid)).map((group) => <TenantEnvironmentBar key={group.guid} group={group} selectedId={t.id} />)}
+      {groupTenantEnvironments(environments.filter((e) => e.guid === t.guid)).map((group) => <TenantEnvironmentBar key={group.key} group={group} selectedId={t.id} />)}
 
       {error && (
         <p role="alert" className="alert alert--danger">

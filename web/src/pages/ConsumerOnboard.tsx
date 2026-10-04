@@ -1,9 +1,10 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
-import { useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
+import { addStageForm } from "../consumerAddStage.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -37,7 +38,11 @@ function deriveConsumerName(repoURL: string): string {
 
 export function ConsumerOnboard() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string });
+  // A consumer's Add stage (the Consumers card's "+ add") arrives with its name, repository, stage and
+  // chart path; the machine and the size stay unchosen, and the repository is read at once.
+  const [params] = useSearchParams();
+  const [adding] = useState(() => addStageForm(params));
+  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string, ...(adding ? { ...adding, size: "" } : {}) });
   // Deployable (the manifest declares a chart → pick a cluster) vs build-only (no chart → the stage
   // alone says where the one triggered release run puts the release). The server checks the choice
   // against the manifest's own shape.
@@ -56,7 +61,7 @@ export function ConsumerOnboard() {
   const [error, setError] = useState<string | null>(null);
   // The consumer name defaults to the repo name (auto-derived) until the operator edits it by hand;
   // after that we stop overwriting their value.
-  const [nameEdited, setNameEdited] = useState(false);
+  const [nameEdited, setNameEdited] = useState(adding !== null);
 
   useEffect(() => {
     listOnboardTargets()
@@ -65,6 +70,8 @@ export function ConsumerOnboard() {
     getChannelStages()
       .then((v) => setChannels(v.channelStages))
       .catch((e: unknown) => setError(msg(e)));
+    // An Add stage reads its repository once on arrival, as leaving the URL field would.
+    if (adding) void readRepository();
   }, []);
 
   const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
@@ -91,7 +98,7 @@ export function ConsumerOnboard() {
       const view = await prefillOnboard({ repoURL: form.repoURL.trim() });
       setPrefill(view);
       setReadURL(form.repoURL.trim());
-      setForm((f) => ({ ...f, channel: view.channel, stage: "" }));
+      setForm((f) => ({ ...f, channel: view.channel, stage: adding ? f.stage : "" }));
     } catch (err) {
       setError(msg(err));
     } finally {
@@ -157,7 +164,7 @@ export function ConsumerOnboard() {
       <header className="page__head">
         <div>
           <span className="page__eyebrow">Onboard · step 1 of 2</span>
-          <h2 className="page__title">Onboard a consumer app</h2>
+          <h2 className="page__title">{adding ? `Add the ${adding.stage} stage of ${adding.consumerName}` : "Onboard a consumer app"}</h2>
         </div>
       </header>
 
@@ -300,6 +307,9 @@ export function ConsumerOnboard() {
             <label className="field">
               <span className="field__label">Size</span>
               <select value={form.size} onChange={set("size")} required>
+                <option value="" disabled>
+                  Choose a size
+                </option>
                 {UNIT_SIZE.map((s) => (
                   <option key={s} value={s}>
                     {s}
@@ -339,7 +349,8 @@ export function ConsumerOnboard() {
               !form.channel ||
               !form.stage ||
               !targetChosen ||
-              !form.owner
+              !form.owner ||
+              (!buildOnly && !form.size)
             }
           >
             {busy ? "Validating…" : "Validate & plan"}

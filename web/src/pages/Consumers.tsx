@@ -23,6 +23,8 @@ import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
+import { ConsumerCardHead } from "../components/ConsumerCardHead.tsx";
+import { defaultEnvironment, groupEnvironments, tenantRowOffer } from "../tenantRows.ts";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -85,6 +87,8 @@ export function Consumers() {
   const [rows, setRows] = useState<ConsumerView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"live" | "runs">("live");
+  // The environment each consumer's card shows, by name; a card nobody switched opens on defaultEnvironment.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const [confirmTarget, setConfirmTarget] = useState<ConsumerView | null>(null);
   const [lifecycle, setLifecycle] = useState<{ c: ConsumerView; action: LifecycleAction } | null>(null);
   // The size dialog's target (null = closed). Its own state and not part of `lifecycle`, because it
@@ -285,17 +289,15 @@ export function Consumers() {
           </div>
         ) : (
           <ul className="cards">
-            {visibleRows.map((c) => (
-              <li key={c.id} className="card servercard">
-                <div className="card__head">
-                  <strong className="servercard__name">{c.name}</strong>
-                  <span className={`badge badge--${c.status}`}>{c.status}</span>
-                </div>
-                {/* No recorded revision: the unit's pin lives on its delivery branch and is the
-                    release cycle's to write — the live Drift row below shows what actually runs. */}
-                <div className="servercard__target">
-                  {c.domain} · {c.stage} · updated {new Date(c.updatedAt).toLocaleString()}
-                </div>
+            {/* One card per CONSUMER: each stage is a unit of its own (namespace, registration, release
+                pin), grouped here for display only. The bar picks the row the rest of the card acts on, and
+                "+ add" onboards the consumer at a stage it does not stand at. */}
+            {groupEnvironments(rows ?? [], (row) => row.name).map((group) => {
+              const c = Object.values(group.byStage).find((r) => r.id === chosen[group.key] && !tenantRowOffer(r.status).settled) ?? defaultEnvironment(group);
+              if (!c) return null;
+              return (
+              <li key={group.key} className="card servercard">
+                <ConsumerCardHead group={group} selected={c} onSelect={(row) => setChosen((cur) => ({ ...cur, [group.key]: row.id }))} />
                 {/* Row facts only. The unit's public address is NOT one of them — it is
                     <label>.<stage apex>, and the apex comes off the target cluster's values chain — so
                     it arrives with the live payload below. */}
@@ -304,7 +306,7 @@ export function Consumers() {
                   {c.repoUrl && <span className="chip">{c.repoUrl.replace(/^https:\/\//, "").replace(/\.git$/, "")}</span>} <CheckChip check={c.check} /> <BackupChip latest={latestBackups} kind="consumer" unit={c.name} stage={c.stage} />
                 </div>
 
-                <ConsumerLive appId={c.id} />
+                <ConsumerLive key={c.id} appId={c.id} />
 
                 {/* The relocation state band: an open or failed backup/restore/move of THIS
                     unit surfaces here, off the one shared runs table, linking to its Run screen. */}
@@ -329,7 +331,8 @@ export function Consumers() {
                   onOffboard={() => setConfirmTarget(c)}
                 />
               </li>
-            ))}
+              );
+            })}
           </ul>
         )}
 

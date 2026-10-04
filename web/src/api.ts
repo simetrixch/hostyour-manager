@@ -287,7 +287,7 @@ export interface ConsumerView {
   name: string;
   clusterId: string;
   domain: string;
-  stage: string;
+  stage: Stage;
   repoUrl: string | null;
   chartPath: string | null;
   /** The server enum verbatim (shared/enums.ts APP_PROVENANCE): "manager" marks a consumer this
