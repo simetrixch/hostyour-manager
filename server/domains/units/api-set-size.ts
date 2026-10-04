@@ -1,12 +1,12 @@
-// What the three sizes cost ONE unit, and the two run kinds that put a unit on a size — the other half
+// What the sizes cost ONE unit, and the two run kinds that put a unit on a size — the other half
 // of the size table (plugins/unit/server/api-unit-sizes.ts), which says what a size means.
 import type { Hono } from "hono";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import { errValidation, errNotConfigured } from "../../kernel/errors.ts";
-import { UNIT_SIZE } from "#unit/shared/unit-size.ts";
-import { explainUnitQuota } from "#unit/server/unit-size.ts";
-import { SetSizeParams, TenantSetSizeParams, TENANT_BRINGS, consumerComposition } from "./set-size.run.ts";
+import { TENANT_SIZE, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
+import { explainUnitQuota, offeredSizes } from "#unit/server/unit-size.ts";
+import { SetSizeParams, TenantSetSizeParams, consumerComposition } from "./set-size.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { loadAppCluster } from "./lifecycle.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
@@ -28,7 +28,7 @@ export interface SetSizeApiDeps {
 export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): void {
   const { db, executor, registrations, onboardingEnabled, tenantEnabled } = deps;
 
-  // ---- What the three sizes cost ONE unit ----
+  // ---- What the sizes cost ONE unit ----
   //
   // The bare table is nine rows and a unit is a SUM of some of them, so a picker that showed the table
   // would be asking an operator to add up base + postgresql + mongodb x members in their head and
@@ -46,7 +46,7 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
       unit: ac.name,
       brings,
       composed: registrations !== undefined,
-      sizes: UNIT_SIZE.map((name) => ({ name, ...explainUnitQuota(db, name, brings) })),
+      sizes: offeredSizes(db, brings).map((name) => ({ name, ...explainUnitQuota(db, name, brings) })),
     });
   });
 
@@ -56,13 +56,13 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
     // unknown id gets a refusal rather than a plausible-looking quote for nothing.
     loadTenantStatus(db, id);
     // A tenant brings no database of its own — its members claim the cluster's shared MongoDB replica
-    // set — so its figures are the base rows, and they bound EACH member namespace rather than the
-    // tenant as a whole.
+    // set — so its figures are the member rows, and they bound EACH member namespace rather than the
+    // tenant as a whole. Only the sizes a tenant may be put on.
     return c.json({
       unit: id,
       brings: TENANT_BRINGS,
       composed: true,
-      sizes: UNIT_SIZE.map((name) => ({ name, ...explainUnitQuota(db, name, TENANT_BRINGS) })),
+      sizes: offeredSizes(db, TENANT_BRINGS).filter((s) => (TENANT_SIZE as readonly string[]).includes(s)).map((name) => ({ name, ...explainUnitQuota(db, name, TENANT_BRINGS) })),
     });
   });
 

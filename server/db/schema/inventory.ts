@@ -222,6 +222,9 @@ export const tenants = sqliteTable("tenants", {
   ownDomainRedirects: text("own_domain_redirects", { mode: "json" }).$type<string[]>().notNull().default([]),
   approvedTags: text("approved_tags", { mode: "json" }).$type<Record<string, Record<string, string>>>().notNull().default({}),
   senderDomain: text("sender_domain").notNull().default(""),
+  // The size word (UNIT_SIZE) the registration's quota was resolved from, beside it for the tenant
+  // view, which reads rows. Null for a stage written before the word was recorded: "no size recorded".
+  size: text("size"),
   // Whether the tenant's IdP boot-seeds initial accounts. Also a registration field (the registration
   // is what the charts read); recorded here as the platform's own trace of what was asked for.
   seedUsers: integer("seed_users", { mode: "boolean" }).notNull().default(false),

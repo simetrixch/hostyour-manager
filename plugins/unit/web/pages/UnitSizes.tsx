@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { listUnitSizes, updateUnitSize, type UnitSizeView } from "#core/web/api.ts";
+import { UNIT_SIZE_LETTER } from "../../shared/unit-size.ts";
 
-/** The size table: what `small`, `medium` and `large` MEAN on this installation.
+/** The size table: what each size (XS to XXL) MEANS on this installation.
  *
- *  A UNIT HAS ONE SIZE, AND THE TABLE HAS THREE ROWS PER SIZE. The one size the operator sells is
- *  `small`, `medium` or `large`; what it COSTS depends on what the unit brings with it. So the figures
+ *  A UNIT HAS ONE SIZE, AND THE TABLE HAS A ROW PER SIZE AND COMPONENT. A consumer is sold `small`,
+ *  `medium` or `large`, a tenant XS to L; what a size COSTS depends on what the unit brings with it. So the figures
  *  are kept per component — `base` is the application itself, `postgresql` is a PostgreSQL instance of
  *  its own, `mongodb` is ONE member of a MongoDB of its own — and a unit's ceiling is the base row plus
  *  the rows for what it brings, the MongoDB row times its member count (one for a standalone, three for
- *  a replica set). A consumer on the cluster's shared MongoDB adds nothing.
+ *  a replica set). A consumer on the cluster's shared MongoDB adds nothing. A tenant member namespace
+ *  is bounded by the `member` row alone.
  *
  *  WHAT AN EDIT HERE REACHES, and what it does not. It changes the words, for every unit registered
  *  from that moment on. It reaches no running unit — a unit's registration carries the figures it was
@@ -36,6 +38,7 @@ const COMPONENT_LEDE: Record<UnitSizeView["component"], string> = {
   base: "The application itself — what every unit gets, whatever it brings. A unit that runs on the platform's shared databases is bounded by this row alone.",
   postgresql: "Added on top when the unit brings its OWN PostgreSQL (services: postgresql in its manifest). One instance, rendered at the unit's own size.",
   mongodb: "Added on top PER MEMBER when the unit brings its OWN MongoDB: once for a standalone, three times for a replica set. A unit on the cluster's shared replica set adds nothing.",
+  member: "Each member namespace of a tenant, alone: a tenant brings no database of its own. A tenant is offered XS to L.",
 };
 
 /** The row's key in the edit buffer — both halves of its primary key, since `medium` alone names
@@ -106,7 +109,7 @@ export function UnitSizes() {
       <p className="section__lede">
         A unit has <strong>one</strong> size. What that size costs depends on what the unit brings: its ceiling is the
         <strong> base</strong> row, plus <strong>postgresql</strong> when it runs its own, plus <strong>mongodb</strong>
-        once per member when it runs its own. That is why each size is priced three times below.
+        once per member when it runs its own. A tenant&apos;s member namespaces are bounded by the <strong>member</strong> row alone.
       </p>
       <p className="section__lede">
         Changing a size here changes what is written into every registration <strong>from now on</strong>. It does not
@@ -123,7 +126,7 @@ export function UnitSizes() {
           <p className="section__lede">{COMPONENT_LEDE[component]}</p>
           {rows?.filter((s) => s.component === component).map((s) => (
             <div className="card" key={rowKey(s)}>
-              <h3>{s.name}</h3>
+              <h3>{UNIT_SIZE_LETTER[s.name]}</h3>
               <div className="grid">
                 {FIELDS.map((f) => (
                   <label className="field" key={f.key}>

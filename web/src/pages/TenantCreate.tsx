@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
-import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, TENANT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
@@ -177,9 +177,9 @@ export function TenantCreate() {
           <label className="field">
             <span className="field__label">Size</span>
             <select value={form.size} onChange={set("size")} required>
-              {UNIT_SIZE.map((s) => (
+              {TENANT_SIZE.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {UNIT_SIZE_LETTER[s]}
                 </option>
               ))}
             </select>

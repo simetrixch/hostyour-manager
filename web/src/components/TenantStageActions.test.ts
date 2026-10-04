@@ -59,7 +59,9 @@ describe("Add stage chooses its own machine and size", () => {
     const html = await loaded([row("prod", "active"), row("test", "purged")]);
     expect(html).toContain('<option value="" disabled="" selected="">Choose a machine</option>');
     expect(html).toContain('<option value="" disabled="" selected="">Choose a size</option>');
-    for (const size of ["small", "medium", "large"]) expect(html).toContain(`<option>${size}</option>`);
+    // A tenant is offered XS to L, by letter; XL and XXL are not offered yet.
+    for (const [id, letter] of [["xsmall", "XS"], ["small", "S"], ["medium", "M"], ["large", "L"]]) expect(html).toContain(`<option value="${id}">${letter}</option>`);
+    expect(html).not.toContain("xlarge");
     expect(html).toMatch(/<button class="btn" disabled="">Validate &amp; plan Add stage<\/button>/);
   });
 });

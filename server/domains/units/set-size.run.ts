@@ -1,6 +1,8 @@
 import { z } from "zod";
 import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
-import { UnitSizeSchema, type UnitSize } from "#unit/shared/unit-size.ts";
+import { eq } from "drizzle-orm";
+import { UnitSizeSchema, TenantSizeSchema, TENANT_BRINGS, type UnitSize } from "#unit/shared/unit-size.ts";
+import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
@@ -9,9 +11,6 @@ import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { UnitComposition } from "#unit/shared/unit-size.ts";
 import type { Stage } from "../../../shared/enums.ts";
 
-/** A tenant brings no database of its own: its members claim the cluster's shared MongoDB replica set
- *  and no tenant runs a PostgreSQL, so its quota is the base row alone. */
-export const TENANT_BRINGS: UnitComposition = { postgresql: false, mongodb: "shared" };
 
 /** What a consumer brings, read off its own registration — the file that states what the unit IS.
  *  A resize changes the size and nothing else, so this is never asked again at resize time. Exported
@@ -46,12 +45,10 @@ export async function consumerComposition(
 // namespace already over the new ceiling keeps its running pods and refuses the NEXT one — Kubernetes
 // never evicts to fit a quota — so the plan says so rather than letting "resized" read as "shrunk".
 
-const SizeField = z.object({ size: UnitSizeSchema });
-
-export const SetSizeParams = z.object({ appId: z.string().startsWith("app_") }).and(SizeField);
+export const SetSizeParams = z.object({ appId: z.string().startsWith("app_"), size: UnitSizeSchema });
 export type SetSizeParams = z.infer<typeof SetSizeParams>;
 
-export const TenantSetSizeParams = z.object({ tenantId: z.string().startsWith("tnt_") }).and(SizeField);
+export const TenantSetSizeParams = z.object({ tenantId: z.string().startsWith("tnt_"), size: TenantSizeSchema });
 export type TenantSetSizeParams = z.infer<typeof TenantSetSizeParams>;
 
 /** How the plan describes the change, for both families. Written once because the sentence is the
@@ -130,7 +127,8 @@ function tenantSetSizeSteps(ports: TenantLifecyclePorts, p: TenantSetSizeParams)
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const quota = resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS);
-        const { commit } = await ports.registrations.setQuota(tc.stage, tc.guid, quota, ctx.runId);
+        const { commit } = await ports.registrations.setSize(tc.stage, tc.guid, p.size, quota, ctx.runId);
+        ctx.db.update(tenants).set({ size: p.size, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, size: p.size, quota });
         ctx.log("meta", `tenant ${tc.guid} sized "${p.size}" (${commit}) — EVERY member namespace gets these figures, and the ArgoCD on ${tc.domain} applies them on its next sync`);
       },

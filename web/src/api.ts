@@ -33,7 +33,7 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
 import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
-import type { UnitSize } from "#unit/shared/unit-size.ts";
+import type { SizeComponent, UnitComposition, UnitSize } from "#unit/shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -359,12 +359,11 @@ export const resumeConsumer = (appId: string): Promise<{ runId: string }> => pos
  *  something restarts it. */
 export const restartConsumerWorkloads = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/restart-workloads`);
 
-/** One row of the size table — what `small`, `medium` and `large` mean on THIS installation, for ONE
- *  component of a unit. A unit's ceiling is `base` plus, when it brings them, `postgresql` and
- *  `mongodb` times its member count, all read at the unit's one size. */
+/** One row of the size table — what a size means on THIS installation, for ONE component of a unit.
+ *  A consumer's ceiling is `base` plus, when it brings them, `postgresql` and `mongodb` times its
+ *  member count, all read at the unit's one size; a tenant member's is the `member` row. */
 export interface UnitSizeView {
-  component: "base" | "postgresql" | "mongodb";
-  name: "small" | "medium" | "large";
+  component: SizeComponent; name: UnitSize;
   requestsCpu: string;
   requestsMemory: string;
   limitsCpu: string;
@@ -374,17 +373,17 @@ export interface UnitSizeView {
 }
 export const listUnitSizes = (): Promise<{ sizes: UnitSizeView[] }> => req<{ sizes: UnitSizeView[] }>("/api/unit/sizes");
 
-/** The three sizes as they apply to ONE unit: the figures already SUMMED from what that unit brings,
+/** The sizes offered to ONE unit, as they apply to it: the figures already SUMMED from what that unit brings,
  *  with the parts they were summed from. The picker shows these rather than the bare table, because a
  *  unit's ceiling is base + postgresql + mongodb x members and nobody should add that up by hand. */
 export interface UnitSizeOptions {
   unit: string;
-  brings: { postgresql: boolean; mongodb: "shared" | "standalone" | "replicaset" };
+  brings: UnitComposition;
   /** false ⇒ what the unit brings could not be read (consumer onboarding unwired), so the figures are
    *  the base rows only and the dialog says so. */
   composed: boolean;
   sizes: Array<{
-    name: "small" | "medium" | "large";
+    name: UnitSize;
     quota: Omit<UnitSizeView, "name" | "component">;
     parts: Array<{ component: UnitSizeView["component"]; members: number; each: Omit<UnitSizeView, "name" | "component"> }>;
   }>;
@@ -501,6 +500,7 @@ export interface TenantView {
   approvedTags: Record<string, Record<string, string>>;
   /** The domain the tenant's mail is sent as, or "" for the platform's own. */
   senderDomain: string;
+  size: UnitSize | null; // the size word the stage's quota was resolved from; null where none was recorded
   seedUsers: boolean;
   suspended: boolean;
   /** Whether a release moves this tenant by itself (hostyour-manager#328). */

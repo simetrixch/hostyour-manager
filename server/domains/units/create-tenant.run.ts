@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { makeTenantStagesDef, bundleStageSteps } from "./tenant-stage-plan.ts";
-import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
+import { TenantSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
@@ -203,7 +203,7 @@ export const CreateTenantStageParams = z.object({
   // to figures as the registration is written, so a plan that waited for approval across a table edit
   // lands on the figures standing at that moment. Defaulted to the frugal preset like the consumer
   // form: an unattended path must never sell the generous one by omission.
-  size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
+  size: TenantSizeSchema.default(DEFAULT_UNIT_SIZE),
   owner: z.string().min(1),
   report: TenantValidationReportSchema, // the approved fan-out report — the run record keeps it verbatim
   expectedApps: z.array(z.string()), // == tenantApplicationSet(guid,apps,stage); the set-watch pivot
@@ -268,7 +268,7 @@ export const CreateTenantRequest = z.object({
   demo: z.boolean().default(false),
   // The tenant's size — the ceiling each of its member namespaces gets. From the OPERATOR creating
   // the tenant, the same way the consumer form takes it from the operator onboarding the unit.
-  size: UnitSizeSchema.default(DEFAULT_UNIT_SIZE),
+  size: TenantSizeSchema.default(DEFAULT_UNIT_SIZE),
   // OPTIONAL first-admin email (the wizard's "Admin email" field). Empty ⇒ omitted; when present the
   // deploy gains the first-admin invite. Kept out of the registration/inventory — see CreateTenantParams.
   adminEmail: z.string().email().optional(),
@@ -607,7 +607,7 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
           probeGuid: guid,
           subdomain: req.subdomain,
           seedUsers: req.seedUsers,
-          demo: req.demo,
+          demo: req.demo, size: req.size,
           ...(appsImage !== undefined ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes

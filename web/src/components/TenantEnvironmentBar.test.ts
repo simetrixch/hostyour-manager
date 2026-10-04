@@ -22,6 +22,12 @@ describe("TenantEnvironmentBar", () => {
     expect(html).toContain("+ add");
     expect(html).toContain("no size recorded");
   });
+  it("names each environment's size by its letter where the row records one", () => {
+    const sized = simetrix.map((r) => (r.id === "tnt_p" ? { ...r, size: "medium" as const } : r));
+    const html = renderToStaticMarkup(createElement(TenantEnvironmentBar, { group: groupTenantEnvironments(sized)[0]!, selectedId: "tnt_p" }));
+    expect(html).toMatch(/PROD.*apps2\.digitacloud\.app<\/span> <span>M<\/span>/);
+    expect(html).toMatch(/TEST.*apps1\.digitacloud\.app<\/span> <span class="muted">no size recorded/);
+  });
   it("on the tenant page links each environment to its OWN row, so every action there acts on that row", () => {
     const html = render("tnt_p");
     expect(html).toContain('href="/tenants/tnt_t"');

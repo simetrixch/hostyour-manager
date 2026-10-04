@@ -3,14 +3,14 @@ import { and, eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, apps, tenants } from "../../db/schema/inventory.ts";
 import { unitSizes } from "#unit/server/schema.ts";
-import { makeSetSizeDef, makeTenantSetSizeDef } from "./set-size.run.ts";
+import { makeSetSizeDef, makeTenantSetSizeDef, TenantSetSizeParams } from "./set-size.run.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import { seedQuota } from "#unit/shared/unit-size.ts";
+import { seedQuota, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 import type { LifecyclePorts, TenantLifecyclePorts } from "./lifecycle.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
@@ -154,16 +154,30 @@ describe("set-size run (consumer)", () => {
 
 describe("tenant-set-size run", () => {
   it("writes the figures once, and the summary says they bound EACH member namespace", async () => {
-    const reg = new TenantRegistrations(new FakePlatformRepo());
+    const repo = new FakePlatformRepo();
+    const reg = new TenantRegistrations(repo);
     await seedTenant(reg);
     const params = { tenantId: "tnt_1", size: "medium" as const };
+    const before = repo.commits.length;
     await runAll(makeTenantSetSizeDef(tenantPorts(reg)).steps(params), params);
 
-    expect((await reg.readTenant("prod", GUID))?.entry.quota).toEqual(seedQuota("medium"));
+    // The MEMBER row, never base: a tenant member namespace is sized on its own component.
+    expect(seedQuota("medium", TENANT_BRINGS)).not.toEqual(seedQuota("medium"));
+    const entry = (await reg.readTenant("prod", GUID))?.entry;
+    expect(entry?.quota).toEqual(seedQuota("medium", TENANT_BRINGS));
+    // The word and the figures in ONE commit, and the word beside the row for the tenant page.
+    expect(entry?.size).toBe("medium");
+    expect(repo.commits.length - before).toBe(1);
+    expect(db.db.select({ size: tenants.size }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.size).toBe("medium");
     const plan = await makeTenantSetSizeDef(tenantPorts(reg)).plan(params, { db: db.db });
     // A tenant owns one namespace per member, so the same figures apply per member — an operator
     // reading "3Gi" must not take it for the tenant's total.
     expect(plan.summary).toContain("EACH of its member namespaces");
     expect(plan.targetKind).toBe("tenant");
+  });
+
+  it("takes only a size a tenant is offered: XS to L", () => {
+    for (const size of ["xsmall", "small", "medium", "large"]) expect(TenantSetSizeParams.safeParse({ tenantId: "tnt_1", size }).success, size).toBe(true);
+    for (const size of ["xlarge", "xxlarge"]) expect(TenantSetSizeParams.safeParse({ tenantId: "tnt_1", size }).success, size).toBe(false);
   });
 });

@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 import { STAGE, type Stage, type TenantStatus } from "../../../shared/enums.ts";
+import { UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { tenantRowOffer, type UnitEnvironments } from "../tenantRows.ts";
 
 export interface EnvironmentRow {
@@ -8,12 +9,14 @@ export interface EnvironmentRow {
   stage: Stage;
   status: TenantStatus;
   domain: string;
+  /** The size word the row records; absent or null where none was. */
+  size?: UnitSize | null | undefined;
 }
 
 /** DEV, TEST and PROD of ONE unit. With `onSelect` an environment is chosen in place; with `rowHref`
  *  each environment links to its own row's page; with neither it is named only. An absent environment
- *  is offered "+ add" where `addHref` names a way to add it. No size letter yet: the rows record no
- *  size word the browser reads. */
+ *  is offered "+ add" where `addHref` names a way to add it. Each environment shows its size letter,
+ *  or says that none is recorded. */
 export function EnvironmentBar<T extends EnvironmentRow>({ group, selectedId, badge, onSelect, rowHref, addHref }: {
   group: UnitEnvironments<T>;
   selectedId: string;
@@ -40,7 +43,7 @@ export function EnvironmentBar<T extends EnvironmentRow>({ group, selectedId, ba
         const selected = row.id === selectedId;
         const body = (
           <>
-            {name} {badge(row)} <span className="mono">{row.domain}</span> <span className="muted">no size recorded</span>
+            {name} {badge(row)} <span className="mono">{row.domain}</span> {row.size ? <span>{UNIT_SIZE_LETTER[row.size]}</span> : <span className="muted">no size recorded</span>}
           </>
         );
         const className = selected ? "tab tab--active" : "tab";

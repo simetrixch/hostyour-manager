@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { seedQuota } from "#unit/shared/unit-size.ts";
+import { seedQuota, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { and, eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -221,7 +221,7 @@ describe("create-tenant run definition", () => {
 `);
     const prt = ports({ registrations: new TenantRegistrations(repo) });
     const logs: string[] = [];
-    await runAll(params(), prt, logs);
+    await runAll(params({ size: "xsmall" }), prt, logs);
 
     // write-registration committed the tenant registration; readTenant folds it back — INCLUDING the
     // cluster field, which the appsets read off registrations/<guid>/<stage>.yaml
@@ -231,14 +231,14 @@ describe("create-tenant run definition", () => {
     expect(read?.entry.suspended).toBe(false);
     expect(read?.entry.cluster).toBe("s1");
     expect(read?.entry.approvedTags).toEqual(pinned); // the newest available version, fixed as the tenant's own
+    expect([read?.entry.size, read?.entry.quota]).toEqual(["xsmall", seedQuota("xsmall", TENANT_BRINGS)]); // the word beside the member row's figures
 
     // record-inventory wrote the tenant row + one tenant_apps row
     const row = db.db.select().from(tenants).where(eq(tenants.guid, GUID)).get();
     expect(row?.approvedTags).toEqual(pinned);
     expect(row?.provenance).toBe("manager"); // the word onboard writes for a consumer — one act, one word
     expect(row?.clusterId).toBe("cls_1");
-    expect(row?.subdomain).toBe("acme");
-    expect(row?.lastRunId).toBe("run_tnt");
+    expect([row?.subdomain, row?.lastRunId, row?.size]).toEqual(["acme", "run_tnt", "xsmall"]);
     const appRows = db.db.select().from(tenantApps).where(eq(tenantApps.tenantId, row!.id)).all();
     expect(appRows.map((a) => a.name)).toEqual(["erp"]);
 

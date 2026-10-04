@@ -52,6 +52,7 @@ export function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase
       routing: p.routing,
       ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
       seedUsers: p.seedUsers,
+      size: p.size,
       owner: p.owner, provenance: "manager" as const,
       lastRunId: ctx.runId, updatedAt: new Date(),
     };

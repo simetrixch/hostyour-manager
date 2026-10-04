@@ -22,6 +22,7 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { MemberRouting, Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
+import type { UnitSize } from "#unit/shared/unit-size.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
@@ -77,6 +78,9 @@ export interface ValidateTenantRequest {
   seedUsers?: boolean;
   /** A demo tenant: delivered as tenant.demo, as the ApplicationSet delivers it, only where true. */
   demo?: boolean;
+  /** The size word the registration will carry: delivered as tenant.size, "" where none is recorded,
+   *  as the ApplicationSet delivers it. */
+  size?: UnitSize | undefined;
   /** The tenant's own apps bundle as the registration will carry it: the flat build name the engines
    *  mount and the immutable image tag of its last release. Delivered under `tenant:` like the
    *  deploy does, so the render yields the bundle's image ref and ensure-images probes it. Absent
@@ -281,6 +285,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           quiesced: false,
           seedUsers: req.seedUsers ?? false,
           ...(req.demo ? { demo: true } : {}),
+          size: req.size ?? "",
           apps,
           // The tenant's own bundle, or the empty pair — always both keys, as the registration
           // always carries both and the appset reads them bare.

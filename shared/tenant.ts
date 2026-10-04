@@ -5,7 +5,7 @@
 // expands to is server/domains/units/tenant-fanout.ts.
 //
 // Import boundary: shared/ is isomorphic (the web bundle imports it), so this file imports ONLY
-import { UnitQuotaSchema } from "#unit/shared/unit-size.ts";
+import { UnitQuotaSchema, UnitSizeSchema } from "#unit/shared/unit-size.ts";
 // other shared/ modules + zod — never node:crypto (guid MINTING lives server-side in
 // server/kernel/ids.ts) and never server/. The graph stays acyclic: enums <- consumer <- gates <-
 // tenant, and tenant is a pure leaf (it imports consumer/gates/enums; nothing imports it back).
@@ -309,6 +309,10 @@ export const TenantRegistrationSchema = z
     // the Manager's database, which no cluster can read, so the registration carries what the unit
     // gets rather than a word to look up.
     quota: UnitQuotaSchema,
+    // The size word the quota was resolved from (UNIT_SIZE), written with it by every run that writes
+    // the quota. Read as optional: a registration written before the word was recorded has none, and
+    // the tenant page says so.
+    size: UnitSizeSchema.optional(),
     seedUsers: z.boolean().default(false), // flips the IdP's user boot-seed
     // A demo tenant: present, and true, only for one. Every member receives it as tenant.demo, which the
     // product's charts turn into a one-click demo login and a nightly reset. Absent everywhere else,
