@@ -56,6 +56,20 @@ const mongoArchives = (i: Pick<ConsumerJobInputs, "mongodb" | "folder">): string
 if grep -qx 'mongo/' /tmp/entries; then rclone lsf --include '*.archive' "box:${i.folder}/mongo/" > /tmp/archives; fi
 `;
 
+/** An own instance's generation names every database it held in mongo/databases.txt; each needs its
+ *  archive, or a dump that lost one would verify as complete. A generation without the list (written
+ *  before the instance was dumped whole) has nothing to hold the archives against. */
+const ownListCheck = (folder: string): string => `if grep -qx 'mongo/' /tmp/entries; then
+  rclone lsf "box:${folder}/mongo/" > /tmp/mongo-entries
+  if grep -qx 'databases.txt' /tmp/mongo-entries; then
+    rclone copyto "box:${folder}/mongo/databases.txt" /tmp/listed.txt
+    while read -r db; do
+      grep -Fqx "$db.archive" /tmp/archives || { echo "MISSING archive $db"; exit 1; }
+    done < /tmp/listed.txt
+  fi
+fi
+`;
+
 function consumerMongo(i: Pick<ConsumerJobInputs, "namespace" | "stage" | "mongodb">): { namespace: string; env: JobEnvVar[] } {
   if (i.mongodb === "shared") return { namespace: MONGO_NAMESPACE, env: mongoEnv(mongoHost(i.stage)) };
   return { namespace: i.namespace, env: mongoEnv(i.mongodb === "standalone" ? "mongodb" : `rs0/mongodb-headless.${i.namespace}.svc.cluster.local:27017`) };
@@ -326,7 +340,7 @@ export function consumerVerifyCompletenessJobs(i: Omit<ConsumerJobInputs, "pvcs"
         script:
           BOX_REMOTE +
           `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/have
-${mongoArchives(i)}sed 's/\\.archive$//' /tmp/archives > /tmp/want
+${mongoArchives(i)}${i.mongodb === "shared" ? "" : ownListCheck(i.folder)}sed 's/\\.archive$//' /tmp/archives > /tmp/want
 while read -r want; do
   grep -qx "$want" /tmp/have || { echo "MISSING database $want"; exit 1; }
 done < /tmp/want
