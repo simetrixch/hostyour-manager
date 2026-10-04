@@ -335,6 +335,7 @@ export function buildTenantOnboarding(
     ...lifecyclePorts,
     ...relocation,
     platformRepoURL,
+    attestedBuilds: onboardPorts.attestedBuilds,
   };
 
   unitProbes.push(tenantUnitProbes(onboardPorts));

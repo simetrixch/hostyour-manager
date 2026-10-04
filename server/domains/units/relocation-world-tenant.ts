@@ -18,7 +18,7 @@ import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts"
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
+import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";
 
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
@@ -39,6 +39,7 @@ import type { TargetCluster } from "#unit/server/relocation-target.ts";
 /** The tenant relocation port set — the kind-neutral relocation ports over the tenant lifecycle set
  *  (TenantRegistrations + resolver + the apex/DNS/argo-sync plumbing the tenant run kinds already carry). */
 export interface TenantRelocationPorts extends RelocationPorts, TenantLifecyclePorts {
+  attestedBuilds: () => Promise<{ unit: string; build: string }[]>;
   platformRepoURL: string;
 }
 
@@ -86,7 +87,6 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       c: StepCtx,
       target: TargetCluster,
       memberNames: string[],
-      applications: string[],
       namespaceLabels: ReadonlyMap<string, Readonly<Record<string, string>>>,
     ): Promise<void> => {
       const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
@@ -99,10 +99,14 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         await clusterReader.applyAdmissionPolicy(policy, binding);
       }
       if (!ports.buildRbac) throw errValidation(`provision-target for tenant ${tc.guid} requires the build RBAC writer but none is wired`);
-      // The grant is re-armed with NO subject: which units may sync this tenant is computed from a
-      // validated render at create-tenant, which a relocation does not re-run — a bump then reaches
-      // the moved tenant on ArgoCD's own poll instead of a pipeline-driven sync.
-      await ports.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: tc.guid, applications, argoNamespace, units: [] })]);
+      const entry = await readRegistration(ports, tc.stage, tc.guid);
+      const charts = [...new Set(entry.members.flatMap((m) => m.sources.map((s) => s.chart)))];
+      const pins = (await Promise.all(charts.map((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart)))).flat();
+      const images = [...pins.map((p) => ({ repo: p.image })), ...(entry.appsImage ? [{ repo: entry.appsImage }] : [])];
+      const units = tenantSyncUnits(images, await ports.attestedBuilds());
+      const liveApplications = tenantApplicationSet(entry.members.map((m) => m.name), tc.guid, tc.stage);
+      await ports.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: tc.guid, applications: liveApplications, argoNamespace, units })]);
+      c.log("meta", `tenant ${tc.guid} release access on ${target.cluster}: ${units.join(", ") || "no attested builders"}; ${liveApplications.join(", ")}`);
       c.log("meta", `${memberNames.length} member AppProject(s) + admission policies + the argo-sync grant applied in ${argoNamespace}, destination pinned to ${target.cluster}`);
     };
     return {
@@ -133,7 +137,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // holds, whose app set may differ from whatever the inventory still says.
         const members = [...tc.members, ...entry.apps.map((a) => a.name)];
         // The standing members' namespace labels ride the registration; an app member carries none.
-        await applyIsolation(c, target, members, tenantApplicationSet(members, tc.guid, tc.stage), new Map(entry.members.map((m) => [m.name, m.namespaceLabels])));
+        await applyIsolation(c, target, members, new Map(entry.members.map((m) => [m.name, m.namespaceLabels])));
         const { clusterReader } = await ports.resolver.resolve(target.clusterId);
         // The claim mark is set on DEPARTURE (see repoint), so a member namespace still standing on
         // this cluster can carry one from an earlier move away from it — and a mark left behind would

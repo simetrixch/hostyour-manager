@@ -159,6 +159,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
   const registrations = new TenantRegistrations(f.platformRepo);
   return {
     registrations,
+    attestedBuilds: async () => [],
     resolver: f.resolver,
     argoWatchTimeoutMs: 1000,
     jobTimeoutMs: 1000,

@@ -7,6 +7,8 @@ import { makeMigrateDef, makeTenantMigrateDef } from "./migrate.run.ts";
 import { repointStep } from "#unit/server/relocation-migrate.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import { listBackups } from "../../db/unit-backups.ts";
+import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
+import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import {
   openFixtureDb, seedClusters, seedMaster, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
   makeFakes, consumerPorts, tenantPorts, driveSteps, stepCtx, jobNames, missing, GUID, CONSUMER, SUBDOMAIN, SOURCE, TARGET,
@@ -168,6 +170,32 @@ describe("repoint (the claim mark)", () => {
 });
 
 describe("tenant-migrate", () => {
+  it("PLANTED DEFECT: provisions release access for current members and exact image builders, keeping the source grant", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedTenantRows(db);
+    const f = makeFakes();
+    const ports = tenantPorts(f);
+    await seedTenantWorld(ports.registrations);
+    const tag = "0.4.001-stable-20261004000000-abcdef1";
+    f.platformRepo.seed(f.platformRepo.booksBranch, "charts/example-auth/pins-prod.yaml", `builds:\n  - {name: auth-backend, image: auth-backend, tag: ${tag}}\n`);
+    f.platformRepo.seed(f.platformRepo.booksBranch, "charts/example-engine/pins-prod.yaml", `builds:\n  - {name: engine, image: engine, tag: ${tag}}\n`);
+    await ports.registrations.setTenantAppsRepo("prod", GUID, { appsRepo: "https://github.com/acme/bundle.git", appsImage: "bundle", appsImageTag: tag }, "run_bundle");
+    ports.attestedBuilds = async () => [{ unit: "auth", build: "auth-backend" }, { unit: "platform", build: "engine" }, { unit: "bundle", build: "bundle" }, { unit: "unrelated", build: "another-image" }];
+    const resolver = ports.resolver;
+    ports.resolver = { resolve: async (id) => ({ ...await resolver.resolve(id), argoNamespace: id === SOURCE.clusterId ? "source-argo" : "target-argo" }) };
+    const apps = ["auth", "jobs", "report", "web"].map((m) => `${GUID}-${m}-prod`);
+    await f.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: apps, argoNamespace: "source-argo", units: ["auth", "platform", "bundle"] })]);
+    const p = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
+    const step = makeTenantMigrateDef(ports).steps(p).find((s) => s.name === "provision-target")!;
+    await step.run(stepCtx(db, step.name, p, []));
+    const role = f.buildRbac.get("Role", "target-argo", `${GUID}-argo-sync`) as RoleManifest;
+    const binding = f.buildRbac.get("RoleBinding", "target-argo", `${GUID}-argo-sync`) as RoleBindingManifest;
+    expect(role.rules[0]?.resourceNames).toEqual(apps);
+    expect(binding.subjects.map((s) => s.namespace)).toEqual(["auth-build", "bundle-build", "platform-build"]);
+    expect(f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`)).toEqual(expect.objectContaining({ subjects: binding.subjects }));
+  });
+
   it("journey: a tenant with Garage object storage is moved whole — bucket dumped and restored, source CR released via the relocating annotation, source cleared last", async () => {
     seedMaster(db);
     seedClusters(db);
