@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer, typedConfirmation } from "./tenantRows.ts";
+import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
 import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // The tenant screens' one status rule: which surface a tenants row gets, and whether a purge may be
@@ -117,5 +117,15 @@ describe("typedConfirmation", () => {
   it("asks for the guid and the environment on PROD, and for the guid elsewhere", () => {
     expect(typedConfirmation({ guid: "ak64h58875qw", stage: "prod" })).toBe("ak64h58875qw prod");
     expect(typedConfirmation({ guid: "ak64h58875qw", stage: "test" })).toBe("ak64h58875qw");
+  });
+});
+
+describe("tenantConfirmTitle", () => {
+  const t = { subdomain: "simetrix", stage: "test" as const, domain: "apps1.digitacloud.app" };
+  it("names the environment and its machine in every changing or destructive confirmation", () => {
+    expect(tenantConfirmTitle.removeApp(t, "erp")).toBe('Remove app "erp" from "simetrix" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.backup(t)).toBe('Back up tenant "simetrix" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.restore(t)).toBe('Restore tenant "simetrix" · test, now on apps1.digitacloud.app, from its backup?');
+    expect(tenantConfirmTitle.offboard(t)).toBe('Offboard tenant "simetrix" · test on apps1.digitacloud.app?');
   });
 });

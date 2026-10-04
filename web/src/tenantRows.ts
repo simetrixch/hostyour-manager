@@ -139,3 +139,15 @@ export function defaultEnvironment<T extends { status: TenantStatus }>(group: Te
 /** What an offboard, purge or move asks the operator to type: on PROD the guid AND the environment, so
  *  the read-back names both what is destroyed and where. */
 export const typedConfirmation = (t: { guid: string; stage: Stage }): string => (t.stage === "prod" ? `${t.guid} prod` : t.guid);
+
+/** The tenant page's confirmation titles: each names the tenant, the environment and the machine it
+ *  stands on, so no change or removal reads as if it touched the whole tenant. A restore may land
+ *  elsewhere, so its machine is the one the environment stands on NOW. */
+type Titled = { subdomain: string; stage: Stage; domain: string };
+const where = (t: Titled): string => `"${t.subdomain}" · ${t.stage} on ${t.domain}`;
+export const tenantConfirmTitle = {
+  removeApp: (t: Titled, app: string): string => `Remove app "${app}" from ${where(t)}?`,
+  backup: (t: Titled): string => `Back up tenant ${where(t)}?`,
+  restore: (t: Titled): string => `Restore tenant "${t.subdomain}" · ${t.stage}, now on ${t.domain}, from its backup?`,
+  offboard: (t: Titled): string => `Offboard tenant ${where(t)}?`,
+};

@@ -7,7 +7,7 @@ import {
   setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants,
   type TenantDetailView, type TenantView,
 } from "../api.ts";
-import { groupTenantEnvironments, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
+import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
 import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { listedWebsites, removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
 import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
@@ -327,7 +327,7 @@ export function TenantDetail() {
 
       {removeApp && (
         <ConfirmDialog
-          title={`Remove app "${removeApp}" from this tenant?`}
+          title={tenantConfirmTitle.removeApp(t, removeApp)}
           confirmLabel="Remove app"
           destructive
           onCancel={() => setRemoveApp(null)}
@@ -339,7 +339,7 @@ export function TenantDetail() {
 
       {offboardT && (
         <TypeToConfirm
-          title={`Offboard tenant "${offboardT.subdomain}" · ${offboardT.stage} on ${offboardT.domain}?`}
+          title={tenantConfirmTitle.offboard(offboardT)}
           expected={typedConfirmation(offboardT)}
           confirmLabel="Offboard tenant"
           onCancel={() => setOffboardT(null)}
@@ -451,7 +451,7 @@ export function TenantDetail() {
 
       {backupT && (
         <ConfirmDialog
-          title={`Back up tenant "${backupT.subdomain}"?`}
+          title={tenantConfirmTitle.backup(backupT)}
           confirmLabel="Plan backup"
           onCancel={() => setBackupT(null)}
           onConfirm={() => {
@@ -474,7 +474,7 @@ export function TenantDetail() {
 
       {relocT && (
         <RelocationTargetDialog
-          title={`Restore tenant "${relocT.subdomain}" from its backup?`}
+          title={tenantConfirmTitle.restore(relocT)}
           kind="restore"
           confirmLabel="Plan restore"
           currentClusterId={relocT.clusterId}
