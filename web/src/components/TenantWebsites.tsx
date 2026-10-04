@@ -23,7 +23,7 @@ export function TenantWebsites(props: {
   onRecordPackagesReader: (owner: string, token: string) => Promise<void>;
 }) {
   const { tenantId, catalog, busy, act } = props;
-  const folder = catalog ? websiteFolder(catalog.apps) : null;
+  const folder = catalog ? websiteFolder(catalog.apps, catalog.websites) : null;
   const websites = props.websites;
   const unknownDomain = unknownDomainText(catalog);
   const [domain, setDomain] = useState("");
@@ -38,7 +38,7 @@ export function TenantWebsites(props: {
   const readerMissing = reader !== undefined && reader.recorded === null;
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (folder && typed && site) void act(() => addTenantWebsite(tenantId, { app: named, domain: typed, site, folder: folder.name }));
+    if (folder?.sites?.includes(site) && typed) void act(() => addTenantWebsite(tenantId, { app: named, domain: typed, site, folder: folder.name }));
   };
   if (!folder && websites.length === 0 && props.removed.length === 0) return null;
   return (
@@ -110,7 +110,7 @@ export function TenantWebsites(props: {
             ))}
           </select>
           <div className="actions">
-            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !site || readerMissing}>
+            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !folder.sites?.includes(site) || readerMissing}>
               Add website
             </button>
           </div>

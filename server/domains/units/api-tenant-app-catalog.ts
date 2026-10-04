@@ -44,7 +44,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
       const current = await registrations.readTenant(tenant.stage, tenant.guid);
       if (!current) return none(`tenant ${tenant.guid} is not onboarded (no registration at ${tenant.stage})`);
       const template = await appCatalog.list(c.req.raw.signal);
-      const deployed = new Set(current.entry.apps.map((a) => a.name));
+      const deployed = new Set([...current.entry.apps, ...current.entry.members].map((a) => a.name));
       // The packages reader is asked for exactly where it is needed: the template routes a scope to
       // GitHub Packages and the owner records no reader. Absent scopes, nothing is asked (#233).
       const packagesReader = template.packageScopes.length > 0

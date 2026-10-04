@@ -258,6 +258,9 @@ export class TenantRegistrations {
     const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
+    if (op === "append" && website && current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) {
+      throw errValidation(`site "${website.site}" already runs in tenant "${guid}"`);
+    }
     // Held against THIS tenant's own members, not against a constant: both are named
     // <guid>-<name>-<stage>, so the app would claim the member's namespace, AppProject and Application.
     if (op === "append" && current.entry.members.some((m) => m.name === app)) {
@@ -320,6 +323,13 @@ export class TenantRegistrations {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
+  }
+
+  async setDemo(stage: Stage, guid: string, demo: boolean, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    const { demo: _previous, ...entry } = current.entry;
+    return this.write(stage, guid, { ...entry, ...(demo ? { demo: true as const } : {}) }, `demo(${guid}): ${demo} ${trailer(runId)}`);
   }
 
   /** Write the tenant's own domain ("" = none, the tenant is reached at its zone) and the hosts that
