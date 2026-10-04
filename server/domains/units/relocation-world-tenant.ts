@@ -88,6 +88,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       target: TargetCluster,
       memberNames: string[],
       namespaceLabels: ReadonlyMap<string, Readonly<Record<string, string>>>,
+      entry: TenantRegistration,
     ): Promise<void> => {
       const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
       for (const member of memberNames) {
@@ -99,7 +100,6 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         await clusterReader.applyAdmissionPolicy(policy, binding);
       }
       if (!ports.buildRbac) throw errValidation(`provision-target for tenant ${tc.guid} requires the build RBAC writer but none is wired`);
-      const entry = await readRegistration(ports, tc.stage, tc.guid);
       const charts = [...new Set(entry.members.flatMap((m) => m.sources.map((s) => s.chart)))];
       const pins = (await Promise.all(charts.map((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart)))).flat();
       const images = [...pins.map((p) => ({ repo: p.image })), ...(entry.appsImage ? [{ repo: entry.appsImage }] : [])];
@@ -137,7 +137,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // holds, whose app set may differ from whatever the inventory still says.
         const members = [...tc.members, ...entry.apps.map((a) => a.name)];
         // The standing members' namespace labels ride the registration; an app member carries none.
-        await applyIsolation(c, target, members, new Map(entry.members.map((m) => [m.name, m.namespaceLabels])));
+        await applyIsolation(c, target, members, new Map(entry.members.map((m) => [m.name, m.namespaceLabels])), entry);
         const { clusterReader } = await ports.resolver.resolve(target.clusterId);
         // The claim mark is set on DEPARTURE (see repoint), so a member namespace still standing on
         // this cluster can carry one from an earlier move away from it — and a mark left behind would

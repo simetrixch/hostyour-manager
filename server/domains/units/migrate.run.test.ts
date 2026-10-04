@@ -186,6 +186,7 @@ describe("tenant-migrate", () => {
     ports.resolver = { resolve: async (id) => ({ ...await resolver.resolve(id), argoNamespace: id === SOURCE.clusterId ? "source-argo" : "target-argo" }) };
     const apps = ["auth", "jobs", "report", "web"].map((m) => `${GUID}-${m}-prod`);
     await f.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: apps, argoNamespace: "source-argo", units: ["auth", "platform", "bundle"] })]);
+    const sourceBinding = f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`);
     const p = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
     const step = makeTenantMigrateDef(ports).steps(p).find((s) => s.name === "provision-target")!;
     await step.run(stepCtx(db, step.name, p, []));
@@ -193,7 +194,7 @@ describe("tenant-migrate", () => {
     const binding = f.buildRbac.get("RoleBinding", "target-argo", `${GUID}-argo-sync`) as RoleBindingManifest;
     expect(role.rules[0]?.resourceNames).toEqual(apps);
     expect(binding.subjects.map((s) => s.namespace)).toEqual(["auth-build", "bundle-build", "platform-build"]);
-    expect(f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`)).toEqual(expect.objectContaining({ subjects: binding.subjects }));
+    expect(f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`)).toEqual(sourceBinding);
   });
 
   it("journey: a tenant with Garage object storage is moved whole — bucket dumped and restored, source CR released via the relocating annotation, source cleared last", async () => {
