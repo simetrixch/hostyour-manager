@@ -6,7 +6,7 @@ import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { TENANT_SECRET, TENANT_S3_SECRET } from "./tenant-secrets.ts";
-import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, mongodumpLine, relocationJobName, hashLine } from "#unit/server/relocation-jobs.ts";
+import { type RelocationJob, MONGO_NAMESPACE, boxSpec, mongoEnv, mongoHost, BOX_REMOTE, writeFile, listMongoDbs, MONGO_FLAGS, mongodumpLine, relocationJobName, hashLine } from "#unit/server/relocation-jobs.ts";
 
 /** What the S3_REMOTE block needs in a tenant app member namespace. EVERY value comes off the
  *  tenant's own bucket Secret, the endpoint included — there is no cluster constant to fall back on
@@ -79,7 +79,7 @@ export function tenantDumpJobs(i: TenantJobInputs & { registrationYaml: string }
     {
       namespace: MONGO_NAMESPACE,
       spec: {
-        ...boxSpec("dump-mongo", i.guid, mongoEnv(i.stage)),
+        ...boxSpec("dump-mongo", i.guid, mongoEnv(mongoHost(i.stage))),
         image: i.image,
         script:
           BOX_REMOTE +
@@ -169,7 +169,7 @@ export function tenantRestoreJobs(i: TenantJobInputs): RelocationJob[] {
     {
       namespace: MONGO_NAMESPACE,
       spec: {
-        ...boxSpec("restore-mongo", i.guid, mongoEnv(i.stage)),
+        ...boxSpec("restore-mongo", i.guid, mongoEnv(mongoHost(i.stage))),
         image: i.image,
         script:
           BOX_REMOTE +
@@ -206,7 +206,7 @@ export function tenantVerifyCompletenessJobs(i: TenantJobInputs): RelocationJob[
     {
       namespace: MONGO_NAMESPACE,
       spec: {
-        ...boxSpec("verify-mongo", i.guid, mongoEnv(i.stage)),
+        ...boxSpec("verify-mongo", i.guid, mongoEnv(mongoHost(i.stage))),
         image: i.image,
         script:
           BOX_REMOTE +
@@ -257,7 +257,7 @@ export function tenantSourceDbListJob(i: { guid: string; stage: Stage; image: st
     spec: {
       name: relocationJobName("list-source", i.guid),
       image: i.image,
-      env: mongoEnv(i.stage),
+      env: mongoEnv(mongoHost(i.stage)),
       script: listMongoDbs(`${i.guid}_`, `_${i.stage}`) + "\n",
     },
   };
@@ -271,7 +271,7 @@ export function tenantClearSourceJobs(i: { guid: string; stage: Stage; image: st
       namespace: MONGO_NAMESPACE,
       spec: {
         name: relocationJobName("clear-source", i.guid),
-        env: mongoEnv(i.stage),
+        env: mongoEnv(mongoHost(i.stage)),
         image: i.image,
         script: `${listMongoDbs(`${i.guid}_`, `_${i.stage}`)} | sed 's/^DB //' | while read -r db; do
   mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"

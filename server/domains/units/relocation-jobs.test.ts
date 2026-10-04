@@ -44,7 +44,7 @@ const ALL_SERVICES: ConsumerService[] = ["mongodb", "postgresql"];
  *  worth asserting over. */
 function everyJob(): RelocationJob[] {
   const tenant = { guid: GUID, folder: TENANT_FOLDER, stage: "prod" as const, apps: ["web"], image: IMAGE , identityProvider: "auth" };
-  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, mongodb: "shared" as const, pvcs: ["data"], image: IMAGE };
   return [
     ...tenantDumpJobs({ ...tenant, registrationYaml: "guid: zsjs023ctne0\n" }),
     ...tenantRestoreJobs(tenant),
@@ -54,8 +54,8 @@ function everyJob(): RelocationJob[] {
     ...consumerDumpJobs({ ...consumer, registrationYaml: "name: acme\n" }),
     ...consumerRestoreJobs(consumer),
     ...consumerVerifyCompletenessJobs(consumer),
-    ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, image: IMAGE }),
-    consumerSourceDbListJob({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, image: IMAGE })!,
+    ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, mongodb: "shared", image: IMAGE }),
+    consumerSourceDbListJob({ name: CONSUMER, stage: "prod", databases: consumer.databases, services: ALL_SERVICES, mongodb: "shared", image: IMAGE })!,
     verifyDumpJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, expected: ["registration.yaml"], image: IMAGE }),
     readRegistrationJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: "mongodb", image: IMAGE }),
     writeManifestJob({ unit: CONSUMER, folder: CONSUMER_FOLDER, namespace: CONSUMER, manifest: "UNIT=acme", image: IMAGE }),
@@ -92,14 +92,14 @@ describe("backup generations (hostyour-cloud#254)", () => {
   });
 
   it("a move's clear-source drops the source databases and leaves the box alone", () => {
-    const jobs = [...tenantClearSourceJobs({ guid: GUID, stage: "prod", image: IMAGE }), ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: ["acme_main"], services: ALL_SERVICES, image: IMAGE })];
+    const jobs = [...tenantClearSourceJobs({ guid: GUID, stage: "prod", image: IMAGE }), ...consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: ["acme_main"], services: ALL_SERVICES, mongodb: "shared", image: IMAGE })];
     expect(jobs).toHaveLength(2);
     for (const job of jobs) {
       expect(job.spec.script).not.toContain("box:");
       expect(jobReadsBoxSecret(job.spec)).toBe(false);
     }
     // A consumer without a Mongo database has nothing a job must drop.
-    expect(consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: [], services: ["postgresql"], image: IMAGE })).toEqual([]);
+    expect(consumerClearSourceJobs({ name: CONSUMER, stage: "prod", databases: [], services: ["postgresql"], mongodb: "shared", image: IMAGE })).toEqual([]);
   });
 });
 
@@ -201,7 +201,7 @@ describe("runRelocationJob places and reaps the box credential", () => {
 });
 
 describe("the nightly backup under pod security restricted (hostyour-manager#333)", () => {
-  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, mongodb: "shared" as const, pvcs: ["data"], image: IMAGE };
   const pvcJob = (jobs: RelocationJob[]): RelocationJob => jobs.find((j) => j.spec.name.startsWith("reloc-dump-pvc"))!;
 
   it("a claim is dumped as the user of the pod that mounts it", () => {
@@ -270,7 +270,7 @@ function rootOwnedAndWritable(path: string): boolean {
 }
 
 describe("restoring a consumer's claims", () => {
-  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, pvcs: ["data"], image: IMAGE };
+  const consumer = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ALL_SERVICES, mongodb: "shared" as const, pvcs: ["data"], image: IMAGE };
   const named = (jobs: RelocationJob[], prefix: string): RelocationJob | undefined => jobs.find((j) => j.spec.name.startsWith(prefix));
 
   it("leaves the per-consumer PostgreSQL's own claim out of the tars, because pg_dumpall takes its databases whole", () => {
@@ -345,5 +345,70 @@ describe("restoring a consumer's claims", () => {
       rmSync(source, { recursive: true, force: true });
       rmSync(box, { recursive: true, force: true });
     }
+  });
+});
+
+describe("a consumer's own MongoDB", () => {
+  const base = { name: CONSUMER, folder: CONSUMER_FOLDER, stage: "prod" as const, namespace: `${CONSUMER}-prod`, databases: ["acme_main"], services: ["mongodb"] as ConsumerService[], pvcs: ["data-mongodb-0", "data-mongodb-1", "data-mongodb-2", "uploads"], image: IMAGE };
+  const own = { ...base, mongodb: "replicaset" as const };
+  const shared = { ...base, mongodb: "shared" as const };
+  const mongoJobs = (i: typeof own | typeof shared): RelocationJob[] =>
+    [...consumerDumpJobs({ ...i, registrationYaml: "name: acme\n" }), ...consumerRestoreJobs(i), ...consumerVerifyCompletenessJobs(i)].filter((j) => /^reloc-(dump|restore|verify)-mongo/.test(j.spec.name));
+  const host = (j: RelocationJob): string | undefined => j.spec.env?.find((e) => e.name === "MONGO_HOST")?.value;
+
+  it("dumps, restores and verifies against the set in the consumer's own namespace", () => {
+    const jobs = mongoJobs(own);
+    expect(jobs.map((j) => j.spec.name.split("-").slice(0, 3).join("-"))).toEqual(["reloc-dump-mongo", "reloc-restore-mongo", "reloc-verify-mongo"]);
+    for (const j of jobs) {
+      expect(j.namespace).toBe(`${CONSUMER}-prod`);
+      expect(host(j)).toBe(`rs0/mongodb-headless.${CONSUMER}-prod.svc.cluster.local:27017`);
+    }
+  });
+
+  it("PLANTED INNOCENT: a consumer on the shared set keeps every Mongo job in the platform namespace", () => {
+    for (const j of mongoJobs(shared)) {
+      expect(j.namespace).toBe("mongodb");
+      expect(host(j)).toBe("rs0/mongodb-prod-headless.mongodb.svc.cluster.local:27017");
+    }
+  });
+
+  it("restores only once the own instance answers as a writable primary, and fails with that reason when it never does", () => {
+    const script = consumerRestoreJobs(own).find((j) => j.spec.name.startsWith("reloc-restore-mongo"))!.spec.script;
+    expect(script.indexOf("isWritablePrimary")).toBeGreaterThan(-1);
+    expect(script.indexOf("isWritablePrimary")).toBeLessThan(script.indexOf("mongorestore"));
+    expect(script).toContain("NO PRIMARY");
+    expect(consumerRestoreJobs(shared).find((j) => j.spec.name.startsWith("reloc-restore-mongo"))!.spec.script).not.toContain("isWritablePrimary");
+  });
+
+  it("keeps the own instance's data directories out of the claim tar, and out of the generation's expected entries", () => {
+    expect(consumerDumpJobs({ ...own, registrationYaml: "name: acme\n" }).find((j) => j.spec.name.startsWith("reloc-dump-pvc"))?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["uploads"]);
+    expect(consumerExpectedDumpEntries({ ...own, pvcs: ["data-mongodb-0"] })).toEqual(["registration.yaml", "mongo"]);
+    expect(consumerExpectedDumpEntries({ ...shared, pvcs: ["data-mongodb-0"] })).toEqual(["registration.yaml", "mongo", "pvc"]);
+  });
+
+  it("takes the WHOLE own instance, whatever databases[] and services say: an empty list is no empty instance", () => {
+    for (const i of [{ ...own, databases: [] }, { ...own, services: [] as ConsumerService[], databases: [] }]) {
+      const jobs = mongoJobs(i);
+      expect(jobs.map((j) => j.spec.name.split("-").slice(0, 3).join("-"))).toEqual(["reloc-dump-mongo", "reloc-restore-mongo", "reloc-verify-mongo"]);
+      const dump = jobs[0]!.spec.script;
+      expect(dump).toContain("listDatabases");
+      expect(dump).toContain("grep -vx -e admin -e local -e config");
+      expect(dump).toContain(`"box:${CONSUMER_FOLDER}/mongo/databases.txt"`);
+      expect(consumerExpectedDumpEntries({ ...i, pvcs: [] })).toEqual(["registration.yaml", "mongo"]);
+    }
+    // The restore and the verify read the archives alone, never the list beside them.
+    for (const j of mongoJobs({ ...own, databases: [] }).slice(1)) expect(j.spec.script).toContain(`--include '*.archive'`);
+  });
+
+  it("PLANTED INNOCENT: a shared-set consumer with an empty databases[] still dumps nothing from Mongo", () => {
+    expect(mongoJobs({ ...shared, databases: [] })).toEqual([]);
+    expect(consumerExpectedDumpEntries({ ...shared, databases: [], pvcs: [] })).toEqual(["registration.yaml"]);
+  });
+
+  it("lists and clears nothing on the source: the own instance falls with the namespace, as the per-consumer PostgreSQL does", () => {
+    expect(consumerSourceDbListJob(own)).toBeNull();
+    expect(consumerClearSourceJobs(own)).toEqual([]);
+    expect(consumerSourceDbListJob(shared)?.namespace).toBe("mongodb");
+    expect(consumerClearSourceJobs(shared).map((j) => j.namespace)).toEqual(["mongodb"]);
   });
 });

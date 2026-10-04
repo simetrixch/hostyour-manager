@@ -5,8 +5,9 @@ import type { ConsumerService } from "../../../shared/consumer.ts";
 import { isOrdinalClaim, type JobEnvVar, type JobIdentity, type ClaimUser } from "../../adapters/kube/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
+import type { MongodbMode } from "#unit/shared/unit-size.ts";
 import {
-  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, writeFile, quoted, relocationJobName, hashLine,
+  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, mongoHost, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
   type RelocationJob,
 } from "#unit/server/relocation-jobs.ts";
@@ -16,11 +17,62 @@ import {
  *  lives on (hostyour-cloud clusters/units/postgresql, `postgres-data.pvc.name`). */
 export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres", claim: "postgres-data" } as const;
 
+/** The claim template of a consumer's OWN MongoDB (hostyour-cloud clusters/units/mongodb, the
+ *  StatefulSet `mongodb`'s template `data`): `data-mongodb-<n>`, one per member. */
+const OWN_MONGO_CLAIM = "data-mongodb";
+
 /** The claims a consumer's dump tars and its restore extracts: every PVC of the namespace but the
- *  per-consumer PostgreSQL's own, whose databases dump-pg takes whole with pg_dumpall. A tar of that
- *  live data directory is no consistent copy, and extracting it would overwrite what restore-pg loads. */
-export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services">): string[] {
-  return i.services.includes("postgresql") ? i.pvcs.filter((claim) => claim !== CONSUMER_POSTGRES.claim) : [...i.pvcs];
+ *  data directories of its own stores, the per-consumer PostgreSQL's, whose databases dump-pg takes
+ *  whole with pg_dumpall, and an own MongoDB's, whose databases dump-mongo takes with mongodump. A tar
+ *  of a live data directory is no consistent copy, and extracting it would overwrite what the
+ *  restore of that store loads. */
+export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services" | "mongodb">): string[] {
+  return i.pvcs.filter((claim) => !(i.services.includes("postgresql") && claim === CONSUMER_POSTGRES.claim) && !(i.mongodb !== "shared" && isOrdinalClaim(OWN_MONGO_CLAIM, claim)));
+}
+
+/** Where a consumer's MongoDB answers, so where its Mongo jobs run and what they dial: the shared set
+ *  of the stage from the platform namespace, or the consumer's own instance from its own namespace,
+ *  whose root password stands there in a Secret of the same name and key. */
+/** Whether the generation holds a Mongo dump: always for an own instance, which is taken whole as
+ *  the per-consumer PostgreSQL is, whatever databases[] and services name; on the shared set only the
+ *  registration's databases[], which are all of the set that is the consumer's. */
+const dumpsMongo = (i: Pick<ConsumerJobInputs, "services" | "databases" | "mongodb">): boolean =>
+  i.mongodb !== "shared" || (i.services.includes("mongodb") && i.databases.length > 0);
+
+/** Every database of an own instance but MongoDB's own three, as the list the dump walks; `grep -v`
+ *  exits 1 on an instance that holds none yet, which is no failure. */
+const OWN_DATABASES = `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/listed
+grep -vx -e admin -e local -e config /tmp/listed > /tmp/databases.txt || [ "$?" -eq 1 ]
+`;
+
+/** The generation's Mongo archives into /tmp/archives. For an own instance the list file beside them
+ *  is left out, and a generation written before the instance was dumped whole holds no mongo folder
+ *  at all, which lists as none. */
+const mongoArchives = (i: Pick<ConsumerJobInputs, "mongodb" | "folder">): string =>
+  i.mongodb === "shared"
+    ? `rclone lsf "box:${i.folder}/mongo/" > /tmp/archives\n`
+    : `rclone lsf "box:${i.folder}/" > /tmp/entries
+: > /tmp/archives
+if grep -qx 'mongo/' /tmp/entries; then rclone lsf --include '*.archive' "box:${i.folder}/mongo/" > /tmp/archives; fi
+`;
+
+/** An own instance's generation names every database it held in mongo/databases.txt; each needs its
+ *  archive, or a dump that lost one would verify as complete. A generation without the list (written
+ *  before the instance was dumped whole) has nothing to hold the archives against. */
+const ownListCheck = (folder: string): string => `if grep -qx 'mongo/' /tmp/entries; then
+  rclone lsf "box:${folder}/mongo/" > /tmp/mongo-entries
+  if grep -qx 'databases.txt' /tmp/mongo-entries; then
+    rclone copyto "box:${folder}/mongo/databases.txt" /tmp/listed.txt
+    while read -r db; do
+      grep -Fqx "$db.archive" /tmp/archives || { echo "MISSING archive $db"; exit 1; }
+    done < /tmp/listed.txt
+  fi
+fi
+`;
+
+function consumerMongo(i: Pick<ConsumerJobInputs, "namespace" | "stage" | "mongodb">): { namespace: string; env: JobEnvVar[] } {
+  if (i.mongodb === "shared") return { namespace: MONGO_NAMESPACE, env: mongoEnv(mongoHost(i.stage)) };
+  return { namespace: i.namespace, env: mongoEnv(i.mongodb === "standalone" ? "mongodb" : `rs0/mongodb-headless.${i.namespace}.svc.cluster.local:27017`) };
 }
 
 /** The shell line that extracts one claim's archive into its mounted root. `--no-overwrite-dir` leaves
@@ -89,6 +141,9 @@ export interface ConsumerJobInputs {
    *  under a postgresql one (the registration's own engine-neutral contract). */
   databases: readonly string[];
   services: readonly ConsumerService[];
+  /** Whose MongoDB the consumer uses: the stage's shared set, of which databases[] are its part, or its
+   *  own instance, which is taken whole. */
+  mongodb: MongodbMode;
   /** The PVC names of the consumer namespace, listed off the cluster at step time. */
   pvcs: readonly string[];
   /** Who the PVC dump and the PVC restore run as: the user the claims' files belong to on the cluster
@@ -117,7 +172,7 @@ export function claimsIdentity(namespace: string, claims: readonly string[], use
   return [...identities.values()][0]!;
 }
 
-/** The complete consumer dump: the registration, its Mongo databases[], the whole per-consumer
+/** The complete consumer dump: the registration, its Mongo databases[] or its whole own MongoDB, the whole per-consumer
  *  PostgreSQL, the claim bucket, and every PVC as a tar — each job where its Secret lives. */
 export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: string }): RelocationJob[] {
   const jobs: RelocationJob[] = [
@@ -131,19 +186,28 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
       },
     },
   ];
-  if (i.services.includes("mongodb") && i.databases.length > 0) {
+  if (dumpsMongo(i)) {
+    const mongo = consumerMongo(i);
     jobs.push({
-      namespace: MONGO_NAMESPACE,
+      namespace: mongo.namespace,
       spec: {
-        ...boxSpec("dump-mongo", i.name, mongoEnv(i.stage)),
+        ...boxSpec("dump-mongo", i.name, mongo.env),
         image: i.image,
         script:
           BOX_REMOTE +
-          `for db in ${quoted(i.databases)}; do
+          (i.mongodb === "shared"
+            ? `for db in ${quoted(i.databases)}; do
   ${mongodumpLine("$db", "/tmp/$db.archive")}  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
   rm -f "/tmp/$db.archive"
 done
-`,
+`
+            : OWN_DATABASES +
+              `${hashLine("/tmp/databases.txt", "mongo/databases.txt")}rclone copyto /tmp/databases.txt "box:${i.folder}/mongo/databases.txt"
+while read -r db; do
+  ${mongodumpLine("$db", "/tmp/$db.archive")}  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
+  rm -f "/tmp/$db.archive"
+done < /tmp/databases.txt
+`),
       },
     });
   }
@@ -184,29 +248,43 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
 }
 
 /** What a complete consumer dump leaves on the box, given its claims. */
-export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "databases" | "services" | "pvcs">): string[] {
+export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "databases" | "services" | "pvcs" | "mongodb">): string[] {
   return [
     "registration.yaml",
-    ...(i.services.includes("mongodb") && i.databases.length > 0 ? ["mongo"] : []),
+    ...(dumpsMongo(i) ? ["mongo"] : []),
     ...(i.services.includes("postgresql") ? ["postgres"] : []),
     ...(tarredClaims(i).length > 0 ? ["pvc"] : []),
   ];
 }
 
+/** An own instance on the target is restored into once it answers as a writable primary, bounded.
+ *  Under `replicaset` the set is initiated by an Argo CD PostSync hook, and the Application reading
+ *  Synced and Healthy does not say that hook has finished; a set that never elects a primary fails
+ *  the restore with that reason instead of a mongorestore error. */
+const OWN_PRIMARY_WAIT = `n=0
+until mongosh ${MONGO_FLAGS} --quiet --eval 'quit(db.hello().isWritablePrimary ? 0 : 1)' > /dev/null 2>&1; do
+  n=$((n + 1))
+  [ "$n" -lt 60 ] || { echo "NO PRIMARY: the consumer's own MongoDB answered no writable primary within 5 minutes"; exit 1; }
+  sleep 5
+done
+`;
+
 /** Restore the consumer's data into the TARGET — the mirror of consumerDumpJobs, minus the
  *  registration (the run re-commits that itself: git is the Manager's to write, not a job's). */
 export function consumerRestoreJobs(i: ConsumerJobInputs): RelocationJob[] {
   const jobs: RelocationJob[] = [];
-  if (i.services.includes("mongodb") && i.databases.length > 0) {
+  if (dumpsMongo(i)) {
+    const mongo = consumerMongo(i);
     jobs.push({
-      namespace: MONGO_NAMESPACE,
+      namespace: mongo.namespace,
       spec: {
-        ...boxSpec("restore-mongo", i.name, mongoEnv(i.stage)),
+        ...boxSpec("restore-mongo", i.name, mongo.env),
         image: i.image,
         script:
           BOX_REMOTE +
-          `rclone lsf "box:${i.folder}/mongo/" > /tmp/archives
-while read -r f; do
+          (i.mongodb === "shared" ? "" : OWN_PRIMARY_WAIT) +
+          mongoArchives(i) +
+          `while read -r f; do
   rclone copyto "box:${i.folder}/mongo/$f" "/tmp/$f"
   mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --drop --quiet
   rm -f "/tmp/$f"
@@ -252,17 +330,17 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
  *  themselves (psql/tar fail non-zero on a broken restore). */
 export function consumerVerifyCompletenessJobs(i: Omit<ConsumerJobInputs, "pvcs">): RelocationJob[] {
   const jobs: RelocationJob[] = [];
-  if (i.services.includes("mongodb") && i.databases.length > 0) {
+  if (dumpsMongo(i)) {
+    const mongo = consumerMongo(i);
     jobs.push({
-      namespace: MONGO_NAMESPACE,
+      namespace: mongo.namespace,
       spec: {
-        ...boxSpec("verify-mongo", i.name, mongoEnv(i.stage)),
+        ...boxSpec("verify-mongo", i.name, mongo.env),
         image: i.image,
         script:
           BOX_REMOTE +
           `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/have
-rclone lsf "box:${i.folder}/mongo/" > /tmp/archives
-sed 's/\\.archive$//' /tmp/archives > /tmp/want
+${mongoArchives(i)}${i.mongodb === "shared" ? "" : ownListCheck(i.folder)}sed 's/\\.archive$//' /tmp/archives > /tmp/want
 while read -r want; do
   grep -qx "$want" /tmp/have || { echo "MISSING database $want"; exit 1; }
 done < /tmp/want
@@ -288,17 +366,20 @@ echo "COMPLETE mongo"
  *  carries Prune=false,Delete=false, so the cascade never touches that instance's data; only the
  *  namespace delete in clear-source does.
  *
+ *  A consumer's OWN MongoDB is not listed either, for the PostgreSQL's reason: it is a source of that
+ *  same Application, pruned with it, and its data claims fall only with the namespace in clear-source.
+ *
  *  null means "this unit has no such database": an s3 / redis / registry-pull / forwardauth consumer,
  *  or a mongodb claim with an empty databases[] — both of which the registration permits. Returning an
  *  empty listing instead would read as "the source data was destroyed" for a unit that never had any. */
-export function consumerSourceDbListJob(i: { name: string; stage: Stage; databases: readonly string[]; services: readonly ConsumerService[]; image: string }): RelocationJob | null {
-  if (!i.services.includes("mongodb") || i.databases.length === 0) return null;
+export function consumerSourceDbListJob(i: { name: string; stage: Stage; databases: readonly string[]; services: readonly ConsumerService[]; mongodb: MongodbMode; image: string }): RelocationJob | null {
+  if (!i.services.includes("mongodb") || i.databases.length === 0 || i.mongodb !== "shared") return null;
   return {
     namespace: MONGO_NAMESPACE,
     spec: {
       name: relocationJobName("list-source", i.name),
       image: i.image,
-      env: mongoEnv(i.stage),
+      env: mongoEnv(mongoHost(i.stage)),
       // The listing lands in a file first: `sh -e` misses a failure inside a pipe, and a Mongo that
       // cannot be listed must fail the job, not read as databases the release destroyed.
       script: `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/mongo-databases
@@ -310,17 +391,18 @@ done
   };
 }
 
-/** Clear the consumer's SOURCE: drop its Mongo databases[]. The per-consumer PostgreSQL and the PVCs
- *  fall with the source namespace, which the run deletes in the same step. The box is not touched: the
- *  generation the move took stays as the backup of the moment before it. */
-export function consumerClearSourceJobs(i: { name: string; stage: Stage; databases: readonly string[]; services: readonly ConsumerService[]; image: string }): RelocationJob[] {
-  if (!i.services.includes("mongodb") || i.databases.length === 0) return [];
+/** Clear the consumer's SOURCE: drop its Mongo databases[] on the shared set. The per-consumer
+ *  PostgreSQL, an own MongoDB and the PVCs fall with the source namespace, which the run deletes in the
+ *  same step. The box is not touched: the generation the move took stays as the backup of the moment
+ *  before it. */
+export function consumerClearSourceJobs(i: { name: string; stage: Stage; databases: readonly string[]; services: readonly ConsumerService[]; mongodb: MongodbMode; image: string }): RelocationJob[] {
+  if (!i.services.includes("mongodb") || i.databases.length === 0 || i.mongodb !== "shared") return [];
   return [
     {
       namespace: MONGO_NAMESPACE,
       spec: {
         name: relocationJobName("clear-source", i.name),
-        env: mongoEnv(i.stage),
+        env: mongoEnv(mongoHost(i.stage)),
         image: i.image,
         script: `for db in ${quoted(i.databases)}; do
   mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"

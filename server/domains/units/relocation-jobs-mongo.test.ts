@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mongoEnv, mongodumpLine } from "#unit/server/relocation-jobs.ts";
+import { mongoEnv, mongoHost, mongodumpLine } from "#unit/server/relocation-jobs.ts";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -26,7 +26,7 @@ exit ${fail ? 7 : 0}
 
 describe("mongodump failure diagnostics", () => {
   it.each(["dev", "test", "prod"] as const)("discovers the replica set through the %s seed instead of pooling a standalone multi-address host", (stage) => {
-    expect(mongoEnv(stage).find((e) => e.name === "MONGO_HOST")?.value).toBe(`rs0/mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`);
+    expect(mongoEnv(mongoHost(stage)).find((e) => e.name === "MONGO_HOST")?.value).toBe(`rs0/mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`);
   });
 
   it.each(["secret[.*]$", "R"])("preserves failure and prints a bounded password-free stderr tail (%s)", (password) => {

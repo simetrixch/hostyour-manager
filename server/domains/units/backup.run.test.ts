@@ -168,3 +168,40 @@ describe("tenant-backup", () => {
     expect(listBackups(db.db, unit).map((b) => b.state)).toEqual(["failed"]);
   });
 });
+
+describe("backup of a consumer with its own MongoDB", () => {
+  const workload = (kind: string, name: string, desired: number) => ({ kind, name, available: true, desired, ready: desired });
+
+  // A quiesced consumer whose manifest brings its own MongoDB: the instance keeps running, which is
+  // what keeps its databases reachable for the dump, and its claim holds the live data directory
+  // beside the application's own claim, each mounted as its own user.
+  async function backUp(mongodb: "standalone" | "shared", application: ReturnType<typeof workload>[]) {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { mongodb });
+    f.source.reader.setSmoke({ namespaceExists: true, externalSecretsReady: true, workloads: [workload("StatefulSet", "mongodb", 1), ...application] });
+    f.source.reader.setClaims(`${CONSUMER}-prod`, ["data-mongodb-0", "uploads"], [{ claim: "data-mongodb", ordinals: true, user: 999, group: 999 }, { claim: "uploads", ordinals: false, user: 1000, group: 1000 }]);
+    await driveSteps(db, f, makeBackupDef(ports).steps({ appId: "app_1" }), { appId: "app_1" }, []);
+    return (name: string) => f.source.reader.jobs.find((j) => j.spec.name === `reloc-${name}-${CONSUMER}`);
+  }
+
+  it("dumps the own instance in the consumer's namespace and leaves its live data directory out of the claim tar", async () => {
+    const job = await backUp("standalone", [workload("Deployment", "web", 0)]);
+    expect(job("dump-mongo")?.namespace).toBe(`${CONSUMER}-prod`);
+    expect(job("dump-mongo")?.spec.env).toContainEqual({ name: "MONGO_HOST", value: "mongodb" });
+    expect(job("dump-mongo")?.spec.env).toContainEqual({ name: "MONGO_ROOT_PASSWORD", secretKeyRef: { name: "mongodb-credentials", key: "root-password" } });
+    expect(job("dump-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["uploads"]);
+    expect(job("dump-pvc")?.spec.runAs).toEqual({ user: 1000, group: 1000 });
+  });
+
+  it("still refuses an application workload that runs beside the own MongoDB, and names only that one", async () => {
+    await expect(backUp("standalone", [workload("Deployment", "web", 1)])).rejects.toThrow(/still runs Deployment\/web \(1\/1\)$/);
+  });
+
+  it("THE INNOCENT NEIGHBOUR: a consumer on the shared set whose own chart runs a StatefulSet mongodb is refused", async () => {
+    await expect(backUp("shared", [])).rejects.toThrow("still runs StatefulSet/mongodb (1/1)");
+  });
+});

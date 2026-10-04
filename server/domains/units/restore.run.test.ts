@@ -129,10 +129,10 @@ describe("tenant-restore", () => {
 });
 
 /** A consumer registration as a generation holds it, with `services` as the unit claimed them. */
-function dumpedConsumer(services: ("mongodb" | "postgresql")[]): string {
+function dumpedConsumer(services: ("mongodb" | "postgresql")[], mongodb: "shared" | "standalone" = "shared"): string {
   return serializePointer(ConsumerRegistrationSchema, {
     name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
-    chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services, size: "medium", mongodb: "shared",
+    chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services, size: "medium", mongodb,
     quota: seedQuota("medium"),
   });
 }
@@ -193,6 +193,25 @@ describe("restore (consumer)", () => {
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
+  });
+
+  it("restores an own MongoDB from its dump, leaving the tar of its data directory an older generation holds unextracted, and says so", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumpedConsumer(["mongodb"], "standalone"));
+    // A generation taken before the own instance was dumped: it holds the tar of its live data
+    // directory, which is no consistent copy and would be overwritten by what restore-mongo loads.
+    f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM data-mongodb-0\nCLAIM uploads\nCLAIMS 2" });
+    f.target.reader.setClaims(`${CONSUMER}-prod`, ["uploads"], [{ claim: "uploads", ordinals: false, user: 1000, group: 1000 }]);
+    const logs: string[] = [];
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, logs);
+    const job = (name: string) => f.target.reader.jobs.find((j) => j.spec.name === `reloc-${name}-${CONSUMER}`);
+    expect(job("restore-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["uploads"]);
+    expect(job("restore-mongo")?.namespace).toBe(`${CONSUMER}-prod`);
+    expect(logs.join("\n")).toMatch(/data-mongodb-0 .*left out/);
   });
 
   it("REFUSES, by name and before any store is written, a claim the generation holds and the restore has nowhere to write", async () => {

@@ -69,16 +69,16 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
     const image = ports.dbtoolsImage ?? "";
     // The registration + PVC list are read lazily, per closure: a restore resolves this world while
     // the unit's registration is deliberately ABSENT (offboarded), and must not fail on it.
-    const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; image: string }> => {
+    const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; mongodb: ConsumerStageRegistration["mongodb"]; image: string }> => {
       const reg = await readStageRegistration(ports, ac.stage, ac.name);
-      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, image };
+      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, mongodb: reg.mongodb, image };
     };
     const jobInputs = async (): Promise<Awaited<ReturnType<typeof registrationInputs>> & { pvcs: string[] }> => {
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
       return { ...(await registrationInputs()), pvcs: await clusterReader.listPersistentVolumeClaims(namespace) };
     };
     // Whose files the tarred claims hold on `clusterId`: the user of the workloads mounting them there.
-    const claimsIdentityOn = async (clusterId: string, inputs: { pvcs: readonly string[]; services: ConsumerStageRegistration["services"] }) => {
+    const claimsIdentityOn = async (clusterId: string, inputs: { pvcs: readonly string[]; services: ConsumerStageRegistration["services"]; mongodb: ConsumerStageRegistration["mongodb"] }) => {
       const claims = tarredClaims(inputs);
       return claims.length > 0 ? claimsIdentity(namespace, claims, await (await ports.resolver.resolve(clusterId)).clusterReader.listClaimUsers(namespace)) : undefined;
     };
@@ -132,7 +132,10 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       restoreJobs: async (folder, ctx, targetClusterId) => {
         const inputs = await registrationInputs();
         const held = parseClaimLines(await runRelocationJob(ports, ctx, targetClusterId, consumerGenerationClaimsJob({ name: ac.name, namespace, folder, image })));
-        const claims = tarredClaims({ pvcs: held, services: inputs.services });
+        const claims = tarredClaims({ pvcs: held, services: inputs.services, mongodb: inputs.mongodb });
+        for (const claim of held.filter((c) => !claims.includes(c))) {
+          ctx.log("meta", `${claim} in the generation ${folder} left out: it is the data directory of a store the restore loads from its own dump, and a tar of it is no consistent copy`);
+        }
         const { clusterReader } = await ports.resolver.resolve(targetClusterId);
         const standing = await clusterReader.listPersistentVolumeClaims(namespace);
         const unplaced: string[] = [];
@@ -143,17 +146,17 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         if (unplaced.length > 0) {
           throw errValidation(`the generation ${folder} holds ${unplaced.join(", ")}, and no claim of that name stands in ${namespace} on ${targetOf(ctx, targetClusterId).cluster}, nor does a StatefulSet there name it, so the restore stops before any store is written`);
         }
-        const pvcUser = await claimsIdentityOn(targetClusterId, { pvcs: claims, services: inputs.services });
+        const pvcUser = await claimsIdentityOn(targetClusterId, { pvcs: claims, services: inputs.services, mongodb: inputs.mongodb });
         return consumerRestoreJobs({ ...inputs, pvcs: claims, ...(pvcUser !== undefined ? { pvcUser } : {}), folder });
       },
       verifyCompletenessJobs: async (folder) => consumerVerifyCompletenessJobs({ ...(await registrationInputs()), folder }),
       sourceDbListJob: async () => {
         const i = await jobInputs();
-        return consumerSourceDbListJob({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, image });
+        return consumerSourceDbListJob({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, mongodb: i.mongodb, image });
       },
       clearSourceJobs: async () => {
         const i = await jobInputs();
-        return consumerClearSourceJobs({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, image });
+        return consumerClearSourceJobs({ name: i.name, stage: i.stage, databases: i.databases, services: i.services, mongodb: i.mongodb, image });
       },
       // ---- migrate/restore closures -------------------------------------------------------
       provisionTarget: async (c, target, dumpedRegistrationYaml) => {
@@ -312,9 +315,14 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       // The per-consumer PostgreSQL DELIBERATELY keeps running through a quiesce — that is what keeps
       // its databases reachable for the dump. Its chart (hostyour-cloud clusters/units/postgresql) pins
       // the database as `postgres` and renders a metrics exporter, which reads and writes nothing; the
-      // upstream exporter chart names it after the Helm release, which is this Application. Exact
-      // names, so an application workload never passes for the store.
-      workloadExempt: (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter`,
+      // upstream exporter chart names it after the Helm release, which is this Application. An own
+      // MongoDB keeps running for the same reason, as the StatefulSet `mongodb` its chart
+      // (clusters/units/mongodb) renders, and only where the registration brings one: dump-mongo reads
+      // it there. Exact names, so an application workload never passes for the store.
+      workloadExempt: async () => {
+        const ownMongo = (await readStageRegistration(ports, ac.stage, ac.name)).mongodb !== "shared";
+        return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb");
+      },
     };
   };
 }
