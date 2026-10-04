@@ -27,11 +27,27 @@ describe("composeQuota", () => {
 
     expect(standalone.parts.find((p) => p.component === "mongodb")?.members).toBe(1);
     expect(replicaset.parts.find((p) => p.component === "mongodb")?.members).toBe(3);
-    // 800m + 250m vs 800m + 3x250m. The replica set is the transaction-capable shape and it is
-    // priced as the three members it actually runs.
-    expect(standalone.quota.requestsCpu).toBe("1050m");
-    expect(replicaset.quota.requestsCpu).toBe("1550m");
+    // 800m + 250m vs 800m + 3x250m, each + the one exporter's 15m. The replica set is the
+    // transaction-capable shape and it is priced as the three members it actually runs.
+    expect(standalone.quota.requestsCpu).toBe("1065m");
+    expect(replicaset.quota.requestsCpu).toBe("1565m");
     expect(replicaset.quota.persistentVolumeClaims).toBe(UNIT_SIZE_SEED.base.medium.persistentVolumeClaims + 3);
+  });
+
+  it("adds ONE metrics exporter per MongoDB of its own, never per member, and none on the shared set", () => {
+    const exporter = { requestsCpu: "15m", requestsMemory: "48Mi", limitsCpu: "100m", limitsMemory: "128Mi", pods: 1, persistentVolumeClaims: 0 };
+    for (const mongodb of ["standalone", "replicaset"] as const) {
+      const { quota, parts } = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb });
+      const n = MONGODB_MEMBERS[mongodb];
+      expect(parts.filter((p) => p.component === "mongodb-exporter")).toEqual([{ component: "mongodb-exporter", members: 1, each: exporter }]);
+      const base = UNIT_SIZE_SEED.base.small, member = UNIT_SIZE_SEED.mongodb.small;
+      expect(quota.pods).toBe(base.pods + n * member.pods + 1);
+      expect(quota.persistentVolumeClaims).toBe(base.persistentVolumeClaims + n * member.persistentVolumeClaims);
+    }
+    // small: base 400m/1Gi requests (1500m/2Gi limits), a member 100m/512Mi (1/2Gi), the exporter 15m/48Mi (100m/128Mi).
+    expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "standalone" }).quota).toMatchObject({ requestsCpu: "515m", requestsMemory: "1584Mi", limitsCpu: "2600m", limitsMemory: "4224Mi" });
+    expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "replicaset" }).quota).toMatchObject({ requestsCpu: "715m", requestsMemory: "2608Mi" });
+    expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "shared" }).parts.map((p) => p.component)).toEqual(["base", "postgresql"]);
   });
 
   it("keeps the WORD and the FIGURES apart: the same size costs more when the unit brings more", () => {
