@@ -30,10 +30,10 @@
 import type { Db } from "#core/server/db/client.ts";
 import { and, eq } from "drizzle-orm";
 import { clusters, tenants } from "#core/server/db/schema/inventory.ts";
-import { listDnsWrites } from "#core/server/db/dns-writes.ts";
+import { findDnsWrite, listDnsWrites } from "#core/server/db/dns-writes.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
 import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
-import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
+import { consumerUnitHost, issuerAddressHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
 import { MAIL_TXT_RECORD, type MailDnsDomainView, type MailDnsRecord, type MailDnsRow, type MailDnsView } from "#core/shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "#core/shared/dns.ts";
 
@@ -160,8 +160,9 @@ async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[
     const standing = await dns.listRecordContents({ name: w.name, type: "TXT" });
     const stage = w.owner.stage;
     const tenant = stage === undefined ? undefined : db.select({ subdomain: tenants.subdomain }).from(tenants).where(and(eq(tenants.guid, w.owner.name), eq(tenants.stage, stage))).get();
+    const owner: DnsOwner = { kind: "tenant", name: tenant?.subdomain ?? w.owner.name, ...(stage === undefined ? {} : { stage }) };
     rows.push({
-      owner: { kind: "tenant", name: tenant?.subdomain ?? w.owner.name, ...(stage === undefined ? {} : { stage }) },
+      owner,
       name: w.name,
       type: "TXT",
       expected: w.content,
@@ -169,6 +170,13 @@ async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[
       verdict: standing.length === 0 ? "absent" : standing.includes(w.content) ? "standing" : "other",
       removable: true,
     });
+    // The issuer host's address record beside a host-routed mark (unit-dns.ts publishIssuerRecord),
+    // listed where the book holds it for the mark's tenant, so a removal that failed leaves it here.
+    const address = issuerAddressHost(w.content);
+    const booked = address === null ? null : findDnsWrite(db, { name: address, type: "CNAME" });
+    if (address !== null && booked !== null && booked.owner.kind === "tenant" && booked.owner.name === w.owner.name) {
+      rows.push(await unitRow(dns, owner, address, booked.content));
+    }
   }
   return rows;
 }

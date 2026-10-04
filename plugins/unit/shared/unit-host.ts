@@ -68,6 +68,16 @@ export function tenantIssuerRecord(label: string, routing: MemberRouting, identi
   return { name: `${label}.${new URL(issuer).host}`, content: issuer };
 }
 
+/** The host that needs an address record of its own beside a tenant's identity provider mark: the
+ *  issuer host under `host` routing, where the mark makes it an empty non-terminal below the tenant's
+ *  wildcard, and RFC 4592 lets no wildcard answer a name that exists; null under `path` routing, whose
+ *  issuer host is the zone, which holds the tenant's own record. Read from the issuer the mark holds, so
+ *  a mark in the book of DNS writes says it without the tenant's routing. */
+export function issuerAddressHost(issuer: string): string | null {
+  const url = new URL(issuer);
+  return url.pathname === "/" ? url.host : null;
+}
+
 /** Every host a tenant answers at beside its zone: its own domain and the hosts that redirect to it;
  *  none without an own domain. */
 export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly string[]): string[] {

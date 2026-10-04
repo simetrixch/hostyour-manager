@@ -277,7 +277,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         c.log("meta", `source Application ${appName} is gone — the source released the unit`);
       },
       // The chain is (the TARGET cluster's domain, the UNIT's stage).
-      dnsRecordName: async (_c, target) => consumerUnitHost(ac.host, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage))),
+      dnsRecordNames: async (_c, target) => [consumerUnitHost(ac.host, ac.stage, unitApexFromChain(await ports.registrations.readClusterValueFiles(target.domain, ac.stage)))],
       clearSourceCluster: async (c) => {
         const { clusterReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
         // The source's three GitOps-rendered objects — its AppProject, its admission policy and its

@@ -208,7 +208,7 @@ function publishIssuerRecordStep(ports: TenantOnboardPorts, p: TenantRefreshMemb
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-      await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-refresh-members" });
+      await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), clusterFqdn: tc.domain, runKind: "tenant-refresh-members" });
     },
   };
 }

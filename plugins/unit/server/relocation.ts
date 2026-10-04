@@ -99,9 +99,10 @@ export interface RelocationWorld {
   /** The handle half of verify-source-released: the source no longer GENERATES the unit — a
    *  consumer's source Application is pruned, a tenant's source CR is gone. */
   verifySourceHandleReleased(ctx: StepCtx): Promise<void>;
-  /** The unit's ONE public record name — what switch-dns updates, never recomposed elsewhere. The
-   *  apex comes off the TARGET's values chain (where the unit will serve). */
-  dnsRecordName(ctx: StepCtx, target: TargetCluster): Promise<string>;
+  /** The unit's public record names — what switch-dns updates, never recomposed elsewhere: the unit's
+   *  one record, and for a tenant with a host-routed identity provider mark the issuer host's record
+   *  beside it. The apex comes off the TARGET's values chain (where the unit will serve). */
+  dnsRecordNames(ctx: StepCtx, target: TargetCluster): Promise<string[]>;
   /** Kind-specific completeness beyond the listing jobs — a tenant proves its crypto material
    *  materialized on the target. Absent ⇒ the jobs are the whole check. */
   verifyCompletenessExtra?(ctx: StepCtx, target: TargetCluster): Promise<void>;

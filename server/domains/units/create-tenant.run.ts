@@ -469,7 +469,7 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
         // The mark the product's mail service trusts the tenant's identity provider by, published long
         // before `activate` sends the first invite through that service.
         if (p.issuerRecordLabel) {
-          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), runKind: "tenant-create" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
         } else {
           ctx.log("meta", "the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
         }

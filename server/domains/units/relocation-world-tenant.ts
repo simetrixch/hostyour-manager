@@ -22,7 +22,7 @@ import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.t
 
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
-import { tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { bookedIssuerLabel, issuerAddressHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
@@ -226,7 +226,14 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         c.log("meta", `source fan-out for ${tc.guid} is pruned (${names.length} Application(s)) — the source released the tenant`);
       },
       // The chain is (the TARGET cluster's domain, the TENANT's stage).
-      dnsRecordName: async (_c, target) => tenantRecordName(tc.routing, tc.subdomain, tc.stage, await ports.resolveUnitApex(target.domain, tc.stage)),
+      dnsRecordNames: async (c, target) => {
+        const apex = await ports.resolveUnitApex(target.domain, tc.stage);
+        // The issuer host's record goes where the mark is: a tenant with a mark gets it on the target
+        // even where the source never had it.
+        const label = bookedIssuerLabel(c.db, tc.guid, tc.stage);
+        const issuerHost = label === null ? null : issuerAddressHost(tenantIssuerRecord(label, tc.routing, tc.identityProvider, tc.stage, tc.subdomain, apex).content);
+        return [tenantRecordName(tc.routing, tc.subdomain, tc.stage, apex), ...(issuerHost === null ? [] : [issuerHost])];
+      },
       verifyCompletenessExtra: async (c, target) => {
         // The crypto material never travels (Vault is one shared mount) — what must be PROVEN is
         // that the target's ESO materialized it, or every member boots into SecretSyncedError.

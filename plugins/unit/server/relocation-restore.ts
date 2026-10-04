@@ -133,10 +133,11 @@ export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetCl
     run: async (ctx) => {
       const w = await worldOf(ctx);
       const target = targetOf(ctx, targetClusterId);
-      const recordName = await w.dnsRecordName(ctx, target);
       // The one caller that repoints a record from another cluster of this installation: the record
       // points at the SOURCE cluster until this step, and moving it onto the target is the whole of the switch.
-      await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, kind: w.kindWord, stage: w.stage, recordName, clusterFqdn: target.domain, runKind, repoint: true });
+      for (const recordName of await w.dnsRecordNames(ctx, target)) {
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, kind: w.kindWord, stage: w.stage, recordName, clusterFqdn: target.domain, runKind, repoint: true });
+      }
     },
   };
 }

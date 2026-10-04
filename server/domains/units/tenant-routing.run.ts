@@ -113,7 +113,7 @@ function tenantSetRoutingSteps(ports: TenantSetRoutingPorts, p: TenantSetRouting
         // with it: published here, the other routing's mark removed with the other record below.
         const label = bookedIssuerLabel(ctx.db, tc.guid, tc.stage);
         if (label !== null) {
-          await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), runKind: "tenant-set-routing" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: tc.guid, stage: tc.stage, record: tenantIssuerRecord(label, p.routing, tc.identityProvider, tc.stage, tc.subdomain, apex), clusterFqdn: tc.domain, runKind: "tenant-set-routing" });
         }
       },
     },

@@ -168,8 +168,11 @@ describe("tenant-set-routing", () => {
 describe("tenant-set-routing carries the identity provider's DNS mark", () => {
   const HOST_MARK = tenantIssuerRecord("_digita-idp", "host", "auth", "prod", "acme", "example.com");
   const PATH_MARK = tenantIssuerRecord("_digita-idp", "path", "auth", "prod", "acme", "example.com");
+  const ISSUER_HOST = "auth.acme.example.com";
+  // The host mark carries the issuer host's CNAME beside it; the path mark, on the zone, carries none.
   const marks = async (dns: FakeDnsProvider): Promise<Record<string, string[]>> => ({
     [HOST_MARK.name]: await dns.listRecordContents({ name: HOST_MARK.name, type: "TXT" }),
+    [ISSUER_HOST]: await dns.listRecordContents({ name: ISSUER_HOST, type: "CNAME" }),
     [PATH_MARK.name]: await dns.listRecordContents({ name: PATH_MARK.name, type: "TXT" }),
   });
 
@@ -179,11 +182,11 @@ describe("tenant-set-routing carries the identity provider's DNS mark", () => {
     const dns = new FakeDnsProvider();
     dns.seed(WILDCARD, "CNAME", CLUSTER);
     const h = { cleanups: [], logs: [] };
-    await publishIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, runKind: "tenant-create" });
+    await publishIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, clusterFqdn: CLUSTER, runKind: "tenant-create" });
     const probe = new FakePublicProbe({ [PATH_IDP]: { reachable: true, status: 200, detail: "HTTP 200" } });
     const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
     await run(makeTenantSetRoutingDef(ports(reg, dns, probe)).steps(params), params, h);
-    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [], [PATH_MARK.name]: [PATH_MARK.content] });
+    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [], [ISSUER_HOST]: [], [PATH_MARK.name]: [PATH_MARK.content] });
     expect(listDnsWrites(db.db).filter((w) => w.type === "TXT").map((w) => `${w.name} ${w.owner.name}`)).toEqual([`${PATH_MARK.name} ${GUID}`]);
   });
 
@@ -193,13 +196,13 @@ describe("tenant-set-routing carries the identity provider's DNS mark", () => {
     const dns = new FakeDnsProvider();
     dns.seed(WILDCARD, "CNAME", CLUSTER);
     const h: Harness = { cleanups: [], logs: [] };
-    await publishIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, runKind: "tenant-create" });
+    await publishIssuerRecord(ctx("provision-dns", {}, h), { dns, guid: GUID, stage: "prod", record: HOST_MARK, clusterFqdn: CLUSTER, runKind: "tenant-create" });
     const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
     const def = makeTenantSetRoutingDef(ports(reg, dns, new FakePublicProbe({})));
     await def.steps(params).find((s) => s.name === "provision-record")!.run(ctx("provision-record", params, h));
     expect((await marks(dns))[PATH_MARK.name]).toEqual([PATH_MARK.content]);
     for (const cleanup of def.cleanups!(params)) await cleanup.run(ctx(cleanup.name, params, h));
-    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [HOST_MARK.content], [PATH_MARK.name]: [] });
+    expect(await marks(dns)).toEqual({ [HOST_MARK.name]: [HOST_MARK.content], [ISSUER_HOST]: [CLUSTER], [PATH_MARK.name]: [] });
   });
 
   it("the plan names the mark it moves, and none where the tenant has no mark", async () => {
@@ -209,7 +212,7 @@ describe("tenant-set-routing carries the identity provider's DNS mark", () => {
     const params = { tenantId: "tnt_1", routing: "path" as const, previous: "host" as const };
     const def = makeTenantSetRoutingDef(ports(reg, dns, new FakePublicProbe({})));
     expect((await def.plan(params, { db: db.db })).summary).not.toContain("DNS mark");
-    await publishIssuerRecord(ctx("provision-dns", {}, { cleanups: [], logs: [] }), { dns, guid: GUID, stage: "prod", record: HOST_MARK, runKind: "tenant-create" });
+    await publishIssuerRecord(ctx("provision-dns", {}, { cleanups: [], logs: [] }), { dns, guid: GUID, stage: "prod", record: HOST_MARK, clusterFqdn: CLUSTER, runKind: "tenant-create" });
     expect((await def.plan(params, { db: db.db })).summary).toContain(`The identity provider's DNS mark moves with it: ${PATH_MARK.name} is published with the record`);
   });
 

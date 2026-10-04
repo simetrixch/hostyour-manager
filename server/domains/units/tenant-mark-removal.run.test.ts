@@ -74,10 +74,14 @@ function ctx(params: object): StepCtx {
 
 /** The mark as tenant-create leaves it: standing and booked for the tenant. */
 async function marked(dns: FakeDnsProvider, guid = GUID): Promise<void> {
-  await publishIssuerRecord(ctx({}), { dns, guid, stage: "prod", record: MARK, runKind: "tenant-create" });
+  await publishIssuerRecord(ctx({}), { dns, guid, stage: "prod", record: MARK, clusterFqdn: "s1.example", runKind: "tenant-create" });
 }
 
-const standing = (dns: FakeDnsProvider): Promise<string[]> => dns.listRecordContents({ name: MARK.name, type: "TXT" });
+/** The mark and, under the host routing these fixtures use, the issuer host's CNAME beside it. */
+const standing = async (dns: FakeDnsProvider): Promise<string[]> => [
+  ...(await dns.listRecordContents({ name: MARK.name, type: "TXT" })),
+  ...(await dns.listRecordContents({ name: "auth.acme.example.com", type: "CNAME" })),
+];
 
 async function purgeRemoveDns(p: TenantLifecyclePorts): Promise<void> {
   const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
@@ -93,7 +97,7 @@ describe("the identity provider's DNS mark goes with its tenant", () => {
     await marked(dns);
     await makeOffboardTenantDef(ports(new TenantRegistrations(new FakePlatformRepo()), dns)).steps({ tenantId: "tnt_1" }).find((s) => s.name === "remove-dns")!.run(ctx({ tenantId: "tnt_1" }));
     expect(await standing(dns)).toEqual([]);
-    expect(listDnsWrites(db.db).some((w) => w.name === MARK.name)).toBe(false);
+    expect(listDnsWrites(db.db).some((w) => w.name === MARK.name || w.name === "auth.acme.example.com")).toBe(false);
   });
 
   it("tenant-purge with a subdomain removes the mark", async () => {
@@ -127,8 +131,9 @@ describe("the identity provider's DNS mark goes with its tenant", () => {
     await marked(dns);
     await marked(dns, "ffffffffffff"); // the newer tenant's create publishes the same mark and books it for itself
     await purgeRemoveDns(ports(new TenantRegistrations(new FakePlatformRepo()), dns));
-    expect(await standing(dns)).toEqual([MARK.content]);
+    expect(await standing(dns)).toEqual([MARK.content, "s1.example"]);
     expect(listDnsWrites(db.db).find((w) => w.name === MARK.name)?.owner.name).toBe("ffffffffffff");
+    expect(listDnsWrites(db.db).find((w) => w.name === "auth.acme.example.com")?.owner.name).toBe("ffffffffffff");
   });
 });
 

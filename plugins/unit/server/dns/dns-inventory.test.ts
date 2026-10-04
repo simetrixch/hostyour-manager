@@ -142,6 +142,21 @@ describe("readDnsInventory", () => {
     ]);
   });
 
+  it("lists the issuer host's CNAME beside a host-routed mark, removable, and none beside a path-routed one or one booked for another owner", async () => {
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    const tenant = { kind: "tenant" as const, name: "zsjs023ctne0", stage: "prod" as const };
+    recordDnsWrite(db.db, { name: "_digita-idp.auth.acme.example.net", type: "TXT", content: "https://auth.acme.example.net", act: "inserted", owner: tenant, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "auth.acme.example.net", type: "CNAME", content: "s1.example", act: "inserted", owner: tenant, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "_digita-idp.show.example.net", type: "TXT", content: "https://show.example.net/auth", act: "inserted", owner: tenant, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "_digita-idp.auth.other.example.net", type: "TXT", content: "https://auth.other.example.net", act: "inserted", owner: tenant, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "auth.other.example.net", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "consumer", name: "auth", stage: "prod" }, runId: "run_c" });
+    dns.seed("auth.acme.example.net", "CNAME", "s1.example");
+    const view = await readDnsInventory(deps());
+    expect(view.rows.filter((r) => r.type === "CNAME" && r.name.startsWith("auth.")).map((r) => `${r.owner.kind} ${r.owner.name} ${r.name} ${r.expected} ${r.verdict} ${r.removable}`)).toEqual([
+      "tenant acme auth.acme.example.net s1.example standing true",
+    ]);
+  });
+
   it("PLANTED INNOCENT: a TXT booked for a tenant whose name carries no underscore label is no mark, and is not listed as one", async () => {
     recordDnsWrite(db.db, { name: "acme.example.net", type: "TXT", content: "v=spf1 -all", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
     const view = await readDnsInventory(deps());
