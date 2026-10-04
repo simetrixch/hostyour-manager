@@ -131,9 +131,9 @@ describe("what the three sizes cost ONE unit", () => {
     expect(body.unit).toBe("acme");
     expect(body.composed).toBe(true);
     expect(body.brings).toEqual({ postgresql: true, mongodb: "replicaset" });
-    // Three sizes, and each one is the SUM the run will write — base + postgresql + mongodb x3.
+    // Three sizes, and each one is the SUM the run will write — base + postgresql + mongodb x3 + its one exporter.
     expect(body.sizes.map((s) => s.name)).toEqual(["small", "medium", "large"]);
-    expect(body.sizes[1]?.parts.map((p) => `${p.component}x${p.members}`)).toEqual(["basex1", "postgresqlx1", "mongodbx3"]);
+    expect(body.sizes[1]?.parts.map((p) => `${p.component}x${p.members}`)).toEqual(["basex1", "postgresqlx1", "mongodbx3", "mongodb-exporterx1"]);
     expect(body.sizes[1]?.quota.requestsCpu).toBe(seedQuota("medium", { postgresql: true, mongodb: "replicaset" }).requestsCpu);
   });
 

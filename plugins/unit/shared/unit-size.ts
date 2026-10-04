@@ -192,19 +192,27 @@ export interface UnitComposition {
  *  and no tenant runs a PostgreSQL, so each member namespace's quota is the member row alone. */
 export const TENANT_BRINGS: UnitComposition = { app: "member", postgresql: false, mongodb: "shared" };
 
-/** The one quota a unit gets: base + postgresql + mongodb x members, summed as Kubernetes quantities.
+/** The metrics exporter a MongoDB of the unit's own runs beside its members: ONE pod per instance,
+ *  whatever the member count, so it is no row of the per-member `mongodb` table. Its figures are the
+ *  ones the cloud's chart sets on it (the shared set's exporter uses 15m/44Mi live). Without them the
+ *  exporter takes its share from `base`, and a unit whose own pods fill `base` gets an exporter that
+ *  never schedules. */
+export const MONGODB_EXPORTER: UnitQuota = { requestsCpu: "15m", requestsMemory: "48Mi", limitsCpu: "100m", limitsMemory: "128Mi", pods: 1, persistentVolumeClaims: 0 };
+
+/** The one quota a unit gets: base + postgresql + mongodb x members (+ its exporter), summed as Kubernetes quantities.
  *  Returned with its PARTS so a screen can show where the number came from — a ceiling nobody can
  *  trace back is a ceiling nobody checks. */
 export function composeQuota(
   table: SizeTable,
   size: UnitSize,
   brings: UnitComposition,
-): { quota: UnitQuota; parts: { component: SizeComponent; members: number; each: UnitQuota }[] } {
-  const parts = quotaParts(brings).map((p) => {
+): { quota: UnitQuota; parts: { component: SizeComponent | "mongodb-exporter"; members: number; each: UnitQuota }[] } {
+  const parts: { component: SizeComponent | "mongodb-exporter"; members: number; each: UnitQuota }[] = quotaParts(brings).map((p) => {
     const each = table[p.component][size];
     if (!each) throw new Error(missingRow(p.component, size));
     return { ...p, each };
   });
+  if (MONGODB_MEMBERS[brings.mongodb] > 0) parts.push({ component: "mongodb-exporter", members: 1, each: MONGODB_EXPORTER });
   const quota: UnitQuota = {
     requestsCpu: addCpu(...parts.map((p) => timesCpu(p.each.requestsCpu, p.members))),
     requestsMemory: addMemory(...parts.map((p) => timesMemory(p.each.requestsMemory, p.members))),

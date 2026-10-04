@@ -385,7 +385,7 @@ export interface UnitSizeOptions {
   sizes: Array<{
     name: UnitSize;
     quota: Omit<UnitSizeView, "name" | "component">;
-    parts: Array<{ component: UnitSizeView["component"]; members: number; each: Omit<UnitSizeView, "name" | "component"> }>;
+    parts: Array<{ component: UnitSizeView["component"] | "mongodb-exporter"; members: number; each: Omit<UnitSizeView, "name" | "component"> }>;
   }>;
 }
 export const unitSizeOptions = (kind: "consumer" | "tenant", id: string): Promise<UnitSizeOptions> =>
