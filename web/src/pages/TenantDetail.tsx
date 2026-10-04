@@ -16,6 +16,7 @@ import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { SetDemoAction } from "../components/SetDemoAction.tsx";
 import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
+import { TenantMoveAction } from "../components/TenantMoveAction.tsx";
 import { TenantStageActions } from "../components/TenantStageActions.tsx";
 import { TenantWebsites } from "../components/TenantWebsites.tsx";
 import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
@@ -78,7 +79,8 @@ export function TenantDetail() {
   // The size dialog's target (null = closed) — its own state beside the confirm dialogs, because it
   // asks WHICH size where those only confirm.
   const [sizeT, setSizeT] = useState<TenantDetailView | null>(null);
-  const [relocT, setRelocT] = useState<{ t: TenantDetailView; kind: "move" | "restore" } | null>(null);
+  const [moveT, setMoveT] = useState<TenantDetailView | null>(null);
+  const [relocT, setRelocT] = useState<TenantDetailView | null>(null);
   // The one shared runs list, for the relocation state band (relocationBand.ts).
   const [runs, setRuns] = useState<RunView[]>([]);
 
@@ -304,7 +306,7 @@ export function TenantDetail() {
             </button>
           )}
           {!unfinished && !t.suspended && (
-            <button type="button" className="btn" disabled={busy} onClick={() => setRelocT({ t, kind: "move" })}>
+            <button type="button" className="btn" disabled={busy} onClick={() => setMoveT(t)}>
               Move…
             </button>
           )}
@@ -415,7 +417,7 @@ export function TenantDetail() {
               A PURGED tenant lost its Vault path — its identity cannot be rebuilt by a restore, which
               deliberately never writes Vault. */}
           {!purged && (
-            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => setRelocT({ t, kind: "restore" })}>
+            <button type="button" className="btn btn--primary" disabled={busy} onClick={() => setRelocT(t)}>
               Restore…
             </button>
           )}
@@ -458,34 +460,27 @@ export function TenantDetail() {
         </ConfirmDialog>
       )}
 
+      {moveT && <TenantMoveAction tenant={moveT} onCancel={() => setMoveT(null)}
+        onConfirm={(stage, targetClusterId) => { setMoveT(null); void act(() => migrateTenant(stage, targetClusterId)); }} />}
+
       {relocT && (
         <RelocationTargetDialog
-          title={relocT.kind === "move" ? `Move tenant "${relocT.t.subdomain}" to another cluster?` : `Restore tenant "${relocT.t.subdomain}" from its backup?`}
-          kind={relocT.kind}
-          confirmLabel={relocT.kind === "move" ? "Plan move" : "Plan restore"}
-          currentClusterId={relocT.t.clusterId}
+          title={`Restore tenant "${relocT.subdomain}" from its backup?`}
+          kind="restore"
+          confirmLabel="Plan restore"
+          currentClusterId={relocT.clusterId}
           loadTargets={listTenantTargets}
-          loadGenerations={relocT.kind === "restore" ? () => listTenantBackups(tenantId) : undefined}
+          loadGenerations={() => listTenantBackups(tenantId)}
           onCancel={() => setRelocT(null)}
-          onConfirm={(targetClusterId, generation) => { const { kind } = relocT; setRelocT(null); void act(() => (kind === "move" ? migrateTenant(tenantId, targetClusterId) : restoreTenant(tenantId, targetClusterId, chosenGeneration(generation)))); }}
+          onConfirm={(targetClusterId, generation) => { setRelocT(null); void act(() => restoreTenant(tenantId, targetClusterId, chosenGeneration(generation))); }}
         >
-          {relocT.kind === "move" ? (
-            <p>
-              This <strong>plans</strong> a move and opens it — you approve on the next screen. The WHOLE bracket moves under the
-              unchanged guid <span className="mono">{relocT.t.guid}</span>: access closes while every store is dumped to the Storage
-              Box, the fan-out deploys closed on the target, the data is replayed and verified, <strong>the tenant's one DNS record is
-              updated</strong> (addresses, sessions and the identity provider survive), access reopens, and the source is cleared{" "}
-              <strong>last</strong>.
-            </p>
-          ) : (
-            <p>
-              This <strong>plans</strong> a restore and opens it — you approve on the next screen. The run rebuilds tenant{" "}
-              <span className="mono">{relocT.t.guid}</span> from the backup generation you choose: every member is provisioned from the dumped
-              registration, the fan-out deploys closed, every <span className="mono">{relocT.t.guid}_*</span> database and the bucket
-              are replayed and verified (the crypto material stays in Vault, byte-identical), the tenant's DNS record is set, and access
-              opens last.
-            </p>
-          )}
+          <p>
+            This <strong>plans</strong> a restore and opens it — you approve on the next screen. The run rebuilds tenant{" "}
+            <span className="mono">{relocT.guid}</span> from the backup generation you choose: every member is provisioned from the dumped
+            registration, the fan-out deploys closed, every <span className="mono">{relocT.guid}_*</span> database and the bucket
+            are replayed and verified (the crypto material stays in Vault, byte-identical), the tenant's DNS record is set, and access
+            opens last.
+          </p>
         </RelocationTargetDialog>
       )}
     </section>
