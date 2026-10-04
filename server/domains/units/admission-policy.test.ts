@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL, VAULT_ALIAS_TENANT_ANNOTATION } from "./admission-policy.ts";
+import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName, TENANT_MANAGED_LABEL, TENANT_STAGE_LABEL, VAULT_ALIAS_TENANT_ANNOTATION } from "./admission-policy.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { TENANT_PROJECT_LABEL } from "../../adapters/kube/port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -177,12 +177,25 @@ describe("the fence against the admission request a tenant member sends", () => 
     const review = namespaceReview(authNs, authTracking, {
       "platform/tenant": GUID,
       [TENANT_MANAGED_LABEL]: "true",
+      [TENANT_STAGE_LABEL]: "prod",
       "platform/db-consumer": "true",
       "platform/redis-consumer": "true",
       // a label in no platform namespace: the member's own business, passed unread
       "app.kubernetes.io/managed-by": "argocd",
     });
     expect(admit(auth, review)).toEqual({ evaluated: true, denied: [] });
+  });
+
+  it("admits only the owning stage, even when member labels claim another stage", () => {
+    for (const stage of ["dev", "test", "prod"] as const) {
+      const namespace = `${GUID}-auth-${stage}`;
+      const tracking = `${namespace}:/Namespace:/${namespace}`;
+      const boundary = renderTenantMemberAdmissionPolicy({ guid: GUID, member: "auth", stage, namespaceLabels: { [TENANT_STAGE_LABEL]: "foreign" } });
+      expect(admit(boundary, namespaceReview(namespace, tracking, { [TENANT_STAGE_LABEL]: stage })).denied).toEqual([]);
+      for (const wrong of ["dev", "test", "prod", "foreign"].filter(value => value !== stage)) {
+        expect(admit(boundary, namespaceReview(namespace, tracking, { [TENANT_STAGE_LABEL]: wrong })).denied).toHaveLength(1);
+      }
+    }
   });
 
   it("admits the redis reach label on the auth member ALONE — no other member may write itself into that NetworkPolicy's selector", () => {

@@ -59,6 +59,7 @@ const TRACKING_ID = "argocd.argoproj.io/tracking-id";
  *  `tenant-eso-<stage>` Vault role. Exported for the tenant fan-out, which is its one writer; a
  *  consumer namespace can never carry it, because `platform/` is a reserved label namespace below. */
 export const TENANT_MANAGED_LABEL = "platform/tenant-managed";
+export const TENANT_STAGE_LABEL = "platform/tenant-stage";
 
 /** The ServiceAccount annotation the `tenant-eso-<stage>` Vault login lifts into its alias metadata
  *  as `tenant` — the guid whose entry `<stage>/tenants/<guid>` the login may read. One spelling: the
@@ -158,13 +159,15 @@ export const consumerNamespaceSelector = (): string => `${CONSUMER_NAMESPACE_LAB
 // grant follows the declaration.
 function grantedTenantNamespaceLabels(
   guid: string,
+  stage: Stage,
   extra: Readonly<Record<string, string>> = {},
 ): ReadonlyArray<readonly [string, string]> {
   return [
     ["platform/tenant", guid],
     [TENANT_MANAGED_LABEL, "true"],
+    [TENANT_STAGE_LABEL, stage],
     ["platform/db-consumer", "true"],
-    ...Object.entries(extra).map(([k, v]) => [k, v] as const),
+    ...Object.entries(extra).filter(([k]) => k !== TENANT_STAGE_LABEL).map(([k, v]) => [k, v] as const),
   ];
 }
 
@@ -227,7 +230,7 @@ export function renderTenantMemberAdmissionPolicy(input: { guid: string; member:
             subject: "a tenant member",
             namespace,
             argoAppName,
-            granted: grantedTenantNamespaceLabels(input.guid, input.namespaceLabels ?? {}),
+          granted: grantedTenantNamespaceLabels(input.guid, input.stage, input.namespaceLabels ?? {}),
           }),
           serviceAccountValidation({ namespace, guid: input.guid }),
         ],

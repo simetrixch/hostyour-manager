@@ -19,6 +19,7 @@ import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
+import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -112,6 +113,14 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+async function refreshMemberPolicies(ports: TenantOnboardPorts, p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[]): Promise<void> {
+  const { clusterReader } = await ports.resolver.resolve(p.clusterId);
+  for (const member of members) {
+    const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: p.guid, member: member.name, stage: p.stage, namespaceLabels: member.namespaceLabels });
+    await clusterReader.applyAdmissionPolicy(policy, binding);
+  }
+}
+
 /** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry and
  *  none of what the previous one carried beyond it: its deploy repository sources carry the entry's charts in
  *  order; each carries the entry's value files in their order and no file the previous entry had and
@@ -155,10 +164,11 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
     title: "Write the previous member entries back into the registration",
     run: async (ctx) => {
       const current = await ports.registrations.readTenant(p.stage, p.guid);
-      if (!current || !sameMembers(current.entry.members, p.members)) {
+      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous))) {
         ctx.log("meta", `tenant ${p.guid}'s member entries are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
         return;
       }
+      await refreshMemberPolicies(ports, p, p.previous);
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
       await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
       ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit}); the apps' database lists stay as their catalog entries declare them`);
@@ -240,6 +250,8 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
           throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
+        // Admit the namespace labels before the registration asks ArgoCD to write them.
+        await refreshMemberPolicies(ports, p, p.members);
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
@@ -402,7 +414,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         owners: (org) => readOwnerIdentity(ctx.db, org), stage: tc.stage, subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
-      // Nothing to do is a result, not an error: the run passes through every step and changes nothing.
+      // Current entries still pass through the policy refresh before their idempotent write.
       // Each app with the database list the tenant's own repository declares now, which every member reads.
       const listedApps = withAppDatabases(apps, outcome.appDatabases);
       const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
@@ -433,7 +445,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targetId: tc.tenantId,
         summary:
           `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
-          `${isCurrent ? "nothing changes — every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
+          `${isCurrent ? "Every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
           `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as the tenant's own repository declares them. ` : ""}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
@@ -442,7 +454,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `${params.issuerRecordLabel ? `The DNS mark of the identity provider under ${params.issuerRecordLabel} is put in place where it does not stand. ` : "The product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is put in place. "}` +
-          `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
+          `Every image the new render pulls must stand in the registry; then the member admission policies are refreshed, the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],

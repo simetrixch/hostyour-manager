@@ -7,7 +7,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
+import { FakeMasterArgoReader, FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { TEMPLATE_FILES, TEMPLATE_URL } from "./tenant-apps-repo.fixture.ts";
@@ -63,7 +63,32 @@ describe("tenant-refresh-members", () => {
     const resolved = await planned(ports(staleMembers()));
     const out = await makeTenantRefreshMembersDef(ports(resolved.members)).planStream!({ tenantId: "tnt_1" }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
-    expect(out.plan.summary).toMatch(/nothing changes — every member entry matches the product's manifest and every part runs the version asked for/);
+    expect(out.plan.summary).toMatch(/Every member entry matches the product's manifest and every part runs the version asked for/);
+    expect(out.plan.summary).toContain("the member admission policies are refreshed");
+  });
+
+  it("refreshes standing admission policies before the registration and restores previous labels on abort", async () => {
+    seedTenant();
+    const previous = staleMembers().map((member, index) => index === 0 ? { ...member, namespaceLabels: { ...member.namespaceLabels, "platform/previous-reach": "true" } } : member);
+    const prt = ports(previous);
+    const p = await planned(prt);
+    const reader = (await prt.resolver.resolve(p.clusterId)).clusterReader as FakeClusterReader;
+    const cleanups: Cleanup[] = [];
+    const apply = reader.applyAdmissionPolicy.bind(reader);
+    reader.applyAdmissionPolicy = async (policy, binding) => {
+      expect((await prt.registrations.readTenant(p.stage, p.guid))?.entry.members).toEqual(previous);
+      return apply(policy, binding);
+    };
+    await makeTenantRefreshMembersDef(prt).steps(p).find(step => step.name === "write-members")!.run(stepCtx(p, cleanups, []));
+    expect(reader.admissionPolicies.size).toBe(p.members.length);
+    for (const { policy } of reader.admissionPolicies.values()) {
+      expect(policy.spec.validations[1]!.expression).toContain("k == 'platform/tenant-stage' && object.metadata.labels[k] == 'prod'");
+      expect(policy.spec.validations[1]!.expression).not.toContain("platform/previous-reach");
+    }
+    reader.applyAdmissionPolicy = apply;
+    for (const cleanup of cleanups.reverse()) await cleanup.run(stepCtx(p, [], []));
+    expect((await prt.registrations.readTenant(p.stage, p.guid))?.entry.members).toEqual(previous);
+    expect(reader.admissionPolicies.get(`tenant-${GUID}-${previous[0]!.name}-prod`)!.policy.spec.validations[1]!.expression).toContain("platform/previous-reach");
   });
 
   it("writes each app's database list as the tenant's own repository declares it, not the template, with no change to its members", async () => {
