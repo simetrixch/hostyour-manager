@@ -106,7 +106,7 @@ describe("counted bucket backup evidence", () => {
     expect(() => run(verify, evidence(1))).toThrow();
     expect(() => run(verify, evidence(0, { "bucket/photo": "fixture" }))).toThrow();
   });
-  it.each(["gen/bucket", "count"])("refuses an unavailable or uncounted archive (%s)", (failOn) => {
+  it.each(["box:gen/bucket", "count"])("refuses an unavailable or uncounted archive (%s)", (failOn) => {
     expect(() => run(verify, evidence(0), { failOn })).toThrow();
   });
   it("records and hashes the empty source count outside the restored bucket subtree", () => {
