@@ -12,7 +12,7 @@ import { fakeTenantSeeder } from "./tenant-seeder.fixture.ts";
 import { tenantBucketName, provisionTenantStorage } from "./tenant-storage.ts";
 import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import { tenantClearSourceJobs } from "./relocation-jobs-tenant.ts";
-import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
+import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
@@ -44,6 +44,16 @@ function stagePorts() {
 }
 
 const request = { clusterId: "cls_1", stage: "prod", subdomain: "newtenant", owner: "team-acme", apps: [] };
+
+async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<TenantRegistration>): Promise<TenantRegistration> {
+  const source = (await p.registrations.readTenant("prod", GUID))!.entry;
+  const entry = TenantRegistrationSchema.parse({ ...source, ...change });
+  const books = new FakePlatformRepo();
+  const write = tenantRegistrationWrite("prod", GUID, entry);
+  books.seed(books.booksBranch, write.path, write.content);
+  p.registrations = new TenantRegistrations(books);
+  return entry;
+}
 
 describe("tenant stages share identity while provisioning independently", () => {
   it("plans all selected stages with one guid on the same machine", async () => {
@@ -120,6 +130,54 @@ describe("tenant stages share identity while provisioning independently", () => 
     const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     await p.registrations.setDemo("prod", GUID, true, "run_changed");
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
+    expect(db.db.select().from(tenants).all()).toHaveLength(1);
+  });
+
+  it.each(["approvedTags", "appsImageTag"] as const)("allows source %s release drift while keeping the validated target versions", async (field) => {
+    const p = stagePorts();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    const frozen = JSON.stringify(result.params);
+    const tag = "0.1.13-stable-20261004101328-befad87";
+    const changed = await changeSource(p, field === "approvedTags" ? { approvedTags: { erp: { "example-engine": tag } } } : { appsImageTag: tag });
+    // Plant the former whole-registration guard inside a green run, rather than publishing red CI.
+    expect(() => { if (JSON.stringify(changed) !== result.params.sourceRegistration) throw new Error("source changed"); }).toThrow("source changed");
+    const cleanups: Cleanup[] = [];
+    await expect(def.steps(result.params)[0]!.run(context(result.params, cleanups))).resolves.toBeUndefined();
+    expect(JSON.stringify(result.params)).toBe(frozen);
+    expect((await p.registrations.readTenant("prod", GUID))!.entry).toEqual(changed);
+    expect(cleanups).toEqual([]);
+    expect(db.db.select().from(tenants).all()).toHaveLength(1);
+  });
+
+  it.each([
+    { cluster: "s2" }, { subdomain: "different" }, { identityProvider: "jobs" },
+    { routing: "path" }, { ownDomain: "different.example" }, { suspended: true }, { quiesced: true },
+    { resetNonce: "2" }, { appsRepo: "https://github.com/acme/different.git" },
+    { appsImage: "different-bundle" },
+  ] satisfies Partial<TenantRegistration>[])("refuses source definition drift %j before creating a stage", async (change) => {
+    const p = stagePorts();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    await changeSource(p, change);
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
+    expect(db.db.select().from(tenants).all()).toHaveLength(1);
+  });
+
+  it("refuses missing source and changed member or app composition", async () => {
+    const p = stagePorts();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    const source = (await p.registrations.readTenant("prod", GUID))!.entry;
+    await changeSource(p, { members: source.members.map((m) => ({ ...m, namespaceLabels: { ...m.namespaceLabels, "example/changed": "true" } })) });
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
+    await changeSource(p, { members: source.members, apps: source.apps.map((a) => ({ ...a, seedDemo: true })) });
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
+    vi.spyOn(p.registrations, "readTenant").mockResolvedValue(null);
     await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
     expect(db.db.select().from(tenants).all()).toHaveLength(1);
   });
