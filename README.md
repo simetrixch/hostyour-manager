@@ -30,8 +30,8 @@ is worse than none.
 scripts/check.sh   # typecheck, eslint, module boundaries, stylelint, the web build, every test suite
 ```
 
-The repository is private, so its tests run here, before every push (the pre-push hook runs
-`scripts/check.sh`), and in no CI. The ansiwise real-serve suites run when the ansiwise binary pair
+The tests run here before every push (the pre-push hook runs `scripts/check.sh`) and in CI
+(`.github/workflows/tests.yml`). The ansiwise real-serve suites run when the ansiwise binary pair
 is on the machine; without it they skip, and the script names each suite it did not run.
 
 ## License
