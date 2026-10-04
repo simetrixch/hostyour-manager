@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { typedConfirmation } from "../tenantRows.ts";
 import { TypeToConfirm } from "./TypeToConfirm.tsx";
 import type { PurgeTenantTarget } from "../../../shared/api-types.ts";
 
@@ -39,7 +40,7 @@ export function PurgeTenantDialog(props: { target: PurgeTenantTarget; onConfirm:
   return (
     <TypeToConfirm
       title={purgeTenantTitle(target)}
-      expected={target.guid}
+      expected={typedConfirmation(target)}
       confirmLabel="Plan purge"
       onCancel={props.onCancel}
       onConfirm={props.onConfirm}

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { splitTenantRows, tenantRowOffer } from "./tenantRows.ts";
-import { TENANT_STATUS, type TenantStatus } from "../../shared/enums.ts";
+import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer, typedConfirmation } from "./tenantRows.ts";
+import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // The tenant screens' one status rule: which surface a tenants row gets, and whether a purge may be
 // offered on it there. It is pure, so it is tested here rather than through the two components that
@@ -89,5 +89,33 @@ describe("splitTenantRows", () => {
 
   it("answers empty lists for an empty inventory", () => {
     expect(splitTenantRows([])).toEqual({ onboarded: [], settled: [], unlisted: [] });
+  });
+});
+
+describe("groupTenantEnvironments", () => {
+  const row = (id: string, stage: Stage, status: TenantStatus) => ({ id, guid: "ak64h58875qw", stage, status });
+  it("shows simetrix once, with its PROD and TEST rows as its environments", () => {
+    const groups = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "active"), { ...row("tnt_o", "prod", "active"), guid: "other0000000" }]);
+    expect(groups.map((g) => g.guid)).toEqual(["ak64h58875qw", "other0000000"]);
+    expect(groups[0]!.byStage).toEqual({ prod: row("tnt_p", "prod", "active"), test: row("tnt_t", "test", "active") });
+  });
+  it("reads a purged environment as absent, while the row stands beside a later one of that stage", () => {
+    const [group] = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "purged")]);
+    expect(group!.byStage.test).toBeUndefined();
+    const [readded] = groupTenantEnvironments([row("tnt_t2", "test", "provisioning"), row("tnt_t", "test", "purged")]);
+    expect(readded!.byStage.test?.id).toBe("tnt_t2");
+  });
+  it("opens on PROD, then TEST, then DEV, and never on a settled row", () => {
+    const [group] = groupTenantEnvironments([row("tnt_d", "dev", "active"), row("tnt_t", "test", "active"), row("tnt_p", "prod", "offboarded")]);
+    expect(defaultEnvironment(group!)?.id).toBe("tnt_t");
+    const [settled] = groupTenantEnvironments([row("tnt_p", "prod", "offboarded")]);
+    expect(defaultEnvironment(settled!)).toBeUndefined();
+  });
+});
+
+describe("typedConfirmation", () => {
+  it("asks for the guid and the environment on PROD, and for the guid elsewhere", () => {
+    expect(typedConfirmation({ guid: "ak64h58875qw", stage: "prod" })).toBe("ak64h58875qw prod");
+    expect(typedConfirmation({ guid: "ak64h58875qw", stage: "test" })).toBe("ak64h58875qw");
   });
 });

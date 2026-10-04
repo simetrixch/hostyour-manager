@@ -1,4 +1,4 @@
-import type { TenantStatus } from "../../shared/enums.ts";
+import { STAGE, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // What the product OFFERS on one tenants row, and which of the Tenants page's lists that row goes into —
 // kept OUT of the components the same way runScreen.ts holds the Run screen's honesty rules and
@@ -111,3 +111,31 @@ export function splitTenantRows<T extends { status: TenantStatus }>(rows: readon
   }
   return lists;
 }
+
+/** One tenant as the operator meets it: its guid, and the row of each environment that stands. A purged
+ *  row stands nowhere, so its environment reads absent and is offered "+ add"; the row itself stays
+ *  reachable at its own URL. Display only: every action still takes ONE row, so the environments stay
+ *  as separate underneath as their rows are. */
+export interface TenantEnvironments<T> {
+  guid: string;
+  byStage: Partial<Record<Stage, T>>;
+}
+
+export function groupTenantEnvironments<T extends { guid: string; stage: Stage; status: TenantStatus }>(rows: readonly T[]): TenantEnvironments<T>[] {
+  const groups = new Map<string, TenantEnvironments<T>>();
+  for (const row of rows) {
+    const group = groups.get(row.guid) ?? { guid: row.guid, byStage: {} };
+    groups.set(row.guid, group);
+    if (tenantRowOffer(row.status).listed) group.byStage[row.stage] = row;
+  }
+  return [...groups.values()];
+}
+
+/** The environment a tenant's card opens on: PROD, then TEST, then DEV, of those still onboarded. */
+export function defaultEnvironment<T extends { status: TenantStatus }>(group: TenantEnvironments<T>): T | undefined {
+  return [...STAGE].reverse().map((s) => group.byStage[s]).find((r) => r !== undefined && !tenantRowOffer(r.status).settled);
+}
+
+/** What an offboard, purge or move asks the operator to type: on PROD the guid AND the environment, so
+ *  the read-back names both what is destroyed and where. */
+export const typedConfirmation = (t: { guid: string; stage: Stage }): string => (t.stage === "prod" ? `${t.guid} prod` : t.guid);

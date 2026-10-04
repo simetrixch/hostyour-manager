@@ -6,7 +6,8 @@ import {
   type TenantView,
 } from "../api.ts";
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
-import { splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
+import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
+import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
 import { CheckChip } from "../components/CheckChip.tsx";
 import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
@@ -183,6 +184,8 @@ export function Tenants() {
   // tenant's card, or a row from the offboarded list. Always a SELECTION, from a scan entry or a tenants
   // row: there is no free-text guid anywhere, because the guid is minted by the plan, never chosen.
   const [purgeFor, setPurgeFor] = useState<PurgeTenantTarget | null>(null);
+  // The environment each tenant's card shows, by guid; a card nobody switched opens on defaultEnvironment.
+  const [chosen, setChosen] = useState<Record<string, string>>({});
 
   useEffect(() => {
     listTenants()
@@ -328,7 +331,11 @@ export function Tenants() {
           </div>
         ) : (
           <ul className="cards">
-            {lists.onboarded.map((t) => {
+            {/* One card per TENANT: its environments are rows of their own, grouped here for display only.
+                The bar picks the row the rest of the card shows and acts on. */}
+            {groupTenantEnvironments(rows ?? []).map((group) => {
+              const t = Object.values(group.byStage).find((r) => r.id === chosen[group.guid] && !tenantRowOffer(r.status).settled) ?? defaultEnvironment(group);
+              if (!t) return null;
               // A tenant whose create-tenant run never finished. It is LISTED —
               // that is the whole point of recording the row before deploying — but it must not read as
               // live: its own badge token, the notice spelling out what the state means, and no
@@ -340,19 +347,19 @@ export function Tenants() {
               // list below, the tenant detail page — is gated by the same answer the purge route gives.
               const offer = tenantRowOffer(t.status);
               return (
-                <li key={t.id} className="card servercard">
+                <li key={group.guid} className="card servercard">
                   <div className="card__head">
                     <strong className="servercard__name">{t.subdomain}</strong>
-                    <TenantStatusBadge status={t.status} suspended={t.suspended} />
+                    <span className="chip">{group.guid}</span>
                   </div>
+                  <TenantEnvironmentBar group={group} selectedId={t.id} onSelect={(row) => setChosen((cur) => ({ ...cur, [group.guid]: row.id }))} />
                   {/* No revision: the row holds none. The registration states no revision either, so the
                       one answer about what a tenant runs comes from the live card below, which reads it
                       off the base Application. */}
                   <div className="servercard__target">
-                    {t.domain} · {t.stage}
+                    Actions for {t.stage.toUpperCase()} · {t.domain} <TenantStatusBadge status={t.status} suspended={t.suspended} />
                   </div>
                   <div className="servercard__chips">
-                    <span className="chip">{t.guid}</span>
                     <span className="chip">{t.provenance}</span>
                     {trioChips(t).map((c) => (
                       <span className="chip" key={c}>
@@ -383,7 +390,7 @@ export function Tenants() {
                     </UnfinishedTenantNotice>
                   )}
 
-                  <TenantLive tenantId={t.id} />
+                  <TenantLive key={t.id} tenantId={t.id} />
 
                   <div className="actions">
                     <Link className="btn btn--primary" to={`/tenants/${t.id}`}>

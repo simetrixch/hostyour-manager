@@ -7,6 +7,7 @@ import { TenantStageActions } from "./TenantStageActions.tsx";
 // Render the real selector after its existing asynchronous inventory load, without a browser.
 const hooks = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0, effects: [] as (() => unknown)[] }));
 const api = vi.hoisted(() => ({ listTenants: vi.fn(), listTenantTargets: vi.fn() }));
+const search = vi.hoisted(() => ({ params: new URLSearchParams() }));
 vi.mock("react", async (original) => ({
   ...await original<typeof import("react")>(),
   useState: (initial: unknown) => {
@@ -16,7 +17,7 @@ vi.mock("react", async (original) => ({
   },
   useEffect: (effect: () => unknown) => { hooks.effects.push(effect); },
 }));
-vi.mock("react-router", () => ({ useNavigate: () => vi.fn(), Link: ({ to, children }: { to: string; children: import("react").ReactNode }) => createElement("a", { href: to }, children) }));
+vi.mock("react-router", () => ({ useNavigate: () => vi.fn(), useSearchParams: () => [search.params] }));
 vi.mock("../api.ts", () => ({ ...api, addTenantStage: vi.fn() }));
 
 const row = (stage: TenantView["stage"], status: TenantView["status"]): TenantView => ({
@@ -34,20 +35,22 @@ async function loaded(siblings: TenantView[]): Promise<string> {
   await vi.waitFor(() => expect(hooks.states[7]).toBe(true));
   return render(siblings.find((t) => t.stage === "prod")!);
 }
-beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effects = []; vi.clearAllMocks(); });
+beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effects = []; search.params = new URLSearchParams(); vi.clearAllMocks(); });
 
 describe("public Add stage recovery", () => {
-  it.each(["dev", "test"] as const)("offers and initially selects purged %s while keeping its history", async (stage) => {
+  it.each(["dev", "test"] as const)("offers and initially selects purged %s", async (stage) => {
     const html = await loaded([row("prod", "active"), row("test", stage === "test" ? "purged" : "active"), row("dev", stage === "dev" ? "purged" : "active")]);
     expect(html).toContain(`<option selected="">${stage}</option>`);
     expect(html).toContain('Validate &amp; plan Add stage');
-    expect(html).toContain(`/tenants/tnt_${stage}`);
-    expect(html).toContain('purged');
   });
   it.each(["active", "suspended", "provisioning", "offboarded"] as const)("keeps %s stages occupied", async (status) => {
     const html = await loaded([row("prod", "active"), row("dev", "active"), row("test", status)]);
     expect(html).not.toContain('Validate &amp; plan Add stage');
-    expect(html).toContain(`/tenants/tnt_test`);
+  });
+  it("opens on the environment whose + add was pressed", async () => {
+    search.params = new URLSearchParams("addStage=test");
+    const html = await loaded([row("prod", "active")]);
+    expect(html).toContain('<option selected="">test</option>');
   });
 });
 

@@ -4,10 +4,11 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, setTenantFollowReleases, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns,
-  type TenantDetailView,
+  setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants,
+  type TenantDetailView, type TenantView,
 } from "../api.ts";
-import { tenantRowOffer } from "../tenantRows.ts";
+import { groupTenantEnvironments, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
+import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { listedWebsites, removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
 import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
@@ -83,6 +84,8 @@ export function TenantDetail() {
   const [relocT, setRelocT] = useState<TenantDetailView | null>(null);
   // The one shared runs list, for the relocation state band (relocationBand.ts).
   const [runs, setRuns] = useState<RunView[]>([]);
+  // The tenant's other environments, for the bar at the head. Not load-bearing: the page acts on its row.
+  const [environments, setEnvironments] = useState<TenantView[]>([]);
 
   useEffect(() => {
     if (!tenantId) return;
@@ -96,6 +99,9 @@ export function TenantDetail() {
     listRuns()
       .then(setRuns)
       .catch(() => setRuns([]));
+    listTenants()
+      .then(setEnvironments)
+      .catch(() => setEnvironments([]));
   }, [tenantId]);
 
   /** Run any lifecycle/matrix trigger, then jump to its Run screen. A single busy flag disables the
@@ -168,12 +174,14 @@ export function TenantDetail() {
               holds none, and neither does the tenant's registration. The live targeted-vs-deployed answer
               lives one click back on the Tenants card, where the live route reads both off the base
               Application and gives them a verdict (server/domains/units/api.ts driftOf). */}
-          <p className="page__desc">{t.domain} · {t.stage}{t.owner ? ` · ${t.owner}` : ""}</p>
+          <p className="page__desc">Actions for {t.stage.toUpperCase()} · {t.domain}{t.owner ? ` · ${t.owner}` : ""}</p>
         </div>
         <div className="page__actions">
           <TenantStatusBadge status={t.status} suspended={t.suspended} />
         </div>
       </header>
+
+      {groupTenantEnvironments(environments.filter((e) => e.guid === t.guid)).map((group) => <TenantEnvironmentBar key={group.guid} group={group} selectedId={t.id} />)}
 
       {error && (
         <p role="alert" className="alert alert--danger">
@@ -218,6 +226,7 @@ export function TenantDetail() {
       <div className="servercard__chips">
         <span className="chip">{t.provenance}</span>
         {t.seedUsers && <span className="chip">seed-users</span>}
+        {Object.entries(t.approvedTags).map(([member, builds]) => <span key={member} className="chip">{member}: {Object.entries(builds).map(([build, tag]) => `${build} ${tag}`).join(", ")}</span>)}
       </div>
 
       <div>{!unfinished && !settled && <TenantStageActions tenant={t} />}<h3 className="steps-panel__title">Apps</h3></div>
@@ -330,8 +339,8 @@ export function TenantDetail() {
 
       {offboardT && (
         <TypeToConfirm
-          title={`Offboard tenant "${offboardT.subdomain}"?`}
-          expected={offboardT.guid}
+          title={`Offboard tenant "${offboardT.subdomain}" · ${offboardT.stage} on ${offboardT.domain}?`}
+          expected={typedConfirmation(offboardT)}
           confirmLabel="Offboard tenant"
           onCancel={() => setOffboardT(null)}
           onConfirm={() => { setOffboardT(null); void act(() => offboardTenant(tenantId)); }}

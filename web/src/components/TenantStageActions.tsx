@@ -1,11 +1,14 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 import { addTenantStage, listTenants, listTenantTargets, type TenantView, type TenantTargetView } from "../api.ts";
 
 export function TenantStageActions({ tenant }: { tenant: TenantView }) {
   const nav = useNavigate();
+  // "+ add" on the environment bar opens this page with the environment it was pressed on.
+  const [params] = useSearchParams();
+  const asked = params.get("addStage");
   const [siblings, setSiblings] = useState<TenantView[]>([]);
   const [targets, setTargets] = useState<TenantTargetView[]>([]);
   const [stage, setStage] = useState<Stage>("test");
@@ -23,18 +26,15 @@ export function TenantStageActions({ tenant }: { tenant: TenantView }) {
       const stages = all.filter((t) => t.guid === tenant.guid);
       setSiblings(stages);
       setTargets(machines.filter((t) => t.status === "active"));
-      setStage(STAGE.find((s) => !stages.some((t) => t.stage === s && t.status !== "purged")) ?? "test");
+      const open = STAGE.filter((s) => !stages.some((t) => t.stage === s && t.status !== "purged"));
+      setStage(open.find((s) => s === asked) ?? open[0] ?? "test");
       setLoaded(true);
     }).catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
-  }, [tenant.guid]);
+  }, [tenant.guid, asked]);
   const missing = STAGE.filter((s) => !siblings.some((t) => t.stage === s && t.status !== "purged"));
   return <div className="card">
-    <h3 className="steps-panel__title">Stages</h3>
-    {siblings.map((sibling) => <p key={sibling.id}>
-      <Link to={`/tenants/${sibling.id}`}>{sibling.stage}</Link> · {sibling.domain} · {sibling.status}
-      {Object.entries(sibling.approvedTags).map(([member, builds]) => <span key={member} className="field__hint">{member}: {Object.entries(builds).map(([build, tag]) => `${build} ${tag}`).join(", ")}</span>)}
-    </p>)}
+    <h3 className="steps-panel__title">Add stage</h3>
     {error && <p className="alert alert--danger" role="alert">{error}</p>}
     {loaded && missing.length > 0 && <form onSubmit={(e) => {
       e.preventDefault(); setBusy(true); setError(null);
