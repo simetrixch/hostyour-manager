@@ -62,16 +62,19 @@ export async function websiteRecordsToReplace(db: Db, ports: WebsiteDomainPorts,
 }
 
 /** On abort: remove the records of `hosts`, where this installation wrote them for the tenant, and write
- *  back the records the run replaced there — except at a host the tenant still serves once the other
- *  cleanups ran: its own domain's, or a website's as the registration stands again (a move keeps the
- *  previous domain's records, which the restored website answers at). */
-export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Cleanup {
+ *  back the records the run replaced there — except at a host the tenant still serves: its own domain's,
+ *  another website's, or one of `spare` that website `app` stands at again once the other cleanups ran
+ *  (a move keeps the previous domain's records, which the restored website answers at). The run's own
+ *  website counts for no other host: an aborted add-app may still find it in the registration. */
+export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, app: string, hosts: readonly string[], replacing: readonly ReplacedRecord[], spare: readonly string[] = []): Cleanup {
   return {
     name: "remove-website-records",
     title: `Remove the DNS records of ${hosts.join(", ") || "no host"}${replacing.length ? ", and write back the records they replaced" : ""}`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, tenantId);
-      const used = new Set([...tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects, tc.ownDomainAliases), ...(await tenantWebsiteHosts(ports.registrations, tc))]);
+      const apps = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.apps ?? [];
+      const sites = apps.flatMap((a) => (a.domain ? websiteHosts(a.domain, a.aliases).filter((h) => a.name !== app || spare.includes(h)) : []));
+      const used = new Set([...tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects, tc.ownDomainAliases), ...sites]);
       for (const host of hosts) if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
       await restoreReplacedRecords(ctx, ports, replacing.filter((r) => !used.has(r.name)));
     },
@@ -80,7 +83,7 @@ export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId:
 
 /** Point every host of `hosts` at the tenant's zone, replacing the records the plan froze in `replacing`.
  *  An abort removes them again and writes the replaced records back. */
-export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Step {
+export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, app: string, hosts: readonly string[], replacing: readonly ReplacedRecord[], spare: readonly string[] = []): Step {
   return {
     name: "provision-website-records",
     title: "Point the website's hosts at the tenant's zone",
@@ -90,7 +93,7 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
         return;
       }
       const tc = loadTenantCluster(ctx.db, tenantId);
-      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, hosts, replacing));
+      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, app, hosts, replacing, spare));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       for (const host of hosts) await provisionOwnDomainRecord(ctx, ports, tc, apex, host, replacing);
     },

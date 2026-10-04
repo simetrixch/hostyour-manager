@@ -133,8 +133,9 @@ describe("add-app for a website", () => {
     if (result.outcome !== "planned") throw new Error("the website was not planned");
     expect(result.params.websiteReplacing).toEqual([{ name: "www.example.ch", type: "A", content: "192.0.2.10" }]);
     expect(result.plan.summary).toContain("It deletes A www.example.ch → 192.0.2.10, which this installation did not write, and an abort writes it back.");
-    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"], websiteReplacing: result.params.websiteReplacing });
-    const def = makeAddAppDef(ports({ dns }));
+    const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"], websiteReplacing: result.params.websiteReplacing });
+    // The abort's remove-website-records runs before revert-app-append, so the registration still carries the website.
+    const def = makeAddAppDef(ports({ dns, registrations: tenantWith([{ name: "main", folder: "web", site: "main", domain: "example.ch" }]) }));
     await def.steps(p).find((s) => s.name === "provision-website-records")!.run(ctx(p, "provision-website-records", []));
     expect([dns.record("www.example.ch", "A"), dns.record("www.example.ch", "CNAME")]).toEqual([undefined, tenantZone("acme", "prod", "example.com")]);
     await def.cleanups!(p).find((c) => c.name === "remove-website-records")!.run(ctx(p, "remove-website-records", []));
@@ -165,7 +166,7 @@ describe("add-app for a website", () => {
     seedWebsiteTenant();
     const dns = new FakeDnsProvider();
     const probe = new FakePublicProbe({ "https://example.ch/": OK, "https://www.example.ch/": REDIRECTS });
-    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["example.ch", "www.example.ch"] });
+    const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["example.ch", "www.example.ch"] });
     const steps = makeAddAppDef(ports({ dns, probe })).steps(p);
     const logs: string[] = [];
     for (const name of ["provision-website-records", "wait-website"]) await steps.find((s) => s.name === name)!.run(ctx(p, name, logs));
@@ -195,7 +196,7 @@ describe("add-app for a website", () => {
   });
 
   it("names every cleanup a website's steps register, so an abort can run them", async () => {
-    const p = params({ website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"] });
+    const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"] });
     const def = makeAddAppDef(ports({ dns: new FakeDnsProvider() }));
     expect(def.cleanups!(p).map((c) => c.name)).toEqual(expect.arrayContaining(["revert-app-append", "remove-website-records"]));
   });

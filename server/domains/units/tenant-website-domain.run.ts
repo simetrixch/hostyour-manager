@@ -93,7 +93,7 @@ function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams)
   return [
     attestTenantTargetStep(ports, p.tenantId),
     checkMailRecordsStep(ports, p.mailRecords),
-    provisionWebsiteRecordsStep(ports, p.tenantId, p.recordHosts, p.replacing),
+    provisionWebsiteRecordsStep(ports, p.tenantId, p.app, p.recordHosts, p.replacing, websiteHosts(p.previous, p.previousAliases)),
     {
       name: "write-website-domain",
       title: "Record the website's new domain and its member entry on the registration",
@@ -240,7 +240,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       };
     },
     steps: (params) => websiteDomainSteps(ports, params),
-    cleanups: (params) => [removeWebsiteRecordsCleanup(ports, params.tenantId, params.recordHosts, params.replacing), restoreWebsiteDomainCleanup(ports, params)],
+    cleanups: (params) => [removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.recordHosts, params.replacing, websiteHosts(params.previous, params.previousAliases)), restoreWebsiteDomainCleanup(ports, params)],
     // Refused once a previous host's record, which this installation wrote, is gone: the website then
     // stands on its new hosts alone, and the abort would move it back onto hosts that no longer point at it.
     assertAbortable: async (params) => {
