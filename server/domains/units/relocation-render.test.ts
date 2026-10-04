@@ -59,7 +59,7 @@ describe("relocation waits for the desired render", () => {
     seedTenantRows(db);
     const f = makeFakes();
     const ports = tenantPorts(f);
-    await ports.registrations.commitTenant({ stage: "prod", guid: GUID, runId: "run_create", registration: tenantEntry({ quiesced: true, members: testMembers(["web", "extra"]) }) });
+    await ports.registrations.commitTenant({ stage: "prod", guid: GUID, runId: "run_create", registration: tenantEntry({ quiesced: true, members: testMembers(["extra", "web"]) }) });
     renderRelocation(f.source, true);
     const ctx = stepCtx(db, "watch", {}, []);
     const world = await tenantWorld(ports, "tnt_1")(ctx);
