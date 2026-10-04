@@ -58,7 +58,7 @@ describe("readOnboardPrefill", () => {
     github.seedTags("x", "acme", ["1.4.0-stable-20260909094733"]);
     github.seedTags("simetrixch", "hostyour-cloud", ["0.8.170-stable-20260914032934"]);
     const view = await readOnboardPrefill({ github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, owners: owners(["x"], ["x"]), store }, request(), signal());
-    expect(view.version).toBe("1.4.1");
+    expect(view.version).toBe("1.4.001");
     expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
   });
 });

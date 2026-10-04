@@ -68,7 +68,7 @@ function harness(over: { manifest?: string; ports?: Partial<TenantOnboardPorts>;
   const consumerRepo = new FakeRepoWriter();
   const github = new FakeGitHubConsumer();
   const buildPlane = new FakeBuildPlane();
-  buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });
+  buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.000-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });
   const buildCluster = new FakeBuildPlaneClusterReader(UNIT);
   const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane, buildClusterReader: buildCluster });
   const ports: TenantOnboardPorts = {
@@ -376,7 +376,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
   });
   it("refuses a release run that states no image-tag result — the registration could name no tag", async () => {
     const h = harness();
-    h.buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+    h.buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.000-stable-20260101000000", succeeded: true });
     const p = await planned(h);
     const creds = fakeCreds(h.githubApp);
     const run = pass(h, p);

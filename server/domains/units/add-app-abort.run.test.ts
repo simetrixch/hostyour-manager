@@ -107,7 +107,7 @@ function harness(): Harness {
   // The bundle steps ahead of the fan-out (#215): the tenant's repository is extended with the app,
   // released build-only and built — one seeded release run of the bundle's unit answers the watch.
   const buildPlane = new FakeBuildPlane();
-  buildPlane.seedReleaseRun(TEST_BUNDLE.appsImage, { runName: `${TEST_BUNDLE.appsImage}-release-1`, releaseTag: "0.1.0-stable-20260101000000", succeeded: true, imageTag: TEST_BUNDLE.appsImageTag });
+  buildPlane.seedReleaseRun(TEST_BUNDLE.appsImage, { runName: `${TEST_BUNDLE.appsImage}-release-1`, releaseTag: "0.1.000-stable-20260101000000", succeeded: true, imageTag: TEST_BUNDLE.appsImageTag });
   // The tenant repository as the build-only chain reads it back: the manifest write-tree commits.
   const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
   unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, TEST_BUNDLE.appsImage) } });

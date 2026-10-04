@@ -274,7 +274,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
   it("the registration carries appsRepo, appsImage and the PipelineRun's image-tag; the argo-sync grant names the unit", async () => {
     seedClusters();
     const buildPlane = new FakeBuildPlane();
-    buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.0-stable-20260202000000", succeeded: true, imageTag: BUILT_TAG });
+    buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.000-stable-20260202000000", succeeded: true, imageTag: BUILT_TAG });
     // The tenant's repository as the chain reads it back after write-tree: the manifest the run writes.
     const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
     unitReader.scriptFor(TENANT_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, UNIT) } });

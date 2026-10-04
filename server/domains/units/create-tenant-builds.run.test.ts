@@ -279,7 +279,7 @@ describe("buildUnitStep — the unit plugin's build-only chain, run for one unit
   it("reaches the unit with the owner's repository PAT row, resolves version and channel, registers the unit and watches its release", async () => {
     seedClusters();
     const buildPlane = new FakeBuildPlane();
-    buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+    buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.000-stable-20260101000000", succeeded: true });
     const onboard = onboardPorts({
       repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }),
       buildPlane,
@@ -304,7 +304,7 @@ describe("buildUnitStep — the unit plugin's build-only chain, run for one unit
     async function standing(extra: { buildArgo: FakeMasterArgoReader }, manifest = JOBS_MANIFEST_YAML, registration: { repoURL?: string; owner?: string; suspended?: boolean; quiesced?: boolean } = {}) {
       seedClusters();
       const buildPlane = new FakeBuildPlane();
-      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-2", releaseTag: "0.1.000-stable-20260101000000", succeeded: true });
       const onboard = onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": manifest } }), buildPlane, ...extra });
       await onboard.registrations.commitRegistration({
         unit: { name: "example-jobs", repoURL: registration.repoURL ?? JOBS_REPO, owner: registration.owner ?? "team-acme", onboardedAt: "2026-01-01T00:00:00.000Z", suspended: registration.suspended ?? false, quiesced: registration.quiesced ?? false },
@@ -381,7 +381,7 @@ describe("buildUnitStep — the unit plugin's build-only chain, run for one unit
     const unit = { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false };
     const make = () => {
       const buildPlane = new FakeBuildPlane();
-      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.0-stable-20260101000000", succeeded: true });
+      buildPlane.seedReleaseRun("example-jobs", { runName: "example-jobs-release-1", releaseTag: "0.1.000-stable-20260101000000", succeeded: true });
       return onboardPorts({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/platform.yaml": JOBS_MANIFEST_YAML } }), buildPlane });
     };
     const reaching = new FakeGitHubApp();
