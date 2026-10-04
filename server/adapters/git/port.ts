@@ -57,6 +57,8 @@ export interface BranchScope {
   /** The branch this turn holds — for messages and assertions, never to re-enter with. */
   readonly branch: string;
   readFile(relPath: string): Promise<string | null>;
+  /** Last commit that wrote the current file; null for an absent or uncommitted file. */
+  readFileCommit(relPath: string): Promise<{ commit: string; message: string } | null>;
   /** List the immediate entry names (files + subdirs) directly under `relPath`, or [] when the
    *  directory is absent. Same non-recursive, absent-is-empty contract as RepoReader.listDir — the
    *  tenant subdomain scan (create-tenant idempotent-by-subdomain) enumerates the registrations/*

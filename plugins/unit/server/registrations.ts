@@ -333,6 +333,24 @@ export class Registrations {
     return readClusterValueChain(this.repo, domain, stage);
   }
 
+  /** Check creation ownership and arm its inverse inside the same exclusive turn as the write.
+   *  The Git trailer survives a shared step checkpoint being overwritten or a crash after push. */
+  async createBuildRegistration(input: Omit<RegistrationCommit, "deploy"> & { runId: string }, beforeCommit: () => void): Promise<{ commit: string }> {
+    return this.repo.withBranch(this.branch, async (books) => {
+      const path = guard(buildPath(input.unit.name));
+      const raw = await books.readFile(path);
+      if ((await this.stagesIn(books, input.unit.name)).length > 0 || (raw !== null && !(await books.readFileCommit(path))?.message.trimEnd().endsWith(trailer(input.runId)))) {
+        throw errValidation(`build-only unit ${input.unit.name} is already registered by another run — plan the onboarding again to re-attest it without the creation inverse`);
+      }
+      const unit = raw === null ? input.unit : ConsumerRegistrationSchema.parse(parseRegistration(raw));
+      beforeCommit();
+      return books.commit({
+        message: `register(${input.unit.name}): build ${input.builds.join(", ")} ${trailer(input.runId)}`,
+        write: [{ path, content: serializePointer(ConsumerRegistrationSchema, { ...unit, removing: false, builds: input.builds }) }],
+      });
+    });
+  }
+
   /** THE writer. Commits build.yaml ALWAYS — for a build-only AND for a deployable unit — plus the one
    *  stage file when a deploy group is given, in ONE commit. Nothing else in this process writes a file
    *  under registrations/<unit>/, which together with the schema's `name == basename(repoURL)`
@@ -476,14 +494,15 @@ export class Registrations {
     });
   }
 
-  /** The build-only onboard's abort inverse: remove registrations/<name>/build.yaml — but ONLY when
-   *  no stage file stands. A unit that is ALSO registered at a stage keeps its build attestation:
+  /** Remove the unused build pointer. A creation inverse also supplies its owner run so it cannot
+   *  remove another run's pointer. A unit ALSO registered at a stage keeps its build attestation:
    *  the stage files' release pipelines render from it, and taking it back would fail every one of
    *  their runs at the attestation check. Reports whether anything actually left the tree. */
-  async removeBuildRegistration(name: string, runId: string): Promise<{ removed: boolean }> {
+  async removeBuildRegistration(name: string, runId: string, createdByRun?: string): Promise<{ removed: boolean }> {
     return this.repo.withBranch(this.branch, async (books) => {
       if ((await this.stagesIn(books, name)).length > 0) return { removed: false };
       if ((await books.readFile(buildPath(name))) === null) return { removed: false };
+      if (createdByRun && !(await books.readFileCommit(buildPath(name)))?.message.trimEnd().endsWith(trailer(createdByRun))) return { removed: false };
       await books.commit({
         message: `offboard(${name}): build ${trailer(runId)}`,
         remove: [guard(buildPath(name))],

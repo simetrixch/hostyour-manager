@@ -7,7 +7,7 @@ import { makeOnboardDef, type OnboardParams, type OnboardPorts } from "./onboard
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
-import { writeBuildRegistrationStep } from "#unit/server/build-registration.ts";
+import { buildOnlyCleanups, writeBuildRegistrationStep } from "#unit/server/build-registration.ts";
 import { BuildOnlyParams } from "#unit/server/build-chain.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -137,5 +137,49 @@ describe("repeat a standing build-only onboarding", () => {
       await expect(step.run({ ...ctx(creation, step.name, []), registerCleanup: (cleanup) => { armed.push(cleanup.name); } })).rejects.toThrow(/already registered.*plan.*again/);
       expect(armed).toEqual([]);
       expect((await prt.registrations.readBuildRegistration("acme"))?.entry.owner).toBe("original-owner");
+    });
+
+    it("rechecks the standing repository inside a retried dispatch", async () => {
+      const prt = await standing();
+      const result = await plan(prt);
+      const chain = makeOnboardDef(prt).steps(result.params);
+      await chain.find((s) => s.name === "re-attest-builds")!.run(ctx(result.params, "re-attest-builds", []));
+      const entry = (await prt.registrations.readBuildRegistration("acme"))!.entry;
+      await prt.registrations.commitRegistration({ unit: { ...entry, repoURL: "https://github.com/other/acme.git" }, builds: entry.builds!, runId: "run_changed" });
+      const trigger = chain.find((s) => s.name === "trigger-release")!;
+      await expect(trigger.run(ctx(result.params, trigger.name, []))).rejects.toThrow(/does not match/);
+      expect((prt.github as FakeGitHubConsumer).dispatches).toEqual([]);
+    });
+
+    it("dispatch cannot skip the exact render when earlier steps are completed", async () => {
+      const prt = await standing(BASE.repoURL, ["acme-api"]);
+      const result = await plan(prt);
+      const trigger = makeOnboardDef(prt).steps(result.params).find((s) => s.name === "trigger-release")!;
+      await expect(trigger.run(ctx(result.params, trigger.name, []))).rejects.toThrow(/does not render the builds/);
+      expect((prt.github as FakeGitHubConsumer).dispatches).toEqual([]);
+    });
+
+    it("recovers its own creation after a crash before checkpointing or an overwritten shared checkpoint", async () => {
+      const prt = await standing();
+      const result = await plan(prt);
+      await prt.registrations.removeBuildRegistration("acme", "run_original");
+      const p = BuildOnlyParams.parse({ ...result.params, form: "build-only" });
+      const step = writeBuildRegistrationStep(prt, p);
+      await expect(step.run({ ...ctx(p, step.name, []), checkpoint: () => { throw new Error("crash before checkpoint"); } })).rejects.toThrow(/crash before checkpoint/);
+      const before = (await prt.registrations.readBuildRegistration("acme"))!.entry;
+      await step.run({ ...ctx(p, step.name, []), readCheckpoint: <T>() => ({ workflow: "release.yml" } as T) });
+      expect((await prt.registrations.readBuildRegistration("acme"))!.entry).toEqual(before);
+    });
+
+    it("a planted foreign registration and webhook survive a stale creation inverse", async () => {
+      const prt = await standing();
+      const result = await plan(prt);
+      const p = BuildOnlyParams.parse({ ...result.params, form: "build-only" });
+      const github = prt.github as FakeGitHubConsumer;
+      github.seedHook("x", "acme", "https://build.example/github");
+      const hook = github.hooksFor("x", "acme");
+      for (const cleanup of buildOnlyCleanups(prt, p)) await cleanup.run(ctx(p, cleanup.name, []));
+      expect((await prt.registrations.readBuildRegistration("acme"))!.entry.owner).toBe("original-owner");
+      expect(github.hooksFor("x", "acme")).toEqual(hook);
     });
   });

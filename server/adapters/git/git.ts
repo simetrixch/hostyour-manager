@@ -20,6 +20,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { BranchScope, ClonedRepo, CommitInput, RepoFileWrite, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
 import { runGit, withAskpass } from "./git-exec.ts";
+import { readWorkdirFileCommit } from "./git-file-commit.ts";
 import { isWorkdirFileExecutable, listWorkdirDir, readWorkdirFile, readWorkdirFileHistory, stageWorkdirChanges } from "./git-workdir.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/;
@@ -75,9 +76,7 @@ export const MANAGER_COMMITTER_EMAIL = 'manager@hostyour';
  *  One function and not one per class: two spellings of the same actor turn "did a person write this
  *  or did the manager?" into a guess for whoever reads the branch. */
 function identity(deps: { committerName?: string; committerEmail?: string }): string[] {
-  const name = deps.committerName ?? MANAGER_COMMITTER_NAME;
-  const email = deps.committerEmail ?? MANAGER_COMMITTER_EMAIL;
-  return ["-c", `user.name=${name}`, "-c", `user.email=${email}`];
+  return ["-c", `user.name=${deps.committerName ?? MANAGER_COMMITTER_NAME}`, "-c", `user.email=${deps.committerEmail ?? MANAGER_COMMITTER_EMAIL}`];
 }
 
 export class GitRepoReader implements RepoReader {
@@ -405,6 +404,7 @@ export class GitPlatformRepo implements PlatformRepo {
     const scope: BranchScope = {
       branch,
       readFile: (relPath) => readWorkdirFile(workdir, relPath),
+      readFileCommit: (relPath) => readWorkdirFileCommit(workdir, relPath),
       listDir: (relPath) => listWorkdirDir(workdir, relPath),
       readFileHistory: (relPath) => readWorkdirFileHistory(workdir, relPath),
       commit: (input) => { if (readOnly) throw errValidation("a read-only branch turn cannot commit"); return this.commitPushIn(workdir, branch, input); },

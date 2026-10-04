@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { GateReportSchema } from "../../../shared/gates.ts";
 import { BuildOnlyParams, type BuildPorts } from "#unit/server/build-chain.ts";
@@ -40,19 +40,22 @@ export async function hasStandingBuildOnly(
 export function standingBuildOnlySteps(ports: BuildPorts, p: StandingBuildOnlyParams, check: Step): Step[] {
   const unit: BuildOnlyParams = { ...p, form: "build-only" };
   const release: ReleaseCycleRuntime = {};
+  const attest = async (ctx: StepCtx): Promise<void> => {
+    if (!await hasStandingBuildOnly(ports, unit)) throw errValidation(`build-only unit ${unit.consumerName} is no longer registered — plan the run again`);
+    await attestBuildsAgain(ctx, ports, unit.consumerName, unit.builds);
+  };
+  const trigger = triggerReleaseStep(ports, unit);
   return [
     preflightScopesStep(ports, unit),
     check,
     {
       name: "re-attest-builds",
       title: "Re-attest the standing builds and wait for their exact GitOps render",
-      run: async (ctx) => {
-        if (!await hasStandingBuildOnly(ports, unit)) throw errValidation(`build-only unit ${unit.consumerName} is no longer registered — plan the run again`);
-        await attestBuildsAgain(ctx, ports, unit.consumerName, unit.builds);
-      },
+      run: attest,
     },
     injectReleaseKitStep(ports, unit),
-    triggerReleaseStep(ports, unit),
+    // Retry skips completed steps, so the dispatch must prove the standing identity and render too.
+    { ...trigger, run: async (ctx) => { await attest(ctx); await trigger.run(ctx); } },
     watchReleaseBuildStep(ports, unit, release),
     recordBuildOnlyStep(ports, unit, release),
   ];

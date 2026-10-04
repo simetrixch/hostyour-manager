@@ -5,7 +5,6 @@ import type { Cleanup, Step } from "#core/server/executor/types.ts";
 import type { BuildOnlyParams, BuildParams, BuildPorts } from "./build-chain.ts";
 import type { ReleaseCycleRuntime } from "./release-cycle.ts";
 import { removeWebhookCleanup } from "./build-webhook.ts";
-import { errValidation } from "#core/server/kernel/errors.ts";
 
 /** Create build.yaml alone. A standing unit belongs to the shorter re-attestation chain; a
  *  creation approved before another run registered it must not overwrite that run's identity. */
@@ -14,13 +13,7 @@ export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams
     name: "write-registration",
     title: "Commit the build registration (GitOps)",
     run: async (ctx) => {
-      if (await ports.registrations.readBuildRegistration(p.consumerName) && !ctx.readCheckpoint<{ commit?: string }>()?.commit) {
-        throw errValidation(`build-only unit ${p.consumerName} is already registered — plan the onboarding again to re-attest it without the creation inverse`);
-      }
-      // The build-only form's whole rollback, armed before the commit so a rollback always exists
-      // once anything is committed (buildOnlyCleanups).
-      for (const c of buildOnlyCleanups(ports, p)) ctx.registerCleanup(c);
-      const { commit } = await ports.registrations.commitRegistration({
+      const { commit } = await ports.registrations.createBuildRegistration({
         unit: {
           name: p.consumerName,
           repoURL: p.repoURL,
@@ -31,6 +24,10 @@ export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams
         },
         builds: p.builds,
         runId: ctx.runId,
+      }, () => {
+        // Ownership is checked inside the exclusive Git turn before arming this inverse, which
+        // still stands before the commit and survives a crash before the completion checkpoint.
+        for (const c of buildOnlyCleanups(ports, p)) ctx.registerCleanup(c);
       });
       ctx.checkpoint({ commit, registration: `registrations/${p.consumerName}/build.yaml` });
       ctx.log("meta", `build registration committed (${commit}) — the build fan-out renders this unit's release pipeline from it`);
@@ -57,10 +54,10 @@ export function removeBuildRegistrationCleanup(ports: BuildPorts, p: BuildParams
     name: "remove-build-registration",
     title: "Remove the build registration",
     run: async (ctx) => {
-      const { removed } = await ports.registrations.removeBuildRegistration(p.consumerName, ctx.runId);
+      const { removed } = await ports.registrations.removeBuildRegistration(p.consumerName, ctx.runId, ctx.runId);
       ctx.log("meta", removed
         ? `build registration for ${p.consumerName} removed`
-        : `build registration for ${p.consumerName} kept — already absent, or a stage file still stands and the attestation belongs to it`);
+        : `build registration for ${p.consumerName} kept — absent, registered at a stage, or written by another run`);
     },
   };
 }
