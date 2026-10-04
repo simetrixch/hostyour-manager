@@ -168,6 +168,8 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       for (const host of websiteHosts(entry.domain, previousAliases)) ownWebsites.delete(host);
       const served = new Set([...tenantOwnHosts(current.entry.ownDomain, current.entry.ownDomainRedirects, current.entry.ownDomainAliases), ...ownWebsites]);
       for (const host of aliasHosts(aliases)) if (served.has(host)) throw errValidation(`${host} is a host tenant ${tc.guid} already serves — an alias names another domain`);
+      // The domain may be the tenant's own (its records stand already), but never another website's alias.
+      for (const host of websiteHosts(req.domain)) if (ownWebsites.has(host)) throw errValidation(`${host} is a host another website of tenant ${tc.guid} already serves`);
       for (const host of websiteHosts(req.domain, aliases)) {
         const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
         if (problem !== null) throw errValidation(problem);

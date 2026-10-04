@@ -225,6 +225,18 @@ describe("add-app for a website", () => {
     await retire.run(ctx(params(), retire.name, []));
     expect([dns.record("www.example.ch", "CNAME"), dns.record("example.ch", "CNAME")]).toEqual(["acme.example.com", "acme.example.com"]);
   });
+
+  it("refuses an own-domain alias a website of the tenant serves, and keeps a previous host a website answers at off the aliases", async () => {
+    seedWebsiteTenant();
+    const own = { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] };
+    db.db.update(tenants).set(own).where(eq(tenants.id, "tnt_1")).run();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }], own);
+    const def = makeTenantSetOwnDomainDef(ports({ registrations }));
+    const from = { tenantId: "tnt_1", previous: own.ownDomain, previousRedirects: own.ownDomainRedirects };
+    await expect(def.planStream!({ ...from, ...own, ownDomainAliases: ["example.net"] }, planCtx())).rejects.toThrow(/example\.net is a host a website of tenant \w+ serves/);
+    const moved = await def.planStream!({ ...from, ownDomain: "www.example.org", ownDomainRedirects: ["example.org"] }, planCtx());
+    expect(moved.outcome === "planned" && moved.params.ownDomainAliases).toEqual([]);
+  });
 });
 
 describe("tenant-set-website-domain", () => {
@@ -291,6 +303,8 @@ describe("tenant-set-website-domain", () => {
     const back = (await registrations.readTenant("prod", GUID))!.entry.apps.find((a) => a.name === "example-ch")!;
     expect(back.domain).toBe("example.ch");
     expect("aliases" in back).toBe(false);
+    // The restored website answers at its previous hosts again, so their records stay; the new ones go.
+    expect(["example.ch", "www.example.ch", "example.org", "www.example.org"].map((h) => dns.record(h, "CNAME"))).toEqual(["acme.example.com", "acme.example.com", undefined, undefined]);
   });
 
   it("puts nothing back on abort once another run moved the website on", async () => {
@@ -322,16 +336,26 @@ describe("tenant-set-website-domain", () => {
     expect(added).toMatchObject({ recordHosts: ["example.ch", "www.example.ch", "example.de", "www.example.de"], retiredHosts: [] });
     expect((await registrations.readTenant("prod", GUID))!.entry.apps.find((a) => a.name === "example-ch")).toMatchObject({ domain: "example.ch", aliases: ["example.de"] });
     expect(dns.record("www.example.de", "CNAME")).toBe("acme.example.com");
-    const dropped = await run({ ...MOVE, domain: "example.ch", aliases: [] });
-    expect(dropped.retiredHosts).toEqual(["example.de", "www.example.de"]);
+    const dropped = await makeTenantSetWebsiteDomainDef(prt).planStream!({ ...MOVE, domain: "example.ch", aliases: [] }, planCtx());
+    if (dropped.outcome !== "planned") throw new Error("not planned");
+    expect(dropped.params.retiredHosts).toEqual(["example.de", "www.example.de"]);
+    const steps = makeTenantSetWebsiteDomainDef(prt).steps(dropped.params).slice(1);
+    for (const step of steps.slice(0, -1)) await step.run(ctx(params(), step.name, []));
+    // The dropped alias's records go only once the site answers at its hosts.
+    probe.set("https://example.ch/", { reachable: false, status: 404, detail: "HTTP 404" });
+    await expect(steps.at(-1)!.run(ctx(params(), "retire-previous-website-domain", []))).rejects.toThrow(/did not answer/);
+    expect(dns.record("www.example.de", "CNAME")).toBe("acme.example.com");
+    probe.set("https://example.ch/", OK);
+    await steps.at(-1)!.run(ctx(params(), "retire-previous-website-domain", []));
     expect("aliases" in (await registrations.readTenant("prod", GUID))!.entry.apps.find((a) => a.name === "example-ch")!).toBe(false);
     expect([dns.record("example.de", "CNAME"), dns.record("www.example.de", "CNAME")]).toEqual([undefined, undefined]);
   });
 
-  it("refuses an alias that is the domain, named twice, or a host the tenant serves, nothing changed, and a move to a current alias", async () => {
+  it("refuses an alias that is the domain, named twice, or a host the tenant serves, a domain another website has as alias, nothing changed, and a move to a current alias", async () => {
     seedWebsiteTenant();
-    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch", aliases: ["example.de"] }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch", aliases: ["example.de"] }, { name: "shop", folder: "web", site: "shop", domain: "example.net", aliases: ["example.it"] }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations }, WEBSITE_APPS));
+    await expect(def.planStream!({ ...MOVE, domain: "example.it" }, planCtx())).rejects.toThrow(/example\.it is a host another website/);
     const same = { ...MOVE, domain: "example.ch" };
     await expect(def.planStream!({ ...same, aliases: ["example.ch"] }, planCtx())).rejects.toThrow(/is the domain itself/);
     await expect(def.planStream!({ ...same, aliases: ["example.at", "example.at"] }, planCtx())).rejects.toThrow(/named twice/);
@@ -345,13 +369,15 @@ describe("tenant-set-website-domain", () => {
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     dns.seed("example.org", "MX", "10 mx.example.net");
+    dns.seed("_dmarc.example.org", "TXT", "v=DMARC1; p=reject");
+    dns.seed("autodiscover.example.org", "CNAME", "autodiscover.mail.example.net");
     const prt = ports({ registrations, dns, repo: withDomain() }, WEBSITE_APPS);
     const planned = await makeTenantSetWebsiteDomainDef(prt).planStream!(MOVE, planCtx());
     if (planned.outcome !== "planned") throw new Error("not planned");
-    expect(planned.plan.summary).toMatch(/MX example\.org \(SHA-256 [0-9a-f]{12}\)/);
-    dns.seed("example.org", "MX", "20 mx.other.net");
+    expect(planned.plan.summary).toMatch(/MX example\.org \(SHA-256 [0-9a-f]{12}\).*TXT _dmarc\.example\.org \(SHA-256 [0-9a-f]{12}\), CNAME autodiscover\.example\.org/);
+    dns.seed("_dmarc.example.org", "TXT", "v=DMARC1; p=none");
     const check = makeTenantSetWebsiteDomainDef(prt).steps(planned.params).find((s) => s.name === "check-mail-records")!;
-    await expect(check.run(ctx(params(), check.name, []))).rejects.toThrow(/MX records at example\.org changed/);
+    await expect(check.run(ctx(params(), check.name, []))).rejects.toThrow(/TXT records at _dmarc\.example\.org changed/);
   });
 });
 

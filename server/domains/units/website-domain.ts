@@ -18,7 +18,7 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { STAGE } from "../../../shared/enums.ts";
 
 /** What the website steps read: the DNS provider, the zone's apex, and the probe with its wait. */
-export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex"> & AnswerWaitPorts;
+export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex" | "registrations"> & AnswerWaitPorts;
 
 /** The hosts a website answers at: `<domain>`, then `www.<domain>` and each alias domain with its
  *  `www.`, which redirect there. */
@@ -62,15 +62,18 @@ export async function websiteRecordsToReplace(db: Db, ports: WebsiteDomainPorts,
 }
 
 /** On abort: remove the records of `hosts`, where this installation wrote them for the tenant, and write
- *  back the records the run replaced there. */
+ *  back the records the run replaced there — except at a host the tenant still serves once the other
+ *  cleanups ran: its own domain's, or a website's as the registration stands again (a move keeps the
+ *  previous domain's records, which the restored website answers at). */
 export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Cleanup {
   return {
     name: "remove-website-records",
     title: `Remove the DNS records of ${hosts.join(", ") || "no host"}${replacing.length ? ", and write back the records they replaced" : ""}`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, tenantId);
-      for (const host of hosts) await removeOwnDomainRecord(ctx, ports, tc, host);
-      await restoreReplacedRecords(ctx, ports, replacing);
+      const used = new Set([...tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects, tc.ownDomainAliases), ...(await tenantWebsiteHosts(ports.registrations, tc))]);
+      for (const host of hosts) if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
+      await restoreReplacedRecords(ctx, ports, replacing.filter((r) => !used.has(r.name)));
     },
   };
 }

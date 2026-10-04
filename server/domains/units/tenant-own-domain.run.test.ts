@@ -182,8 +182,9 @@ describe("tenant-set-own-domain through the Executor", () => {
     const h = await make({ answers: [OWN], redirecting: [BARE] });
     h.dns.seed(BARE, "MX", "10 mx.mail.test");
     h.dns.seed(BARE, "TXT", "v=spf1 include:mail.test -all");
+    h.dns.seed(`_dmarc.${BARE}`, "TXT", "v=DMARC1; p=reject"); h.dns.seed(`autodiscover.${BARE}`, "CNAME", "autodiscover.mail.test");
     const planned = await plan(h, { ownDomain: OWN, ownDomainRedirects: [BARE], previous: "" });
-    expect(planned.summary).toMatch(/leaves the mail records beside them as they stand: MX customer\.test \(SHA-256 [0-9a-f]{12}\), TXT customer\.test/);
+    expect(planned.summary).toMatch(/leaves the mail records beside them as they stand: MX customer\.test \(SHA-256 [0-9a-f]{12}\), TXT customer\.test \(SHA-256 [0-9a-f]{12}\), TXT _dmarc\.customer\.test \(SHA-256 [0-9a-f]{12}\), CNAME autodiscover\.customer\.test/);
     h.dns.seed(BARE, "MX", "10 mx.elsewhere.test");
     await h.executor.approve(planned.runId); await h.executor.settle(planned.runId);
     expect(getRun(h.db.db, planned.runId)?.status).toBe("failed");
@@ -235,15 +236,14 @@ describe("tenant-set-own-domain through the Executor", () => {
 
   it("an abort after a failed redirect wait removes the new redirect host's record and records the previous hosts again", async () => {
     const h = await make({ answers: [OWN] });
-    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE], ownDomainAliases: ["simetrix.de"] });
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(h.dns.record(BARE, "CNAME")).toBe(ZONE);
+    expect([h.dns.record(BARE, "CNAME"), h.rowAliases()]).toEqual([ZONE, ["simetrix.de"]]);
     await h.executor.abortWithCleanup(runId);
     await h.executor.settle(runId);
     expect(h.dns.record(BARE, "CNAME")).toBeUndefined();
     expect(h.dns.record(OWN, "CNAME")).toBeUndefined();
-    expect(h.rowRedirects()).toEqual([]);
-    expect(await h.regRedirects()).toEqual([]);
+    expect([h.rowRedirects(), await h.regRedirects(), h.rowAliases(), await h.regAliases(), h.dns.record("simetrix.de", "CNAME")]).toEqual([[], [], [], [], undefined]);
   });
 
   it("REFUSES redirect hosts without a domain, twice named, equal to the domain, in the platform's name space, or another tenant's", async () => {

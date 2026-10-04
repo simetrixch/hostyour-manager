@@ -253,9 +253,15 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
     },
     // Streamed so the plan can freeze the records it replaces into the params, where the abort reads them.
     planStream: async (rawParams, ctx) => {
-      const params = keepingPrevious(TenantSetOwnDomainParams.parse(rawParams));
+      const asked = TenantSetOwnDomainParams.parse(rawParams);
       const db = ctx.db;
-      const tc = loadTenantCluster(db, params.tenantId);
+      const tc = loadTenantCluster(db, asked.tenantId);
+      // A host a website of the tenant serves is no alias: one asked for is refused, and a previous host
+      // a website answers at stays the website's rather than becoming an alias.
+      const ownWebsites = await tenantWebsiteHosts(ports.registrations, tc);
+      for (const host of aliasHosts(asked.ownDomainAliases)) if (ownWebsites.has(host)) throw errValidation(`${host} is a host a website of tenant ${tc.guid} serves — an alias names another domain`);
+      const kept = keepingPrevious(asked);
+      const params = { ...kept, ownDomainAliases: kept.ownDomainAliases.filter((a) => !ownWebsites.has(a)) };
       const row = db.select({ suspended: tenants.suspended, status: tenants.status, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no domain to set`);
