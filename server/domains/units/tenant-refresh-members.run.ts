@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Cleanup, Plan } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
-import { STAGE } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { approvedImageTag, guid as guidSchema, isOlderRelease, TenantAppSchema, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -19,7 +19,7 @@ import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
+import { renderTenantMemberAdmissionPolicy, TENANT_STAGE_LABEL } from "./admission-policy.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -127,7 +127,7 @@ async function refreshMemberPolicies(ports: TenantOnboardPorts, p: TenantRefresh
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
  *  are the same before and after, so the previous entry is what tells a dropped part from them. */
-export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string): boolean {
+export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string, stage: Stage): boolean {
   if (!status) return false;
   const charts = (status.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
@@ -145,15 +145,17 @@ export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMe
     return got.path === want.chart && filesMatch && valuesMatch;
   });
   const labels = status.namespaceLabels ?? {};
-  const labelsMatch = Object.entries(member.namespaceLabels).every(([k, v]) => labels[k] === v)
-    && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k in member.namespaceLabels || labels[k] === undefined);
+  // The ApplicationSet owns the stage label even if the member declares or drops an override.
+  const labelsMatch = labels[TENANT_STAGE_LABEL] === stage
+    && Object.entries(member.namespaceLabels).every(([k, v]) => k === TENANT_STAGE_LABEL || labels[k] === v)
+    && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k === TENANT_STAGE_LABEL || k in member.namespaceLabels || labels[k] === undefined);
   return sourcesMatch && labelsMatch;
 }
 
 /** Every member Application Synced + Healthy, each rendering its entry of `members`. */
 function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
   const synced = syncedAt(p.expectedApps);
-  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl));
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, p.stage));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -276,7 +278,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         });
         if (!syncedAt(p.expectedApps)(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         if (!until(byName)) {
-          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.deployRepoUrl)).map((m) => m.name);
+          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.deployRepoUrl, p.stage)).map((m) => m.name);
           throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);
         }
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);

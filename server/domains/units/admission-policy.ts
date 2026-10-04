@@ -147,7 +147,7 @@ export const consumerNamespaceSelector = (): string => `${CONSUMER_NAMESPACE_LAB
 /** The label pairs the platform itself puts on a tenant MEMBER namespace — the ONLY values admitted
  *  under the reserved prefixes. They are the managedNamespaceMetadata of the four tenant
  *  ApplicationSets (hostyour-cloud/argocd/<stage>/apps/tenants-{auth,jobs,report,apps}-appset.yaml),
- *  identical across the three stages: every member carries platform/tenant=<guid>,
+ *  every member carries platform/tenant=<guid>, platform/tenant-stage=<stage>,
  *  platform/tenant-managed and platform/db-consumer; ONLY the auth member additionally carries
  *  platform/redis-consumer — example-auth keeps the tenant's sessions on the no-auth Redis, and no
  *  other member may write itself into that NetworkPolicy's selector. NO pod-security pair is in the
