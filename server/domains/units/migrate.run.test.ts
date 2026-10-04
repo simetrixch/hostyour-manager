@@ -120,6 +120,37 @@ describe("migrate (consumer)", () => {
     expect(row?.clusterId).toBe(TARGET.clusterId);
     expect(row?.status).toBe("active");
   });
+
+  it("journey: a consumer with its own MongoDB and an empty databases[] moves whole — dumped from its own instance while it runs, restored on the target, the source cleared last", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { mongodb: "replicaset", databases: [], services: [] });
+    // The application asks for zero replicas; the own set keeps running, which the dump needs.
+    f.source.reader.setSmoke({
+      namespaceExists: true, externalSecretsReady: true,
+      workloads: [{ kind: "Deployment", name: `${CONSUMER}-api`, available: true, desired: 0, ready: 0 }, { kind: "StatefulSet", name: "mongodb", available: true, desired: 3, ready: 3 }],
+    });
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    let atClear: { restored: boolean; sourceStanding: boolean } | undefined;
+    await driveSteps(db, f, makeMigrateDef(ports).steps(params), params, [], {
+      "verify-source-released": async () => { f.source.argo.setStatus(missing); },
+      "clear-source": async () => {
+        atClear = { restored: jobNames(f.target).includes(`reloc-restore-mongo-${CONSUMER}`), sourceStanding: !f.source.reader.deletedNamespaces.includes(`${CONSUMER}-prod`) };
+      },
+    });
+    const dump = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-mongo-${CONSUMER}`);
+    expect(dump?.namespace).toBe(`${CONSUMER}-prod`);
+    expect(dump?.spec.script).toContain("listDatabases");
+    expect(f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-mongo-${CONSUMER}`)?.namespace).toBe(`${CONSUMER}-prod`);
+    expect(jobNames(f.target)).toContain(`reloc-verify-mongo-${CONSUMER}`);
+    // Nothing touches the shared set: neither a listing nor a drop.
+    expect(f.source.reader.jobs.filter((j) => j.namespace === "mongodb")).toEqual([]);
+    expect(atClear).toEqual({ restored: true, sourceStanding: true });
+    expect(f.source.reader.deletedNamespaces).toContain(`${CONSUMER}-prod`);
+  });
 });
 
 describe("verify-quiesced (consumer)", () => {

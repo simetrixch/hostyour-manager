@@ -386,6 +386,25 @@ describe("a consumer's own MongoDB", () => {
     expect(consumerExpectedDumpEntries({ ...shared, pvcs: ["data-mongodb-0"] })).toEqual(["registration.yaml", "mongo", "pvc"]);
   });
 
+  it("takes the WHOLE own instance, whatever databases[] and services say: an empty list is no empty instance", () => {
+    for (const i of [{ ...own, databases: [] }, { ...own, services: [] as ConsumerService[], databases: [] }]) {
+      const jobs = mongoJobs(i);
+      expect(jobs.map((j) => j.spec.name.split("-").slice(0, 3).join("-"))).toEqual(["reloc-dump-mongo", "reloc-restore-mongo", "reloc-verify-mongo"]);
+      const dump = jobs[0]!.spec.script;
+      expect(dump).toContain("listDatabases");
+      expect(dump).toContain("grep -vx -e admin -e local -e config");
+      expect(dump).toContain(`"box:${CONSUMER_FOLDER}/mongo/databases.txt"`);
+      expect(consumerExpectedDumpEntries({ ...i, pvcs: [] })).toEqual(["registration.yaml", "mongo"]);
+    }
+    // The restore and the verify read the archives alone, never the list beside them.
+    for (const j of mongoJobs({ ...own, databases: [] }).slice(1)) expect(j.spec.script).toContain(`--include '*.archive'`);
+  });
+
+  it("PLANTED INNOCENT: a shared-set consumer with an empty databases[] still dumps nothing from Mongo", () => {
+    expect(mongoJobs({ ...shared, databases: [] })).toEqual([]);
+    expect(consumerExpectedDumpEntries({ ...shared, databases: [], pvcs: [] })).toEqual(["registration.yaml"]);
+  });
+
   it("lists and clears nothing on the source: the own instance falls with the namespace, as the per-consumer PostgreSQL does", () => {
     expect(consumerSourceDbListJob(own)).toBeNull();
     expect(consumerClearSourceJobs(own)).toEqual([]);
