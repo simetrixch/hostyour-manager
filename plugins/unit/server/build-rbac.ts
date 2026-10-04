@@ -166,12 +166,13 @@ export function renderConsumerArgoSync(input: { name: string; stage: Stage; argo
  */
 export function renderTenantArgoSync(input: {
   guid: string;
+  stage: Stage;
   applications: readonly string[];
   argoNamespace: string;
   units: readonly string[];
 }): BuildRbacGrant {
   return grant({
-    name: `${input.guid}-argo-sync`,
+    name: input.stage === "prod" ? `${input.guid}-argo-sync` : `${input.guid}-${input.stage}-argo-sync`,
     namespace: input.argoNamespace,
     label: TENANT_PROJECT_LABEL,
     rules: [

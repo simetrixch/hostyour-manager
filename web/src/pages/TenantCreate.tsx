@@ -1,7 +1,6 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import type { Stage } from "../../../shared/enums.ts";
-import { tenantStagesOn } from "../../../shared/tenant.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
@@ -10,7 +9,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
 /** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
  *  always live in the fixed deploy repository, so the operator only declares WHAT to fan out —
- *  a subdomain, an owner, the target cluster (any active one) and a stage it carries, the
+ *  a subdomain, an owner, a default machine and selected stages with placement overrides, the
  *  size and the first administrator's mailbox. THE PLATFORM ALONE (hostyour-manager#211): the
  *  standing members auth, jobs and report, always those three and no app. Apps are added
  *  afterwards from the tenant's page, where the first one creates the tenant's own repository
@@ -21,7 +20,9 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
  *  operator approves. */
 export function TenantCreate() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ subdomain: "", owner: "", stage: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
+  const [form, setForm] = useState({ subdomain: "", owner: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
+  const [selectedStages, setSelectedStages] = useState<Stage[]>(["prod"]);
+  const [stageMachines, setStageMachines] = useState<Partial<Record<Stage, string>>>({});
   const [demo, setDemo] = useState(false);
   const [targets, setTargets] = useState<TenantTargetView[] | null>(null);
   const [busy, setBusy] = useState(false);
@@ -34,24 +35,20 @@ export function TenantCreate() {
   }, []);
 
   const set = (k: keyof typeof form) => (e: ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  // Only the stages the chosen cluster carries are offered (tenantStagesOn: its own, and test on a
-  // prod cluster), its own first; the server refuses any other (resolveTenantCluster).
-  const stagesOf = (clusterId: string): readonly Stage[] => {
-    const target = (targets ?? []).find((t) => t.id === clusterId);
-    return target ? tenantStagesOn(target.stage as Stage) : [];
-  };
   const chooseCluster = (e: ChangeEvent<HTMLSelectElement>) => {
     const clusterId = e.target.value;
-    setForm((f) => ({ ...f, clusterId, stage: stagesOf(clusterId)[0] ?? "" }));
+    setForm((f) => ({ ...f, clusterId }));
   };
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
+    if (!selectedStages.length) { setError("Choose at least one stage."); return; }
     setBusy(true);
     setError(null);
     try {
       const { runId } = await createTenant({
         clusterId: form.clusterId,
-        stage: form.stage as Stage,
+        stage: selectedStages[0]!,
+        stages: selectedStages.map((stage) => ({ stage, clusterId: stageMachines[stage] || form.clusterId })),
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
         size: form.size as UnitSize,
@@ -71,7 +68,7 @@ export function TenantCreate() {
   const noTargets = targets !== null && activeTargets.length === 0;
   // Where the tenant lands, derived from the chosen stage and cluster (tenantPlacement.ts). Null until
   // both are chosen, and it changes NOTHING about what is submitted.
-  const placement = tenantPlacement(form.stage, form.clusterId, targets);
+  const placement = tenantPlacement(selectedStages[0] ?? "", stageMachines[selectedStages[0]!] || form.clusterId, targets);
 
   return (
     <section className="page">
@@ -119,7 +116,7 @@ export function TenantCreate() {
             </span>
           </label>
           <label className="field">
-            <span className="field__label">Target cluster</span>
+            <span className="field__label">Default machine</span>
             <select value={form.clusterId} onChange={chooseCluster} required>
               <option value="" disabled>
                 {targets === null ? "Loading…" : "Choose a cluster"}
@@ -132,21 +129,22 @@ export function TenantCreate() {
             </select>
             <span className="field__hint">Any active cluster; the domain is taken from it.</span>
           </label>
-          <label className="field">
-            <span className="field__label">Stage</span>
-            <select value={form.stage} onChange={set("stage")} required disabled={form.clusterId === ""}>
-              {stagesOf(form.clusterId).map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-            <span className="field__hint">
-              The tenant&apos;s own stage: every member namespace, the registration file, the Vault path{" "}
-              <code>&lt;stage&gt;/tenants/&lt;guid&gt;</code> and the zone carry it. A prod cluster also carries a
-              customer&apos;s test stage, at <code>&lt;subdomain&gt;.test.&lt;apex&gt;</code>.
-            </span>
-          </label>
+          <fieldset className="field">
+            <legend className="field__label">Stages</legend>
+            {STAGE.map((stage) => (
+              <div key={stage}>
+                <label><input type="checkbox" checked={selectedStages.includes(stage)} onChange={(e) => setSelectedStages((chosen) => e.target.checked ? [...chosen, stage] : chosen.filter((s) => s !== stage))} /> {stage}</label>
+                {selectedStages.includes(stage) && <label className="field">
+                  <span className="field__label">{stage} machine</span>
+                  <select value={stageMachines[stage] || form.clusterId} required onChange={(e) => setStageMachines((machines) => ({ ...machines, [stage]: e.target.value }))}>
+                    <option value="" disabled>Choose a machine</option>
+                    {activeTargets.map((target) => <option key={target.id} value={target.id}>{target.domain}</option>)}
+                  </select>
+                </label>}
+              </div>
+            ))}
+            <span className="field__hint">One tenant identity. Each selected stage has its own data, users, sessions and keys. Stages may share a machine.</span>
+          </fieldset>
 
           {/* The placement read-out that makes the two fields above checkable instead of merely stated:
               the two identities they decide — the GitOps registration file in the deploy repository and the member
@@ -211,7 +209,7 @@ export function TenantCreate() {
         </div>
 
         <div className="form-foot">
-          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || !form.stage || !form.clusterId || !form.owner}>
+          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || !form.owner}>
             {busy ? "Validating…" : "Validate & plan"}
           </button>
         </div>

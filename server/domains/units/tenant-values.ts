@@ -12,20 +12,11 @@ import { parse as parseYaml } from "yaml";
 import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
-import { tenantStagesOn } from "../../../shared/tenant.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 
-/** The cluster a tenant is created on, from its row: the domain (never trusted from wizard input),
- *  the SHORT NAME the pointer's `cluster` field and the AppProject destination pin carry, and the
- *  cluster's stage. The cluster must be ACTIVE, because a tenant that is not yet (or no longer)
- *  reachable cannot be created on it, and it must CARRY THE TENANT'S STAGE (tenantStagesOn): its
- *  own, and test on a prod cluster. A tenant's charts log in with `tenant-eso-<the tenant's stage>`
- *  and read `secret/data/<the tenant's stage>/tenants/…`, and a cluster holds that role and that
- *  policy only for the stages it carries (hostyour-deploy deploy-platform-services.yaml and
- *  register-slave.yaml). A tenant at another stage would seed an entry its SecretStore cannot log in
- *  to read. */
-export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): ResolvedTenantCluster {
+/** Resolve an active machine. The tenant stage has its own namespaces and Vault role on every machine. */
+export function resolveTenantCluster(db: Db, clusterId: string, _stage: Stage): ResolvedTenantCluster {
   const row = db
     .select({ id: clusters.id, domain: clusters.domain, name: clusters.name, status: clusters.status, stage: clusters.stage })
     .from(clusters)
@@ -33,14 +24,6 @@ export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): R
     .get();
   if (!row) throw errNotFound(`cluster ${clusterId}`);
   if (row.status !== "active") throw errValidation(`cluster ${clusterId} is not active (status "${row.status}")`);
-  const carried = tenantStagesOn(row.stage);
-  if (!carried.includes(stage)) {
-    throw errValidation(
-      `a tenant at ${stage} cannot be created on ${row.domain}, a ${row.stage} cluster — its Vault holds the tenant roles ` +
-      `${carried.map((s) => `tenant-eso-${s}`).join(" and ")} alone, so a tenant at ${stage} would name a role that does not exist ` +
-      `and could not read its own entry; create it at ${carried.join(" or ")}`,
-    );
-  }
   return { clusterId: row.id, domain: row.domain, cluster: row.name, stage: row.stage };
 }
 

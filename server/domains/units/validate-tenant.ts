@@ -19,7 +19,7 @@
 import { parse as parseYaml } from "yaml";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import type { MemberRouting, Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
@@ -60,6 +60,12 @@ export interface ValidateTenantRequest {
   /** The apps are a standing tenant's, resolved again by its Versions run: T4 does not hold them against
    *  the app catalog, which is the offer to a new tenant and to add-app. */
   isStandingTenant?: boolean;
+  members?: readonly TenantMemberRecord[];
+  identityProvider?: string;
+  ownDomain?: string;
+  routing?: MemberRouting;
+  ownDomainRedirects?: readonly string[];
+  approvedTags?: Record<string, Record<string, string>>;
   /** Each app's database list as the caller read it off the tenant's own repository (a standing tenant,
    *  tenant-app-databases.ts standingAppDatabases); absent, the template catalog's list of its folder. */
   appDatabases?: Readonly<Record<string, readonly string[]>>;
@@ -235,8 +241,8 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       appDatabases = req.appDatabases ? Object.fromEntries(Object.entries(req.appDatabases).map(([app, list]) => [app, [...list]])) : catalogDatabases(req.apps, catalog);
       // What every member reads in `tenant.apps` at render, as the ApplicationSet will hand it over.
       const apps = withAppDatabases(req.apps, appDatabases);
-      memberRecords = await layerExistingValueFiles(resolveMembers(t1.spec, apps), deps, cloned.workdir);
-      identityProvider = identityProviderMember(t1.spec);
+      memberRecords = await layerExistingValueFiles(req.members ? [...req.members] : resolveMembers(t1.spec, apps), deps, cloned.workdir);
+      identityProvider = req.identityProvider ?? identityProviderMember(t1.spec);
       const members = fanoutOf(memberRecords, req.stage);
       resolvedMembers = members.map((m) => m.name);
 
@@ -262,6 +268,9 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           member: member.member,
           appName: member.member,
           subdomain: req.subdomain,
+          ownDomain: req.ownDomain ?? "",
+          routing: req.routing ?? t1.spec!.routing,
+          ownDomainRedirects: req.ownDomainRedirects ?? [],
           stage: req.stage,
           zone: tenantZone(req.subdomain, req.stage, unitApex),
           // The four tenant flags, under tenant: where every member chart reads them (the off
@@ -297,7 +306,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           workdir: cloned.workdir,
           chartPath: member.chart,
           valueFiles: pinned ? [...member.valueFiles, pin] : member.valueFiles,
-          valuesObject: mergeDeep(mergeDeep(chainValues, deliveredTo(member)), member.values),
+          valuesObject: mergeDeep(mergeDeep(mergeDeep(chainValues, deliveredTo(member)), member.values), { images: { tags: req.approvedTags?.[member.member] ?? {} } }),
           releaseName: `${req.probeGuid}-${member.name}`,
           namespace,
           signal: deps.signal, // a DELETE/budget abort kills the in-flight helm child immediately
@@ -313,7 +322,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       images = collectContainerImages(docsByMember.flatMap((m) => m.docs));
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
-      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
+      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: req.members ? req.members.map((m) => m.name).filter((name) => !req.apps.some((a) => a.name === name)) : t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
       for (const g of [t2, t3, t4]) {
         gates.push(g);
         streamGate(deps, g);

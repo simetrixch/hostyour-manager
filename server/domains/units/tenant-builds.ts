@@ -340,7 +340,13 @@ export interface RefreshImagesParams {
   subdomain: string;
   apps: ValidateTenantRequest["apps"];
   /** The apps are a standing tenant's (its Versions run): the catalog does not judge them. */
-  isStandingTenant?: boolean;
+  isStandingTenant?: boolean | undefined;
+  members?: ValidateTenantRequest["members"];
+  identityProvider?: string | undefined;
+  ownDomain?: string | undefined;
+  routing?: ValidateTenantRequest["routing"];
+  ownDomainRedirects?: readonly string[] | undefined;
+  approvedTags?: Record<string, Record<string, string>> | undefined;
   seedUsers: boolean;
   demo?: boolean;
   registryHost: string;
@@ -373,6 +379,11 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           stage: p.stage,
           apps: p.apps,
           ...(p.isStandingTenant ? { isStandingTenant: true } : {}),
+          ...(p.members ? { members: p.members } : {}),
+          ...(p.identityProvider ? { identityProvider: p.identityProvider } : {}),
+          ...(p.routing ? { routing: p.routing } : {}),
+          ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
+          ...(p.approvedTags ? { approvedTags: p.approvedTags } : {}),
           probeGuid: p.guid,
           subdomain: p.subdomain,
           seedUsers: p.seedUsers,
@@ -447,7 +458,7 @@ export function provisionArgoSyncStep(
       // No registerCleanup — the shared teardown armed at record-provisional deletes it beside the
       // member AppProjects. Idempotent on resume (the writer replaces both objects in place).
       const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const syncGrant = renderTenantArgoSync({ guid: p.guid, applications, argoNamespace, units: syncUnits });
+      const syncGrant = renderTenantArgoSync({ guid: p.guid, stage: p.stage, applications, argoNamespace, units: syncUnits });
       const { created } = await ports.buildRbac.applyBuildRbac([syncGrant]);
       ctx.checkpoint({ argoSync: `${argoNamespace}/${syncGrant.role.metadata.name}`, units: syncUnits, created });
       ctx.log(

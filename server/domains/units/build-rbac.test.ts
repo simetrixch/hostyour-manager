@@ -62,7 +62,7 @@ const NEIGHBOUR = "e2e8ymj86dk8";
 const TENANT_APPS = [{ name: "erp" }, { name: "web" }];
 
 const tenantGrant = (units: readonly string[] = ["example-platform", "example-auth"]) =>
-  renderTenantArgoSync({ guid: TENANT, applications: tenantApplicationSet([...TEST_MEMBERS, ...TENANT_APPS.map((a) => a.name)], TENANT, "prod"), argoNamespace: "s1", units });
+  renderTenantArgoSync({ stage: "prod", guid: TENANT, applications: tenantApplicationSet([...TEST_MEMBERS, ...TENANT_APPS.map((a) => a.name)], TENANT, "prod"), argoNamespace: "s1", units });
 
 describe("renderSmtpOpsGrant", () => {
   // The permission a mail-queue dashboard needs, and it is not small: exec into the RELAY's pods.
@@ -143,7 +143,7 @@ describe("renderTenantArgoSync", () => {
   });
 
   it("renders name and namespace on their own, so a teardown can delete the grant without naming a unit", () => {
-    const { role, binding } = renderTenantArgoSync({ guid: TENANT, applications: [], argoNamespace: "argocd", units: [] });
+    const { role, binding } = renderTenantArgoSync({ stage: "prod", guid: TENANT, applications: [], argoNamespace: "argocd", units: [] });
     expect([role.metadata.name, binding.metadata.name]).toEqual([`${TENANT}-argo-sync`, `${TENANT}-argo-sync`]);
     expect(binding.subjects).toEqual([]);
   });

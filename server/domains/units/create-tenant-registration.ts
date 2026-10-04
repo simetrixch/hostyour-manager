@@ -8,7 +8,7 @@
 // TenantRegistrationSchema.parse re-validates as a belt.
 import { and, eq } from "drizzle-orm";
 import type { Step } from "../../executor/types.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import { STAGE } from "../../../shared/enums.ts";
 import { mintTenantGuid } from "../../kernel/ids.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { TenantBuildRuntime } from "./tenant-builds.ts";
@@ -36,18 +36,19 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
       // The bundle's tag: the one the apps-repo steps read off the release in this pass. A pass
       // resumed after them has none, and a registration naming an image without its tag would hand
       // the engines nothing to mount — refused here, naming the retry, never written.
-      const appsImageTag = runtime.appsImageTag;
+      const appsImageTag = runtime.appsImageTag ?? p.appsImageTag;
       if (p.appsImage && !appsImageTag) {
         throw errValidation(`the tag the apps bundle ${p.appsImage} was built at is not in this pass's memory — onboard-build-only reads it off the release; retry from that step, because the registration cannot name an image the engines cannot mount`);
       }
       // The tenant starts on the newest available version of every build, fixed as its own: a later
       // release moves the stage pin and leaves this tenant where it is (#296).
-      const approvedTags = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members);
+      const approvedTags = p.approvedTags ?? await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members);
       // The bundle this pass built, judged against every version the tenant starts on (none held before):
       // a build unit of this run may have pinned a version the plan could not judge (engine-line.ts).
       throwEngineLineRefusal(await bundleReleaseRefusal(ports, { appsRepo: p.appsRepo, appsImageTag }, {}, approvedTags, stepLog(ctx)), `tenant ${p.subdomain} cannot start on these versions`);
       const registration: TenantRegistration = TenantRegistrationSchema.parse({
         cluster: p.cluster,
+        ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
         subdomain: p.subdomain,
         // The tenant's own bundle, or none: the schema defaults the two the tenants ApplicationSet
         // reads bare to the empty string; the repository reaches no chart and stands only where
@@ -84,9 +85,9 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
 
 const GUID_MINT_ATTEMPTS = 8; // CSPRNG guid space is 32^12; a live collision is astronomically unlikely
 
-/** Mint a guid the registrations tree does not already hold at this stage. The 32^12 CSPRNG space makes
+/** Mint a guid no stage of the registrations tree already holds. The 32^12 CSPRNG space makes
  *  a first-try free guid overwhelmingly likely; exhausting the bounded retry is INTERNAL (never reuse). */
-export async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Promise<string> {
+export async function mintFreeGuid(ports: TenantOnboardPorts): Promise<string> {
   for (let i = 0; i < GUID_MINT_ATTEMPTS; i++) {
     const candidate = mintTenantGuid();
     // The question is only "does a registrations/<candidate>/<stage>.yaml stand", so this reads through
@@ -95,7 +96,7 @@ export async function mintFreeGuid(ports: TenantOnboardPorts, stage: Stage): Pro
     // candidate it should simply have discarded — while its null covers only an absent file.
     // "unreadable" means the guid IS taken (a file stands at that path), so the loop moves on and the
     // guid is never handed out twice.
-    if ((await ports.registrations.scanTenant(stage, candidate)).status === "absent") return candidate;
+    if ((await Promise.all(STAGE.map((s) => ports.registrations.scanTenant(s, candidate)))).every((entry) => entry.status === "absent")) return candidate;
   }
   throw errInternal(`could not mint a free tenant guid after ${GUID_MINT_ATTEMPTS} attempts`);
 }

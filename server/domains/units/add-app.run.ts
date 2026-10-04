@@ -229,7 +229,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         const applications = tenantApplicationSet(names.includes(p.app) ? names : [...names, p.app], p.guid, p.stage);
         const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const units = runtime.syncUnits ?? p.syncUnits; // as they stand after a bundle build, else as planned
-        const syncGrant = renderTenantArgoSync({ guid: p.guid, applications, argoNamespace, units });
+        const syncGrant = renderTenantArgoSync({ guid: p.guid, stage: p.stage, applications, argoNamespace, units });
         await ports.buildRbac.applyBuildRbac([syncGrant]);
         ctx.checkpoint({ argoSync: `${argoNamespace}/${syncGrant.role.metadata.name}`, applications, units });
         ctx.log("meta", `argo-sync grant ${syncGrant.role.metadata.name} now names ${applications.length} Application(s) of tenant ${p.guid}, "${p.app}" included`);

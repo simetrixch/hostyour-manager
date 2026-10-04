@@ -17,7 +17,7 @@ import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
-import { tenantKeyName } from "./tenant-storage.ts";
+import { tenantBucketName, tenantKeyName } from "./tenant-storage.ts";
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
 // purge.run.ts, and the ONLY run kind that can name an ORPHAN: a tenant that exists in GitOps + ArgoCD
@@ -388,12 +388,12 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
         const c = loadPurgeCluster(ctx.db, p);
         const name = tenantKeyName(c.guid, c.stage);
         if (!ports.objectStore) {
-          ctx.log("meta", `no object storage is wired, so the key(s) named ${name} are NOT withdrawn — if this tenant was ever seeded, a live key on bucket ${c.guid} stands at the provider after this purge and must be withdrawn by hand`);
+          ctx.log("meta", `no object storage is wired, so the key(s) named ${name} are NOT withdrawn — if this tenant was ever seeded, a live key on bucket ${tenantBucketName(c.guid, c.stage)} stands at the provider after this purge and must be withdrawn by hand`);
           return;
         }
         const { deleted } = await ports.objectStore.withdrawBucketKeys({ name, ...(ctx.signal ? { signal: ctx.signal } : {}) });
         ctx.checkpoint({ bucketKeys: name, deleted });
-        ctx.log("meta", `${deleted} key(s) named ${name} withdrawn — nothing reaches bucket ${c.guid} any more; the bucket and its objects are kept`);
+        ctx.log("meta", `${deleted} key(s) named ${name} withdrawn — nothing reaches bucket ${tenantBucketName(c.guid, c.stage)} any more; the bucket and its objects are kept`);
       },
     },
     {

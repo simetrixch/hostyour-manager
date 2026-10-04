@@ -109,9 +109,9 @@ export function describeTenantMemberDeletes(deletes: TenantMemberDeletes, argoSy
  *  a tenant can never be taken down by one of them and keep a Role naming its Applications. Reports
  *  whether anything was there. An unwired writer means the Manager provisioned no grant in the
  *  first place, so there is nothing to take back. */
-export async function deleteTenantArgoSync(ports: Pick<TenantLifecyclePorts, "buildRbac">, guid: string, argoNamespace: string): Promise<boolean> {
+export async function deleteTenantArgoSync(ports: Pick<TenantLifecyclePorts, "buildRbac">, guid: string, argoNamespace: string, stage: Stage): Promise<boolean> {
   if (!ports.buildRbac) return false;
-  const { deleted } = await ports.buildRbac.deleteBuildRbac([renderTenantArgoSync({ guid, applications: [], argoNamespace, units: [] })]);
+  const { deleted } = await ports.buildRbac.deleteBuildRbac([renderTenantArgoSync({ guid, stage, applications: [], argoNamespace, units: [] })]);
   return deleted > 0;
 }
 
@@ -389,7 +389,7 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
         // The tenant's argo-sync grant lives in the same namespace and goes the same way: it names
         // Application names, and a Role naming this guid's Applications must not outlive the guid.
         // The delete matches on the object names, so the grant is rendered here with no subject.
-        const removed = await deleteTenantArgoSync(ports, t.guid, kube.argoNamespace);
+        const removed = await deleteTenantArgoSync(ports, t.guid, kube.argoNamespace, t.stage);
         ctx.checkpoint({ members: t.members, ...deletes, argoSyncDeleted: removed });
         ctx.log("meta", `${settled} ${t.guid}: ${describeTenantMemberDeletes(deletes, removed)}`);
       },
