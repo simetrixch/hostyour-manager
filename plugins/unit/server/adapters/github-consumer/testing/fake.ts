@@ -122,6 +122,14 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     return this.branches.get(`${this.key(input.owner, input.repo)}/${input.branch}`) ?? null;
   }
 
+  /** Every deleteBranch call, as owner/repo/branch. */
+  readonly deletedBranches: string[] = [];
+  async deleteBranch(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<void> {
+    const key = `${this.key(input.owner, input.repo)}/${input.branch}`;
+    this.deletedBranches.push(key);
+    this.branches.delete(key);
+  }
+
   async hookStandsAt(input: { owner: string; repo: string; token: string; targetUrl: string }): Promise<boolean> {
     if (this.scopeError) throw new WebhookScopeError(`fake: the PAT cannot list webhooks on ${input.owner}/${input.repo}`, 403);
     this.tokensSeen.push(input.token);

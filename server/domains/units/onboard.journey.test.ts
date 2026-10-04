@@ -166,7 +166,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const planned = getRun(db.db, runId);
     expect(planned?.status).toBe("planned");
     expect(planned?.steps.map((s) => s.name)).toEqual([
-      "attest-target", "preflight-scopes", "check", "record-provisional", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
+      "attest-target", "preflight-scopes", "check", "record-provisional", "clear-leftover-branch", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
       "inject-release-kit", "setup-webhook", "await-unit-fences", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",

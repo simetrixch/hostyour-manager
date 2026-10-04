@@ -250,6 +250,16 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     return { sha: body.sha, parents: (body.parents ?? []).flatMap((p) => (typeof p.sha === "string" ? [p.sha] : [])) };
   }
 
+  async deleteBranch(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<void> {
+    const path = `${this.repoPath(input.owner, input.repo)}/git/refs/heads/${input.branch.split("/").map(encodeURIComponent).join("/")}`;
+    const res = await this.send(input.token, path, { method: "DELETE", ...(input.signal ? { signal: input.signal } : {}) });
+    if (res.status === 204 || res.status === 404) return;
+    const message = await HttpGitHubConsumer.ghMessage(res);
+    // A 422 is both "already gone" and "protected": only the first is done.
+    if (res.status === 422 && /does not exist/i.test(message)) return;
+    throw new GitHubConsumerError(`GitHub DELETE ${path} → ${res.status}: ${message}`, res.status);
+  }
+
   async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
     const base = this.repoPath(input.owner, input.repo);
     const path = `${base}/actions/workflows/${encodeURIComponent(input.workflowFile)}/dispatches`;

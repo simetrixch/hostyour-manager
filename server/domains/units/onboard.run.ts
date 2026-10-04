@@ -37,7 +37,7 @@ import {
 } from "#unit/server/build-chain.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
-import { writeRegistrationStep } from "./onboard-registration.ts";
+import { clearLeftoverBranchStep, writeRegistrationStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
 import { errNotFound, errInternal } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
@@ -217,6 +217,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // webhook — is accounted for by an inventory row. Recording only at the end left a failed onboard
     // with all of that and no row at all, findable solely by an explicit detected-scan.
     recordProvisionalStep(ports, p),
+    clearLeftoverBranchStep(ports, p),
     // the registration comes FIRST — it is what makes the unit's release pipeline exist.
     writeRegistrationStep(ports, p),
     seedSecretsStep(ports, p, runtime),

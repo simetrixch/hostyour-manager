@@ -6,6 +6,39 @@ import type { Step } from "../../executor/types.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { deployableOnboardCleanups } from "./onboard-abort.ts";
+import { errValidation } from "../../kernel/errors.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
+
+/** A delivery branch that outlived its stage. The stage's Application renders deploy/<stage> the moment
+ *  the registration lands, so a branch left from an earlier life of the unit — an old release kit moved
+ *  it onto the release commit before the build, with its 0.0.0 pins — is synced before this run's
+ *  release places the pin, and the first sync hangs on images that never existed. With no registration
+ *  of the unit at the stage nothing renders the branch, so it is deleted (its SHA logged) and the bump
+ *  re-creates it, pinned. A registration standing at the stage owns the branch: refuse, touch nothing. */
+export function clearLeftoverBranchStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
+  const branch = `deploy/${p.stage}`;
+  return {
+    name: "clear-leftover-branch",
+    title: `Delete a ${branch} left without a registration`,
+    run: async (ctx) => {
+      if (!ports.github) throw errValidation(`onboard "${p.consumerName}" requires the GitHub client to read ${branch} but none is wired on this manager`);
+      if ((await ports.registrations.readRegistration(p.stage, p.consumerName)) !== null) {
+        throw errValidation(`a registration of ${p.consumerName} at ${p.stage} already stands on ${branch} — this onboarding leaves the branch alone; offboard the stage first`);
+      }
+      const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
+      const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:clear-leftover-branch", runId: ctx.runId });
+      try {
+        const token = pat.toString("utf8");
+        const head = await ports.github.readBranchCommit({ owner, repo, branch, token, signal: ctx.signal });
+        if (!head) return;
+        await ports.github.deleteBranch({ owner, repo, branch, token, signal: ctx.signal });
+        ctx.log("meta", `deleted ${branch} of ${owner}/${repo}, left at ${head.sha} with no registration at ${p.stage} — the release re-creates it, pinned`);
+      } finally {
+        pat.fill(0);
+      }
+    },
+  };
+}
 
 /** The deployable form's registration commit: build.yaml (the attested build names) PLUS this
  *  stage's file, in ONE commit. It runs FIRST after the check — the registration is what
