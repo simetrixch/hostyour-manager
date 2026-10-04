@@ -465,7 +465,7 @@ export const RUN_KIND = [
   "tenant-line-move",
   // Set, switch or clear the domain a tenant's mail is sent as, after the product's check answered
   // that mail from it is signed.
-  "tenant-set-sender-domain",
+  "tenant-set-sender-domain", "tenant-set-demo",
   // Change a declared secret of a STANDING consumer (#245): merge the values into its Vault entry,
   // delete the rendered Secrets so the operator's store writes them again, roll the workloads. The
   // onboarding's seed is create-only by design, so without this nothing could change a value at all,
@@ -532,7 +532,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "mail-envelope-spf-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-demo", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

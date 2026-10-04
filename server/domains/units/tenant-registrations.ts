@@ -325,6 +325,13 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
   }
 
+  async setDemo(stage: Stage, guid: string, demo: boolean, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    const { demo: _previous, ...entry } = current.entry;
+    return this.write(stage, guid, { ...entry, ...(demo ? { demo: true as const } : {}) }, `demo(${guid}): ${demo} ${trailer(runId)}`);
+  }
+
   /** Write the tenant's own domain ("" = none, the tenant is reached at its zone) and the hosts that
    *  redirect to it. Two fields of one file, like the flips above; writing what it already has commits
    *  nothing. tenant-set-own-domain moves the DNS records around this write. */

@@ -681,6 +681,9 @@ export const setTenantRouting = (tenantId: string, routing: MemberRouting): Prom
 export const setTenantSenderDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/sender-domain`, { senderDomain: domain });
 
+export const setTenantDemo = (tenantId: string, demo: boolean): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/demo`, { demo });
+
 /** What the Versions dialog offers for a tenant: per part, the versions the registry holds for it. */
 export const getTenantVersions = (tenantId: string): Promise<VersionsView> => req<VersionsView>(`/api/tenants/${tenantId}/versions`);
 
