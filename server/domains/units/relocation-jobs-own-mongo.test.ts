@@ -107,4 +107,22 @@ describe("a consumer's own MongoDB, run by a real shell", () => {
     expect(verified.stdout).toContain("MISSING archive audit");
     expect(verified.status).toBe(1);
   });
+
+  it("holds a listed name against whole archive names, so one name inside another's archive is no match", () => {
+    const w = world();
+    expect(run(w, dumpJob, "a data").status).toBe(0);
+    rmSync(join(w.box, FOLDER, "mongo", "a.archive"));
+    const verified = run(w, verifyJob, "a data");
+    expect(verified.stdout).toContain("MISSING archive a");
+    expect(verified.status).toBe(1);
+  });
+
+  it("verifies a generation whose mongo/ holds archives and no list, holding the archives alone", () => {
+    const w = world();
+    mkdirSync(join(w.box, FOLDER, "mongo"));
+    writeFileSync(join(w.box, FOLDER, "mongo", "shop.archive"), "dumped\n");
+    const verified = run(w, verifyJob, "shop");
+    expect(verified.stdout).toContain("COMPLETE mongo");
+    expect(verified.status).toBe(0);
+  });
 });
