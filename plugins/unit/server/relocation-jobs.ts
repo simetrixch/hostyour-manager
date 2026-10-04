@@ -243,6 +243,20 @@ export function verifyDumpJob(i: { unit: string; folder: string; namespace: stri
       script:
         BOX_REMOTE +
         `for entry in ${quoted(i.expected)}; do
+  if [ "$entry" = "bucket" ]; then
+    rclone copyto "box:${i.folder}/bucket-objects.txt" /tmp/bucket-objects.txt
+    rclone copyto "box:${i.folder}/manifest.txt" /tmp/bucket-manifest
+    grep -E '^[0-9a-f]{64}  bucket-objects[.]txt$' /tmp/bucket-manifest > /tmp/bucket-sum
+    (cd /tmp/ && sha256sum -c bucket-sum)
+    want=$(cat /tmp/bucket-objects.txt)
+    case "$want" in ''|*[!0-9]*) echo "UNCOUNTED bucket evidence"; exit 1 ;; esac
+    rclone size "box:${i.folder}/bucket" --json > /tmp/bucket-size
+    have=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/bucket-size)
+    [ -n "$have" ] || { echo "UNCOUNTED archived bucket"; exit 1; }
+    [ "$want" = "$have" ] || { echo "MISSING bucket objects: source had $want, archive has $have"; exit 1; }
+    echo "PRESENT bucket"
+    continue
+  fi
   [ -n "$(rclone lsf "box:${i.folder}/$entry" 2>/dev/null)" ] || { echo "MISSING $entry"; exit 1; }
   echo "PRESENT $entry"
 done

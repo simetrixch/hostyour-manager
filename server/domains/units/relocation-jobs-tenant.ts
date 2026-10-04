@@ -112,7 +112,19 @@ done
       spec: {
         ...boxSpec("dump-bucket", i.guid, tenantS3Env()),
         image: i.image,
-        script: BOX_REMOTE + S3_REMOTE + `rclone sync "s3:${i.guid}" "box:${i.folder}/bucket" --create-empty-src-dirs\n`,
+        script: BOX_REMOTE + S3_REMOTE + `rclone size "s3:${i.guid}" --json > /tmp/source-size
+want=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/source-size)
+[ -n "$want" ] || { echo "UNCOUNTED source bucket: rclone answered no count"; exit 1; }
+rclone mkdir "box:${i.folder}/bucket"
+rclone sync "s3:${i.guid}" "box:${i.folder}/bucket" --create-empty-src-dirs
+rclone size "box:${i.folder}/bucket" --json > /tmp/copied-size
+have=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/copied-size)
+[ -n "$have" ] || { echo "UNCOUNTED copied bucket: rclone answered no count"; exit 1; }
+echo "COUNT bucket source=$want copied=$have"
+[ "$want" = "$have" ] || { echo "MISSING bucket objects: source has $want, copy has $have"; exit 1; }
+printf '%s\\n' "$want" > /tmp/bucket-objects.txt
+${hashLine("/tmp/bucket-objects.txt", "bucket-objects.txt")}rclone copyto /tmp/bucket-objects.txt "box:${i.folder}/bucket-objects.txt"
+`,
       },
     });
     // The fifth crypto file, beside the other four under vault/. It runs HERE and not with them
