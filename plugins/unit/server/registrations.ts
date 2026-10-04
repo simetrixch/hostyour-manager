@@ -34,6 +34,7 @@ import type { BranchScope, PlatformRepo } from "#core/server/adapters/git/port.t
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { resolveClusterMarkingIn } from "#core/server/domains/inventory/cluster-marking.ts";
 import { makeRegistrationGuard, parseRegistration, schemaWhy, serializePointer, trailer } from "./registration-laws.ts";
+import { applyDomainChanges, type DomainChange } from "#core/shared/domain-move.ts";
 
 const REGISTRATION_GUARD = /^registrations\/[a-z0-9-]+\/(dev|test|prod|build)\.yaml$/;
 
@@ -98,6 +99,18 @@ export interface RegistrationCommit {
 }
 
 export class Registrations {
+  async compareDomainFields(stage: Stage, name: string, changes: readonly DomainChange[], reverse: boolean, runId: string): Promise<void> {
+    if (changes.some(c => c.path.length !== 1 || c.path[0] !== "fqdn")) throw errValidation("consumer domain migration changes only fqdn");
+    if (!changes.length) return;
+    await this.repo.withBranch(this.branch, async books => {
+      const path = guard(stagePath(stage, name)), raw = await books.readFile(path);
+      if (raw === null) throw errValidation(`consumer ${name}/${stage} disappeared`);
+      const entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
+      const next = applyDomainChanges(entry, changes, reverse);
+      await books.commit({ message: `consumer-domain(${name}): ${reverse ? "restore" : "move"} ${stage} ${trailer(runId)}`, write: [{ path, content: serializePointer(ConsumerRegistrationSchema, next) }] });
+    });
+  }
+
   /** `repo` is the platform GitOps repo (hostyour-cloud), which carries the registrations. */
   constructor(private readonly repo: PlatformRepo) {}
 

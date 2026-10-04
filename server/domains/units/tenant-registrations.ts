@@ -35,6 +35,7 @@ import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { serializePointer, makeRegistrationGuard, trailer, schemaWhy } from "#unit/server/registration-laws.ts";
 import { withAppDatabases } from "./tenant-fanout.ts";
+import { applyDomainChanges, type DomainChange } from "../../../shared/domain-move.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
  *  shared/tenant.ts:guid (12 chars of Crockford base32 minus i/l/o/u). */
@@ -114,6 +115,17 @@ function parseRegistration(path: string, raw: string): TenantRegistration {
 }
 
 export class TenantRegistrations {
+  async compareDomainFields(stage: Stage, guid: string, changes: readonly DomainChange[], reverse: boolean, runId: string): Promise<void> {
+    if (changes.some(c => !["ownDomain", "ownDomainRedirects", "apps", "members"].includes(c.path[0]!))) throw errValidation("tenant domain migration contains a non-domain field");
+    if (!changes.length) return;
+    await this.repo.withBranch(this.branch, async books => {
+      const path = guard(registrationPath(stage, guid)), raw = await books.readFile(path);
+      if (raw === null) throw errValidation(`tenant ${guid}/${stage} disappeared`);
+      const entry = parseRegistration(path, raw), next = applyDomainChanges(entry, changes, reverse);
+      await books.commit({ message: `tenant-domain(${guid}): ${reverse ? "restore" : "move"} ${stage} ${trailer(runId)}`, write: [tenantRegistrationWrite(stage, guid, next)] });
+    });
+  }
+
   /** `repo` is the deploy repository, where the registrations live. */
   constructor(private readonly repo: PlatformRepo) {}
 

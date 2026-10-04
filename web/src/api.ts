@@ -1,4 +1,5 @@
 import type { OwnersListView, OwnerCredentialInput } from "../../shared/api-types-owners.ts";
+import type { InstallationDomainSnapshot } from "../../shared/installation-domain.ts";
 import type { UnitCheck } from "../../shared/preflight.ts";
 import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, PluginsView, BranchesView, BranchDiffView, ResetRequest, ResetResult, // The tenant-purge targeting surface + the two reads that name one. Declared
   // ONCE in shared/api-types.ts and returned by the server domain module itself (tenant-orphans.ts), so
@@ -80,6 +81,7 @@ export const getHealth = (): Promise<HealthView> => req<HealthView>("/healthz");
 export const getPlugins = (): Promise<PluginsView> => req<PluginsView>("/api/plugins");
 
 export const getClusters = (): Promise<ClustersView> => req<ClustersView>("/api/clusters");
+export const previewInstallationDomain = (fromDomain: string, toDomain: string): Promise<InstallationDomainSnapshot> => req(`/api/installation-domain/preview?${new URLSearchParams({ fromDomain, toDomain })}`);
 /** Which version each of an installation's platform apps runs. Fed by the SAME pin search that
  *  builds the registry reaper's protected floor, so a version shown here is a version retention
  *  refuses to delete. */

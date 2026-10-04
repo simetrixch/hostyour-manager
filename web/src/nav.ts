@@ -14,6 +14,7 @@ export interface NavItem {
 export const NAV: readonly NavItem[] = [
   { path: "/", label: "Dashboard", icon: "clusters" },
   { path: "/servers", label: "Servers", icon: "servers" },
+  { path: "/installation-domain", label: "Domain move", icon: "branches" },
   { path: "/consumers", label: "Consumers", icon: "consumers" },
   { path: "/tenants", label: "Tenants", icon: "tenants" },
   { path: "/branches", label: "Branches", icon: "branches" },

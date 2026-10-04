@@ -393,6 +393,7 @@ export const RUN_KIND = [
   // run: what acts on a slave alone runs on all of them at once, and what writes the master runs one
   // slave after the other.
   "cluster-deploy-slave", "cluster-redeploy", "cluster-redeploy-slaves", "cluster-remove-slave", "cluster-rename",
+  "installation-domain-move", "installation-domain-rollback",
   // The tailnet run kinds, on a host that is already deployed. Three repairs and a reading, not one
   // with a switch: `cluster-tailnet-disconnect` takes the host off the private network and leaves it
   // there, `cluster-tailnet-reconnect` puts it back with the credential the host still holds, and
@@ -526,6 +527,7 @@ export const RUN_FAMILY = {
   fixture: ["noop"],
   cluster: [
     "cluster-deploy-slave", "cluster-redeploy", "cluster-redeploy-slaves", "cluster-remove-slave", "cluster-rename",
+    "installation-domain-move", "installation-domain-rollback",
     "cluster-tailnet-disconnect", "cluster-tailnet-reconnect", "cluster-tailnet-rejoin", "cluster-tailnet-read",
     "cluster-password-login-disable", "cluster-password-login-enable",
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",

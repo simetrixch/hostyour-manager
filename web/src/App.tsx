@@ -11,6 +11,7 @@ import { compiledPlugins } from "./plugins.ts";
 // landed in one bundle the first screen had to load whole, and the build warned that it passed 500 kB.
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx").then((m) => ({ default: m.Dashboard })));
 const Servers = lazy(() => import("./pages/Servers.tsx").then((m) => ({ default: m.Servers })));
+const InstallationDomain = lazy(() => import("./pages/InstallationDomain.tsx").then(m => ({ default: m.InstallationDomain })));
 const OperatorKeys = lazy(() => import("./pages/OperatorKeys.tsx").then((m) => ({ default: m.OperatorKeys })));
 const RunDetail = lazy(() => import("./pages/RunDetail.tsx").then((m) => ({ default: m.RunDetail })));
 const Branches = lazy(() => import("./pages/Branches.tsx").then((m) => ({ default: m.Branches })));
@@ -62,6 +63,7 @@ export function App() {
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/servers" element={<Servers />} />
+              <Route path="/installation-domain" element={<InstallationDomain />} />
               {/* Under /servers rather than in NAV: an operator key is a fact about the machines,
                   and isActivePath keeps the Servers rail item lit while the page is open. */}
               <Route path="/servers/keys" element={<OperatorKeys />} />

@@ -18,6 +18,7 @@ import { makeRenameSlaveDef, type UnitRecordsRepointer } from "./defs/rename-sla
 import { makeTailnetDisconnectDef, makeTailnetReadDef, makeTailnetReconnectDef, makeTailnetRejoinDef } from "./defs/tailnet.ts";
 import { passwordLoginDisableDef, passwordLoginEnableDef } from "./defs/password-login.ts";
 import { authorizedKeysReadDef, operatorKeyPlaceDef, operatorKeyRemoveDef } from "./defs/operator-key.ts";
+import { makeInstallationDomainDef, makeInstallationDomainRollbackDef, type InstallationDomainActions } from "./defs/installation-domain.ts";
 
 export type RunDefinitions = Map<string, AnyRunDefinition>;
 
@@ -37,6 +38,7 @@ export function register<P>(runDefinitions: RunDefinitions, def: RunDefinition<P
  *  loud without it. `db` is NOT optional: redeploy reads the target's role to decide which of its
  *  two arms it runs, and a definition's steps() is handed the persisted params and no database. */
 export interface RunDefinitionsPorts extends DeploySlavePorts, AnsiwisePorts, DnsRecordPorts {
+  installationDomain?: InstallationDomainActions;
   db: Db;
   /** The DNS provider mail-dns-publish reads the published records at before and after its program,
    *  and the two removal run kinds delete at. Absent on a manager without a DNS provider: each run
@@ -78,6 +80,8 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // above do and reaches the slave not at all.
   register(runDefinitions, makeRemoveSlaveDef(ports));
   register(runDefinitions, makeRenameSlaveDef(ports));
+  register(runDefinitions, makeInstallationDomainDef(ports.installationDomain));
+  register(runDefinitions, makeInstallationDomainRollbackDef(ports.installationDomain));
   // The tailnet run kinds, on a host that is already deployed: leave the private network, come
   // back with the credential the host holds, or be logged out and joined again with one the master
   // mints. Every act is a program of the machine's own programs checkout driven over `ansiwise-rest serve`, so

@@ -20,6 +20,8 @@ import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
+import { readInstallationDomain, applyInstallationDomain } from "../domains/units/installation-domain.ts";
+import { registerInstallationDomainRoutes } from "../domains/units/api-installation-domain.ts";
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
 import { HttpReleaseDownloads } from "../adapters/downloads/downloads.ts";
@@ -223,7 +225,12 @@ export async function wire(): Promise<Wired> {
     ...(tenantRegistrations ? { tenants: async (stage: Stage) => (await tenantRegistrations.listTenantPointers(stage)).pointers } : {}),
     ...(units.resolveUnitApex ? { unitApex: units.resolveUnitApex } : {}),
   };
+  const installationDomainPorts = { ...(platformRepo ? { platformRepo } : {}), ...(dns ? { dns } : {}), ...(units.registrations ? { consumers: units.registrations } : {}), ...(units.tenantRegistrations ? { tenantRegistrations: units.tenantRegistrations } : {}) };
   const runDefinitions = buildRunDefinitions({
+    installationDomain: {
+      read: (inventory, from, to, signal) => readInstallationDomain(inventory, installationDomainPorts, from, to, signal),
+      apply: (ctx, snapshot, reverse, sourceRunId) => applyInstallationDomain(ctx, installationDomainPorts, snapshot, reverse, sourceRunId),
+    },
     db: db.db,
     // WHAT THE CLUSTER RUN KINDS READ ARGOCD THROUGH. gitops-handoff, verify-slave and argocd-follow
     // reach the master's ArgoCD and its ExternalSecrets over the pod's own ServiceAccount, the same
@@ -362,6 +369,7 @@ export async function wire(): Promise<Wired> {
     registerAuth: (a) => registerAuthRoutes(a, { config, oidc, session, loginTx, db: db.db, logger }),
     registerProtected: (a) => {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
+      registerInstallationDomainRoutes(a, db.db, installationDomainPorts);
       registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
       registerServerRoutes(a, { db: db.db, creds: store, actor: runActor, probe: new NetTcpProbe() });
       // The mail DNS of the installation, measured at public resolvers, and beside it every record

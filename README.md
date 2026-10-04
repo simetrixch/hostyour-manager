@@ -40,3 +40,11 @@ because it has no ansiwise binaries; those suites are not proven by a green Acti
 needs a separate license from Simetrix GmbH is running onboarding as a service for third parties.
 
 See [LICENSE.md](LICENSE.md).
+
+### Installation domain preview
+
+Open **Domain move** (`/installation-domain`), enter the installation's current and proposed apex, and select **Read preview**. This protected GET reads live cluster maps, every dev/test/prod consumer and tenant registration, DNS provider records, DNS book entries, IdP marks and derived cookie domains plus product cookie overrides. It does not create a run or write migration data. The full recorded fields and retained book entries are expandable.
+
+Leave **Dry run** selected to record an `installation-domain-move` plan and approve its read-only attestation in the normal run screen. Apply is a later owner-led cutover: machine/control-plane migration must be complete, the frozen census must still match, and every displayed blocker must be resolved. External database/Vault/IdP-client migration and cross-apex session handoff remain separate acceptance gates. Old records are retained; mail records are untouched.
+
+`installation-domain-rollback` takes the ID of a stopped, real move and derives its journal from that run. Its default is also dry run. A real rollback restores only recorded domain fields and records owned by that move, retaining unrelated edits and refusing conflicting newer writers. A dry-run move has nothing to roll back. Full installation cutover acceptance stays open until the owner-led live switch and data/session proof.
