@@ -112,7 +112,7 @@ describe("add-app for a website", () => {
 
   it("takes the numbered name of a site whose id the tenant already carries, and refuses the id itself", async () => {
     seedWebsiteTenant();
-    const registrations = tenantWith([{ name: "main", folder: "web", site: "main", domain: "example.net" }]);
+    const registrations = tenantWith([{ name: "main" }]);
     const def = makeAddAppDef(ports({ registrations, dns: new FakeDnsProvider() }, WEBSITE_APPS));
     await expect(def.planStream!(WEBSITE, planCtx())).rejects.toThrow(/app "main" already exists/);
     const result = await def.planStream!({ ...WEBSITE, app: "main-2" }, planCtx());
