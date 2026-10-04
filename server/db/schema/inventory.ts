@@ -220,6 +220,7 @@ export const tenants = sqliteTable("tenants", {
   // reason: every path that addresses a member composes its host from it.
   ownDomain: text("own_domain").notNull().default(""),
   ownDomainRedirects: text("own_domain_redirects", { mode: "json" }).$type<string[]>().notNull().default([]),
+  ownDomainAliases: text("own_domain_aliases", { mode: "json" }).$type<string[]>().notNull().default([]),
   approvedTags: text("approved_tags", { mode: "json" }).$type<Record<string, Record<string, string>>>().notNull().default({}),
   senderDomain: text("sender_domain").notNull().default(""),
   // The size word (UNIT_SIZE) the registration's quota was resolved from, beside it for the tenant

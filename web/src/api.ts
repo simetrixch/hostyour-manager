@@ -496,6 +496,8 @@ export interface TenantView {
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
   ownDomainRedirects: string[];
+  /** The own domain's alias domains, typed without www, each redirecting there permanently. */
+  ownDomainAliases: string[];
   /** The image tags approved for this tenant alone: app -> build -> tag. */
   approvedTags: Record<string, Record<string, string>>;
   /** The domain the tenant's mail is sent as, or "" for the platform's own. */
@@ -707,15 +709,14 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
 
 /** Plan setting, switching or clearing ("") the tenant's own domain. */
 /** Plan tenant-set-own-domain for a domain typed without www: the tenant is served at <domain>,
- *  and www.<domain> redirects there ("" returns it to its zone). */
-export const setTenantOwnDomain = (tenantId: string, domain: string, nestsUnder = ""): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain, ...(nestsUnder ? { nestsUnder } : {}) });
+ *  and www.<domain> and each alias domain redirect there ("" returns it to its zone). */
+export const setTenantOwnDomain = (tenantId: string, domain: string, nestsUnder = "", aliases: readonly string[] = []): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain, aliases, ...(nestsUnder ? { nestsUnder } : {}) });
 /** Plan add-app for a website: named after its site (websiteAppName), running the bundle's website folder. */
 export const addTenantWebsite = (tenantId: string, website: { app: string; domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, website);
-/** Plan tenant-set-website-domain: the website moves to another domain and keeps its name. */
-export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain });
+/** Plan tenant-set-website-domain: the website moves to another domain, or gets other alias domains. */
+export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string, aliases: readonly string[]): Promise<{ runId: string }> => post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain, aliases });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */

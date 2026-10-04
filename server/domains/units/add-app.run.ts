@@ -483,8 +483,8 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         seedUsers: current.entry.seedUsers,
         demo: current.entry.demo === true,
         ...(website ? { website } : {}),
-        websiteRecordHosts: website ? websiteRecordHosts(website.domain, current.entry) : [],
-        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, current.entry), ctx.signal) : [],
+        websiteRecordHosts: website ? websiteRecordHosts(website.domain, [], current.entry) : [],
+        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, [], current.entry), ctx.signal) : [],
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {

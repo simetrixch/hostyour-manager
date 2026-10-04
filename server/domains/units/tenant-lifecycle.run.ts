@@ -264,8 +264,8 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
         const current = await ports.registrations.readTenant(tc.stage, tc.guid);
         // A website's hosts are read before the drop, while the registration still names its domain, and
         // held in the checkpoint, so a resume after the drop still removes their records.
-        const domain = current?.entry.apps.find((a) => a.name === app)?.domain;
-        const websiteHosts = ctx.readCheckpoint<{ websiteHosts?: string[] }>()?.websiteHosts ?? (current && domain ? websiteRecordHosts(domain, current.entry) : []);
+        const website = current?.entry.apps.find((a) => a.name === app);
+        const websiteHosts = ctx.readCheckpoint<{ websiteHosts?: string[] }>()?.websiteHosts ?? (current && website?.domain ? websiteRecordHosts(website.domain, website.aliases ?? [], current.entry) : []);
         if (current && !current.entry.apps.some((a) => a.name === app)) {
           ctx.log("meta", `app "${app}" already dropped from tenant ${tc.guid} — skipping (resume)`);
         } else {

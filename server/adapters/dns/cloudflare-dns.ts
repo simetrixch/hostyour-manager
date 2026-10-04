@@ -18,6 +18,7 @@ type FetchLike = typeof fetch;
 interface CfRecord {
   id: string;
   content: string;
+  priority?: number;
 }
 
 interface CfEnvelope<T> {
@@ -41,7 +42,8 @@ export function txtText(raw: string): string {
   return value.replaceAll('" "', "");
 }
 
-const contentOf = (record: CfRecord, type: DnsRecordType): string => (type === "TXT" ? txtText(record.content) : record.content);
+const contentOf = (record: CfRecord, type: DnsRecordType | "MX"): string =>
+  type === "TXT" ? txtText(record.content) : type === "MX" ? `${record.priority ?? 0} ${record.content}` : record.content;
 
 export class CloudflareDns implements DnsProvider {
   private readonly apiBase: string;
@@ -103,12 +105,12 @@ export class CloudflareDns implements DnsProvider {
     return (await this.listRecordContents(input))[0] ?? null;
   }
 
-  async listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]> {
+  async listRecordContents(input: { name: string; type: DnsRecordType | "MX"; signal?: AbortSignal }): Promise<string[]> {
     const zone = await this.zoneId(input.name, input.signal);
     return (await this.listRecords(zone, input.name, input.type, input.signal)).map((r) => contentOf(r, input.type));
   }
 
-  private async listRecords(zone: string, name: string, type: DnsRecordType, signal?: AbortSignal): Promise<CfRecord[]> {
+  private async listRecords(zone: string, name: string, type: DnsRecordType | "MX", signal?: AbortSignal): Promise<CfRecord[]> {
     const q = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=100`;
     const records = await this.send<CfRecord[]>(`/zones/${zone}/dns_records?${q}`, signal ? { signal } : {});
     return records ?? [];

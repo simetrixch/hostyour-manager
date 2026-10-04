@@ -1,20 +1,21 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { newWebsiteName, unknownDomainText, websiteFolder } from "../tenantAppRows.ts";
+import { newWebsiteName, typedAliases, unknownDomainText, websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its address and
- *  its site, the form that adds one, and the dialog that moves one to another domain. A website is
- *  typed without `www.`: it is served at `<domain>`, and `www.<domain>` redirects there. It is named
+ *  its site, the form that adds one, and the dialog that moves one to another domain or gives it alias
+ *  domains. A website is typed without `www.`: it is served at `<domain>`, and `www.<domain>` and each
+ *  alias with its `www.` redirect there. It is named
  *  after its site when it is added. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
   tenantId: string;
   catalog: TenantAppCatalogView | null;
   /** The live websites (listedWebsites): a domain is null where only the inventory could name the website. */
-  websites: readonly { name: string; site: string; domain: string | null }[];
+  websites: readonly { name: string; site: string; domain: string | null; aliases: readonly string[] }[];
   /** The websites the tenant removed: name, site and the run that removed each. */
   removed: readonly { name: string; site: string; lastRunId: string | null }[];
   busy: boolean;
@@ -30,6 +31,8 @@ export function TenantWebsites(props: {
   const [site, setSite] = useState("");
   const [moving, setMoving] = useState<TenantWebsiteView | null>(null);
   const [next, setNext] = useState("");
+  const [aliasText, setAliasText] = useState("");
+  const aliases = typedAliases(aliasText);
   const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
   const named = catalog && site ? newWebsiteName(catalog, site) : "";
@@ -56,11 +59,12 @@ export function TenantWebsites(props: {
                 <span className="row__title">{w.name}</span>
                 <span className="row__meta">
                   {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : unknownDomain} · site {w.site}
+                  {w.aliases.length > 0 && ` · aliases ${w.aliases.join(", ")}`}
                 </span>
                 <span className="row__end">
                   {w.domain !== null && (
-                    <button type="button" className="btn" disabled={busy} onClick={() => { const domain = w.domain!; setNext(domain); setMoving({ name: w.name, site: w.site, domain }); }}>
-                      Change domain…
+                    <button type="button" className="btn" disabled={busy} onClick={() => { const domain = w.domain!; setNext(domain); setAliasText(w.aliases.join(", ")); setMoving({ name: w.name, site: w.site, domain, aliases: [...w.aliases] }); }}>
+                      Domain and aliases…
                     </button>
                   )}
                   <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
@@ -118,18 +122,25 @@ export function TenantWebsites(props: {
       )}
       {moving && (
         <ConfirmDialog
-          title={`Move website ${moving.name}`}
-          confirmLabel={nextTyped ? `Serve at ${nextTyped}` : "Serve at the new domain"}
-          confirmDisabled={!nextTyped || nextTyped === moving.domain}
+          title={`Domain and aliases of website ${moving.name}`}
+          confirmLabel={nextTyped && nextTyped !== moving.domain ? `Serve at ${nextTyped}` : "Set the aliases"}
+          confirmDisabled={!nextTyped || (nextTyped === moving.domain && aliases.join() === (moving.aliases ?? []).join())}
           onCancel={() => setMoving(null)}
-          onConfirm={() => { const w = moving; setMoving(null); void act(() => setTenantWebsiteDomain(tenantId, w.name, nextTyped)); }}
+          onConfirm={() => { const w = moving; setMoving(null); void act(() => setTenantWebsiteDomain(tenantId, w.name, nextTyped, aliases)); }}
         >
           <label className="field">
-            <span className="field__label">New domain, without www</span>
+            <span className="field__label">Domain, without www</span>
             <input className="input" value={next} onChange={(e) => setNext(e.target.value)} />
           </label>
+          <label className="field">
+            <span className="field__label">Alias domains without www, separated by commas</span>
+            <input className="input" value={aliasText} onChange={(e) => setAliasText(e.target.value)} placeholder="example.com, example.net" />
+          </label>
           <p>
-            The website keeps its name {moving.name}. From the moment the new domain is recorded, it answers only there; the records of {moving.domain} and www.{moving.domain} go once it answers at the new hosts.
+            The website keeps its name {moving.name}. Each alias and its www host redirect permanently to the domain.
+            {nextTyped !== moving.domain
+              ? ` From the moment the new domain is recorded, the site answers only there; ${moving.domain} stays as an alias. A domain that is an alias now cannot become the domain in the same run.`
+              : " The records of an alias you drop go once the site answers at its hosts."}
           </p>
         </ConfirmDialog>
       )}

@@ -5,18 +5,26 @@ import { tenants } from "../../db/schema/inventory.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { appName, TenantMemberRecordSchema } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
-import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
+import { aliasHosts, ownDomainEntryProblem, tenantOwnHosts } from "#unit/shared/unit-host.ts";
 import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { customerHostProblem, removeOwnDomainRecord, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
+import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, removeOwnDomainRecord, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
+import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, tenantWebsiteHosts, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
 import { tenantBundleManifest } from "./engine-line.ts";
 import { standingAppDatabases } from "./tenant-app-databases.ts";
 
-// `tenant-set-website-domain` — move one website of a standing tenant to another domain.
+// `tenant-set-website-domain` — move one website of a standing tenant to another domain, or give it
+// other alias domains (the same domain with another alias list).
+//
+// ALIAS DOMAINS: each alias, typed without `www.`, answers with its `www.` with a permanent redirect to
+// the domain (the chart's `site.aliases`, filled from the app's `{aliases}`). A MOVE KEEPS THE DOMAIN IT
+// LEAVES as an alias, so links to it keep working; only a later run that drops an alias removes its
+// records. An alias cannot become the domain in the same run: a browser that cached its permanent
+// redirect would loop; drop the alias first. The run writes only CNAME records, and refuses to start
+// where a mail record beside its hosts changed since the plan.
 //
 // A website's domain is baked into its member entry (the chart serves `site.domain`), so the plan
 // resolves the member again with the new domain through the same validation add-app renders with, and
@@ -30,6 +38,8 @@ export const TenantSetWebsiteDomainRequest = z.object({
   app: appName,
   /** The new domain, typed without `www.`. */
   domain: publicFqdn,
+  /** The alias domains, each typed without `www.`; absent keeps the website's. */
+  aliases: z.array(publicFqdn).optional(),
 });
 
 export const TenantSetWebsiteDomainParams = z.object({
@@ -37,6 +47,9 @@ export const TenantSetWebsiteDomainParams = z.object({
   app: appName,
   domain: publicFqdn,
   previous: publicFqdn,
+  /** The alias domains to set, and the ones the website had. */
+  aliases: z.array(publicFqdn).default([]),
+  previousAliases: z.array(publicFqdn).default([]),
   /** The member entry resolved with the new domain, and the one it replaces. */
   member: TenantMemberRecordSchema,
   previousMember: TenantMemberRecordSchema,
@@ -46,6 +59,8 @@ export const TenantSetWebsiteDomainParams = z.object({
   retiredHosts: z.array(publicFqdn).default([]),
   /** The records standing at recordHosts that this run replaces; an abort writes them back. */
   replacing: z.array(ReplacedRecord).default([]),
+  /** The mail records beside the hosts the run writes or removes, hashed by the plan. */
+  mailRecords: z.array(MailRecordHash).default([]),
 });
 export type TenantSetWebsiteDomainParams = z.infer<typeof TenantSetWebsiteDomainParams>;
 
@@ -57,20 +72,27 @@ function restoreWebsiteDomainCleanup(ports: AddAppPorts, p: TenantSetWebsiteDoma
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       // Only while the website stands where this run put it: a later run's move or a removal is that run's.
-      const standing = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.apps.find((a) => a.name === p.app)?.domain;
-      if (standing !== p.domain) {
-        ctx.log("meta", `website ${p.app} stands at ${standing ?? "nothing"} now, not at ${p.domain} where this run put it — left as it is`);
+      const standing = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.apps.find((a) => a.name === p.app);
+      if (!standing || !standsAt(standing, p.domain, p.aliases)) {
+        ctx.log("meta", `website ${p.app} stands at ${standing?.domain ?? "nothing"} now, not as this run put it — left as it is`);
         return;
       }
-      const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.previous, p.previousMember, ctx.runId);
+      const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.previous, p.previousAliases, p.previousMember, ctx.runId);
       ctx.log("meta", `website ${p.app} back at ${p.previous} (${commit})`);
     },
   };
 }
 
+/** Whether a website's apps[] entry stands at `domain` with exactly `aliases`. */
+function standsAt(entry: { domain?: string | undefined; aliases?: readonly string[] | undefined }, domain: string, aliases: readonly string[]): boolean {
+  const held = entry.aliases ?? [];
+  return entry.domain === domain && held.length === aliases.length && held.every((a) => aliases.includes(a));
+}
+
 function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
+    checkMailRecordsStep(ports, p.mailRecords),
     provisionWebsiteRecordsStep(ports, p.tenantId, p.recordHosts, p.replacing),
     {
       name: "write-website-domain",
@@ -78,27 +100,39 @@ function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams)
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const current = await ports.registrations.readTenant(tc.stage, tc.guid);
-        const standing = current?.entry.apps.find((a) => a.name === p.app)?.domain;
+        const standing = current?.entry.apps.find((a) => a.name === p.app);
         // The plan's fact, asked again: another run may have moved the website since. A resume finds
         // its own write standing.
-        if (standing !== p.previous && standing !== p.domain) throw errValidation(`website ${p.app} stands at ${standing ?? "no domain"} now, not at ${p.previous} as when this run was planned — plan it again`);
+        if (!standing || (!standsAt(standing, p.previous, p.previousAliases) && !standsAt(standing, p.domain, p.aliases))) {
+          throw errValidation(`website ${p.app} stands at ${standing?.domain ?? "no domain"} now, not as when this run was planned — plan it again`);
+        }
         ctx.registerCleanup(restoreWebsiteDomainCleanup(ports, p));
-        const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.domain, p.member, ctx.runId);
+        const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.domain, p.aliases, p.member, ctx.runId);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
-        ctx.log("meta", `website ${p.app}: ${p.previous} → ${p.domain} (${commit}) — its chart serves the new hosts once the ArgoCD on ${tc.domain} syncs`);
+        ctx.log("meta", `website ${p.app}: ${p.previous} → ${p.domain}${p.aliases.length ? `, aliases ${p.aliases.join(", ")}` : ""} (${commit}) — its chart serves the new hosts once the ArgoCD on ${tc.domain} syncs`);
       },
     },
     {
       name: "retire-previous-website-domain",
       title: "Wait until the website answers at its new hosts, then remove the previous hosts' records",
       run: async (ctx) => {
-        await waitForWebsite(ctx, ports, p.domain, `The previous hosts' records still stand: retry this step once the new ones answer, or abort the run to put the website back at ${p.previous}.`);
+        await waitForWebsite(ctx, ports, p.domain, `The previous hosts' records still stand: retry this step once the new ones answer, or abort the run to put the website back at ${p.previous}.`, p.aliases);
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         for (const host of p.retiredHosts) await removeOwnDomainRecord(ctx, ports, tc, host);
       },
     },
   ];
+}
+
+/** The alias list a request asks for, as the run sets it: a move adds the domain it leaves, and the new
+ *  domain is never its own alias. A domain that is an alias now cannot become the domain directly. */
+function keptAliases(domain: string, asked: readonly string[], previous: string, previousAliases: readonly string[]): string[] {
+  if (domain !== previous && previousAliases.includes(domain)) throw errValidation(`${domain} is an alias of this website, whose permanent redirect a browser may have cached — drop the alias in one run, then make it the domain in another`);
+  if (new Set(asked).size !== asked.length) throw errValidation("an alias domain is named twice");
+  if (asked.includes(domain)) throw errValidation(`${domain} is the domain itself — an alias names another domain`);
+  if (domain === previous) return [...asked];
+  return asked.includes(previous) ? [...asked] : [...asked, previous];
 }
 
 export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition<TenantSetWebsiteDomainParams> {
@@ -117,15 +151,24 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       if (current.entry.suspended) throw errValidation(`tenant ${tc.guid} is suspended — its ingress is down, so the website could never answer at its new hosts; resume it first`);
       const entry = current.entry.apps.find((a) => a.name === req.app);
       if (!entry?.folder || !entry.site || !entry.domain) throw errValidation(`app "${req.app}" of tenant ${tc.guid} is no website — it names no folder, site and domain`);
-      const typed = ownDomainEntryProblem(req.domain);
-      if (typed !== null) throw errValidation(typed);
-      if (req.domain === entry.domain) throw errValidation(`website ${req.app} is already served at ${req.domain}`);
+      for (const typedEntry of [req.domain, ...(req.aliases ?? [])]) {
+        const typed = ownDomainEntryProblem(typedEntry);
+        if (typed !== null) throw errValidation(typed);
+      }
+      const previousAliases = entry.aliases ?? [];
+      const aliases = keptAliases(req.domain, req.aliases ?? previousAliases, entry.domain, previousAliases);
+      if (standsAt(entry, req.domain, aliases)) throw errValidation(`website ${req.app} is already served at ${req.domain}${aliases.length ? ` with the aliases ${aliases.join(", ")}` : ""}`);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.domain === req.domain);
       if (serving) throw errValidation(`${req.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
       if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
-      for (const host of websiteHosts(req.domain)) {
+      // A host the tenant already serves — its own domain's, or another website's — is no alias of this one.
+      const ownWebsites = await tenantWebsiteHosts(ports.registrations, { stage: tc.stage, guid: tc.guid });
+      for (const host of websiteHosts(entry.domain, previousAliases)) ownWebsites.delete(host);
+      const served = new Set([...tenantOwnHosts(current.entry.ownDomain, current.entry.ownDomainRedirects, current.entry.ownDomainAliases), ...ownWebsites]);
+      for (const host of aliasHosts(aliases)) if (served.has(host)) throw errValidation(`${host} is a host tenant ${tc.guid} already serves — an alias names another domain`);
+      for (const host of websiteHosts(req.domain, aliases)) {
         const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
         if (problem !== null) throw errValidation(problem);
       }
@@ -139,7 +182,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           repoURL: ports.deployRepoUrl,
           ref: ports.registrations.branch,
           stage: tc.stage,
-          apps: [{ name: req.app, folder: entry.folder, site: entry.site, domain: req.domain, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
+          apps: [{ name: req.app, folder: entry.folder, site: entry.site, domain: req.domain, aliases, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
           // A standing website: its site, and its database list, may stand in the tenant's own repository alone.
           isStandingTenant: true,
           appDatabases,
@@ -161,13 +204,17 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       }
       const member = outcome.memberRecords.find((m) => m.name === req.app);
       if (!member) throw errValidation(`the validated fan-out has no member for website "${req.app}"`);
-      const recordHosts = websiteRecordHosts(req.domain, current.entry);
+      const recordHosts = websiteRecordHosts(req.domain, aliases, current.entry);
       const kept = new Set(recordHosts);
-      const retiredHosts = websiteRecordHosts(entry.domain, current.entry).filter((h) => !kept.has(h));
+      const retiredHosts = websiteRecordHosts(entry.domain, previousAliases, current.entry).filter((h) => !kept.has(h));
       const replacing = await websiteRecordsToReplace(ctx.db, ports, tc, recordHosts, ctx.signal);
-      const params: TenantSetWebsiteDomainParams = { tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, member, previousMember, recordHosts, retiredHosts, replacing };
+      const mailRecords = await mailRecordHashes(ports, [...recordHosts, ...retiredHosts], ctx.signal);
+      const params: TenantSetWebsiteDomainParams = {
+        tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, aliases, previousAliases, member, previousMember, recordHosts, retiredHosts, replacing, mailRecords,
+      };
       const steps = websiteDomainSteps(ports, params);
-      const [site, ...redirects] = websiteHosts(req.domain);
+      const [site, ...redirects] = websiteHosts(req.domain, aliases);
+      const what = req.domain === entry.domain ? `Give website ${req.app} of tenant ${tc.guid} at ${req.domain} the aliases ${aliases.join(", ") || "none"}` : `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} to ${req.domain}, keeping ${entry.domain} as an alias`;
       return {
         outcome: "planned",
         params,
@@ -176,12 +223,12 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           targetKind: "tenant",
           targetId: tc.tenantId,
           summary:
-            `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} to ${req.domain} (${tc.domain}, ${tc.stage}): ` +
+            `${what} (${tc.domain}, ${tc.stage}): ` +
             `${recordHosts.length ? `point ${recordHosts.join(", ")} at the tenant's zone, ` : ""}record the domain and the member resolved with it, ` +
             `wait until https://${site}/ answers and ${redirects.map((h) => `https://${h}/`).join(", ")} redirects` +
             `${retiredHosts.length ? `, then remove the records of ${retiredHosts.join(", ")}` : ""}. The website keeps its name ${req.app}. ` +
             `From the moment the new domain is recorded, the website answers only there. ` +
-            `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.${replacementSentence(replacing)}`,
+            `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto the tenant's zone) BEFORE approving.${replacementSentence(replacing)}${mailRecordSentence(mailRecords)}`,
           steps: steps.map((s) => ({ name: s.name, title: s.title })),
           targets: [],
           locks: tenantLocks(ports.registrations),

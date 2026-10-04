@@ -50,7 +50,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
       const packagesReader = template.packageScopes.length > 0
         ? await (async () => { const owner = await githubApp.installationOrg(c.req.raw.signal); return { owner, scopes: template.packageScopes, recorded: await packagesReaderView({ db, store }, owner) }; })()
         : undefined;
-      const websites = current.entry.apps.flatMap((a) => (a.site && a.domain ? [{ name: a.name, site: a.site, domain: a.domain }] : []));
+      const websites = current.entry.apps.flatMap((a) => (a.site && a.domain ? [{ name: a.name, site: a.site, domain: a.domain, ...(a.aliases ? { aliases: a.aliases } : {}) }] : []));
       return c.json({ apps: template.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), websites, members: current.entry.members.map((m) => m.name), ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
     } catch (e) {
       return c.json({ apps: [], error: errText(e) } satisfies TenantAppCatalogView);

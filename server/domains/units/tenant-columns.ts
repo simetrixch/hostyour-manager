@@ -22,6 +22,7 @@ export const TENANT_COLUMNS = {
   routing: tenants.routing,
   ownDomain: tenants.ownDomain,
   ownDomainRedirects: tenants.ownDomainRedirects,
+  ownDomainAliases: tenants.ownDomainAliases,
   approvedTags: tenants.approvedTags,
   senderDomain: tenants.senderDomain,
   size: tenants.size,

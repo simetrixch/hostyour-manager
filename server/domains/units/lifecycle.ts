@@ -139,6 +139,7 @@ export interface TenantCluster {
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
   ownDomainRedirects: string[];
+  ownDomainAliases: string[];
   /** The image tags approved for this tenant alone, per app and build (shared/tenant.ts). */
   approvedTags: Record<string, Record<string, string>>;
   /** The domain the tenant's mail is sent as, or "" for the platform's own (shared/tenant.ts). */
@@ -164,6 +165,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     routing: tenant.routing,
     ownDomain: tenant.ownDomain,
     ownDomainRedirects: tenant.ownDomainRedirects,
+    ownDomainAliases: tenant.ownDomainAliases,
     approvedTags: tenant.approvedTags,
     senderDomain: tenant.senderDomain,
     owner: tenant.owner ?? tenant.subdomain,
