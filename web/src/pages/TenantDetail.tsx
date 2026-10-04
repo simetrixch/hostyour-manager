@@ -365,7 +365,7 @@ export function TenantDetail() {
           confirming only PLANS the run. */}
       {purgeT && (
         <PurgeTenantDialog
-          target={{ guid: purgeT.guid, subdomain: purgeT.subdomain, stage: purgeT.stage, clusterId: purgeT.clusterId }}
+          target={{ guid: purgeT.guid, subdomain: purgeT.subdomain, stage: purgeT.stage, clusterId: purgeT.clusterId, machine: purgeT.domain }}
           onCancel={() => setPurgeT(null)}
           onConfirm={() => {
             const p = purgeT;

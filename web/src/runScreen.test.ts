@@ -27,7 +27,7 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   secretHints: {},
 });
 
-const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "simetrix", stage: "prod", clusterId: "cls_1" };
+const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "simetrix", stage: "prod", clusterId: "cls_1", machine: "apps2.example" };
 const row = { tenantId: "tnt_1", suspended: false };
 
 describe("runOnScreen", () => {

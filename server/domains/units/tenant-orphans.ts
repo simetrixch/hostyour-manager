@@ -114,6 +114,12 @@ function parseMemberName(name: string): { guid: string; member: string; stage: S
   return m ? { guid: m[1]!, member: m[2]!, stage: m[3] as Stage } : null;
 }
 
+/** The subdomain any inventory row of the guid records (every stage of a tenant shares it, and a
+ *  purged row keeps it), or "" when no row names the guid. */
+function knownSubdomain(db: Db, guid: string): string {
+  return db.select({ subdomain: tenants.subdomain }).from(tenants).where(eq(tenants.guid, guid)).get()?.subdomain ?? "";
+}
+
 /** THE OBJECTS SIDE OF THE DIFF (#190): on every active cluster, every AppProject, admission policy
  *  and labelled namespace of a tenant member whose guid has no live row and no pointer at that stage —
  *  grouped per guid and stage into ONE orphan that names its members, so a purge can aim at them
@@ -142,7 +148,7 @@ async function scanOrphanObjects(db: Db, resolver: ClusterKubeResolver, pointed:
       const parsed = parseMemberName(name);
       if (!parsed || pointed.get(parsed.stage)?.has(parsed.guid)) return;
       const key = `${parsed.guid}/${parsed.stage}`;
-      const group = groups.get(key) ?? { kind: "objects" as const, guid: parsed.guid, subdomain: "", stage: parsed.stage, cluster: clusterName, clusterId: cluster.id, members: [], objects: { appProjects: [], policies: [], namespaces: [] } };
+      const group = groups.get(key) ?? { kind: "objects" as const, guid: parsed.guid, subdomain: knownSubdomain(db, parsed.guid), stage: parsed.stage, cluster: clusterName, clusterId: cluster.id, members: [], objects: { appProjects: [], policies: [], namespaces: [] } };
       if (!group.members!.includes(parsed.member)) group.members!.push(parsed.member);
       group.objects![into].push(name);
       groups.set(key, group);
@@ -175,7 +181,8 @@ async function scanOrphanObjects(db: Db, resolver: ClusterKubeResolver, pointed:
  *  cls_ prefix — validation a wire type cannot express); the check only pins that the SHAPE is the one
  *  the browser is compiled against, so a field renamed or dropped here fails at this line rather than at
  *  runtime in a screen that reads it. */
-export const CreateTenantPurgeTarget = TenantPurgeRequest.extend({ subdomain: z.string().min(1) }) satisfies z.ZodType<PurgeTenantTarget>;
+export const CreateTenantPurgeTarget = TenantPurgeRequest.extend({ subdomain: z.string().min(1), domain: z.string().min(1) })
+  .transform(({ domain, ...target }) => ({ ...target, machine: domain })) satisfies z.ZodType<PurgeTenantTarget>;
 export type CreateTenantPurgeTarget = z.infer<typeof CreateTenantPurgeTarget>;
 
 /** Did this run ever get PAST its fail-closed precondition — i.e. did it reach a step that mutates

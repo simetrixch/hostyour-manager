@@ -27,11 +27,18 @@ import type { PurgeTenantTarget } from "../../../shared/api-types.ts";
  *  a Run exists (api.ts) and again in the run's own attest-target step once it is approved — rather than
  *  the flatter "every step is fail-soft, so it always runs through", which was true of neither the run
  *  nor the route. */
+/** The tenant by name and guid, and the stage and machine the purge reaches; an orphan nothing names
+ *  is called by its guid alone. */
+export function purgeTenantTitle(target: PurgeTenantTarget): string {
+  const tenant = target.subdomain ? `"${target.subdomain}" (${target.guid})` : target.guid;
+  return `Purge tenant ${tenant} · ${target.stage} on ${target.machine}?`;
+}
+
 export function PurgeTenantDialog(props: { target: PurgeTenantTarget; onConfirm: () => void; onCancel: () => void }): ReactNode {
   const { target } = props;
   return (
     <TypeToConfirm
-      title={`Purge tenant "${target.subdomain}"?`}
+      title={purgeTenantTitle(target)}
       expected={target.guid}
       confirmLabel="Plan purge"
       onCancel={props.onCancel}

@@ -625,7 +625,7 @@ export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTa
  *  is not wired or the catalog is momentarily unreadable), so the wizard just shows an inline
  *  "catalog unavailable" note and can still onboard a tenant with no apps. */
 export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
-export const addTenantStage = (id: string, stage: Stage, clusterId: string): Promise<{ runId: string }> => post(`/api/tenants/${id}/stages`, { stage, clusterId });
+export const addTenantStage = (id: string, stage: Stage, clusterId: string, size: UnitSize): Promise<{ runId: string }> => post(`/api/tenants/${id}/stages`, { stage, clusterId, size });
 
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
 /** ONE tenant's catalog (GET /api/tenants/:id/app-catalog): the apps the deploy repository's template offers,

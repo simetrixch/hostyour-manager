@@ -21,10 +21,11 @@ import { IconChevronRight } from "../components/icons.tsx";
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** A tenants row narrowed to what a purge is AIMED at (PurgeTenantTarget, shared/api-types.ts): the three fields the
- *  run is keyed on plus the subdomain, which is the part of the identity a human recognises. Written
+ *  run is keyed on plus the subdomain, which is the part of the identity a human recognises, and the
+ *  cluster's domain as the machine the confirmation names. Written
  *  once so the two purge triggers on this page — the unfinished card and the settled list — can never
  *  aim at differently-built targets. */
-const purgeTarget = (t: TenantView): PurgeTenantTarget => ({ guid: t.guid, subdomain: t.subdomain, stage: t.stage, clusterId: t.clusterId });
+const purgeTarget = (t: TenantView): PurgeTenantTarget => ({ guid: t.guid, subdomain: t.subdomain, stage: t.stage, clusterId: t.clusterId, machine: t.domain });
 
 /** ArgoCD health → a tone token (Healthy good, Degraded/Missing bad, the rest cautionary). */
 function healthTone(h: string): "ok" | "warn" | "down" {

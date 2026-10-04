@@ -35,7 +35,7 @@ function OrphanRows({ orphans, onPurge }: { orphans: OrphanTenantView[]; onPurge
                   <button
                     type="button"
                     className="btn btn--danger"
-                    onClick={() => onPurge({ guid: o.guid, subdomain: o.subdomain, stage: o.stage, clusterId, ...(o.members ? { orphanMembers: o.members } : {}) })}
+                    onClick={() => onPurge({ guid: o.guid, subdomain: o.subdomain, stage: o.stage, clusterId, machine: o.cluster, ...(o.members ? { orphanMembers: o.members } : {}) })}
                   >
                     Purge…
                   </button>

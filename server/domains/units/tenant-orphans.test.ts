@@ -106,7 +106,7 @@ describe("scanOrphanTenants — member objects with no pointer", () => {
     const resolver = await clusterWith([GUID, LEFT]);
     const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(entry(GUID, "acme")), resolver });
     expect(found.orphans).toEqual([{
-      kind: "objects", guid: LEFT, subdomain: "", stage: "prod", cluster: "s1", clusterId: "cls_1", members: ["erp", "web"],
+      kind: "objects", guid: LEFT, subdomain: "left", stage: "prod", cluster: "s1", clusterId: "cls_1", members: ["erp", "web"],
       objects: {
         appProjects: [memberNamespace(LEFT, "erp", "prod"), memberNamespace(LEFT, "web", "prod")],
         policies: [`tenant-${memberNamespace(LEFT, "erp", "prod")}`, `tenant-${memberNamespace(LEFT, "web", "prod")}`],
@@ -114,6 +114,13 @@ describe("scanOrphanTenants — member objects with no pointer", () => {
       },
     }]);
     expect(found.skipped).toEqual([]);
+  });
+
+  it("names an objects orphan by the subdomain its guid's inventory row keeps, and by nothing where no row names the guid", async () => {
+    const UNKNOWN = "k3m9p2q8r4t6";
+    db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_1", guid: LEFT, subdomain: "left", stage: "dev", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    const found = await scanOrphanTenants({ db: db.db, registrations: await deployed(), resolver: await clusterWith([LEFT, UNKNOWN]) });
+    expect(found.orphans.map((o) => [o.guid, o.subdomain])).toEqual([[LEFT, "left"], [UNKNOWN, ""]]);
   });
 
   it("leaves a pointer orphan's objects to the pointer, and reports a cluster it cannot read instead of clearing it", async () => {
@@ -212,12 +219,12 @@ describe("scanOrphanTenants (the pointer-vs-inventory diff)", () => {
 describe("CreateTenantPurgeTarget (the target frozen in a create-tenant run's params)", () => {
   it("projects a PLANNED run's params to exactly the purge request + subdomain", () => {
     // A superset of the purge request: extra params (owner, chartsRef, the PII adminEmail) are dropped,
-    // so only the four fields the dialog needs can ever reach the browser.
+    // so only the five fields the dialog needs can ever reach the browser.
     const parsed = CreateTenantPurgeTarget.parse({
-      guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1",
+      guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "apps1.example",
       owner: "team-acme", chartsRef: SHA, adminEmail: "admin@acme.example",
     });
-    expect(parsed).toEqual({ guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" });
+    expect(parsed).toEqual({ guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", machine: "apps1.example" });
   });
 
   it("refuses the RAW params of a run that failed while still planning — no guid was frozen, so nothing was deployed", () => {
@@ -236,7 +243,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
   const PURGEABLE = ["orphan", "unfinished"];
   const RUN = "run_ct";
   const frozen = (over: Record<string, unknown> = {}): Record<string, unknown> => ({
-    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1",
+    guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     owner: "team-acme", chartsRef: SHA, adminEmail: "admin@acme.example", ...over,
   });
   const seedRow = (over: Record<string, unknown> = {}): void => {
@@ -287,7 +294,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     seedRun();
     const state = resolveRunTenantState(db.db, RUN, frozen());
     expect(state.state).toBe("unfinished");
-    expect(state).toMatchObject({ target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toMatchObject({ target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", machine: "s1.example" } });
   });
 
   it("NO row, and the run got PAST attest-target: ORPHAN — nothing else can name it, so purge is offered", () => {
@@ -297,7 +304,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     seedRun("ok");
     const state = resolveRunTenantState(db.db, RUN, frozen());
     expect(state.state).toBe("orphan");
-    expect(state).toEqual({ state: "orphan", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toEqual({ state: "orphan", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", machine: "s1.example" } });
   });
 
   it("NO row because attest-target REFUSED: NOT-DEPLOYED — the run never mutated, so nothing is claimed", () => {
@@ -312,7 +319,7 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
     expect(PURGEABLE).not.toContain(state.state);
     // The tenant is still NAMED — the guid was minted and frozen, and the screen says which tenant was
     // never created — it is simply not offered as something to remove.
-    expect(state).toEqual({ state: "not-deployed", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1" } });
+    expect(state).toEqual({ state: "not-deployed", target: { guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", machine: "s1.example" } });
   });
 
   it("a run that never reached its precondition at all is NOT-DEPLOYED too", () => {

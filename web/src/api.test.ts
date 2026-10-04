@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildCreateTenantBody, type TenantCreateForm } from "./api.ts";
+import { describe, it, expect, vi } from "vitest";
+import { addTenantStage, buildCreateTenantBody, type TenantCreateForm } from "./api.ts";
 import { appSelectionsToRequest } from "../../shared/app-selections.ts";
 
 // The create-tenant wizard's only load-bearing pure logic: shaping the form state into the exact
@@ -84,5 +84,20 @@ describe("buildCreateTenantBody", () => {
 
   it("sends the size the operator picked — the run used to take the default whatever the wizard showed", () => {
     expect(buildCreateTenantBody({ ...base, size: "large" }).size).toBe("large");
+  });
+});
+
+describe("addTenantStage", () => {
+  it("sends the size the operator chose with the stage and the machine", async () => {
+    const fetch = vi.fn(async () => new Response(JSON.stringify({ runId: "run_1" }), { status: 201 }));
+    vi.stubGlobal("fetch", fetch);
+    try {
+      await addTenantStage("tnt_1", "test", "cls_2", "medium");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+    const [path, init] = fetch.mock.calls[0] as unknown as [string, RequestInit];
+    expect(path).toBe("/api/tenants/tnt_1/stages");
+    expect(JSON.parse(init.body as string)).toEqual({ stage: "test", clusterId: "cls_2", size: "medium" });
   });
 });

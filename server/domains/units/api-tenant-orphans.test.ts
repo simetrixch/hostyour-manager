@@ -309,8 +309,8 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     expect(body.target).toMatchObject({ subdomain: "acme", stage: "prod", clusterId: "cls_2" });
     expect(body.target["guid"]).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/); // minted by the plan, never supplied
     // The frozen params also carry the whole approved plan and the operator's adminEmail (PII), so the
-    // route PROJECTS: nothing beyond these four fields can reach the browser.
-    expect(Object.keys(body.target).sort()).toEqual(["clusterId", "guid", "stage", "subdomain"]);
+    // route PROJECTS: nothing beyond these five fields can reach the browser.
+    expect(Object.keys(body.target).sort()).toEqual(["clusterId", "guid", "machine", "stage", "subdomain"]);
   });
 
   it("REFUSED at attest-target: NOT-DEPLOYED — the run mutated nothing, so nothing is described or offered", async () => {
@@ -345,7 +345,7 @@ describe("GET /api/tenants/runs/:runId/tenant-state (the run's tenant, as invent
     expect(body.state).toBe("not-deployed");
     // The tenant is still NAMED (the plan minted and froze the guid) — it is simply not offered as
     // something to remove, and the same four projected fields ride along.
-    expect(Object.keys(body.target).sort()).toEqual(["clusterId", "guid", "stage", "subdomain"]);
+    expect(Object.keys(body.target).sort()).toEqual(["clusterId", "guid", "machine", "stage", "subdomain"]);
   });
 
   it("with an ACTIVE row: LIVE — the failed-at-`activate` run, which must NOT be offered a purge", async () => {

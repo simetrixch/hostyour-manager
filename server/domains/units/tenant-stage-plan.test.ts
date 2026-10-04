@@ -123,6 +123,16 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(await p.registrations.readTenant("prod", GUID)).toEqual(source);
   });
 
+  it("plans the added stage at the size the operator chose, not the default", async () => {
+    const p = stagePorts();
+    const chosen = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...request, sourceTenantId: "tnt_1", stage: "test", size: "medium" }), planCtx());
+    if (chosen.outcome !== "planned") throw new Error(chosen.summary);
+    expect(chosen.params.size).toBe("medium");
+    const unnamed = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...request, sourceTenantId: "tnt_1", stage: "test" }), planCtx());
+    if (unnamed.outcome !== "planned") throw new Error(unnamed.summary);
+    expect(unnamed.params.size).toBe("small");
+  });
+
   it("refuses a duplicate stage and source drift before any new-stage row", async () => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);

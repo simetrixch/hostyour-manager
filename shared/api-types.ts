@@ -682,13 +682,17 @@ export interface TenantPurgeInput {
 }
 
 /** What a purge is AIMED at: the three fields the run is keyed on plus the subdomain, which is the only
- *  part of a tenant's identity a human recognises (the guid is minted, not chosen). Declared beside the
+ *  part of a tenant's identity a human recognises (the guid is minted, not chosen), and the machine
+ *  the confirmation names. Declared beside the
  *  input it extends, because both places that hand a target to PurgeTenantDialog carry this one shape —
  *  the orphan scan and a create-tenant run's own frozen params (server CreateTenantPurgeTarget, a zod
  *  extension of TenantPurgeRequest checked against this type). */
 export interface PurgeTenantTarget extends TenantPurgeInput {
-  /** Empty for an objects orphan (#190): nothing records its subdomain any more. */
+  /** Empty only for an objects orphan whose guid no inventory row names. */
   subdomain: string;
+  /** The machine the purge reaches, as the operator reads it: a cluster's domain, or an orphan's
+   *  cluster name. Display only; the run is aimed by `clusterId`. */
+  machine: string;
 }
 
 /** One tenant deployed in GitOps that the inventory does not know — everything the operator needs to
@@ -710,7 +714,7 @@ export interface OrphanTenantView {
    *  scan was born for; `objects` — member objects standing on a cluster (AppProjects, admission
    *  policies, labelled namespaces) whose guid has no live row and no pointer at that stage: a purge
    *  that missed members, a teardown that died between steps, a machine restored under a standing
-   *  master. The subdomain of an objects orphan is empty — nothing records it any more. */
+   *  master. The subdomain of an objects orphan is the one an inventory row of its guid records, and empty where no row names the guid. */
   kind: "pointer" | "objects";
   /** The members the objects name, so a purge can aim at them without any inventory. */
   members?: string[];

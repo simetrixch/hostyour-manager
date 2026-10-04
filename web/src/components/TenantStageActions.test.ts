@@ -31,7 +31,7 @@ async function loaded(siblings: TenantView[]): Promise<string> {
   api.listTenantTargets.mockResolvedValue([{ id: "cls_1", domain: "apps1.example", status: "active" }]);
   render(siblings.find((t) => t.stage === "prod")!);
   for (const effect of hooks.effects.splice(0)) effect();
-  await vi.waitFor(() => expect(hooks.states[6]).toBe(true));
+  await vi.waitFor(() => expect(hooks.states[7]).toBe(true));
   return render(siblings.find((t) => t.stage === "prod")!);
 }
 beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effects = []; vi.clearAllMocks(); });
@@ -48,5 +48,15 @@ describe("public Add stage recovery", () => {
     const html = await loaded([row("prod", "active"), row("dev", "active"), row("test", status)]);
     expect(html).not.toContain('Validate &amp; plan Add stage');
     expect(html).toContain(`/tenants/tnt_test`);
+  });
+});
+
+describe("Add stage chooses its own machine and size", () => {
+  it("preselects neither the machine of the page's stage nor a size", async () => {
+    const html = await loaded([row("prod", "active"), row("test", "purged")]);
+    expect(html).toContain('<option value="" disabled="" selected="">Choose a machine</option>');
+    expect(html).toContain('<option value="" disabled="" selected="">Choose a size</option>');
+    for (const size of ["small", "medium", "large"]) expect(html).toContain(`<option>${size}</option>`);
+    expect(html).toMatch(/<button class="btn" disabled="">Validate &amp; plan Add stage<\/button>/);
   });
 });
