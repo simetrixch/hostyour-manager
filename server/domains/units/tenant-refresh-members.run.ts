@@ -2,7 +2,7 @@ import { z } from "zod";
 import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Cleanup, Plan } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
-import { STAGE } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { approvedImageTag, guid as guidSchema, isOlderRelease, TenantAppSchema, TenantMemberRecordSchema, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -19,6 +19,7 @@ import { probeBuildUnit } from "./tenant-probes.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
+import { renderTenantMemberAdmissionPolicy, TENANT_STAGE_LABEL } from "./admission-policy.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
@@ -112,13 +113,21 @@ function sameMembers(a: readonly TenantMemberRecord[], b: readonly TenantMemberR
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+async function refreshMemberPolicies(ports: TenantOnboardPorts, p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[]): Promise<void> {
+  const { clusterReader } = await ports.resolver.resolve(p.clusterId);
+  for (const member of members) {
+    const { policy, binding } = renderTenantMemberAdmissionPolicy({ guid: p.guid, member: member.name, stage: p.stage, namespaceLabels: member.namespaceLabels });
+    await clusterReader.applyAdmissionPolicy(policy, binding);
+  }
+}
+
 /** Whether ArgoCD's last comparison of a member Application rendered exactly this member entry and
  *  none of what the previous one carried beyond it: its deploy repository sources carry the entry's charts in
  *  order; each carries the entry's value files in their order and no file the previous entry had and
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
  *  are the same before and after, so the previous entry is what tells a dropped part from them. */
-export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string): boolean {
+export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string, stage: Stage | undefined): boolean {
   if (!status) return false;
   const charts = (status.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
@@ -136,15 +145,17 @@ export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMe
     return got.path === want.chart && filesMatch && valuesMatch;
   });
   const labels = status.namespaceLabels ?? {};
-  const labelsMatch = Object.entries(member.namespaceLabels).every(([k, v]) => labels[k] === v)
-    && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k in member.namespaceLabels || labels[k] === undefined);
+  // The ApplicationSet owns the stage label even if the member declares or drops an override.
+  const labelsMatch = (stage === undefined || labels[TENANT_STAGE_LABEL] === stage)
+    && Object.entries(member.namespaceLabels).every(([k, v]) => k === TENANT_STAGE_LABEL || labels[k] === v)
+    && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k === TENANT_STAGE_LABEL || k in member.namespaceLabels || labels[k] === undefined);
   return sourcesMatch && labelsMatch;
 }
 
 /** Every member Application Synced + Healthy, each rendering its entry of `members`. */
-function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
+function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string, stage: Stage | undefined): (byName: ArgoAppStatusMap) => boolean {
   const synced = syncedAt(p.expectedApps);
-  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl));
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, stage));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -155,10 +166,11 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
     title: "Write the previous member entries back into the registration",
     run: async (ctx) => {
       const current = await ports.registrations.readTenant(p.stage, p.guid);
-      if (!current || !sameMembers(current.entry.members, p.members)) {
+      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous))) {
         ctx.log("meta", `tenant ${p.guid}'s member entries are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
         return;
       }
+      await refreshMemberPolicies(ports, p, p.previous);
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
       await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
       ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit}); the apps' database lists stay as their catalog entries declare them`);
@@ -174,7 +186,9 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
   if (sameMembers(p.previous, p.members)) return;
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
-  const until = renderedAt(p, p.members, ports.deployRepoUrl);
+  // Already-serving charts must not be rolled back merely because the Cloud stage-label rollout
+  // is still pending. Completion requires that label; protecting serving entries does not.
+  const until = renderedAt(p, p.members, ports.deployRepoUrl, undefined);
   const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
   const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
   if (until(byName)) {
@@ -240,6 +254,8 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
           throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
+        // Admit the namespace labels before the registration asks ArgoCD to write them.
+        await refreshMemberPolicies(ports, p, p.members);
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
@@ -255,7 +271,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
       name: "watch-sync-set",
       title: "Wait until every member is Synced + Healthy rendering its new entry",
       run: async (ctx) => {
-        const until = renderedAt(p, p.members, ports.deployRepoUrl);
+        const until = renderedAt(p, p.members, ports.deployRepoUrl, p.stage);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
           timeoutMs: ports.argoWatchTimeoutMs,
@@ -264,7 +280,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         });
         if (!syncedAt(p.expectedApps)(byName)) throw errValidation(`tenant ${p.guid} fan-out did not converge — ${describeUnsynced(p.expectedApps, byName)}`);
         if (!until(byName)) {
-          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.deployRepoUrl)).map((m) => m.name);
+          const stale = p.members.filter((m, i) => !rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), ports.deployRepoUrl, p.stage)).map((m) => m.name);
           throw errValidation(`${stale.join(", ")} ${stale.length === 1 ? "is" : "are"} Synced + Healthy but ArgoCD has not rendered the new ${stale.length === 1 ? "entry" : "entries"} yet — retry this step once the ApplicationSet has regenerated ${stale.length === 1 ? "it" : "them"}`);
         }
         ctx.log("meta", `tenant ${p.guid}: ${p.expectedApps.length} member Application(s) Synced + Healthy, each rendering its new entry`);
@@ -402,7 +418,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         owners: (org) => readOwnerIdentity(ctx.db, org), stage: tc.stage, subdomain, signal: ctx.signal, log: ctx.log,
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
-      // Nothing to do is a result, not an error: the run passes through every step and changes nothing.
+      // Current entries still pass through the policy refresh before their idempotent write.
       // Each app with the database list the tenant's own repository declares now, which every member reads.
       const listedApps = withAppDatabases(apps, outcome.appDatabases);
       const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
@@ -433,7 +449,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         targetId: tc.tenantId,
         summary:
           `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
-          `${isCurrent ? "nothing changes — every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
+          `${isCurrent ? "Every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
           `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as the tenant's own repository declares them. ` : ""}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
@@ -442,7 +458,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `${moves.forward.length || moves.back.length ? "No other tenant changes. " : ""}` +
           `${planned.builds.units.length ? `First the build unit(s) ${planned.builds.units.map((u) => `${u.unit} (${u.images.join(", ")})`).join("; ")} release their next version and pin it. ` : ""}` +
           `${params.issuerRecordLabel ? `The DNS mark of the identity provider under ${params.issuerRecordLabel} is put in place where it does not stand. ` : "The product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is put in place. "}` +
-          `Every image the new render pulls must stand in the registry; then the entries are written and every member must sync. ` +
+          `Every image the new render pulls must stand in the registry; then the member admission policies are refreshed, the entries are written and every member must sync. ` +
           `A member whose chart moved does not answer from the carry of the product's change into the books branch until its Application syncs here.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],

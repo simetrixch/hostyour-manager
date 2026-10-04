@@ -113,7 +113,7 @@ export function rendering(members: readonly TenantMemberRecord[], approved: Reco
     const m = members[i]!;
     return [name, {
       syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy",
-      namespaceLabels: { "platform/tenant": GUID, ...m.namespaceLabels },
+      namespaceLabels: { "platform/tenant": GUID, ...m.namespaceLabels, "platform/tenant-stage": "prod" },
       syncSources: [
         { repoURL: "https://github.com/simetrixch/hostyour-cloud.git", revision: SHA },
         { repoURL: DEPLOY_URL, revision: SHA },
