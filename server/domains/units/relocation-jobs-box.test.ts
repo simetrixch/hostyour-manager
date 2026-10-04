@@ -148,7 +148,7 @@ describe("listing the claims a generation holds", () => {
 
 describe("the Mongo jobs that list the generation's archives", () => {
   const GUID = "zsjs023ctne0";
-  const consumer = { name: "acme", folder: "gen", stage: "prod" as const, namespace: "acme-prod", databases: ["acme_main"], services: ["mongodb" as const], pvcs: [], image: "dbtools" };
+  const consumer = { name: "acme", folder: "gen", stage: "prod" as const, namespace: "acme-prod", databases: ["acme_main"], services: ["mongodb" as const], mongodb: "shared" as const, pvcs: [], image: "dbtools" };
   const tenant = { guid: GUID, folder: "gen", stage: "prod" as const, apps: ["web"], image: "dbtools", identityProvider: "auth" };
   const named = (jobs: RelocationJob[], name: string): RelocationJob => jobs.find((j) => j.spec.name.startsWith(name))!;
   const cases = [
@@ -194,7 +194,7 @@ describe("the Mongo jobs that list the databases themselves", () => {
   });
 
   it("PLANTED INNOCENT: a consumer's clear-source drops its registered databases, and fails where Mongo does", () => {
-    const job = consumerClearSourceJobs({ name: "acme", stage: "prod", databases: ["acme_main"], services: ["mongodb"], image: "dbtools" })[0]!;
+    const job = consumerClearSourceJobs({ name: "acme", stage: "prod", databases: ["acme_main"], services: ["mongodb"], mongodb: "shared", image: "dbtools" })[0]!;
     expect(run(job, box({}))).toContain("DROPPED acme_main");
     expect(() => run(job, box({}), { failMongo: true })).toThrow();
   });
@@ -203,7 +203,7 @@ describe("the Mongo jobs that list the databases themselves", () => {
 describe("the jobs that read a count or a listing into a variable", () => {
   const GUID = "zsjs023ctne0";
   const bucketCheck = (): RelocationJob => tenantVerifyCompletenessJobs({ guid: GUID, folder: "gen", stage: "prod", apps: ["web"], image: "dbtools", identityProvider: "auth" }).find((j) => j.spec.name.startsWith("reloc-verify-bucket"))!;
-  const consumerList = (): RelocationJob => consumerSourceDbListJob({ name: "acme", stage: "prod", databases: ["acme_main", "acme_logs"], services: ["mongodb"], image: "dbtools" })!;
+  const consumerList = (): RelocationJob => consumerSourceDbListJob({ name: "acme", stage: "prod", databases: ["acme_main", "acme_logs"], services: ["mongodb"], mongodb: "shared", image: "dbtools" })!;
 
   it("PLANTED INNOCENT: the bucket check passes where the box and the target hold the same number of objects", () => {
     expect(run(bucketCheck(), box({ "bucket/a": "", "bucket/b": "", [`../s3/${GUID}/a`]: "", [`../s3/${GUID}/b`]: "" }))).toContain("COMPLETE bucket");

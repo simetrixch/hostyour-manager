@@ -105,7 +105,7 @@ export RCLONE_CONFIG_BOX_USER="$STORAGE_BOX_USER"
 export RCLONE_CONFIG_BOX_PASS="$(rclone obscure "$STORAGE_BOX_PASSWORD")"
 `;
 
-// Mongo flags shared by every mongodb-namespace script ($MONGO_HOST/$MONGO_ROOT_PASSWORD env).
+// Mongo flags shared by every Mongo script, the shared set's and a consumer's own ($MONGO_HOST/$MONGO_ROOT_PASSWORD env).
 export const MONGO_FLAGS = `--host "$MONGO_HOST" --username root --password "$MONGO_ROOT_PASSWORD" --authenticationDatabase admin`;
 
 /** Keep successful dumps quiet without suppressing the diagnostic that explains a failed backup.
@@ -135,8 +135,10 @@ export const mongodumpLine = (db: string, archive: string): string =>
   rm -f /tmp/mongodump.stderr
 `;
 
-export const mongoEnv = (stage: Stage): JobEnvVar[] => [
-  { name: "MONGO_HOST", value: mongoHost(stage) },
+/** The coordinates every Mongo script dials: the host, and the root password off the Secret that
+ *  stands beside the instance, the shared set's and a consumer's own alike. */
+export const mongoEnv = (host: string): JobEnvVar[] => [
+  { name: "MONGO_HOST", value: host },
   { name: "MONGO_ROOT_PASSWORD", secretKeyRef: MONGO_ROOT_SECRET },
 ];
 

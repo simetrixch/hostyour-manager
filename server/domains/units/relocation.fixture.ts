@@ -4,7 +4,7 @@
 // registries over a fake platform repo, the DNS fake with both clusters' own A records, and the
 // public probe defaulting to "unreachable" (what a correctly quiesced unit answers).
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { seedQuota } from "#unit/shared/unit-size.ts";
+import { seedQuota, type MongodbMode } from "#unit/shared/unit-size.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import type { StepCtx, Step } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -180,7 +180,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
  *  passes its own `services`/`databases`. */
 export async function seedConsumerRegistration(
   registrations: Registrations,
-  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[] } = {},
+  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[]; mongodb?: MongodbMode } = {},
 ): Promise<void> {
   await registrations.commitRegistration({
     unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: over.quiesced ?? false },
@@ -193,7 +193,7 @@ export async function seedConsumerRegistration(
       channelPatterns: over.channelPatterns ?? [],
       databases: over.databases ?? ["acme_db"],
       services: over.services ?? ["mongodb"],
-      size: "small", mongodb: "shared", quota: seedQuota("small"),
+      size: "small", mongodb: over.mongodb ?? "shared", quota: seedQuota("small"),
     },
     runId: "run_onb",
   });

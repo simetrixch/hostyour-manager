@@ -110,10 +110,11 @@ export interface RelocationWorld {
   clearSourceCluster(ctx: StepCtx): Promise<void>;
   /** Settle the inventory onto the target — always the LAST step of a move or restore. */
   record(ctx: StepCtx, target: TargetCluster): Promise<void>;
-  /** Is this workload MEANT to keep running while the unit is quiesced? A consumer's per-consumer
-   *  PostgreSQL is provisioner-owned, not chart-rendered, and deliberately keeps serving so its
-   *  databases stay reachable for the dump. Absent ⇒ nothing is exempt. */
-  workloadExempt?(w: WorkloadStatus): boolean;
+  /** Which workloads are MEANT to keep running while the unit is quiesced: a consumer's own stores,
+   *  which deliberately keep serving so their databases stay reachable for the dump. Read once per
+   *  measurement, because which stores a consumer brings is its registration's to say. Absent ⇒
+   *  nothing is exempt. */
+  workloadExempt?(): Promise<(w: WorkloadStatus) => boolean>;
 }
 
 /** The per-kind world factory the step builders close over — resolved fresh at every step. */
@@ -234,10 +235,11 @@ export function verifyQuiescedStep(ports: RelocationPorts, worldOf: WorldOf): St
         throw errValidation(`${w.kindWord} ${w.unit} is flagged quiesced but its public address ${url} still answers (${seen.detail}) — a write landing now would be lost after the dump, refusing to continue`);
       }
       const { clusterReader } = await ports.resolver.resolve(w.sourceClusterId);
+      const exempt = await w.workloadExempt?.();
       for (const ns of w.namespaces) {
         const smoke = await clusterReader.smoke(ns);
         if (!smoke.namespaceExists) throw errValidation(`namespace ${ns} does not exist — a quiesce switches the unit off, it never removes a namespace`);
-        const running = stillRunning(smoke.workloads, w.workloadExempt?.bind(w));
+        const running = stillRunning(smoke.workloads, exempt);
         if (running.length) throw errValidation(`${w.kindWord} ${w.unit} is flagged quiesced but ${ns} still runs ${running.join(", ")}`);
       }
       ctx.checkpoint({ probed: url, detail: seen.detail, namespaces: w.namespaces });

@@ -70,6 +70,20 @@ describe("consumer-nightly-backup", () => {
     expect(purged[0]).toContain(`${INSTALLATION}/prod/consumers/${CONSUMER}/2026091`);
   });
 
+  it("dumps a consumer's own MongoDB from the instance in its namespace, not from the shared set", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { mongodb: "standalone" });
+    await driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, []);
+    const dump = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-mongo-${CONSUMER}`);
+    expect(dump?.namespace).toBe(`${CONSUMER}-prod`);
+    expect(dump?.spec.env).toContainEqual({ name: "MONGO_HOST", value: "mongodb" });
+    expect(listBackups(db.db, consumer)[0]).toMatchObject({ trigger: "nightly", state: "ok" });
+  });
+
   it("records a consumer that fails, backs up the next one anyway, and fails the run naming only the one", async () => {
     seedMaster(db);
     seedClusters(db);
