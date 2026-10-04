@@ -140,7 +140,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS), identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -193,7 +193,7 @@ function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
 }
-const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS };
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS };
 async function planned(prt: TenantOnboardPorts, request: Record<string, unknown> = REQUEST) {
   const result = await makeCreateTenantDef(prt).planStream!(request, planCtx());
   if (result.outcome !== "planned") throw new Error(result.summary);

@@ -43,7 +43,7 @@ function stagePorts() {
   return p;
 }
 
-const request = { clusterId: "cls_1", stage: "prod", subdomain: "newtenant", owner: "team-acme", apps: [] };
+const request = { clusterId: "cls_1", stage: "prod", subdomain: "newtenant", owner: "team-acme", size: "small", apps: [] };
 
 async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<TenantRegistration>): Promise<TenantRegistration> {
   const source = (await p.registrations.readTenant("prod", GUID))!.entry;

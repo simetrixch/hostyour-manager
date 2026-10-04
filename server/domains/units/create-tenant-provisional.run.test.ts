@@ -173,7 +173,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -455,7 +455,7 @@ describe("the guid mint probes with the TOLERANT scan", () => {
     const registrations = new TenantRegistrations(new FakePlatformRepo());
     registrations.readTenant = () => Promise.reject(errInternal(`tenant file tenants/prod/${GUID}/reset.yaml failed its schema: nonce Invalid input`));
     const result = await makeCreateTenantDef(withAppsTemplate(ports({ registrations }))).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, trio: { jobs: false } },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS, trio: { jobs: false } },
       { db: db.db, log: () => undefined, signal: new AbortController().signal },
     );
     expect(result.outcome).toBe("planned");

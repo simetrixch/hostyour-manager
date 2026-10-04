@@ -132,7 +132,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
     members: testMembers(APPS),
     identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     syncUnits: ["example-platform"],
     ...over,
@@ -228,7 +228,7 @@ describe("planStream derives the subjects from the tenant's own images", () => {
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(withAppsTemplate(ports({ helm })));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // example-platform builds example-engine, which this tenant pulls; swissbookai builds nothing it

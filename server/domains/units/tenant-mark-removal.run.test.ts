@@ -144,7 +144,7 @@ describe("the pointer-only teardowns take the mark too", () => {
     const prt = ports(new TenantRegistrations(new FakePlatformRepo()), dns) as unknown as TenantOnboardPorts;
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: "a".repeat(40), registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: "https://github.com/acme/acme-deploy.git",
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: "https://github.com/acme/acme-deploy.git",
       report: composeTenantReport({ resolvedSha: "a".repeat(40), probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const cleanup = createTenantCleanups(prt, p).find((c) => c.name === `abort-${GUID}-remove-issuer-records`);

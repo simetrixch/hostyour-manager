@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { makeTenantStagesDef, bundleStageSteps } from "./tenant-stage-plan.ts";
-import { TenantSizeSchema, DEFAULT_UNIT_SIZE, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
+import { TenantSizeSchema, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
@@ -202,9 +202,8 @@ export const CreateTenantStageParams = z.object({
   demo: z.boolean().default(false), // a demo tenant: tenant.demo on every member; a registration field
   // The tenant's SIZE — the ceiling EVERY member namespace of it is bounded by. A NAME here, resolved
   // to figures as the registration is written, so a plan that waited for approval across a table edit
-  // lands on the figures standing at that moment. Defaulted to the frugal preset like the consumer
-  // form: an unattended path must never sell the generous one by omission.
-  size: TenantSizeSchema.default(DEFAULT_UNIT_SIZE),
+  // lands on the figures standing at that moment.
+  size: TenantSizeSchema,
   owner: z.string().min(1),
   report: TenantValidationReportSchema, // the approved fan-out report — the run record keeps it verbatim
   expectedApps: z.array(z.string()), // == tenantApplicationSet(guid,apps,stage); the set-watch pivot
@@ -268,8 +267,8 @@ export const CreateTenantRequest = z.object({
   // login and a nightly reset in the product's charts.
   demo: z.boolean().default(false),
   // The tenant's size — the ceiling each of its member namespaces gets. From the OPERATOR creating
-  // the tenant, the same way the consumer form takes it from the operator onboarding the unit.
-  size: TenantSizeSchema.default(DEFAULT_UNIT_SIZE),
+  // the tenant, and never defaulted: which size its members fit is T5's to say, not a preset's.
+  size: TenantSizeSchema,
   // OPTIONAL first-admin email (the wizard's "Admin email" field). Empty ⇒ omitted; when present the
   // deploy gains the first-admin invite. Kept out of the registration/inventory — see CreateTenantParams.
   adminEmail: z.string().email().optional(),

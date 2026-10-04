@@ -400,7 +400,7 @@ function seedTenant(): void {
 
 // The request targets the seeded slave cls_2. resolveCluster is role-agnostic — it requires only
 // an ACTIVE cluster — so the slave here is test topology, not an enforced law.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [{ name: "erp" }] };
 
 describe("tenant API", () => {
   it("501 NOT_CONFIGURED on create-tenant when tenant onboarding is not wired", async () => {

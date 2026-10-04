@@ -93,7 +93,7 @@ function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()):
   };
 }
 
-const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [] };
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", size: "small", apps: [] };
 
 function planCtx(logs: string[]): PlanStreamCtx {
   return { db: db.db, log: (l) => logs.push(l), signal: new AbortController().signal };
@@ -218,7 +218,7 @@ describe("create-tenant plans the zone before the first write", () => {
     const prt = ports(dns);
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
       report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const logs: string[] = [];
@@ -236,7 +236,7 @@ describe("create-tenant marks the identity provider in DNS where the product dec
   const MARK_NAME = `_digita-idp.auth.${SUB}.example.com`;
   const createParams = (prt: TenantOnboardPorts, over: Record<string, unknown> = {}) => CreateTenantParams.parse({
     guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
     report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     ...over,
   });

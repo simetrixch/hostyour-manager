@@ -119,7 +119,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -269,7 +269,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     seedSlave();
     const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const result = await makeCreateTenantDef(withAppsTemplate(ports())).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS, adminEmail: "admin@acme.test" },
       planCtx,
     );
     expect(result.outcome).toBe("planned");

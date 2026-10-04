@@ -215,7 +215,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
 // A zero-app tenant: these routes read the run's row, and a tenant with an app needs the GitHub App and the
 // deploy repository's template at the plan, which this harness does not wire.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
   it("lists a live pointer with no inventory row, resolved to its cluster row", async () => {
