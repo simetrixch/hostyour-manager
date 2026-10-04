@@ -135,7 +135,7 @@ stamp_manifest_version() {
     git diff --quiet -- "$file" && continue
     # --force: the file is tracked (ls-files listed it), and git refuses to add a tracked file that
     # stands in a directory a .gitignore names, as packages/storage/ under a `storage/` rule.
-    git add --force -- "$file"
+    git add --force -- "$file" || die "the version bump to $VERSION could not be staged"
     stamped="$stamped$declared $rel
 "
   done <<EOF
@@ -184,20 +184,23 @@ pin_branch() {
   for attempt in 1 2 3 4 5; do
     git -C "$PLATFORM_REPO_DIR" fetch --quiet origin "$branch" \
       || die "the branch ${branch} of ${PLATFORM_REPO} could not be fetched - nothing further was pinned"
-    git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}"
+    git -C "$PLATFORM_REPO_DIR" reset --quiet --hard "origin/${branch}" \
+      || die "the branch ${branch} of ${PLATFORM_REPO} could not be reset - nothing further was pinned"
     pinned="$(python3 "$PINNER" "$PLATFORM_REPO_DIR" "$STAGE" "${TAG}-${SHA7}" "$MANIFEST")" \
       || die "the pin of ${STAGE} could not be written: ${pinned} - the images are built and nothing was pinned"
     if [ -z "$pinned" ]; then
       say "${branch} carries no values-${STAGE}.yaml pin of ${NAME} - left as it stands"
       return 0
     fi
-    git -C "$PLATFORM_REPO_DIR" add -- $pinned
+    git -C "$PLATFORM_REPO_DIR" add -- $pinned \
+      || die "the pin of ${STAGE} could not be staged - nothing further was pinned"
     if git -C "$PLATFORM_REPO_DIR" diff --cached --quiet; then
       say "${branch} is pinned to ${TAG}-${SHA7} already - nothing to write"
       PINNED_ANY=1
       return 0
     fi
-    git -C "$PLATFORM_REPO_DIR" commit --quiet -m "release: pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built."
+    git -C "$PLATFORM_REPO_DIR" commit --quiet -m "release: pin ${STAGE} to ${TAG}" -m "Written by the release of ${NAME}, once its images were built." \
+      || die "the pin of ${STAGE} could not be committed - nothing further was pinned"
     if git -C "$PLATFORM_REPO_DIR" push --quiet origin "$branch"; then
       say "pinned ${branch} to ${TAG}-${SHA7} in ${pinned}"
       PINNED_ANY=1
@@ -424,8 +427,10 @@ if [ -n "$EXISTING" ]; then
   # no build and pin nothing; it is pushed now, and the rest of the run proceeds as a reuse.
   if ! git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
     say "${TAG} stands on this machine only, on the commit being released - its push never reached origin; pushed now"
-    git push origin "$RELEASE_PUSH"
-    git push origin "refs/tags/${TAG}"
+    git push origin "$RELEASE_PUSH" \
+      || die "the release commit for ${TAG} could not be pushed - deploy/after-release was not run"
+    git push origin "refs/tags/${TAG}" \
+      || die "the release tag ${TAG} could not be pushed - deploy/after-release was not run"
   fi
   if [ -n "$LIBRARY" ]; then
     say "reusing the existing release ${TAG} - one release per version+channel, so nothing is minted"
@@ -436,9 +441,12 @@ else
   TS14="$(date -u +%Y%m%d%H%M%S)"
   TAG="${VERSION}-${CHANNEL}-${TS14}"
   stamp_manifest_version
-  git tag -a "$TAG" -m "release $TAG"
-  git push origin "$RELEASE_PUSH"
-  git push origin "refs/tags/${TAG}"
+  git tag -a "$TAG" -m "release $TAG" \
+    || die "the release tag ${TAG} could not be created - nothing was pushed"
+  git push origin "$RELEASE_PUSH" \
+    || die "the release commit for ${TAG} could not be pushed - deploy/after-release was not run"
+  git push origin "refs/tags/${TAG}" \
+    || die "the release tag ${TAG} could not be pushed - deploy/after-release was not run"
   say "minted ${TAG}"
 fi
 
@@ -464,7 +472,8 @@ DEPLOY_REF="refs/tags/deploy/${STAGE}/${TAG}"
 # Delete first (absent on a first deploy — that is the normal case, not an error), then push: the
 # push is what the platform's webhook reacts to.
 git push origin ":${DEPLOY_REF}" >/dev/null 2>&1 || true
-git push origin "${SHA}:${DEPLOY_REF}"
+git push origin "${SHA}:${DEPLOY_REF}" \
+  || die "the deploy ref ${DEPLOY_REF} could not be pushed - ${TAG} is released; deploy/after-release was not run"
 
 # ── The build, waited for, and the pin it makes true ──────────────────────────────────────────
 #

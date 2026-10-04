@@ -237,6 +237,7 @@ function Publish-BranchPin {
     git -C $platformRepoDir fetch --quiet origin $Branch
     if ($LASTEXITCODE -ne 0) { Die "the branch $Branch of $platformRepo could not be fetched - nothing further was pinned" }
     git -C $platformRepoDir reset --quiet --hard "origin/$Branch"
+    if ($LASTEXITCODE -ne 0) { Die "the branch $Branch of $platformRepo could not be reset - nothing further was pinned" }
     try { $pinned = @(Write-StagePin -Tree $platformRepoDir -PinStage $Stage -ImageTag "$tag-$sha7" -Manifest $manifest) }
     catch { Die "the pin of $Stage could not be written: $($_.Exception.Message) - the images are built and nothing was pinned" }
     if ($pinned.Count -eq 0) {
@@ -244,6 +245,7 @@ function Publish-BranchPin {
       return
     }
     git -C $platformRepoDir add -- @pinned
+    if ($LASTEXITCODE -ne 0) { Die "the pin of $Stage could not be staged - nothing further was pinned" }
     git -C $platformRepoDir diff --cached --quiet
     if ($LASTEXITCODE -eq 0) {
       Say "$Branch is pinned to $tag-$sha7 already - nothing to write"
@@ -251,6 +253,7 @@ function Publish-BranchPin {
       return
     }
     git -C $platformRepoDir commit --quiet -m "release: pin $Stage to $tag" -m "Written by the release of $name, once its images were built."
+    if ($LASTEXITCODE -ne 0) { Die "the pin of $Stage could not be committed - nothing further was pinned" }
     git -C $platformRepoDir push --quiet origin $Branch
     if ($LASTEXITCODE -eq 0) {
       Say "pinned $Branch to $tag-$sha7 in $($pinned -join ' ')"
@@ -309,6 +312,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
     # --force: the file is tracked (ls-files listed it), and git refuses to add a tracked file that
     # stands in a directory a .gitignore names, as packages/storage/ under a `storage/` rule.
     git add --force -- $file
+    if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be staged" }
     $stamped += "$declared $rel"
   }
   if ($stamped.Count -eq 0) { return }
@@ -547,7 +551,9 @@ try {
     if ($LASTEXITCODE -ne 0) {
       Say "$tag stands on this machine only, on the commit being released - its push never reached origin; pushed now"
       git push origin $releasePush
+      if ($LASTEXITCODE -ne 0) { Die "the release commit for $tag could not be pushed - deploy/after-release was not run" }
       git push origin "refs/tags/$tag"
+      if ($LASTEXITCODE -ne 0) { Die "the release tag $tag could not be pushed - deploy/after-release was not run" }
     }
     if ($library) {
       Say "reusing the existing release $tag - one release per version+channel, so nothing is minted"
@@ -561,8 +567,11 @@ try {
     $tag = "$Version-$Channel-$ts14"
     Set-ManifestVersion $root $Version $tag
     git tag -a $tag -m "release $tag"
+    if ($LASTEXITCODE -ne 0) { Die "the release tag $tag could not be created - nothing was pushed" }
     git push origin $releasePush
+    if ($LASTEXITCODE -ne 0) { Die "the release commit for $tag could not be pushed - deploy/after-release was not run" }
     git push origin "refs/tags/$tag"
+    if ($LASTEXITCODE -ne 0) { Die "the release tag $tag could not be pushed - deploy/after-release was not run" }
     Say "minted $tag"
   }
 
@@ -589,6 +598,7 @@ try {
   # push is what the platform's webhook reacts to.
   git push origin ":$deployRef" 2>$null | Out-Null
   git push origin "${sha}:$deployRef"
+  if ($LASTEXITCODE -ne 0) { Die "the deploy ref $deployRef could not be pushed - $tag is released; deploy/after-release was not run" }
 
   # ── The build, waited for, and the pin it makes true ────────────────────────────────────────
   #
