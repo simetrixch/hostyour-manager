@@ -127,7 +127,7 @@ async function refreshMemberPolicies(ports: TenantOnboardPorts, p: TenantRefresh
  *  this one dropped, and the entry's values and no value key it dropped; the spec asks for the entry's
  *  namespace labels and none it dropped. The template's own value files and values around the entry's
  *  are the same before and after, so the previous entry is what tells a dropped part from them. */
-export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string, stage: Stage): boolean {
+export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMemberRecord, previous: TenantMemberRecord | undefined, deployRepoUrl: string, stage: Stage | undefined): boolean {
   if (!status) return false;
   const charts = (status.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
   if (charts.length !== member.sources.length) return false;
@@ -146,16 +146,16 @@ export function rendersEntry(status: ArgoAppStatus | undefined, member: TenantMe
   });
   const labels = status.namespaceLabels ?? {};
   // The ApplicationSet owns the stage label even if the member declares or drops an override.
-  const labelsMatch = labels[TENANT_STAGE_LABEL] === stage
+  const labelsMatch = (stage === undefined || labels[TENANT_STAGE_LABEL] === stage)
     && Object.entries(member.namespaceLabels).every(([k, v]) => k === TENANT_STAGE_LABEL || labels[k] === v)
     && Object.keys(previous?.namespaceLabels ?? {}).every((k) => k === TENANT_STAGE_LABEL || k in member.namespaceLabels || labels[k] === undefined);
   return sourcesMatch && labelsMatch;
 }
 
 /** Every member Application Synced + Healthy, each rendering its entry of `members`. */
-function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string): (byName: ArgoAppStatusMap) => boolean {
+function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMemberRecord[], deployRepoUrl: string, stage: Stage | undefined): (byName: ArgoAppStatusMap) => boolean {
   const synced = syncedAt(p.expectedApps);
-  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, p.stage));
+  return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, stage));
 }
 
 /** On abort: write back the member entries the registration carried before this run — only while it
@@ -186,7 +186,9 @@ async function assertRefreshAbortable(ports: TenantOnboardPorts, p: TenantRefres
   if (sameMembers(p.previous, p.members)) return;
   const current = await ports.registrations.readTenant(p.stage, p.guid);
   if (!current || !sameMembers(current.entry.members, p.members)) return;
-  const until = renderedAt(p, p.members, ports.deployRepoUrl);
+  // Already-serving charts must not be rolled back merely because the Cloud stage-label rollout
+  // is still pending. Completion requires that label; protecting serving entries does not.
+  const until = renderedAt(p, p.members, ports.deployRepoUrl, undefined);
   const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
   const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, { timeoutMs: 1, labelSelector: `platform/tenant=${p.guid}` });
   if (until(byName)) {
@@ -269,7 +271,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
       name: "watch-sync-set",
       title: "Wait until every member is Synced + Healthy rendering its new entry",
       run: async (ctx) => {
-        const until = renderedAt(p, p.members, ports.deployRepoUrl);
+        const until = renderedAt(p, p.members, ports.deployRepoUrl, p.stage);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
           timeoutMs: ports.argoWatchTimeoutMs,

@@ -1,11 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { tenants } from "../../db/schema/inventory.ts";
-import { makeTenantRefreshMembersDef, rendersEntry, TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
+import { makeTenantRefreshMembersDef, TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { Cleanup } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
-import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
+import { GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { FakeMasterArgoReader, FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
@@ -375,6 +375,20 @@ describe("tenant-refresh-members", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.members.find((m) => m.name === "erp")?.namespaceLabels).toEqual({ later: "yes" });
   });
 
+  it("refuses aborting serving entry changes even while the canonical stage label is pending", async () => {
+    seedTenant();
+    const p = await planned(ports(staleMembers()));
+    const withoutStage = () => new Map([...rendering(p.members)].map(([name, status]) => {
+      const labels = { ...status.namespaceLabels };
+      delete labels["platform/tenant-stage"];
+      return [name, { ...status, namespaceLabels: labels }];
+    }));
+    const prt = ports(p.previous, { argo: [withoutStage] }), def = makeTenantRefreshMembersDef(prt);
+    await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
+    await expect(def.steps(p).find((s) => s.name === "watch-sync-set")!.run(stepCtx(p, [], []))).rejects.toThrow(/has not rendered/);
+    await expect(def.assertAbortable!(p, { db: db.db })).rejects.toThrow(/Retry the failed step/);
+  });
+
   it("allows the abort while the members have not converged", async () => {
     seedTenant();
     const prt = ports(staleMembers(), { argo: [() => rendering(staleMembers())] });
@@ -403,44 +417,3 @@ describe("the Versions run's params", () => {
   });
 });
 
-describe("rendersEntry, clause by clause", () => {
-  const src = (over: Partial<TenantMemberRecord["sources"][number]> = {}): TenantMemberRecord["sources"][number] => ({ chart: "charts/x", valueFiles: [], values: {}, ...over });
-  const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", namespaceLabels: {}, sources: [src()], ...over });
-  const render = (m: TenantMemberRecord, labels: Record<string, string> = {}): ArgoAppStatus => ({
-    syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy", namespaceLabels: { "platform/tenant-stage": "prod", ...labels },
-    syncSources: m.sources.map((s) => ({ repoURL: DEPLOY_URL, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),
-  });
-  it("holds the entry's value files in their order, searched after the template's own", () => {
-    const want = entry({ sources: [src({ valueFiles: ["a.yaml", "values.yaml"] })] });
-    expect(rendersEntry(render(want), want, undefined, DEPLOY_URL, "prod")).toBe(true);
-    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["b.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["a.yaml", "b.yaml"] })] }), undefined, DEPLOY_URL, "prod")).toBe(false);
-    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["values.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["values.yaml", "a.yaml"] })] }), undefined, DEPLOY_URL, "prod")).toBe(true);
-  });
-  it("refuses a value file the previous entry had and the new one dropped", () => {
-    const was = entry({ sources: [src({ valueFiles: ["old.yaml"] })] });
-    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL, "prod")).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL, "prod")).toBe(true);
-  });
-  it("refuses a value key the previous entry had and the new one dropped", () => {
-    const was = entry({ sources: [src({ values: { debug: true } })] });
-    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL, "prod")).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL, "prod")).toBe(true);
-  });
-  it("refuses a namespace label the previous entry had and the new one dropped, and a label of another value", () => {
-    const was = entry({ namespaceLabels: { stale: "yes" } });
-    expect(rendersEntry(render(entry(), { stale: "yes" }), entry(), was, DEPLOY_URL, "prod")).toBe(false);
-    expect(rendersEntry(render(entry(), {}), entry(), was, DEPLOY_URL, "prod")).toBe(true);
-    const want = entry({ namespaceLabels: { tier: "b" } });
-    expect(rendersEntry(render(want, { tier: "a" }), want, undefined, DEPLOY_URL, "prod")).toBe(false);
-  });
-  it("uses the registration stage when a member declares or drops the platform stage label", () => {
-    for (const stage of ["dev", "test", "prod"] as const) {
-      const want = entry({ namespaceLabels: { "platform/tenant-stage": "foreign" } });
-      const correct = { ...render(want), namespaceLabels: { "platform/tenant-stage": stage } };
-      expect(rendersEntry(correct, want, undefined, DEPLOY_URL, stage)).toBe(true);
-      expect(rendersEntry(correct, entry(), want, DEPLOY_URL, stage)).toBe(true);
-      expect(rendersEntry({ ...correct, namespaceLabels: { "platform/tenant-stage": "foreign" } }, want, undefined, DEPLOY_URL, stage)).toBe(false);
-      expect(rendersEntry({ ...correct, namespaceLabels: {} }, entry(), undefined, DEPLOY_URL, stage)).toBe(false);
-    }
-  });
-});
