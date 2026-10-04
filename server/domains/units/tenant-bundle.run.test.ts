@@ -300,7 +300,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the owner's packages reader opens to the store's fallback
     expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
-    expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
+    expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.000", channel: "stable" }]);
     expect(logs.some((l) => l.includes(`${UNIT}:${BUILT_TAG}`))).toBe(true);
     expect(logs.some((l) => l.includes(`${UNIT}: ${PLACEHOLDER} -> ${BUILT_TAG}`))).toBe(true);
     const binding = buildRbac.get("RoleBinding", "argocd", `${result.params.guid}-argo-sync`) as RoleBindingManifest | undefined;

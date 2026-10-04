@@ -153,6 +153,21 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     }
   });
 
+  it("refuses a burnt999 without recommending an invalid1000 or pushing", RUNS, async () => {
+    const before = new Map<string, string>();
+    const o = await bothSpellings(() => {
+      const f = releasedRepo({ moved: true, version: "0.4.999" });
+      before.set(f.cwd, originRefs(f));
+      return f;
+    }, ["0.4.999", "stable", "prod"]);
+    const { stdout, stderr } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stdout).toBe("");
+    expect(stderr).toBe("release: 0.4.999 is burnt and its next patch exceeds three digits - choose another version. Nothing was pushed.\n");
+    expect(stderr).not.toContain("0.4.1000");
+    for (const f of [o.sh, o.ps1]) expect(originRefs(f)).toBe(before.get(f.cwd));
+  });
+
   it("names the next three-digit version when a three-digit one is burnt: 0.3.008 after 0.3.007 (#303)", RUNS, async () => {
     const o = await bothSpellings(() => releasedRepo({ moved: true, version: "0.3.007" }), ["0.3.007", "stable", "test"]);
     const { stderr } = expectSameBytes(o);
@@ -203,11 +218,11 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       const f = releasedRepo({ moved: false });
       before.set(f.cwd, originRefs(f));
       return f;
-    }, ["9.9.9", "stable", "dev", "--existing"], ["9.9.9", "stable", "dev", "-Existing"]);
+    }, ["9.9.009", "stable", "dev", "--existing"], ["9.9.009", "stable", "dev", "-Existing"]);
     const { stdout, stderr } = expectSameBytes(o);
     expect(o.sh.status).toBe(1);
     expect(stdout).toBe("");
-    expect(stderr).toBe("release: no release 9.9.9-stable stands on origin, so there is none to put on dev. Nothing was pushed.\n");
+    expect(stderr).toBe("release: no release 9.9.009-stable stands on origin, so there is none to put on dev. Nothing was pushed.\n");
     for (const f of [o.sh, o.ps1]) expect(originRefs(f)).toBe(before.get(f.cwd));
   });
 

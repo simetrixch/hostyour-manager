@@ -536,7 +536,8 @@ try {
     $parts = $Version.Split('.')
     # Three digits stay three digits: 0.3.007 is followed by 0.3.008.
     $nextPatch = [int]$parts[2] + 1
-    $next = "$($parts[0]).$($parts[1]).$(if ($parts[2].Length -eq 3) { $nextPatch.ToString('000') } else { $nextPatch })"
+    if ($nextPatch -gt 999) { Die "$Version is burnt and its next patch exceeds three digits - choose another version. Nothing was pushed." }
+    $next = "$($parts[0]).$($parts[1]).$($nextPatch.ToString('000'))"
     $candidateShort = (git rev-parse --short=7 "$candidate^{commit}" | Select-Object -First 1)
     $headShort = (git rev-parse --short=7 HEAD | Select-Object -First 1)
     Die "$candidate stands on origin at $candidateShort and HEAD is $headShort. A version names one commit, so $Version is burnt: release $next instead. Nothing was pushed."

@@ -39,7 +39,7 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
       for (const result of [o.sh, o.ps1]) {
         expect(existsSync(join(result.root, "work", "hook-count"))).toBe(false);
         const refs = originRefs(result);
-        expect(/refs\/tags\/1[.]2[.]3-stable-\d{14}/.test(refs)).toBe(failure.released);
+        expect(/refs\/tags\/1[.]2[.]003-stable-\d{14}/.test(refs)).toBe(failure.released);
         expect(refs).not.toContain("refs/tags/deploy/");
       }
     });

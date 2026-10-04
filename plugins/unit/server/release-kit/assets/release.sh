@@ -415,7 +415,8 @@ if [ -z "$EXISTING_ONLY" ] && [ -n "$EXISTING" ] && [ "$(git rev-parse --verify 
   # Base ten, because 008 is no octal number; three digits stay three digits.
   PATCH="${VERSION##*.}"
   NEXT_PATCH="$(( 10#${PATCH} + 1 ))"
-  [ "${#PATCH}" -eq 3 ] && NEXT_PATCH="$(printf '%03d' "${NEXT_PATCH}")"
+  [ "$NEXT_PATCH" -le 999 ] || die "${VERSION} is burnt and its next patch exceeds three digits - choose another version. Nothing was pushed."
+  NEXT_PATCH="$(printf '%03d' "${NEXT_PATCH}")"
   NEXT="${VERSION%.*}.${NEXT_PATCH}"
   die "${EXISTING} stands on origin at $(git rev-parse --short=7 "${EXISTING}^{commit}") and HEAD is $(git rev-parse --short=7 HEAD). A version names one commit, so ${VERSION} is burnt: release ${NEXT} instead. Nothing was pushed."
 fi

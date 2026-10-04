@@ -52,17 +52,17 @@ export function parseReleaseTag(tag: string): ParsedRelease | null {
  *  tag starts at. Tags outside the grammar (a `v` prefix, an image tag with its sha7) are not
  *  releases and are passed over. */
 export function nextReleaseVersion(tags: readonly string[], first = "0.1.000"): string {
-  let best: { v: [number, number, number]; width: number } | null = null;
+  let best: { v: [number, number, number] } | null = null;
   for (const tag of tags) {
     const parsed = parseReleaseTag(tag);
     if (!parsed) continue;
     const parts = parsed.version.split(".");
     const v = parts.map(Number) as [number, number, number];
     const b = best?.v;
-    if (b === undefined || v[0] > b[0] || (v[0] === b[0] && (v[1] > b[1] || (v[1] === b[1] && v[2] > b[2])))) best = { v, width: 3 };
+    if (b === undefined || v[0] > b[0] || (v[0] === b[0] && (v[1] > b[1] || (v[1] === b[1] && v[2] > b[2])))) best = { v };
   }
   if (best !== null && best.v[2] >= 999) throw new Error("the next patch exceeds three digits; choose another version");
-  return best === null ? first : `${best.v[0]}.${best.v[1]}.${String(best.v[2] + 1).padStart(best.width, "0")}`;
+  return best === null ? first : `${best.v[0]}.${best.v[1]}.${String(best.v[2] + 1).padStart(3, "0")}`;
 }
 
 /** The bare version half of the grammar — `x.y.z`, the third position as in RELEASE_TAG_RE. What every release surface takes
