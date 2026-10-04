@@ -20,7 +20,7 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
   for (const failure of [
     { name: "deploy request", ref: "refs/tags/deploy/*", manifest: MANIFEST, released: true },
     { name: "release commit", ref: "refs/heads/master", manifest: MANIFEST, released: false },
-    { name: "release tag", ref: "refs/tags/1.2.3-*", manifest: LIBRARY_MANIFEST, released: false },
+    { name: "release tag", ref: "refs/tags/1.2.003-*", manifest: LIBRARY_MANIFEST, released: false },
   ]) {
     it(`never invokes the hook after a rejected ${failure.name} push`, RUNS, async () => {
       const o = await bothSpellings(() => fixtureRepo({
@@ -32,7 +32,7 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
           sh: "printf 'called\\n' >> hook-count\n",
           ps1: '[IO.File]::AppendAllText((Join-Path (Get-Location) "hook-count"), "called`n")\n',
         },
-      }), ["1.2.3", "stable", ...(failure.manifest === MANIFEST ? ["dev"] : [])]);
+      }), ["1.2.003", "stable", ...(failure.manifest === MANIFEST ? ["dev"] : [])]);
       const { stdout } = expectSameBytes(o);
       expect(o.sh.status).toBe(1);
       expect(stdout).not.toContain("running deploy/after-release");
@@ -47,41 +47,41 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
 
   it("PLANTED DEFECT: runs it last, with the tag, the release commit and the stage, from the repository root", RUNS, async () => {
     const { stdout } = expectSameBytes(
-      await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: step(0) }), ["1.2.3", "stable", "dev"]),
+      await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: step(0) }), ["1.2.003", "stable", "dev"]),
     );
     expect(stdout).toContain([
-      "release: running deploy/after-release 1.2.3-stable-<ts14> <sha> dev",
-      "after-release 1.2.3-stable-<ts14> <sha> dev (3 arguments) in <root>/work",
-      "release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev",
+      "release: running deploy/after-release 1.2.003-stable-<ts14> <sha> dev",
+      "after-release 1.2.003-stable-<ts14> <sha> dev (3 arguments) in <root>/work",
+      "release: probe-unit 1.2.003-stable-<ts14> (commit <sha7>) is on its way to dev",
     ].join("\n"));
   });
 
   it("PLANTED DEFECT: passes none as the stage of a library", RUNS, async () => {
     const { stdout } = expectSameBytes(
-      await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true, afterRelease: step(0) }), ["1.2.3", "stable"]),
+      await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true, afterRelease: step(0) }), ["1.2.003", "stable"]),
     );
     expect(stdout).toContain([
-      "after-release 1.2.3-stable-<ts14> <sha> none (3 arguments) in <root>/work",
-      "release: probe-lib 1.2.3-stable-<ts14> (commit <sha7>) is released; nothing is deployed",
+      "after-release 1.2.003-stable-<ts14> <sha> none (3 arguments) in <root>/work",
+      "release: probe-lib 1.2.003-stable-<ts14> (commit <sha7>) is released; nothing is deployed",
     ].join("\n"));
   });
 
   it("PLANTED DEFECT: turns the release red when the step fails, and leaves the release standing", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: step(7) }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: step(7) }), ["1.2.003", "stable", "dev"]);
     const { stdout, stderr } = expectSameBytes(o);
     expect(o.sh.status).toBe(1);
     expect(stderr).toContain(
-      "release: deploy/after-release failed with exit 7 - 1.2.3-stable-<ts14> is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed\n",
+      "release: deploy/after-release failed with exit 7 - 1.2.003-stable-<ts14> is released and its deploy ref is pushed; only the after-release step is missing: run it again once fixed\n",
     );
     expect(stdout).not.toContain("is on its way");
-    expect(originRefs(o.sh)).toMatch(/refs\/tags\/deploy\/dev\/1\.2\.3-stable-\d{14}/);
+    expect(originRefs(o.sh)).toMatch(/refs\/tags\/deploy\/dev\/1\.2\.003-stable-\d{14}/);
   });
 
   it("reports a failed library hook without claiming that a deploy ref was pushed", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true, afterRelease: step(7) }), ["1.2.3", "stable"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true, afterRelease: step(7) }), ["1.2.003", "stable"]);
     const { stdout, stderr } = expectSameBytes(o);
     expect(o.sh.status).toBe(1);
-    expect(stderr).toContain("release: deploy/after-release failed with exit 7 - 1.2.3-stable-<ts14> is released; only the after-release step is missing: run it again once fixed\n");
+    expect(stderr).toContain("release: deploy/after-release failed with exit 7 - 1.2.003-stable-<ts14> is released; only the after-release step is missing: run it again once fixed\n");
     expect(stdout).not.toContain("is released; nothing is deployed");
     expect(originRefs(o.sh)).not.toContain("refs/tags/deploy/");
   });
@@ -89,7 +89,7 @@ describe.skipIf(!BOTH)("the repository's own step after the release", () => {
   for (const only of ["sh", "ps1"] as const) {
     const other = only === "sh" ? "ps1" : "sh";
     it(`PLANTED DEFECT: refuses a step in the ${only} spelling alone, before anything is pushed`, RUNS, async () => {
-      const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: { [only]: step(0)[only] } }), ["1.2.3", "stable", "dev"]);
+      const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: { [only]: step(0)[only] } }), ["1.2.003", "stable", "dev"]);
       const { stderr } = expectSameBytes(o);
       expect(stderr).toBe(
         `release: deploy/after-release.${only} stands without its twin deploy/after-release.${other} - each release script runs its own spelling, so a repository supplies both or neither. Nothing was pushed.\n`,

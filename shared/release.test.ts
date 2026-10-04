@@ -47,29 +47,29 @@ describe("three-digit versions (#303)", () => {
     }
   });
 
-  it("follows 0.3.000 with 0.3.001, 0.3.007 with 0.3.008 and 0.3.099 with 0.3.100, and keeps the form that stands", () => {
+  it("follows 0.3.000 with 0.3.001, 0.3.007 with 0.3.008 and 0.3.099 with 0.3.100, and pads the next version after historical tags", () => {
     expect(nextReleaseVersion(["0.3.000-stable-20270101120000"])).toBe("0.3.001");
     expect(nextReleaseVersion(["0.3.007-stable-20270101120000", "0.3.006-beta-20270101110000"])).toBe("0.3.008");
     expect(nextReleaseVersion(["0.3.099-stable-20270101120000"])).toBe("0.3.100");
-    expect(nextReleaseVersion(["0.1.16-stable-20260927135112"])).toBe("0.1.17");
+    expect(nextReleaseVersion(["0.1.16-stable-20260927135112"])).toBe("0.1.017");
   });
 });
 
 describe("nextReleaseVersion", () => {
   it("takes the highest release version across every channel and bumps the patch", () => {
-    expect(nextReleaseVersion(["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034"])).toBe("0.1.3");
+    expect(nextReleaseVersion(["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034"])).toBe("0.1.003");
   });
 
   it("compares numerically, so 0.8.10 stands above 0.8.9", () => {
-    expect(nextReleaseVersion(["0.8.9-stable-20260901000000", "0.8.10-stable-20260902000000"])).toBe("0.8.11");
+    expect(nextReleaseVersion(["0.8.9-stable-20260901000000", "0.8.10-stable-20260902000000"])).toBe("0.8.011");
   });
 
   it("passes over what is not a release tag — a v prefix, an image tag, a deploy ref", () => {
-    expect(nextReleaseVersion(["v2.0.0", "0.1.2-stable-20260909121415-77dba19", "deploy/prod/0.1.2-stable-20260909121415", "0.1.2-stable-20260909121415"])).toBe("0.1.3");
+    expect(nextReleaseVersion(["v2.0.0", "0.1.2-stable-20260909121415-77dba19", "deploy/prod/0.1.2-stable-20260909121415", "0.1.2-stable-20260909121415"])).toBe("0.1.003");
   });
 
-  it("starts a repository with no release at 0.1.0, or at what the caller names", () => {
-    expect(nextReleaseVersion([])).toBe("0.1.0");
+  it("starts a repository with no release at 0.1.000, or at what the caller names", () => {
+    expect(nextReleaseVersion([])).toBe("0.1.000");
     expect(nextReleaseVersion(["v1"], "1.0.0")).toBe("1.0.0");
   });
 });
@@ -84,4 +84,8 @@ describe("future versions after historical tags", () => {
   it("proposes a padded first version for a new repository", () => {
     expect(nextReleaseVersion([])).toBe("0.1.000");
   });
+});
+
+it("refuses to suggest a four-digit patch at the end of a minor line", () => {
+  expect(() => nextReleaseVersion(["0.4.999-stable-20261004075646"])).toThrow("next patch exceeds three digits");
 });

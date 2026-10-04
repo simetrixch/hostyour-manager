@@ -293,7 +293,7 @@ describe("buildUnitStep — the unit plugin's build-only chain, run for one unit
     // The unit stands registered build-only on the books branch, its release watched at the version
     // read off the repository's tags (none ⇒ 0.1.0) on the channel that reaches prod.
     expect(await onboard.registrations.readBuildRegistration("example-jobs")).not.toBeNull();
-    expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.0", channel: "stable" }]);
+    expect(buildPlane.releaseWatches).toEqual([{ unit: "example-jobs", version: "0.1.000", channel: "stable" }]);
     expect(logs.some((l) => l.includes("build unit example-jobs done"))).toBe(true);
   });
   describe("a registered unit whose manifest declares other builds than it attests", () => {

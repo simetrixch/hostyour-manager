@@ -232,7 +232,7 @@ fi
 [ "$STAGE" = "none" ] && STAGE=""
 
 [ -n "$VERSION" ] && [ -n "$CHANNEL" ] || die "$USAGE"
-[[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$ ]] \
+[[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[0-9]{3}$ ]] \
   || die "version must be x.y.z, the third position three digits such as 000 (got '$VERSION')"
 case "$CHANNEL" in stable|beta|alpha) ;; *) die "channel must be stable|beta|alpha (got '$CHANNEL')" ;; esac
 case "$STAGE" in ""|dev|test|prod) ;; *) die "stage must be dev|test|prod, or none for a library (got '$STAGE')" ;; esac

@@ -57,10 +57,10 @@
   and the allowed stages - is the one that counts. Every property here is re-verified there.
 
 .EXAMPLE
-  ./release/release.ps1 0.6.0 stable prod
+  ./release/release.ps1 0.6.000 stable prod
 
 .EXAMPLE
-  ./release/release.ps1 0.5.0 stable prod -Existing
+  ./release/release.ps1 0.5.000 stable prod -Existing
 
 .EXAMPLE
   ./release/release.ps1 0.3.001 stable
@@ -324,7 +324,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
   }
 }
 
-if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.([0-9]{3}|0|[1-9][0-9]*)$') {
+if ($Version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.[0-9]{3}$') {
   Die "version must be x.y.z, the third position three digits such as 000 (got '$Version')"
 }
 if (@('stable', 'beta', 'alpha') -cnotcontains $Channel) { Die "channel must be stable|beta|alpha (got '$Channel')" }

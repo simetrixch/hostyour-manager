@@ -364,8 +364,8 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(h.seeder.refreshedRepoPats).toEqual([]);
     expect(h.buildCluster.secretWrites).toEqual([]);
     expect(h.github.created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_hour_two" }]);
-    expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: "ghs_hour_two", inputs: { version: "0.1.0", channel: "stable", stage: "prod" } }]);
-    expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
+    expect(h.github.dispatches.map((d) => ({ repo: d.repo, token: d.token, inputs: d.inputs }))).toEqual([{ repo: UNIT, token: "ghs_hour_two", inputs: { version: "0.1.000", channel: "stable", stage: "prod" } }]);
+    expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.000", channel: "stable" }]);
     // ONE credential for the whole pass, of the kind that stores nothing; every open went to it, and
     // the PAT scope preflight read no scopes off it — the step itself stood aside for the App's row.
     expect(creds.seals).toEqual([]); // no row per unit (#226)
@@ -401,7 +401,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect([h.buildCluster.refreshedExternalSecrets, h.buildCluster.secretWrites]).toEqual([["build-git-https", "bump-git-https", "build-npmrc"].map((name) => `${UNIT}-build/${name}`), []]);
     expect(logs.findIndex((l) => l.includes("repo PAT rewritten"))).toBeLessThan(logs.findIndex((l) => l.includes(`in ${UNIT}-build again`)));
     expect(logs.findIndex((l) => l.includes(`written again in ${UNIT}-build`))).toBeLessThan(logs.findIndex((l) => l.includes("release workflow dispatched")));
-    expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.0", channel: "stable" }]);
+    expect(h.buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.000", channel: "stable" }]);
     expect(h.github.dispatches[0]?.token).toBe("ghs_rerun");
   });
 });

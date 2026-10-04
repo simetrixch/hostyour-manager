@@ -29,13 +29,13 @@ describe("readOnboardPrefill", () => {
     const github = new FakeGitHubConsumer();
     github.seedTags("x", "acme", ["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034", "v9"]);
     const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
-    expect(view).toEqual({ version: "0.1.3", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "default", identity: "pat" });
+    expect(view).toEqual({ version: "0.1.003", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "default", identity: "pat" });
     expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
   });
 
   it("starts a repository with no release tag at 0.1.0", async () => {
     const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"], ["x"]), store }, request(), signal());
-    expect(view.version).toBe("0.1.0");
+    expect(view.version).toBe("0.1.000");
   });
 
   it("reads a platform-line unit over the platform's line: its own repo, the platform repo and the engine's", async () => {
@@ -73,7 +73,7 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     github.seedTags(githubApp.org, "acme", ["0.2.0-stable-20260909094733"]);
     const view = await readOnboardPrefill({ github, githubApp, owners: owners([githubApp.org]), store }, request({ repoURL: `https://github.com/${githubApp.org}/acme.git` }), signal());
     expect(view.identity).toBe("github-app");
-    expect(view.version).toBe("0.2.1");
+    expect(view.version).toBe("0.2.001");
     expect(github.tokensSeen).toEqual([githubApp.token]);
   });
 

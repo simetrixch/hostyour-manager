@@ -47,11 +47,11 @@ export function parseReleaseTag(tag: string): ParsedRelease | null {
 
 /** The version the NEXT release of a repository takes: the highest x.y.z among its release tags,
  *  patch + 1 — whatever channel the tags were cut on, because a version number is used once per
- *  repository (and once per platform line, rules §17). A third position written with three digits
- *  keeps them (`0.3.007` is followed by `0.3.008`). `first` is what a repository with no release
+ *  repository (and once per platform line, rules §17). New versions use three patch digits, including after historical
+ *  unpadded tags (`0.4.9` is followed by `0.4.010`). `first` is what a repository with no release
  *  tag starts at. Tags outside the grammar (a `v` prefix, an image tag with its sha7) are not
  *  releases and are passed over. */
-export function nextReleaseVersion(tags: readonly string[], first = "0.1.0"): string {
+export function nextReleaseVersion(tags: readonly string[], first = "0.1.000"): string {
   let best: { v: [number, number, number]; width: number } | null = null;
   for (const tag of tags) {
     const parsed = parseReleaseTag(tag);
@@ -59,8 +59,9 @@ export function nextReleaseVersion(tags: readonly string[], first = "0.1.0"): st
     const parts = parsed.version.split(".");
     const v = parts.map(Number) as [number, number, number];
     const b = best?.v;
-    if (b === undefined || v[0] > b[0] || (v[0] === b[0] && (v[1] > b[1] || (v[1] === b[1] && v[2] > b[2])))) best = { v, width: parts[2]!.length === 3 ? 3 : 0 };
+    if (b === undefined || v[0] > b[0] || (v[0] === b[0] && (v[1] > b[1] || (v[1] === b[1] && v[2] > b[2])))) best = { v, width: 3 };
   }
+  if (best !== null && best.v[2] >= 999) throw new Error("the next patch exceeds three digits; choose another version");
   return best === null ? first : `${best.v[0]}.${best.v[1]}.${String(best.v[2] + 1).padStart(best.width, "0")}`;
 }
 

@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version x.y.z (e.g. 0.8.0)"
+        description: "Release version x.y.zzz (e.g. 0.8.000); exactly three patch digits"
         required: true
         type: string
       channel:

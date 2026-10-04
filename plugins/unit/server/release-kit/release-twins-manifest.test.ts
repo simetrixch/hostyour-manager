@@ -41,7 +41,7 @@ describe.skipIf(!BOTH)("both release-kit assets, stamping package.json", () => {
   });
 
   it("stamps every package.json the repository tracks in the one release commit, identically", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, workspace: true, origin: true }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, workspace: true, origin: true }), ["1.2.003", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(stdout.split("\n").slice(0, 4)).toEqual([
       "release: packages/b/package.json declares no version - nothing to stamp",
@@ -51,7 +51,7 @@ describe.skipIf(!BOTH)("both release-kit assets, stamping package.json", () => {
     ]);
     for (const f of [o.sh, o.ps1]) {
       const shown = run("git", ["-c", "core.quotePath=false", "show", "--name-only", "--format=%s", "HEAD"], f.cwd).stdout;
-      expect(shown.split("\n").filter(Boolean)).toEqual([expect.stringMatching(/^release: 1\.2\.3-stable-\d{14}$/), "package.json", "packages/a/package.json", "packages/ü/package.json"]);
+      expect(shown.split("\n").filter(Boolean)).toEqual([expect.stringMatching(/^release: 1\.2\.003-stable-\d{14}$/), "package.json", "packages/a/package.json", "packages/ü/package.json"]);
       expect(readFileSync(join(f.cwd, "packages", "a", "package.json"), "utf8")).toContain('"version": "1.2.3",\n  "dependencies": { "x": "1.0.0" }');
       expect(readFileSync(join(f.cwd, "packages", "b", "package.json"), "utf8")).toBe('{\n  "name": "b"\n}\n');
       // Only the version line moves: the byte order mark and the CRLF endings stay.
@@ -65,10 +65,10 @@ describe.skipIf(!BOTH)("both release-kit assets, stamping package.json", () => {
       writeFileSync(join(f.cwd, "package.json"), '{\n  "name": "probe",\n  "version": "1.2.3"\n}\n');
       for (const args of [["add", "package.json"], ["commit", "-qm", "at the version"], ["push", "-q", "origin", "HEAD:master"]]) run("git", args, f.cwd);
       return f;
-    }, ["1.2.3", "stable", "dev"]);
+    }, ["1.2.003", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: minted 1.2.3-stable-<ts14>\n");
+    expect(stdout).toContain("release: minted 1.2.003-stable-<ts14>\n");
     expect(stdout).not.toContain("declares");
     for (const f of [o.sh, o.ps1]) expect(run("git", ["log", "-1", "--format=%s"], f.cwd).stdout.trim()).toBe("at the version");
   });

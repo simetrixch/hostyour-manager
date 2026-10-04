@@ -201,22 +201,22 @@ export function moveMaster(f: Fixture): void {
   }
 }
 
-/** A repository whose 1.2.3-stable release already stands on origin, put on dev by the bash spelling:
+/** A repository whose 1.2.003-stable release already stands on origin, put on dev by the bash spelling:
  *  the rerun is the subject here, and the first run's bytes are what the success-path scenario
  *  asserts. With `moved`, master has one commit on top of the released one. */
 export function releasedRepo(opts: { moved: boolean; version?: string }): Fixture {
   const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
-  const first = run(BASH, [SCRIPTS.sh, opts.version ?? "1.2.3", "stable", "dev"], f.cwd);
+  const first = run(BASH, [SCRIPTS.sh, opts.version ?? "1.2.003", "stable", "dev"], f.cwd);
   if (first.status !== 0) throw new Error(`the first release failed: ${first.stderr}`);
   if (opts.moved) moveMaster(f);
   return f;
 }
 
-/** A repository carrying a 1.2.3-stable tag that never reached origin and names the commit before
+/** A repository carrying a 1.2.003-stable tag that never reached origin and names the commit before
  *  HEAD — what a run whose push was refused leaves behind once the fix has landed. */
 export function residueRepo(): Fixture {
   const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
-  const tag = run("git", ["tag", "-a", "1.2.3-stable-20200101000000", "-m", "residue"], f.cwd);
+  const tag = run("git", ["tag", "-a", "1.2.003-stable-20200101000000", "-m", "residue"], f.cwd);
   if (tag.status !== 0) throw new Error(`git tag failed: ${tag.stderr}`);
   moveMaster(f);
   return f;
@@ -225,7 +225,7 @@ export function residueRepo(): Fixture {
 /** A release whose tag's push never landed: the tag stands on HEAD here and origin lacks it (#227). */
 export function owedPushRepo(): Fixture {
   const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
-  const tag = run("git", ["tag", "-a", "1.2.3-stable-20200101000000", "-m", "owed"], f.cwd);
+  const tag = run("git", ["tag", "-a", "1.2.003-stable-20200101000000", "-m", "owed"], f.cwd);
   if (tag.status !== 0) throw new Error(`git tag failed: ${tag.stderr}`);
   return f;
 }
@@ -244,8 +244,8 @@ export function issueBranchRepo(opts: { tracking: boolean; owed?: boolean }): Fi
   if (opts.owed) {
     writeFileSync(join(f.cwd, "stamp.txt"), "the release commit whose push was cut\n");
     git("add", "stamp.txt");
-    git("commit", "-qm", "release: 1.2.3-stable-20200101000000");
-    git("tag", "-a", "1.2.3-stable-20200101000000", "-m", "owed");
+    git("commit", "-qm", "release: 1.2.003-stable-20200101000000");
+    git("tag", "-a", "1.2.003-stable-20200101000000", "-m", "owed");
   }
   return f;
 }
@@ -253,7 +253,7 @@ export function issueBranchRepo(opts: { tracking: boolean; owed?: boolean }): Fi
 /** Every ref origin holds, with its commit — the whole of what a release may move. */
 export const originRefs = (f: Fixture): string => run("git", ["ls-remote", "origin"], f.cwd).stdout;
 export const head = (f: Fixture): string => run("git", ["rev-parse", "HEAD"], f.cwd).stdout.trim();
-export const releaseTags = (f: Fixture): string[] => run("git", ["tag", "-l", "1.2.3-stable-*"], f.cwd).stdout.split("\n").filter((l) => l.length > 0);
+export const releaseTags = (f: Fixture): string[] => run("git", ["tag", "-l", "1.2.003-stable-*"], f.cwd).stdout.split("\n").filter((l) => l.length > 0);
 
 /** A directory that is no repository at all — where the two refusals needing none are performed. */
 export function bareDir(): Fixture {

@@ -21,8 +21,8 @@ describe("the normaliser the comparison rests on", () => {
   });
 
   it("replaces the volatile values and nothing beside them", () => {
-    const line = "release: probe-unit 1.2.3-stable-20260904103359 (commit 17f0eb9) is on its way to dev\n";
-    expect(normalise(line, "/nowhere")).toBe("release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev\n");
+    const line = "release: probe-unit 1.2.003-stable-20260904103359 (commit 17f0eb9) is on its way to dev\n";
+    expect(normalise(line, "/nowhere")).toBe("release: probe-unit 1.2.003-stable-<ts14> (commit <sha7>) is on its way to dev\n");
     // A root path is replaced in every spelling either operating system writes it in.
     expect(normalise("at C:/tmp/x/deploy/platform.yaml", "C:/tmp/x")).toBe("at <root>/deploy/platform.yaml");
     expect(normalise("at C:\\tmp\\x\\deploy", "C:/tmp/x")).toBe("at <root>\\deploy");
@@ -86,21 +86,21 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("warns about the channel ceiling and refuses a directory that is no repository, identically", RUNS, async () => {
-    const { stderr } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2.3", "alpha", "prod"]));
+    const { stderr } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2.003", "alpha", "prod"]));
     // The ceiling WARNS and continues; the refusal underneath is the next thing either spelling says.
     expect(stderr).toContain("release: WARNING - channel alpha admits only: dev.");
     expect(stderr).toContain("release: not inside a git repository\n");
   });
 
   it("refuses a dirty worktree identically", RUNS, async () => {
-    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, dirty: true }), ["1.2.3", "stable", "dev"]));
+    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, dirty: true }), ["1.2.003", "stable", "dev"]));
     expect(stderr).toBe("release: worktree is dirty - commit or stash before releasing\n");
   });
 
   it("refuses a manifest that states no name identically, naming the same path", RUNS, async () => {
     // The path is composed by each spelling out of the repository root git answers with. Written with
     // a backslash on one side it would differ here by every separator in it.
-    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({}), ["1.2.3", "stable", "dev"]));
+    const { stderr } = expectSameBytes(await bothSpellings(() => fixtureRepo({}), ["1.2.003", "stable", "dev"]));
     expect(stderr).toBe(
       "release: the manifest <root>/work/deploy/platform.yaml states no name - it is what the release line and any pin are written under\n",
     );
@@ -111,19 +111,19 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     // the deploy ref, and reports. Nothing here reaches the network — origin is a bare repository
     // beside the working tree — so this is the whole of what such a release does.
     const { stdout, stderr } = expectSameBytes(
-      await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable", "dev"]),
+      await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.003", "stable", "dev"]),
     );
     expect(stdout).toBe([
       "release: package.json declares 1.2.3",
-      "release: minted 1.2.3-stable-<ts14>",
+      "release: minted 1.2.003-stable-<ts14>",
       "release: the manifest <root>/work/deploy/platform.yaml names no platformRepo, so nothing is pinned from here - the deploy ref above is what the platform reacts to",
-      "release: probe-unit 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev",
+      "release: probe-unit 1.2.003-stable-<ts14> (commit <sha7>) is on its way to dev",
       "release: the platform builds these image tags, or skips the build when they already exist:",
-      "    probe:1.2.3-stable-<ts14>-<sha7>",
+      "    probe:1.2.003-stable-<ts14>-<sha7>",
       "",
     ].join("\n"));
     // git's own push lines are on standard error, and they are the same on both sides too.
-    expect(stderr).toContain("deploy/dev/1.2.3-stable-<ts14>");
+    expect(stderr).toContain("deploy/dev/1.2.003-stable-<ts14>");
   });
 
   // A RERUN FOR A VERSION THAT ALREADY STANDS ON ORIGIN, in its three shapes. A version names one
@@ -137,12 +137,12 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       const f = releasedRepo({ moved: true });
       before.set(f.cwd, originRefs(f));
       return f;
-    }, ["1.2.3", "stable", "test"]);
+    }, ["1.2.003", "stable", "test"]);
     const { stdout, stderr } = expectSameBytes(o);
     expect(o.sh.status).toBe(1);
     expect(stdout).toBe("");
     expect(stderr).toBe(
-      "release: 1.2.3-stable-<ts14> stands on origin at <sha7> and HEAD is <sha7>. A version names one commit, so 1.2.3 is burnt: release 1.2.4 instead. Nothing was pushed.\n",
+      "release: 1.2.003-stable-<ts14> stands on origin at <sha7> and HEAD is <sha7>. A version names one commit, so 1.2.003 is burnt: release 1.2.004 instead. Nothing was pushed.\n",
     );
     for (const f of [o.sh, o.ps1]) {
       // Nothing on origin moved: not the delivery branch of the stage asked for, not the one of the
@@ -163,10 +163,10 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("reuses a tag that stands on origin on HEAD and pushes its deploy ref for a further stage, moving no branch (#293)", RUNS, async () => {
-    const o = await bothSpellings(() => releasedRepo({ moved: false }), ["1.2.3", "stable", "test"]);
+    const o = await bothSpellings(() => releasedRepo({ moved: false }), ["1.2.003", "stable", "test"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
+    expect(stdout).toContain("release: reusing the existing release 1.2.003-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
     expect(stdout).not.toContain("stands at <sha7>");
     expect(stdout).not.toContain("minted");
     for (const f of [o.sh, o.ps1]) {
@@ -182,10 +182,10 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   // nothing is minted, and a release that never stood on origin is refused before any push.
 
   it("puts a release that stands on origin on a stage again from a moved HEAD, at the release's own commit", RUNS, async () => {
-    const o = await bothSpellings(() => releasedRepo({ moved: true }), ["1.2.3", "stable", "test", "--existing"], ["1.2.3", "stable", "test", "-Existing"]);
+    const o = await bothSpellings(() => releasedRepo({ moved: true }), ["1.2.003", "stable", "test", "--existing"], ["1.2.003", "stable", "test", "-Existing"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
+    expect(stdout).toContain("release: reusing the existing release 1.2.003-stable-<ts14> - one release per version+channel, so putting it on test rebuilds nothing\n");
     expect(stdout).not.toContain("minted");
     for (const f of [o.sh, o.ps1]) {
       const [tag] = releaseTags(f);
@@ -212,17 +212,17 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("drops a tag that never reached origin and names another commit, and cuts the release again", RUNS, async () => {
-    const o = await bothSpellings(() => residueRepo(), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => residueRepo(), ["1.2.003", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain(
-      "release: 1.2.3-stable-<ts14> stands on this machine only and names <sha7>, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again.\n",
+      "release: 1.2.003-stable-<ts14> stands on this machine only and names <sha7>, not the commit being released. A run whose push was refused left it behind; it is dropped and cut again.\n",
     );
-    expect(stdout).toContain("release: minted 1.2.3-stable-<ts14>\n");
+    expect(stdout).toContain("release: minted 1.2.003-stable-<ts14>\n");
     for (const f of [o.sh, o.ps1]) {
       const tags = releaseTags(f);
       expect(tags).toHaveLength(1);
-      expect(tags[0]).not.toBe("1.2.3-stable-20200101000000");
+      expect(tags[0]).not.toBe("1.2.003-stable-20200101000000");
       expect(originRefs(f)).toContain(`refs/tags/${tags[0]}\n`);
       expect(originRefs(f)).toContain(`refs/tags/deploy/dev/${tags[0]}\n`);
       expect(originRefs(f)).not.toContain("refs/heads/deploy/");
@@ -230,16 +230,16 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("pushes a tag that stands on HEAD here and is missing on origin, then reuses it — the push a cut run still owed (#227)", RUNS, async () => {
-    const o = await bothSpellings(() => owedPushRepo(), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => owedPushRepo(), ["1.2.003", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: 1.2.3-stable-<ts14> stands on this machine only, on the commit being released - its push never reached origin; pushed now\n");
-    expect(stdout).toContain("release: reusing the existing release 1.2.3-stable-<ts14> - one release per version+channel, so putting it on dev rebuilds nothing\n");
+    expect(stdout).toContain("release: 1.2.003-stable-<ts14> stands on this machine only, on the commit being released - its push never reached origin; pushed now\n");
+    expect(stdout).toContain("release: reusing the existing release 1.2.003-stable-<ts14> - one release per version+channel, so putting it on dev rebuilds nothing\n");
     expect(stdout).not.toContain("minted");
     for (const f of [o.sh, o.ps1]) {
-      expect(releaseTags(f)).toEqual(["1.2.3-stable-20200101000000"]);
-      expect(originRefs(f)).toContain("refs/tags/1.2.3-stable-20200101000000\n");
-      expect(originRefs(f)).toContain("refs/tags/deploy/dev/1.2.3-stable-20200101000000\n");
+      expect(releaseTags(f)).toEqual(["1.2.003-stable-20200101000000"]);
+      expect(originRefs(f)).toContain("refs/tags/1.2.003-stable-20200101000000\n");
+      expect(originRefs(f)).toContain("refs/tags/deploy/dev/1.2.003-stable-20200101000000\n");
       expect(originRefs(f)).not.toContain("refs/heads/deploy/");
     }
   });
@@ -249,7 +249,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   // own name, as before.
 
   it("puts the release commit of a branch tracking origin/master under another name on master, and makes no branch of its name", RUNS, async () => {
-    const o = await bothSpellings(() => issueBranchRepo({ tracking: true }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: true }), ["1.2.003", "stable", "dev"]);
     expectSameBytes(o);
     for (const f of [o.sh, o.ps1]) {
       expect(f.status).toBe(0);
@@ -259,7 +259,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("puts the release commit a cut run still owed on master too, from a branch tracking it under another name", RUNS, async () => {
-    const o = await bothSpellings(() => issueBranchRepo({ tracking: true, owed: true }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: true, owed: true }), ["1.2.003", "stable", "dev"]);
     expect(expectSameBytes(o).stdout).toContain("its push never reached origin; pushed now\n");
     for (const f of [o.sh, o.ps1]) {
       expect(f.status).toBe(0);
@@ -269,7 +269,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   });
 
   it("PLANTED INNOCENT: pushes a branch that tracks nothing to its own name, and leaves master where it stood", RUNS, async () => {
-    const o = await bothSpellings(() => issueBranchRepo({ tracking: false }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => issueBranchRepo({ tracking: false }), ["1.2.003", "stable", "dev"]);
     expectSameBytes(o);
     for (const f of [o.sh, o.ps1]) {
       expect(f.status).toBe(0);
@@ -282,13 +282,13 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   // takes no stage and pushes no deploy ref. Everything else is put on a stage.
 
   it("releases a library without a stage identically, and pushes no deploy ref", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, packageJson: true, origin: true }), ["1.2.3", "stable"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, packageJson: true, origin: true }), ["1.2.003", "stable"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toBe([
       "release: package.json declares 1.2.3",
-      "release: minted 1.2.3-stable-<ts14>",
-      "release: probe-lib 1.2.3-stable-<ts14> (commit <sha7>) is released; nothing is deployed",
+      "release: minted 1.2.003-stable-<ts14>",
+      "release: probe-lib 1.2.003-stable-<ts14> (commit <sha7>) is released; nothing is deployed",
       "",
     ].join("\n"));
     for (const f of [o.sh, o.ps1]) {
@@ -300,15 +300,15 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
 
   it("PLANTED DEFECT: the deploy-ref check above goes red on a unit, which does push one", RUNS, async () => {
     const f = fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true });
-    expect((await runAsync(BASH, [SCRIPTS.sh, "1.2.3", "stable", "dev"], f.cwd)).status).toBe(0);
+    expect((await runAsync(BASH, [SCRIPTS.sh, "1.2.003", "stable", "dev"], f.cwd)).status).toBe(0);
     expect(originRefs(f)).toContain("deploy/");
   });
 
   it("releases a library with the stage `none` exactly as without one", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true }), ["1.2.3", "stable", "none"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST, origin: true }), ["1.2.003", "stable", "none"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: probe-lib 1.2.3-stable-<ts14> (commit <sha7>) is released; nothing is deployed\n");
+    expect(stdout).toContain("release: probe-lib 1.2.003-stable-<ts14> (commit <sha7>) is released; nothing is deployed\n");
   });
 
   it("refuses a stage, and --existing, for a library identically, before any push", RUNS, async () => {
@@ -318,17 +318,17 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
       before.set(f.cwd, originRefs(f));
       return f;
     };
-    const staged = await bothSpellings(build, ["1.2.3", "stable", "dev"]);
+    const staged = await bothSpellings(build, ["1.2.003", "stable", "dev"]);
     const { stderr } = expectSameBytes(staged);
     expect(staged.sh.status).toBe(1);
     expect(stderr).toBe("release: probe-lib declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed.\n");
-    const existing = await bothSpellings(build, ["1.2.3", "stable", "none", "--existing"], ["1.2.3", "stable", "none", "-Existing"]);
+    const existing = await bothSpellings(build, ["1.2.003", "stable", "none", "--existing"], ["1.2.003", "stable", "none", "-Existing"]);
     expect(expectSameBytes(existing).stderr).toBe("release: --existing puts a release that stands on origin on a stage again, and probe-lib deploys nothing. Nothing was pushed.\n");
     for (const f of [staged.sh, staged.ps1, existing.sh, existing.ps1]) expect(originRefs(f)).toBe(before.get(f.cwd));
   });
 
   it("refuses a chart-only unit without a stage identically: a chart deploys, even with no builds", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-chart\nchart:\n  path: deploy/chart\n", origin: true }), ["1.2.3", "stable"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-chart\nchart:\n  path: deploy/chart\n", origin: true }), ["1.2.003", "stable"]);
     const { stderr } = expectSameBytes(o);
     expect(o.sh.status).toBe(1);
     expect(stderr).toBe("release: probe-chart declares builds, a chart or a tenant block, so a release of it is put on a stage - name dev, test or prod. Nothing was pushed.\n");
@@ -337,15 +337,15 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   it("names only the top-level builds as images: a tenant block's members are none", RUNS, async () => {
     // PLANTED DEFECT: a reader of every `- name:` line would print `auth` as an image this release builds.
     const fanOut = "name: probe-fanout\ntenant:\n  members:\n    - name: auth\n      chart: charts/auth\n";
-    const o = await bothSpellings(() => fixtureRepo({ manifest: fanOut, origin: true }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: fanOut, origin: true }), ["1.2.003", "stable", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
-    expect(stdout).toContain("release: probe-fanout 1.2.3-stable-<ts14> (commit <sha7>) is on its way to dev\n");
+    expect(stdout).toContain("release: probe-fanout 1.2.003-stable-<ts14> (commit <sha7>) is on its way to dev\n");
     expect(stdout).not.toContain("auth");
   });
 
-  it("stamps a beta with its channel as the prerelease part identically: 1.2.3-beta", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.3", "beta", "dev"]);
+  it("stamps a beta with its channel as the prerelease part identically: 1.2.003-beta", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true }), ["1.2.003", "beta", "dev"]);
     const { stdout } = expectSameBytes(o);
     expect(o.sh.status).toBe(0);
     expect(stdout).toContain("release: package.json declares 1.2.3-beta\n");
@@ -357,21 +357,21 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
   it("refuses a channel and a stage spelled in another case identically", RUNS, async () => {
     // PLANTED DEFECT: PowerShell compares without case by default, and `Beta` or `None` taken for the
     // real word mints a tag the bash twin refuses.
-    const channel = await bothSpellings(() => bareDir(), ["1.2.3", "Beta", "dev"]);
+    const channel = await bothSpellings(() => bareDir(), ["1.2.003", "Beta", "dev"]);
     expect(expectSameBytes(channel).stderr).toBe("release: channel must be stable|beta|alpha (got 'Beta')\n");
-    const stage = await bothSpellings(() => bareDir(), ["1.2.3", "stable", "None"]);
+    const stage = await bothSpellings(() => bareDir(), ["1.2.003", "stable", "None"]);
     expect(expectSameBytes(stage).stderr).toBe("release: stage must be dev|test|prod, or none for a library (got 'None')\n");
   });
 
   it("reads the chart, tenant and builds keys only as YAML spells them, identically", RUNS, async () => {
     // `Chart:` is no chart key, so this manifest deploys nothing: both twins take it for a library.
-    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-case\nChart:\n  path: deploy/chart\nBuilds:\n  - name: x\n" }), ["1.2.3", "stable", "dev"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: "name: probe-case\nChart:\n  path: deploy/chart\nBuilds:\n  - name: x\n" }), ["1.2.003", "stable", "dev"]);
     expect(o.sh.status).toBe(1);
     expect(expectSameBytes(o).stderr).toBe("release: probe-case declares no builds, no chart and no tenant block, so a release of it deploys nothing and takes no stage - release it without one. Nothing was pushed.\n");
   });
 
   it("takes --existing before the stage as after it, as the twin's switch does", RUNS, async () => {
-    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST }), ["1.2.3", "stable", "--existing"], ["1.2.3", "stable", "-Existing"]);
+    const o = await bothSpellings(() => fixtureRepo({ manifest: LIBRARY_MANIFEST }), ["1.2.003", "stable", "--existing"], ["1.2.003", "stable", "-Existing"]);
     expect(o.sh.status).toBe(1);
     expect(expectSameBytes(o).stderr).toBe("release: --existing puts a release that stands on origin on a stage again, and probe-lib deploys nothing. Nothing was pushed.\n");
   });
@@ -380,7 +380,7 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     // Two runs of the SAME spelling with different arguments must not compare equal, or every
     // assertion above would be comparing something to itself.
     const a = run(BASH, [SCRIPTS.sh, "1.2", "stable", "dev"], tempDir());
-    const b = run(BASH, [SCRIPTS.sh, "1.2.3", "banana", "dev"], tempDir());
+    const b = run(BASH, [SCRIPTS.sh, "1.2.003", "banana", "dev"], tempDir());
     expect(normalise(b.stderr, "/nowhere")).not.toBe(normalise(a.stderr, "/nowhere"));
   });
 });
