@@ -121,6 +121,39 @@ describe("migrate (consumer)", () => {
   });
 });
 
+describe("verify-quiesced (consumer)", () => {
+  // What a quiesced consumer that brings PostgreSQL runs: the store's chart keeps the database and its
+  // metrics exporter, whose Deployment the upstream chart names after the Helm release, which is the
+  // consumer's Application; the application itself asks for zero replicas.
+  const deployment = (name: string, desired: number) => ({ kind: "Deployment", name, available: true, desired, ready: desired });
+  const store = [deployment("postgres", 1), deployment(`${CONSUMER}-prod-prometheus-postgres-exporter`, 1)];
+
+  async function verifyQuiesced(application: ReturnType<typeof deployment>[]): Promise<void> {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+    f.source.reader.setSmoke({ namespaceExists: true, externalSecretsReady: true, workloads: [...store, ...application] });
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    const steps = makeMigrateDef(ports).steps(params);
+    await driveSteps(db, f, steps.filter((s) => s.name === "quiesce" || s.name === "verify-quiesced"), params, []);
+  }
+
+  it("lets the store and its exporter run while the application asks for zero replicas", async () => {
+    await expect(verifyQuiesced([deployment(`${CONSUMER}-api`, 0)])).resolves.toBeUndefined();
+  });
+
+  it("refuses an application workload that still runs", async () => {
+    await expect(verifyQuiesced([deployment(`${CONSUMER}-api`, 1)])).rejects.toThrow(`still runs Deployment/${CONSUMER}-api (1/1)`);
+  });
+
+  it("refuses an application workload whose name only starts like the store's", async () => {
+    await expect(verifyQuiesced([deployment("postgres-admin", 1)])).rejects.toThrow("still runs Deployment/postgres-admin (1/1)");
+  });
+});
+
 describe("the consumer dump (hostyour-manager#333)", () => {
   it("dumps the claims as the user of the workload that mounts them", async () => {
     seedMaster(db);

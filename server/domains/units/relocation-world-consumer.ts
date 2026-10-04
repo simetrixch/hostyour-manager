@@ -309,9 +309,12 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         localTx(c, (tx) => tx.update(apps).set({ clusterId: target.clusterId, status: "active", lastRunId: c.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
         c.log("meta", `consumer ${ac.name} recorded on cluster ${target.clusterId} (active)`);
       },
-      // The per-consumer PostgreSQL is provisioner-owned (not chart-rendered), and it DELIBERATELY
-      // keeps running through a quiesce — that is what keeps its databases reachable for the dump.
-      workloadExempt: (w) => w.name === "postgres" || w.name.startsWith("postgres-"),
+      // The per-consumer PostgreSQL DELIBERATELY keeps running through a quiesce — that is what keeps
+      // its databases reachable for the dump. Its chart (hostyour-cloud clusters/units/postgresql) pins
+      // the database as `postgres` and renders a metrics exporter, which reads and writes nothing; the
+      // upstream exporter chart names it after the Helm release, which is this Application. Exact
+      // names, so an application workload never passes for the store.
+      workloadExempt: (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter`,
     };
   };
 }
