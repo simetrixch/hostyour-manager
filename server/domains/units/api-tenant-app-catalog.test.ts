@@ -79,6 +79,15 @@ const read = async (app: Hono<AppEnv>, cookie: string, id = "tnt_1"): Promise<{ 
 };
 
 describe("GET /api/tenants/:id/app-catalog", () => {
+  it("PLANTED DEFECT: marks a live member deployed even when apps[] does not list it", async () => {
+    const repo = new FakePlatformRepo();
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(["erp", "crm"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...TEST_BUNDLE });
+    const w = tenantRegistrationWrite("prod", GUID, registration);
+    repo.seed(repo.booksBranch, w.path, w.content);
+    const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
+    expect((await read(app, cookie)).body.apps.map((a) => [a.name, a.deployed])).toEqual([["erp", true], ["crm", true]]);
+  });
+
   it("answers the template's apps, each marked deployed where the registration's apps[] names it — with a bundle and without one alike", async () => {
     const template = { list: async () => CATALOG };
     const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template });

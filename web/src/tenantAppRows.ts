@@ -76,13 +76,15 @@ export function unknownDomainText(catalog: Pick<TenantAppCatalogView, "websites"
 
 /** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website
  *  folder among them. */
-export function undeployedApps(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView[] {
-  return catalog.filter((a) => !a.deployed && a.sites === undefined);
+export function undeployedApps(catalog: readonly TenantCatalogAppView[], members: readonly string[] = []): TenantCatalogAppView[] {
+  return catalog.filter((a) => !a.deployed && !members.includes(a.name) && a.sites === undefined);
 }
 
 /** The bundle's website folder, the one entry that lists sites, or null where it has none. */
-export function websiteFolder(catalog: readonly TenantCatalogAppView[]): TenantCatalogAppView | null {
-  return catalog.find((a) => a.sites !== undefined) ?? null;
+export function websiteFolder(catalog: readonly TenantCatalogAppView[], websites: readonly { site: string }[] = []): TenantCatalogAppView | null {
+  const folder = catalog.find((a) => a.sites !== undefined);
+  const sites = folder?.sites?.filter((site) => !websites.some((w) => w.site === site)) ?? [];
+  return folder && sites.length > 0 ? { ...folder, sites } : null;
 }
 
 /** The name a new website of `site` gets: clear of every member the tenant has and every app its

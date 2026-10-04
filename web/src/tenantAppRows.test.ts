@@ -89,4 +89,15 @@ describe("undeployedApps", () => {
   it("offers only the bundle's undeployed apps, in catalog order", () => {
     expect(undeployedApps([entry("erp", true), entry("crm", false), entry("web", false)]).map((a) => a.name)).toEqual(["crm", "web"]);
   });
+
+  it("PLANTED DEFECT: a running member is never offered even with a stale deployed flag", () => {
+    expect(undeployedApps([entry("workshop", false), entry("crm", false)], ["auth", "workshop"]).map((a) => a.name)).toEqual(["crm"]);
+  });
+
+  it("offers only unused website sites and removes the folder only after the last site is deployed", () => {
+    const web = { ...entry("web", true), sites: ["show", "veloluck"] };
+    expect(websiteFolder([web], [{ site: "show" }])?.sites).toEqual(["veloluck"]);
+    expect(websiteFolder([web], [{ site: "show" }, { site: "veloluck" }])).toBeNull();
+    expect(websiteFolder([web], [])?.sites).toEqual(["show", "veloluck"]);
+  });
 });

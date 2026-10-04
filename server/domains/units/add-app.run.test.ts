@@ -212,6 +212,11 @@ describe("add-app streaming planner", () => {
     await expect(def.planStream!({ tenantId: "tnt_1", app: "erp" }, planCtx())).rejects.toThrow(/already exists/);
   });
 
+  it("refuses a standing member from a stale add-app form before reading or building the catalog", async () => {
+    seedClusters();
+    await expect(makeAddAppDef(ports()).planStream!({ tenantId: "tnt_1", app: "auth" }, planCtx())).rejects.toThrow(/already exists/);
+  });
+
   // A standing bundle carries every app of its tenant: adding one the bundle lacks extends it —
   // the tenant-apps-repo steps ahead of the image gate, the render at the standing tag until
   // refresh-images re-renders at the built one (#215).

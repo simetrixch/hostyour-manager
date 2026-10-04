@@ -362,11 +362,12 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       // A suspended tenant renders with no workloads, so a new app's members would never come up and
       // the watch would burn the full timeout — refuse up front.
       if (current.entry.suspended) throw errValidation(`tenant ${tc.guid} is suspended — resume it before adding an app`);
-      if (current.entry.apps.some((a) => a.name === req.app)) {
+      if ([...current.entry.apps, ...current.entry.members].some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
       const website = req.folder !== undefined && req.site !== undefined && req.domain !== undefined ? { folder: req.folder, site: req.site, domain: req.domain } : undefined;
       if (website) {
+        if (current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) throw errValidation(`site "${website.site}" already runs in tenant ${tc.guid}`);
         if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
         const serving = current.entry.apps.find((a) => a.domain === website.domain);
         if (serving) throw errValidation(`${website.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);

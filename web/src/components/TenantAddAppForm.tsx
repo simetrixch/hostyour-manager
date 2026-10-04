@@ -41,7 +41,7 @@ export function TenantAddAppForm({ catalog, busy, onAdd, onRecordPackagesReader 
         {catalog.reason}
       </span>
     );
-  const offered = undeployedApps(catalog.apps);
+  const offered = undeployedApps(catalog.apps, catalog.members);
   if (offered.length === 0)
     return (
       <span className="field__hint" role="note">

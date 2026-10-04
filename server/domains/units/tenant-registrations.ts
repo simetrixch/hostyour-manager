@@ -258,6 +258,9 @@ export class TenantRegistrations {
     const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
+    if (op === "append" && website && current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) {
+      throw errValidation(`site "${website.site}" already runs in tenant "${guid}"`);
+    }
     // Held against THIS tenant's own members, not against a constant: both are named
     // <guid>-<name>-<stage>, so the app would claim the member's namespace, AppProject and Application.
     if (op === "append" && current.entry.members.some((m) => m.name === app)) {
