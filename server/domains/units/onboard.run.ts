@@ -31,6 +31,7 @@ import {
 } from "#unit/server/release-cycle.ts";
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import { checkStep } from "./onboard-check.ts";
+import { StandingBuildOnlyParams, hasStandingBuildOnly, standingBuildOnlySteps } from "./onboard-standing-build.ts";
 import {
   BuildParamsBase, BuildOnlyParams, buildOnlySteps, DEFAULT_BRANCH_HEAD, unitNameSchema, repoURLSchema, type BuildPorts,
 } from "#unit/server/build-chain.ts";
@@ -138,9 +139,9 @@ export const DeployableOnboardParams = BuildParamsBase.extend({
 });
 export type DeployableOnboardParams = z.infer<typeof DeployableOnboardParams>;
 
-export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyParams])
+export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyParams, StandingBuildOnlyParams])
   .superRefine((p, ctx) => {
-    if (p.form !== "build-only") return;
+    if (p.form === "deployable") return;
     if ((p.report === undefined) === (p.ungated === undefined)) {
       ctx.addIssue({
         code: "custom",
@@ -272,6 +273,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
 
 
 function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
+  if (p.form === "standing-build-only") return standingBuildOnlySteps(ports, p, checkStep(ports, { ...p, form: "build-only" }));
   // The check step RE-RUNS the gates at the current head, so the one onboarding admitted without a
   // gate has no check to run: leaving it in would dispatch at execute time the very sandbox the plan
   // established there is no point waiting for.
@@ -438,7 +440,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         const mismatch = formMismatch(outcome, false, req.consumerName);
         if (mismatch) return mismatch;
         const params: OnboardParams = {
-          form: "build-only",
+          form: await hasStandingBuildOnly(ports, req) ? "standing-build-only" : "build-only",
           consumerName: req.consumerName,
           repoURL: req.repoURL,
           repoCredentialId: req.repoCredentialId,
@@ -458,14 +460,16 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
           kind: "consumer-onboard",
           targetKind: "cluster",
           targetId: master.clusterId, // the build plane — the one cluster this form touches
-          summary: `Onboard build-only unit "${req.consumerName}" (version ${req.version}, channel ${req.channel}, release run on ${stage}): ${stepDefs.length} steps — attest the registration, inject the release kit, trigger the cycle once and watch its build.`,
+          summary: params.form === "standing-build-only"
+            ? `Re-attest standing build-only unit "${req.consumerName}" (version ${req.version}, channel ${req.channel}, release run on ${stage}): ${stepDefs.length} steps — keep its identity, credentials, webhook and grants, wait for the exact build render, then inject the kit and prove one release.`
+            : `Onboard build-only unit "${req.consumerName}" (version ${req.version}, channel ${req.channel}, release run on ${stage}): ${stepDefs.length} steps — attest the registration, inject the release kit, trigger the cycle once and watch its build.`,
           steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
           targets: [], // no host owned — the Manager acts master-locally
           locks: [
             { resource: "git-branch", key: ports.registrations.branch }, // the registration commit's branch
             { resource: "master-kube", key: "m" },
           ],
-          warnings: [],
+          warnings: params.form === "standing-build-only" ? ["Re-attestation remains if the run is stopped; retry completes the release. Existing credentials, hooks and grants are kept, and abort removes none of them."] : [],
           requiredSecrets: [],
         };
         return { outcome: "planned", params, plan };
@@ -585,7 +589,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     // named here so the executor can resolve it), and WHETHER they may run — a full un-deploy must
     // never fire for a run whose consumer has meanwhile gone live or been recorded.
     cleanups: (params) =>
-      params.form === "build-only"
+      params.form === "standing-build-only" ? [] : params.form === "build-only"
         ? buildOnlyCleanups(ports, params)
         : [...deployableOnboardCleanups(ports, params), removeCeremonySecretsCleanup(ports, params)],
     assertAbortable: (params, deps) => assertOnboardAbortable(ports, params, deps.db),

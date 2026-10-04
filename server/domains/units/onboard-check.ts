@@ -24,7 +24,7 @@ export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
     title: "Check the repo against the concept (the gates)",
     run: async (ctx) => {
       const target: OnboardTarget =
-        p.form === "build-only"
+        p.form !== "deployable"
           ? { domain: p.domain, stage: p.stage, clusterValueFiles: [] }
           : {
               domain: p.domain,

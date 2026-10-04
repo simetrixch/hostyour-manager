@@ -77,7 +77,7 @@ export const BuildParamsBase = z.object({
 });
 
 /** What every build step reads of a run's params, whichever form the run has. */
-export type BuildParams = z.infer<typeof BuildParamsBase> & { form: "deployable" | "build-only" };
+export type BuildParams = z.infer<typeof BuildParamsBase> & { form: "deployable" | "build-only" | "standing-build-only" };
 
 /** The BUILD-ONLY form: no cluster and no chart, and the only form that can carry `ungated`
  *  instead of a report — the platform's own unit at the first installation in the master role

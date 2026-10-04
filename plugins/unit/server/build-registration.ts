@@ -5,17 +5,18 @@ import type { Cleanup, Step } from "#core/server/executor/types.ts";
 import type { BuildOnlyParams, BuildParams, BuildPorts } from "./build-chain.ts";
 import type { ReleaseCycleRuntime } from "./release-cycle.ts";
 import { removeWebhookCleanup } from "./build-webhook.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 
-/** The build-only form's registration commit: build.yaml alone — a build-only unit has no stage
- *  file. For a unit hand-seeded before the run kind existed this is the ATTEST case: identical content
- *  commits nothing (the platform repo's empty-staged-diff no-op), a changed fact (a new sealed
- *  credential id, a new build name) commits the correction — either way the manager is the writer
- *  of the registration. */
+/** Create build.yaml alone. A standing unit belongs to the shorter re-attestation chain; a
+ *  creation approved before another run registered it must not overwrite that run's identity. */
 export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams): Step {
   return {
     name: "write-registration",
     title: "Commit the build registration (GitOps)",
     run: async (ctx) => {
+      if (await ports.registrations.readBuildRegistration(p.consumerName) && !ctx.readCheckpoint<{ commit?: string }>()?.commit) {
+        throw errValidation(`build-only unit ${p.consumerName} is already registered — plan the onboarding again to re-attest it without the creation inverse`);
+      }
       // The build-only form's whole rollback, armed before the commit so a rollback always exists
       // once anything is committed (buildOnlyCleanups).
       for (const c of buildOnlyCleanups(ports, p)) ctx.registerCleanup(c);

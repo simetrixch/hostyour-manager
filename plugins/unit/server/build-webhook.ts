@@ -110,7 +110,7 @@ export function removeWebhookCleanup(ports: BuildPorts, p: BuildParams): Cleanup
     title: "Remove the consumer build webhook (the unit's own goes with its last stage)",
     run: async (ctx) => {
       // A build-only run has no stage registration of its own, so it discounts none.
-      const unit = { name: p.consumerName, ...(p.form === "build-only" ? {} : { stage: p.stage }) };
+      const unit = { name: p.consumerName, ...(p.form === "deployable" ? { stage: p.stage } : {}) };
       if (await unitStaysRegistered(ctx, ports.registrations, unit, "the build webhook")) return;
       await removeConsumerWebhook(ctx, {
         github: ports.github,

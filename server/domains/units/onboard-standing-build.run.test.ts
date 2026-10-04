@@ -7,6 +7,8 @@ import { makeOnboardDef, type OnboardParams, type OnboardPorts } from "./onboard
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
 import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
+import { writeBuildRegistrationStep } from "#unit/server/build-registration.ts";
+import { BuildOnlyParams } from "#unit/server/build-chain.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -108,4 +110,32 @@ describe("repeat a standing build-only onboarding", () => {
       expect((await prt.registrations.readBuildRegistration("acme"))?.entry.builds).toEqual(["acme-api", "acme-ui"]);
       expect(makeOnboardDef(prt).cleanups!(result.params)).toEqual([]);
     });
-});
+
+    it.each(["suspended", "quiesced"] as const)("refuses to resume a %s registration", async (flag) => {
+      const prt = await standing();
+      const entry = (await prt.registrations.readBuildRegistration("acme"))!.entry;
+      await prt.registrations.commitRegistration({ unit: { ...entry, [flag]: true }, builds: entry.builds!, runId: "run_pause" });
+      await expect(makeOnboardDef(prt).planStream!(request, streamCtx())).rejects.toThrow(/suspended or quiesced/);
+    });
+
+    it("rechecks the repository at execution before any re-attestation", async () => {
+      const prt = await standing();
+      const result = await plan(prt);
+      const entry = (await prt.registrations.readBuildRegistration("acme"))!.entry;
+      await prt.registrations.commitRegistration({ unit: { ...entry, repoURL: "https://github.com/other/acme.git" }, builds: entry.builds!, runId: "run_changed" });
+      const step = makeOnboardDef(prt).steps(result.params).find((s) => s.name === "re-attest-builds")!;
+      await expect(step.run(ctx(result.params, step.name, []))).rejects.toThrow(/does not match/);
+      expect((await prt.registrations.readBuildRegistration("acme"))?.entry.builds).toEqual(["acme-api"]);
+    });
+
+    it("a creation plan cannot replace a registration that appeared before execution", async () => {
+      const prt = await standing();
+      const result = await plan(prt);
+      const creation = BuildOnlyParams.parse({ ...result.params, form: "build-only" });
+      const armed: string[] = [];
+      const step = writeBuildRegistrationStep(prt, creation);
+      await expect(step.run({ ...ctx(creation, step.name, []), registerCleanup: (cleanup) => { armed.push(cleanup.name); } })).rejects.toThrow(/already registered.*plan.*again/);
+      expect(armed).toEqual([]);
+      expect((await prt.registrations.readBuildRegistration("acme"))?.entry.owner).toBe("original-owner");
+    });
+  });
