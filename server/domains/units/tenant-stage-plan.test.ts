@@ -208,6 +208,17 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params.apps[0]!.domain).toBe("test.company.example");
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ domain: "test.company.example" });
     expect(result.params.members.map((m) => m.name)).toEqual(members.map((m) => m.name));
+    // Every host a website answers at gets its record, www. included, as Add website writes them; the
+    // abort takes them all back.
+    const cleanups: Cleanup[] = [];
+    const steps = makeCreateTenantDef(p).steps(result.params);
+    await steps.find((step) => step.name.endsWith("record-provisional"))!.run(context(result.params, cleanups));
+    await steps.find((step) => step.name.endsWith("provision-stage-hosts"))!.run(context(result.params, cleanups));
+    const hosts = ["test.show.example", "www.test.show.example", "test.company.example", "www.test.company.example"];
+    const dns = p.dns as FakeDnsProvider;
+    expect(hosts.map((h) => dns.record(h, "CNAME") !== undefined)).toEqual([true, true, true, true]);
+    for (const cleanup of [...createTenantCleanups(p, result.params)].reverse()) await cleanup.run(context(result.params));
+    expect(hosts.map((h) => dns.record(h, "CNAME"))).toEqual([undefined, undefined, undefined, undefined]);
   });
 });
 
