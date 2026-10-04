@@ -43,6 +43,17 @@ describe("GitPlatformRepo, the books branch", () => {
     return new GitPlatformRepo({ platformRepoURL: originURL, booksBranch: BOOKS, carriesTrunkToBooksBranch, workRoot: join(newRoot(), "work"), allowFileURLs: true });
   }
 
+  it("read-only preview does not create a missing books branch and cannot publish commits", async () => {
+    const { originDir, originURL } = makeTrunkOnlyOrigin();
+    const repo = makeRepo(originURL);
+    await expect(repo.withReadBranch(BOOKS, async () => undefined)).rejects.toThrow();
+    expect(git(originDir, "for-each-ref", "--format=%(refname:short)", "refs/heads/").trim()).toBe("master");
+    await repo.withBranch(BOOKS, async () => undefined);
+    const before = git(originDir, "rev-parse", BOOKS).trim();
+    await expect(repo.withReadBranch(BOOKS, scope => scope.commit({ message: "forbidden", write: [{ path: "preview.yaml", content: "no" }] }))).rejects.toThrow(/read-only/);
+    expect(git(originDir, "rev-parse", BOOKS).trim()).toBe(before);
+  }, SLOW);
+
   it(
     "CREATES the books branch from the trunk when the remote does not carry it yet, and only that one",
     async () => {

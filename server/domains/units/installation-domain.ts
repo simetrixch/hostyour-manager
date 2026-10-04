@@ -5,13 +5,13 @@ import { clusters, tenants } from "../../db/schema/inventory.ts";
 import { findDnsWrite, listDnsWrites, recordDnsWrite, forgetDnsWrite, type DnsWrite } from "../../db/dns-writes.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
-import type { PlatformRepo } from "../../adapters/git/port.ts";
+import { readOnlyPlatformRepo, type PlatformRepo } from "../../adapters/git/port.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { consumerUnitHost, tenantRecordName, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
+import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
 import { InstallationDomainSnapshotSchema, type InstallationDomainSnapshot } from "../../../shared/installation-domain.ts";
 import { errNotConfigured, errValidation } from "../../kernel/errors.ts";
 
@@ -45,7 +45,8 @@ function cookieOverrides(root: unknown, from: string, to: string): { path: strin
 
 /** Census from both registration authorities, including units with no Manager inventory row. */
 export async function readInstallationDomain(db: Db, optional: InstallationDomainPorts, fromDomain: string, toDomain: string, signal?: AbortSignal): Promise<InstallationDomainSnapshot> {
-  const ports = installationDomainPorts(optional);
+  const configured = installationDomainPorts(optional);
+  const ports = { ...configured, platformRepo: readOnlyPlatformRepo(configured.platformRepo), consumers: configured.consumers.readOnlyView(), tenantRegistrations: configured.tenantRegistrations.readOnlyView() };
   if (fromDomain === toDomain || fromDomain.endsWith(`.${toDomain}`) || toDomain.endsWith(`.${fromDomain}`)) throw errValidation("the source and target must be different, disjoint domains");
   const snapshot: InstallationDomainSnapshot = {
     fromDomain, toDomain, booksBranch: ports.platformRepo.booksBranch, clusters: [], records: [], registrations: [], tenants: [], retainedBooks: [], blockers: [],
@@ -165,10 +166,10 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
 }
 
 /** Forward unit phase, and its inverse. The old records are never deleted by either direction. */
-export async function applyInstallationDomain(ctx: StepCtx, optional: InstallationDomainPorts, snapshot: InstallationDomainSnapshot, reverse: boolean, sourceRunId: string): Promise<void> {
+export async function applyInstallationDomain(ctx: StepCtx, optional: InstallationDomainPorts, snapshot: InstallationDomainSnapshot, reverse: boolean, sourceRunId: string, readOnly = false): Promise<void> {
   const ports = installationDomainPorts(optional);
-  const writeMaps = async (): Promise<void> => {
-    await ports.platformRepo.withBranch(snapshot.booksBranch, async books => {
+  const writeMaps = async (validateOnly = false): Promise<void> => {
+    await (validateOnly ? readOnlyPlatformRepo(ports.platformRepo) : ports.platformRepo).withBranch(snapshot.booksBranch, async books => {
       const write: { path: string; content: string }[] = [];
       for (const cluster of snapshot.clusters) {
         const raw = await books.readFile(cluster.mapPath);
@@ -181,26 +182,30 @@ export async function applyInstallationDomain(ctx: StepCtx, optional: Installati
         map.setIn(["global", "unitApex"], after);
         write.push({ path: cluster.mapPath, content: map.toString() });
       }
-      if (write.length) {
+      if (write.length && !validateOnly) {
         const result = await books.commit({ message: `installation-domain: ${reverse ? "restore" : "move"} unit apex [${ctx.runId}]`, write });
         ctx.log("meta", `unit apex maps ${reverse ? "restored" : "moved"} (${result.commit})`);
       }
     });
   };
-  const writeRegistrations = async (): Promise<void> => {
+  const writeRegistrations = async (validateOnly = false): Promise<void> => {
     for (const registration of snapshot.registrations) {
       const writer = registration.kind === "tenant" ? ports.tenantRegistrations : ports.consumers;
-      await writer.compareDomainFields(registration.stage, registration.name, registration.changes, reverse, ctx.runId);
+      if (validateOnly) {
+        const current = registration.kind === "tenant" ? await ports.tenantRegistrations.readOnlyView().readTenant(registration.stage, registration.name) : await ports.consumers.readOnlyView().readRegistration(registration.stage, registration.name);
+        if (!current) throw errValidation(`registration ${registration.name}/${registration.stage} disappeared`);
+        applyDomainChanges(current.entry, registration.changes, reverse);
+      } else await writer.compareDomainFields(registration.stage, registration.name, registration.changes, reverse, ctx.runId);
     }
     for (const tenant of snapshot.tenants) if (tenant.id !== null) {
       const row = ctx.db.select().from(tenants).where(eq(tenants.id, tenant.id)).get();
       const before = reverse ? tenant.ownDomainAfter : tenant.ownDomainBefore, after = reverse ? tenant.ownDomainBefore : tenant.ownDomainAfter;
       const redirectsBefore = reverse ? tenant.redirectsAfter : tenant.redirectsBefore, redirectsAfter = reverse ? tenant.redirectsBefore : tenant.redirectsAfter;
       if (!row || (row.ownDomain !== before && row.ownDomain !== after) || ![JSON.stringify(redirectsBefore), JSON.stringify(redirectsAfter)].includes(JSON.stringify(row.ownDomainRedirects))) throw errValidation(`tenant ${tenant.guid}/${tenant.stage} domain inventory changed since planning`);
-      if (row.ownDomain !== after || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(redirectsAfter)) ctx.db.update(tenants).set({ ownDomain: after, ownDomainRedirects: redirectsAfter, updatedAt: new Date() }).where(eq(tenants.id, tenant.id)).run();
+      if (!validateOnly && (row.ownDomain !== after || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(redirectsAfter))) ctx.db.update(tenants).set({ ownDomain: after, ownDomainRedirects: redirectsAfter, updatedAt: new Date() }).where(eq(tenants.id, tenant.id)).run();
     }
   };
-  const writeRecords = async (): Promise<void> => {
+  const writeRecords = async (validateOnly = false): Promise<void> => {
     for (const record of reverse ? [...snapshot.records].reverse() : snapshot.records) {
       const current = await ports.dns.listRecordContents({ name: record.targetName, type: record.type, signal: ctx.signal });
       const currentBook = findDnsWrite(ctx.db, { name: record.targetName, type: record.type });
@@ -212,14 +217,14 @@ export async function applyInstallationDomain(ctx: StepCtx, optional: Installati
         }
         if (record.targetName === record.name) {
           if (current.some(v => v !== record.after && v !== record.before) || current.length > 1) throw errValidation(`${record.targetName}: provider value changed; rollback refuses`);
-          if (current[0] !== record.before) await ports.dns.upsertRecord({ name: record.name, type: record.type, content: record.before, signal: ctx.signal });
+          if (!validateOnly && current[0] !== record.before) await ports.dns.upsertRecord({ name: record.name, type: record.type, content: record.before, signal: ctx.signal });
         } else if (!record.targetHadValue && current.includes(record.after)) {
           if (!currentBook || currentBook.runId !== sourceRunId) throw errValidation(`${record.targetName}: rollback cannot prove this run owns the new record`);
           if (record.type === "CNAME" && current.some(v => v !== record.after)) throw errValidation(`${record.targetName}: provider value changed; rollback refuses`);
-          await ports.dns.deleteRecord({ name: record.targetName, type: record.type, content: record.after, signal: ctx.signal });
+          if (!validateOnly) await ports.dns.deleteRecord({ name: record.targetName, type: record.type, content: record.after, signal: ctx.signal });
         }
-        if (record.targetBook) recordDnsWrite(ctx.db, { ...record.targetBook, owner: { kind: record.targetBook.owner.kind, name: record.targetBook.owner.name, ...(record.targetBook.owner.stage ? { stage: record.targetBook.owner.stage } : {}) } });
-        else if (currentBook) forgetDnsWrite(ctx.db, { name: record.targetName, type: record.type });
+        if (!validateOnly && record.targetBook) recordDnsWrite(ctx.db, { ...record.targetBook, owner: { kind: record.targetBook.owner.kind, name: record.targetBook.owner.name, ...(record.targetBook.owner.stage ? { stage: record.targetBook.owner.stage } : {}) } });
+        else if (!validateOnly && currentBook) forgetDnsWrite(ctx.db, { name: record.targetName, type: record.type });
         continue;
       }
       if (currentBook && (currentBook.owner.kind !== record.owner.kind || currentBook.owner.name !== record.owner.name || currentBook.owner.stage !== record.owner.stage || ![record.before, record.after].includes(currentBook.content))) throw errValidation(`${record.targetName}: book ownership changed since planning`);
@@ -233,6 +238,15 @@ export async function applyInstallationDomain(ctx: StepCtx, optional: Installati
       ctx.log("meta", `${record.type} ${record.targetName} → ${record.after}; old name retained`);
     }
   };
-  if (reverse) { await writeMaps(); await writeRegistrations(); await writeRecords(); }
+  if (reverse) {
+    // Refuse every known conflict before the first inverse write. Each writer then rechecks its CAS.
+    await writeRecords(true); await writeRegistrations(true); await writeMaps(true);
+    if (readOnly) return;
+    await writeMaps(); await writeRegistrations(); await writeRecords();
+  }
   else { await writeRecords(); await writeRegistrations(); await writeMaps(); }
+}
+
+export async function validateInstallationDomainRollback(ctx: StepCtx, ports: InstallationDomainPorts, snapshot: InstallationDomainSnapshot, sourceRunId: string): Promise<void> {
+  await applyInstallationDomain(ctx, ports, snapshot, true, sourceRunId, true);
 }

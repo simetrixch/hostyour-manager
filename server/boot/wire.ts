@@ -20,7 +20,7 @@ import { RunEventBus } from "../executor/bus.ts";
 import { Executor } from "../executor/executor.ts";
 import { buildRunDefinitions, type RunDefinitions } from "../domains/runs/run-definitions.ts";
 import { repointUnitRecords } from "../domains/units/cluster-rename-records.ts";
-import { readInstallationDomain, applyInstallationDomain } from "../domains/units/installation-domain.ts";
+import { readInstallationDomain, applyInstallationDomain, validateInstallationDomainRollback } from "../domains/units/installation-domain.ts";
 import { registerInstallationDomainRoutes } from "../domains/units/api-installation-domain.ts";
 import { buildUnits } from "./wire-units.ts";
 import { createSshSession } from "../adapters/ssh/ssh2-session.ts";
@@ -229,6 +229,7 @@ export async function wire(): Promise<Wired> {
   const runDefinitions = buildRunDefinitions({
     installationDomain: {
       read: (inventory, from, to, signal) => readInstallationDomain(inventory, installationDomainPorts, from, to, signal),
+      validateRollback: (ctx, snapshot, sourceRunId) => validateInstallationDomainRollback(ctx, installationDomainPorts, snapshot, sourceRunId),
       apply: (ctx, snapshot, reverse, sourceRunId) => applyInstallationDomain(ctx, installationDomainPorts, snapshot, reverse, sourceRunId),
     },
     db: db.db,

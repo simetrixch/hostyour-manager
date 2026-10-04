@@ -1,3 +1,4 @@
+import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 // TenantRegistrations — the Manager's ONLY writer of the deploy
 // repository's registrations/**. The structural twin of the consumer registration Registrations (registrations.ts),
 // reusing the SAME laws through the shared primitives of registration-laws.ts (serializePointer / parseRegistration /
@@ -115,6 +116,8 @@ function parseRegistration(path: string, raw: string): TenantRegistration {
 }
 
 export class TenantRegistrations {
+  readOnlyView(): TenantRegistrations { return new TenantRegistrations(readOnlyPlatformRepo(this.repo)); }
+
   async compareDomainFields(stage: Stage, guid: string, changes: readonly DomainChange[], reverse: boolean, runId: string): Promise<void> {
     if (changes.some(c => !["ownDomain", "ownDomainRedirects", "apps", "members"].includes(c.path[0]!))) throw errValidation("tenant domain migration contains a non-domain field");
     if (!changes.length) return;

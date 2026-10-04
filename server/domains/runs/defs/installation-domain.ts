@@ -6,6 +6,7 @@ import { InstallationDomainParamsSchema, InstallationDomainRollbackParamsSchema,
 
 export interface InstallationDomainActions {
   read(db: Db, from: string, to: string, signal?: AbortSignal): Promise<InstallationDomainSnapshot>;
+  validateRollback(ctx: StepCtx, snapshot: InstallationDomainSnapshot, sourceRunId: string): Promise<void>;
   apply(ctx: StepCtx, snapshot: InstallationDomainSnapshot, reverse: boolean, sourceRunId: string): Promise<void>;
 }
 
@@ -74,6 +75,13 @@ export function makeInstallationDomainRollbackDef(value: InstallationDomainActio
       result.summary = `${params.dryRun ? "Dry-run rollback" : "Rollback"} of ${params.sourceRunId}: restore only its recorded values; refuse any conflicting newer writer.`;
       return { outcome: "planned", params: { ...params, snapshot }, plan: result };
     },
-    steps: params => [{ name: "attest-target", title: "Read the recorded rollback", run: async ctx => { ctx.log("meta", JSON.stringify(frozen(params.snapshot))); } }, ...(params.dryRun ? [] : [{ name: "move-unit-domains", title: "Restore the recorded unit domain fields", run: async (ctx: StepCtx) => { await actions(value).apply(ctx, frozen(params.snapshot), true, params.sourceRunId); } }])],
+    steps: params => [{ name: "attest-target", title: "Validate every recorded inverse before any write", run: async ctx => {
+      const source = getRun(ctx.db, params.sourceRunId), original = getRunParams(ctx.db, params.sourceRunId);
+      if (!source || !["succeeded", "failed", "cancelled"].includes(source.status) || original?.kind !== "installation-domain-move") throw errValidation("the source move is no longer stopped; rollback refuses");
+      const recorded = InstallationDomainParamsSchema.parse(original.params);
+      if (recorded.dryRun || JSON.stringify(recorded.snapshot) !== JSON.stringify(frozen(params.snapshot))) throw errValidation("the recorded move journal changed; rollback refuses");
+      await actions(value).validateRollback(ctx, frozen(params.snapshot), params.sourceRunId);
+      ctx.log("meta", JSON.stringify(frozen(params.snapshot)));
+    } }, ...(params.dryRun ? [] : [{ name: "move-unit-domains", title: "Restore the recorded unit domain fields", run: async (ctx: StepCtx) => { await actions(value).apply(ctx, frozen(params.snapshot), true, params.sourceRunId); } }])],
   };
 }

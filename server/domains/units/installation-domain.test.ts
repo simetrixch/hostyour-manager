@@ -15,7 +15,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
-import { applyInstallationDomain, readInstallationDomain } from "./installation-domain.ts";
+import { applyInstallationDomain, readInstallationDomain, validateInstallationDomainRollback } from "./installation-domain.ts";
 import { makeInstallationDomainDef, makeInstallationDomainRollbackDef } from "../runs/defs/installation-domain.ts";
 
 const FROM = "old.example", TO = "new.example", OLD_HOST = `s1.${FROM}`, NEW_HOST = `s1.${TO}`, GUID = "zsjs023ctne0";
@@ -32,7 +32,7 @@ function seed(stage: Stage, withOverride = false): void {
   const name = "post", consumer = ConsumerRegistrationSchema.parse({ name, repoURL: "https://github.com/acme/post.git", chartPath: "deploy/chart", cluster: "s1", host: name,
     databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") });
   cloud.seed(cloud.booksBranch, `registrations/${name}/${stage}.yaml`, JSON.stringify(consumer));
-  const members = testMembers(["web"]);
+  const members = structuredClone(testMembers(["web"]));
   if (withOverride) members[0]!.sources[0]!.values = { cookieDomain: `.shop.${FROM}` };
   const tenant = { cluster: "s1", members, identityProvider: "auth", routing: "host" as const, ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", subdomain: "shop",
     apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {} }], seedUsers: false, quota: seedQuota("small"), resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" };
@@ -133,6 +133,7 @@ describe("installation domain unit phase", () => {
     recordDnsWrite(db.db, { name: `post.${TO}`, type: "CNAME", content: NEW_HOST, act: "updated", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_newer" });
     await expect(applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move")).rejects.toThrow(/newer book writer/);
     expect(dns.record(`post.${TO}`, "CNAME")).toBe(NEW_HOST);
+    expect(parseDocument(cloud.read(cloud.booksBranch, mapPath)!).getIn(["global", "unitApex"])).toBe(TO);
   });
   it("does not overwrite a changed map identity", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
@@ -142,17 +143,33 @@ describe("installation domain unit phase", () => {
   });
   it("ignores a caller-supplied snapshot and records the current census", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
-    const def = makeInstallationDomainDef({ read: async () => snapshot, apply: async () => undefined });
+    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => undefined });
     const result = await def.planStream!({ fromDomain: FROM, toDomain: TO, dryRun: true, snapshot: { ...snapshot, records: [] } }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
     expect(result.outcome).toBe("planned");
     if (result.outcome === "planned") expect(result.params.snapshot?.records).toHaveLength(3);
     const rollback = makeInstallationDomainRollbackDef(undefined);
     await expect(rollback.planStream!({ sourceRunId: "run_missing", dryRun: true }, { db: db.db, log: () => undefined, signal: new AbortController().signal })).rejects.toThrow(/stopped installation domain move/);
   });
+  it("dry-run rollback validates without writes and refuses a source that restarted after planning", async () => {
+    seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
+    const original = { fromDomain: FROM, toDomain: TO, dryRun: false, snapshot };
+    const actions = { read: async () => snapshot, apply: async () => undefined, validateRollback: (context: StepCtx, recorded: typeof snapshot, sourceRunId: string) => validateInstallationDomainRollback(context, ports(), recorded, sourceRunId) };
+    const move = makeInstallationDomainDef(actions);
+    const movePlan = await move.planStream!(original, { db: db.db, log: () => undefined, signal: ctx().signal });
+    if (movePlan.outcome !== "planned") throw new Error("expected plan");
+    db.sqlite.prepare("INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,started_by) VALUES(?,?,?,?,?,?,?,?)").run("run_source", "installation-domain-move", "installation", cloud.booksBranch, JSON.stringify(original), JSON.stringify(movePlan.plan), "failed", "op_system");
+    const rollback = makeInstallationDomainRollbackDef(actions);
+    const planned = await rollback.planStream!({ sourceRunId: "run_source", dryRun: true }, { db: db.db, log: () => undefined, signal: ctx().signal });
+    if (planned.outcome !== "planned") throw new Error("expected rollback plan");
+    await rollback.steps(planned.params)[0]!.run(ctx("run_rollback"));
+    expect(cloud.commits).toHaveLength(0); expect(deploy.commits).toHaveLength(0); expect(dns.upserts).toHaveLength(0); expect(dns.creates).toHaveLength(0); expect(dns.deletes).toHaveLength(0);
+    db.sqlite.prepare("UPDATE runs SET status='running' WHERE id='run_source'").run();
+    await expect(rollback.steps(planned.params)[0]!.run(ctx("run_rollback"))).rejects.toThrow(/no longer stopped/);
+  });
   it("dry-run step cannot reach the writer and apply approval refuses cutover blockers", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     let writes = 0;
-    const def = makeInstallationDomainDef({ read: async () => snapshot, apply: async () => { writes++; } });
+    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => { writes++; } });
     const params = { fromDomain: FROM, toDomain: TO, dryRun: true, snapshot };
     for (const step of def.steps(params)) await step.run(ctx());
     expect(writes).toBe(0); expect(def.steps(params)).toHaveLength(1);

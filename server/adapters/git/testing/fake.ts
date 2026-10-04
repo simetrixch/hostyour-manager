@@ -168,6 +168,13 @@ export class FakePlatformRepo implements PlatformRepo {
   // a test could pass on behavior the running system never produces.
   private readonly turns = new Map<string, Promise<unknown>>();
 
+  async withReadBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
+    return this.withBranch(branch, scope => fn({ ...scope,
+      commit: async () => { throw new Error("a read-only branch turn cannot commit"); },
+      mintTag: async () => { throw new Error("a read-only branch turn cannot mint a tag"); },
+    }));
+  }
+
   async withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
     const prior = this.turns.get(branch) ?? Promise.resolve();
     const turn = prior.then(() => this.runTurn(branch, fn), () => this.runTurn(branch, fn));

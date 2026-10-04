@@ -380,21 +380,25 @@ export class GitPlatformRepo implements PlatformRepo {
    *  failed turn release the directory rather than wedge it. */
   private readonly turns = new Map<string, Promise<unknown>>();
 
-  async withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
+  async withReadBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
+    return this.withBranch(branch, fn, true);
+  }
+
+  async withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>, readOnly = false): Promise<T> {
     assertRefName(branch, "branch");
     assertRepoURL(this.deps.platformRepoURL, this.deps.allowFileURLs);
     const dir = this.worktreeDir(branch);
     const prior = this.turns.get(dir) ?? Promise.resolve();
     const turn = prior.then(
-      () => this.runTurn(branch, dir, fn),
-      () => this.runTurn(branch, dir, fn),
+      () => this.runTurn(branch, dir, fn, readOnly),
+      () => this.runTurn(branch, dir, fn, readOnly),
     );
     this.turns.set(dir, turn.then(NOOP, NOOP));
     return turn;
   }
 
-  private async runTurn<T>(branch: string, dir: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> {
-    const workdir = await this.resetToOrigin(branch, dir);
+  private async runTurn<T>(branch: string, dir: string, fn: (scope: BranchScope) => Promise<T>, readOnly: boolean): Promise<T> {
+    const workdir = await this.resetToOrigin(branch, dir, !readOnly);
     // The scope is created here and nowhere else, so the directory it closes over is reachable only
     // for as long as this turn runs. A caller that keeps the object past the callback still cannot
     // interleave: the NEXT turn's reset is what it would race, and that turn has not started yet.
@@ -403,21 +407,21 @@ export class GitPlatformRepo implements PlatformRepo {
       readFile: (relPath) => readWorkdirFile(workdir, relPath),
       listDir: (relPath) => listWorkdirDir(workdir, relPath),
       readFileHistory: (relPath) => readWorkdirFileHistory(workdir, relPath),
-      commit: (input) => this.commitPushIn(workdir, branch, input),
-      mintTag: (input) => this.mintTagIn(workdir, input),
+      commit: (input) => { if (readOnly) throw errValidation("a read-only branch turn cannot commit"); return this.commitPushIn(workdir, branch, input); },
+      mintTag: (input) => { if (readOnly) throw errValidation("a read-only branch turn cannot mint a tag"); return this.mintTagIn(workdir, input); },
     };
     return fn(scope);
   }
 
 
-  private async resetToOrigin(branch: string, dir: string): Promise<string> {
+  private async resetToOrigin(branch: string, dir: string, mayCreate = true): Promise<string> {
     const existed = existsSync(join(dir, ".git"));
     try {
       await this.syncWorktree(dir, branch);
     } catch (e) {
       // A probe that cannot answer counts as "the branch is there": the original failure then
       // surfaces below, instead of being replaced by a second one from the probe itself.
-      if (branch === this.deps.booksBranch && !(await this.remoteHasBranch(dir, branch).catch(() => true))) {
+      if (mayCreate && branch === this.deps.booksBranch && !(await this.remoteHasBranch(dir, branch).catch(() => true))) {
         if (!this.deps.carriesTrunkToBooksBranch) {
           // hostyour-cloud: an installer cuts this branch and a stamper specialises it, so its absence
           // is a fault to report and never a gap to fill — minting it here would publish the

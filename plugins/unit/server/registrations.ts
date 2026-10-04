@@ -30,7 +30,7 @@ import { STAGE, type Stage } from "#core/shared/enums.ts";
 // shared/api-types.ts and used here — the same rule tenant-registrations.ts follows for
 // SkippedTenantPointerView.
 import type { SkippedConsumerPointerView } from "#core/shared/api-types.ts";
-import type { BranchScope, PlatformRepo } from "#core/server/adapters/git/port.ts";
+import { readOnlyPlatformRepo, type BranchScope, type PlatformRepo } from "#core/server/adapters/git/port.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { resolveClusterMarkingIn } from "#core/server/domains/inventory/cluster-marking.ts";
 import { makeRegistrationGuard, parseRegistration, schemaWhy, serializePointer, trailer } from "./registration-laws.ts";
@@ -99,6 +99,8 @@ export interface RegistrationCommit {
 }
 
 export class Registrations {
+  readOnlyView(): Registrations { return new Registrations(readOnlyPlatformRepo(this.repo)); }
+
   async compareDomainFields(stage: Stage, name: string, changes: readonly DomainChange[], reverse: boolean, runId: string): Promise<void> {
     if (changes.some(c => c.path.length !== 1 || c.path[0] !== "fqdn")) throw errValidation("consumer domain migration changes only fqdn");
     if (!changes.length) return;

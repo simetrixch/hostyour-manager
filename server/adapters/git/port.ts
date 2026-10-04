@@ -95,6 +95,16 @@ export interface PlatformRepo {
    *  A branch the remote does not carry is an error — EXCEPT `booksBranch`, which is created from the
    *  trunk on first use (the books are data this process owns; see GitPlatformRepo). */
   withBranch<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T>;
+  /** An existing-branch read turn. Never creates a remote branch and refuses commit/tag writes. */
+  withReadBranch?<T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T>;
+}
+
+/** Restrict an existing repository to non-creating read turns, including legacy reader classes. */
+export function readOnlyPlatformRepo(repo: PlatformRepo): PlatformRepo {
+  return { booksBranch: repo.booksBranch, withBranch: (branch, fn) => {
+    if (!repo.withReadBranch) throw new Error("the repository does not support an existing-branch read turn");
+    return repo.withReadBranch(branch, fn);
+  } };
 }
 
 /** A disposable checkout of a repository's default branch (RepoWriter.open). Unlike PlatformRepo
