@@ -139,6 +139,37 @@ export function defaultEnvironment<T extends { status: TenantStatus }>(group: Un
   return [...STAGE].reverse().map((s) => group.byStage[s]).find((r) => r !== undefined && !tenantRowOffer(r.status).settled);
 }
 
+/** The environment a tenant's card shows: the one the Tenants page URL names (`env.<guid>=<stage>`),
+ *  where it still stands, else the default. The choice lives in the URL so that Back, a reload and a
+ *  list refresh keep it — kept in page state, it snapped back to PROD whenever the list remounted. */
+export function cardEnvironment<T extends { status: TenantStatus }>(group: UnitEnvironments<T>, search: URLSearchParams): T | undefined {
+  const named = STAGE.find((s) => s === search.get(`env.${group.key}`));
+  const row = named ? group.byStage[named] : undefined;
+  return row && !tenantRowOffer(row.status).settled ? row : defaultEnvironment(group);
+}
+
+/** The Tenants page URL with one card switched to `stage`, every other parameter kept. */
+export function chooseEnvironment(search: URLSearchParams, key: string, stage: Stage): URLSearchParams {
+  const next = new URLSearchParams(search);
+  next.set(`env.${key}`, stage);
+  return next;
+}
+
+/** The tenant page's row: the loaded one only while it is the row the URL names. A switch of
+ *  environment changes the URL before the new row has loaded, and until then — or for good, where the
+ *  read fails — the previous environment's row must not stand behind the page's buttons. */
+export const rowOfUrl = <T extends { id: string }>(row: T | null, id: string): T | null => (row?.id === id ? row : null);
+
+/** The environments a Move can act on: the tenant's own that run (the page offers no Move on an
+ *  unfinished or suspended one), DEV to PROD. The page's own row is always among them. */
+export function movableEnvironments<T extends { id: string; guid: string; stage: Stage; status: TenantStatus; suspended: boolean }>(page: T, all: readonly T[]): T[] {
+  const others = all.filter((r) => r.guid === page.guid && r.id !== page.id && r.status === "active" && !r.suspended);
+  return [page, ...others].sort((a, b) => STAGE.indexOf(a.stage) - STAGE.indexOf(b.stage));
+}
+
+/** The environment the Move dialog's choice names: the picked row among those offered, else the page's. */
+export const chosenForMove = <T extends { id: string }>(offered: readonly T[], pick: string, page: T): T => offered.find((r) => r.id === pick) ?? page;
+
 /** What an offboard, purge or move asks the operator to type: on PROD the guid AND the environment, so
  *  the read-back names both what is destroyed and where. */
 export const typedConfirmation = (t: { guid: string; stage: Stage }): string => (t.stage === "prod" ? `${t.guid} prod` : t.guid);

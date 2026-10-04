@@ -3,7 +3,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { TenantView } from "../api.ts";
 import { groupTenantEnvironments } from "../tenantRows.ts";
-import { TenantEnvironmentBar } from "./TenantEnvironmentBar.tsx";
+import { ChosenTenantEnvironment, TenantEnvironmentBar } from "./TenantEnvironmentBar.tsx";
 
 vi.mock("react-router", () => ({ Link: ({ to, children, className }: { to: string; children: import("react").ReactNode; className?: string }) => createElement("a", { href: to, className }, children) }));
 
@@ -37,5 +37,24 @@ describe("TenantEnvironmentBar", () => {
     const html = render("tnt_t", () => undefined);
     expect(html).not.toContain('href="/tenants/tnt_t"');
     expect(html).toMatch(/<button[^>]*aria-selected="true"[^>]*>TEST/);
+  });
+});
+
+describe("ChosenTenantEnvironment", () => {
+  // The Tenants card: what it opens and acts on is the environment the page URL names.
+  const card = (search: string, rows = simetrix): string =>
+    renderToStaticMarkup(createElement(ChosenTenantEnvironment, {
+      group: groupTenantEnvironments(rows)[0]!, search: new URLSearchParams(search), onChoose: () => undefined,
+      children: (t: TenantView, bar: import("react").ReactNode) => createElement("div", null, bar, createElement("a", { href: `/tenants/${t.id}` }, `Open ${t.stage}`)),
+    }));
+
+  it("opens on PROD where the URL names nothing", () => {
+    expect(card("")).toContain('href="/tenants/tnt_p">Open prod');
+  });
+  it("opens and acts on TEST once TEST is chosen, with TEST selected in the bar, across a refresh of the list", () => {
+    const html = card("env.ak64h58875qw=test");
+    expect(html).toContain('href="/tenants/tnt_t">Open test');
+    expect(html).toMatch(/aria-selected="true"[^>]*>TEST/);
+    expect(card("env.ak64h58875qw=test", simetrix.map((r) => ({ ...r })))).toContain('href="/tenants/tnt_t">Open test');
   });
 });

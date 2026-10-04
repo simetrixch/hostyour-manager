@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
+import { cardEnvironment, chooseEnvironment, defaultEnvironment, groupTenantEnvironments, movableEnvironments, rowOfUrl, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
 import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // The tenant screens' one status rule: which surface a tenants row gets, and whether a purge may be
@@ -127,5 +127,50 @@ describe("tenantConfirmTitle", () => {
     expect(tenantConfirmTitle.backup(t)).toBe('Back up tenant "simetrix" · test on apps1.digitacloud.app?');
     expect(tenantConfirmTitle.restore(t)).toBe('Restore tenant "simetrix" · test, now on apps1.digitacloud.app, from its backup?');
     expect(tenantConfirmTitle.offboard(t)).toBe('Offboard tenant "simetrix" · test on apps1.digitacloud.app?');
+  });
+});
+
+describe("the card's chosen environment", () => {
+  const row = (id: string, stage: Stage, status: TenantStatus) => ({ id, guid: "ak64h58875qw", stage, status });
+  const rows = [row("tnt_p", "prod", "active"), row("tnt_t", "test", "active")];
+  const group = () => groupTenantEnvironments(rows.map((r) => ({ ...r })))[0]!;
+
+  it("opens on PROD when the URL names nothing, and on the environment the URL names", () => {
+    expect(cardEnvironment(group(), new URLSearchParams())?.id).toBe("tnt_p");
+    expect(cardEnvironment(group(), new URLSearchParams("env.ak64h58875qw=test"))?.id).toBe("tnt_t");
+  });
+
+  it("keeps TEST once chosen, across a list refresh and a remount, because the choice is in the URL", () => {
+    const search = chooseEnvironment(new URLSearchParams("tab=live"), "ak64h58875qw", "test");
+    expect(search.toString()).toBe("tab=live&env.ak64h58875qw=test");
+    // A refreshed list is new objects with the same rows; a remount reads the same URL.
+    expect(cardEnvironment(group(), new URLSearchParams(search.toString()))?.id).toBe("tnt_t");
+  });
+
+  it("falls back to the default where the named environment no longer stands", () => {
+    const [g] = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "offboarded")]);
+    expect(cardEnvironment(g!, new URLSearchParams("env.ak64h58875qw=test"))?.id).toBe("tnt_p");
+    expect(cardEnvironment(g!, new URLSearchParams("env.ak64h58875qw=nonsense"))?.id).toBe("tnt_p");
+  });
+});
+
+describe("the tenant page's row", () => {
+  it("is the loaded row only while it is the row the URL names, so no action runs on the previous environment", () => {
+    const prod = { id: "tnt_p" };
+    expect(rowOfUrl(prod, "tnt_p")).toBe(prod);
+    expect(rowOfUrl(prod, "tnt_t")).toBeNull();
+    expect(rowOfUrl(null, "tnt_t")).toBeNull();
+  });
+});
+
+describe("the environments a Move can act on", () => {
+  const row = (id: string, stage: Stage, status: TenantStatus, guid = "ak64h58875qw", suspended = false) => ({ id, guid, stage, status, suspended });
+  it("are the tenant's own running environments, DEV to PROD", () => {
+    const all = [row("tnt_p", "prod", "active"), row("tnt_o", "test", "active", "other0000000"), row("tnt_t", "test", "active"), row("tnt_d", "dev", "provisioning"), row("tnt_x", "dev", "purged")];
+    expect(movableEnvironments(all[0]!, all).map((r) => r.id)).toEqual(["tnt_t", "tnt_p"]);
+  });
+  it("leave a suspended environment out, as the page offers it no Move, and always hold the page's own", () => {
+    const page = row("tnt_p", "prod", "active");
+    expect(movableEnvironments(page, [row("tnt_t", "test", "active", "ak64h58875qw", true)]).map((r) => r.id)).toEqual(["tnt_p"]);
   });
 });

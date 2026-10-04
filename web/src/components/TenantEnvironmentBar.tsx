@@ -1,5 +1,6 @@
+import type { ReactNode } from "react";
 import type { TenantView } from "../api.ts";
-import type { UnitEnvironments } from "../tenantRows.ts";
+import { cardEnvironment, type UnitEnvironments } from "../tenantRows.ts";
 import { EnvironmentBar } from "./EnvironmentBar.tsx";
 import { TenantStatusBadge } from "./TenantStatusBadge.tsx";
 
@@ -23,4 +24,17 @@ export function TenantEnvironmentBar({ group, selectedId, onSelect }: {
       addHref={(stage) => (addFrom ? `/tenants/${addFrom.id}?addStage=${stage}` : undefined)}
     />
   );
+}
+
+/** A tenant's card on the Tenants page: the environment the page URL names (cardEnvironment), handed to
+ *  the card body with the bar that switches it. Everything the card opens and acts on is that row. */
+export function ChosenTenantEnvironment({ group, search, onChoose, children }: {
+  group: UnitEnvironments<TenantView>;
+  search: URLSearchParams;
+  onChoose: (row: TenantView) => void;
+  children: (t: TenantView, bar: ReactNode) => ReactNode;
+}) {
+  const t = cardEnvironment(group, search);
+  if (!t) return null;
+  return children(t, <TenantEnvironmentBar group={group} selectedId={t.id} onSelect={onChoose} />);
 }

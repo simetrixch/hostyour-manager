@@ -1,19 +1,42 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { TenantMoveAction } from "./TenantMoveAction.tsx";
+import { TenantMoveAction, TenantMoveConfirm } from "./TenantMoveAction.tsx";
 import { migrateTenant, type TenantView } from "../api.ts";
+import { chosenForMove, movableEnvironments } from "../tenantRows.ts";
 
 const row = (stage: TenantView["stage"]): TenantView =>
   ({ id: `tnt_${stage}`, guid: "tenant1", subdomain: "demo", stage, status: "active", clusterId: `cls_${stage}`, domain: "apps1.example", suspended: false } as TenantView);
-const render = (stage: TenantView["stage"]): string => renderToStaticMarkup(createElement(TenantMoveAction, { tenant: row(stage), onCancel: () => undefined, onConfirm: () => undefined }));
+const render = (stage: TenantView["stage"]): string => renderToStaticMarkup(createElement(TenantMoveConfirm, { tenant: row(stage), onCancel: () => undefined, onConfirm: () => undefined }));
+const simetrix = [{ ...row("prod"), domain: "apps2.example" }, row("test"), { ...row("dev"), status: "purged" } as TenantView, { ...row("test"), id: "tnt_other", guid: "other" }];
 
 afterEach(() => vi.unstubAllGlobals());
 describe("stage Move surface and request", () => {
-  it("moves the environment of the page it is opened on, naming it and its machine", () => {
+  it("starts with the stage choice: the tenant's running environments with their machines, the page's own preselected", () => {
+    const html = renderToStaticMarkup(createElement(TenantMoveAction, { tenant: simetrix[0]!, environments: simetrix, onCancel: () => undefined, onConfirm: () => undefined }));
+    expect(html).toContain("Choose the environment to move");
+    expect(html).toMatch(/name="move-stage" value="tnt_test"\/> TEST · apps1\.example/);
+    expect(html).toMatch(/checked="" value="tnt_prod"\/> PROD · apps2\.example/);
+    expect(html).not.toContain("tnt_dev");
+    expect(html).not.toContain("tnt_other");
+    // Nothing is typed or targeted before the stage is chosen.
+    expect(html).not.toContain("Choose target machine");
+    const fromTest = renderToStaticMarkup(createElement(TenantMoveAction, { tenant: simetrix[1]!, environments: simetrix, onCancel: () => undefined, onConfirm: () => undefined }));
+    expect(fromTest).toMatch(/checked="" value="tnt_test"/);
+  });
+  it("moves what was picked: PROD picked on the TEST page is PROD, and PROD's typed confirmation stands before its target", () => {
+    const offered = movableEnvironments(simetrix[1]!, simetrix);
+    const chosen = chosenForMove(offered, "tnt_prod", simetrix[1]!);
+    expect(chosen.stage).toBe("prod");
+    const html = renderToStaticMarkup(createElement(TenantMoveConfirm, { tenant: chosen, onCancel: () => undefined, onConfirm: () => undefined }));
+    expect(html).toContain('Type <span class="mono">tenant1 prod</span> to confirm');
+    expect(html).not.toContain("Plan stage move");
+    // A pick that is not offered (another tenant's row) never moves it: the page's own stands.
+    expect(chosenForMove(offered, "tnt_other", simetrix[1]!).id).toBe("tnt_test");
+  });
+  it("moves the chosen environment, naming it and its machine", () => {
     const html = render("test");
     expect(html).toContain("Move &quot;demo&quot; test from apps1.example?");
-    expect(html).not.toContain("Choose a stage");
   });
   it("asks for the guid and the environment before a PROD move offers a target", () => {
     const html = render("prod");

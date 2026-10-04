@@ -7,7 +7,7 @@ import {
   setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants,
   type TenantDetailView, type TenantView,
 } from "../api.ts";
-import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
+import { groupTenantEnvironments, rowOfUrl, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
 import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { listedWebsites, removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
 import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
@@ -89,6 +89,7 @@ export function TenantDetail() {
 
   useEffect(() => {
     if (!tenantId) return;
+    setError(null);
     getTenant(tenantId)
       .then(setTenant)
       .catch((e: unknown) => setError(msg(e)));
@@ -129,13 +130,15 @@ export function TenantDetail() {
     setCatalog(await getTenantAppCatalog(tenantId));
   };
 
-  if (error && !tenant)
+  // The row behind every button below is the URL's, never the one the previous environment left.
+  const t = rowOfUrl(tenant, tenantId);
+  if (error && !t)
     return (
       <p role="alert" className="alert alert--danger">
         {error}
       </p>
     );
-  if (!tenant)
+  if (!t)
     return (
       <div className="loading">
         <span className="spinner" aria-hidden="true" />
@@ -143,7 +146,6 @@ export function TenantDetail() {
       </div>
     );
 
-  const t = tenant;
   // WHICH surface this row gets, from the ONE shared rule (tenantRows.ts): `settled` swaps the live
   // action surface for the offboarded bar at the foot, `purgeable` gates every purge trigger on the page
   // so this screen can never offer a purge the route refuses — nor withhold one the route accepts.
@@ -469,7 +471,7 @@ export function TenantDetail() {
         </ConfirmDialog>
       )}
 
-      {moveT && <TenantMoveAction tenant={moveT} onCancel={() => setMoveT(null)}
+      {moveT && <TenantMoveAction tenant={moveT} environments={environments} onCancel={() => setMoveT(null)}
         onConfirm={(stage, targetClusterId) => { setMoveT(null); void act(() => migrateTenant(stage, targetClusterId)); }} />}
 
       {relocT && (
