@@ -4,7 +4,7 @@ import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-
 import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
-import { addStageForm } from "../consumerAddStage.ts";
+import { addStageForm, admittedStage } from "../consumerAddStage.ts";
 import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -124,6 +124,11 @@ export function ConsumerOnboard() {
   // The stages the chosen channel admits — the plan holds the same ceiling (assertChannelReaches) at
   // the point that writes; the wizard only offers what would pass. No channel chosen yet ⇒ nothing to offer.
   const admittedStages = form.channel ? (channels?.[form.channel as keyof NonNullable<typeof channels>] ?? []) : [];
+  // An Add stage's stage, held against the channel the repository answered once both are known.
+  const keptStage = admittedStage(form.stage, channels && form.channel ? admittedStages : null);
+  useEffect(() => {
+    if (keptStage !== form.stage) setForm((f) => ({ ...f, stage: keptStage }));
+  }, [keptStage, form.stage]);
   // Deployable form: every ACTIVE cluster — the unit's stage is its own, whatever the cluster's is.
   const activeTargets = (targets ?? []).filter((t) => t.status === "active");
 

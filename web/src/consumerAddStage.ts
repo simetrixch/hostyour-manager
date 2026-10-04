@@ -26,3 +26,7 @@ export function addStageForm(params: URLSearchParams): { consumerName: string; r
   const chartPath = params.get("chartPath");
   return { consumerName, repoURL, stage, ...(chartPath ? { chartPath } : {}) };
 }
+
+/** The prefilled stage once the channel is known: kept while the channel table is unread (`null`),
+ *  cleared where the channel does not admit it, so the stage select and the submit guard agree. */
+export const admittedStage = (stage: string, admitted: readonly string[] | null): string => (admitted === null || admitted.includes(stage) ? stage : "");
