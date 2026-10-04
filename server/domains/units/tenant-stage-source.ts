@@ -35,8 +35,8 @@ export async function planStandingStage(
   if (!registered) throw errValidation(`tenant ${source.guid} ${source.stage} has no registration to provision another stage from`);
   const entry = registered.entry;
   if (placement.stage === source.stage) throw errValidation(`tenant ${source.guid} already has ${source.stage}`);
-  const existing = ctx.db.select({ id: tenants.id }).from(tenants).where(and(eq(tenants.guid, source.guid), eq(tenants.stage, placement.stage))).get();
-  if (existing || (await ports.registrations.scanTenant(placement.stage, source.guid)).status !== "absent") throw errValidation(`tenant ${source.guid} already has a ${placement.stage} stage; finish or purge it before adding that stage`);
+  const existing = ctx.db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(and(eq(tenants.guid, source.guid), eq(tenants.stage, placement.stage))).get();
+  if ((existing && existing.status !== "purged") || (await ports.registrations.scanTenant(placement.stage, source.guid)).status !== "absent") throw errValidation(`tenant ${source.guid} already has a ${placement.stage} stage; finish or purge it before adding that stage`);
   const rc = resolveTenantCluster(ctx.db, placement.clusterId, placement.stage);
   if (ports.carryTrunkToBooksBranch) await ports.carryTrunkToBooksBranch();
   const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, placement.stage);

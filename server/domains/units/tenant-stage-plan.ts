@@ -58,9 +58,9 @@ function composedSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[]
       run: async (ctx) => {
         for (const stage of stages) {
           await createTenantSteps(ports, stage)[0]!.run(stageContext(ctx, stage, "attest-target"));
-          const row = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(and(eq(tenants.guid, stage.guid), eq(tenants.stage, stage.stage))).get();
+          const row = ctx.db.select({ lastRunId: tenants.lastRunId, status: tenants.status }).from(tenants).where(and(eq(tenants.guid, stage.guid), eq(tenants.stage, stage.stage))).get();
           const pointer = await ports.registrations.scanTenant(stage.stage, stage.guid);
-          if ((row || pointer.status !== "absent") && row?.lastRunId !== ctx.runId) throw errValidation(`tenant ${stage.guid} already has a ${stage.stage} stage; no standing stage is replaced`);
+          if ((row?.status === "purged" && pointer.status !== "absent") || (((row && row.status !== "purged") || pointer.status !== "absent") && row?.lastRunId !== ctx.runId)) throw errValidation(`tenant ${stage.guid} already has a ${stage.stage} stage; no standing stage is replaced`);
           if (stage.sourceStage && stage.sourceRegistration) {
             const source = await ports.registrations.readTenant(stage.sourceStage, stage.guid);
             if (!source || sourceDefinition(source.entry) !== sourceDefinition(TenantRegistrationSchema.parse(JSON.parse(stage.sourceRegistration)))) throw errValidation(`tenant ${stage.guid} ${stage.sourceStage} changed after this Add stage plan; plan again before creating ${stage.stage}`);

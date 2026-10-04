@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Cleanup, StepCtx } from "../../executor/types.ts";
-import { tenants } from "../../db/schema/inventory.ts";
+import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, CreateTenantRequest } from "./create-tenant.run.ts";
 import { db, GUID, ports, planCtx, seedTenant, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
@@ -249,5 +249,70 @@ describe("stage resources cannot reach a sibling", () => {
     const job = tenantClearSourceJobs({ guid: GUID, stage: "test", image: "dbtools" })[0]!;
     expect(job.spec.script).toContain(`grep "^${GUID}_.*_test$"`);
     expect(job.spec.script).not.toContain(`grep "^${GUID}"`);
+  });
+});
+
+describe("native purged-stage recovery", () => {
+  function target(status: "purged" | "active" | "suspended" | "provisioning" | "offboarded" = "purged") {
+    const source = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()!;
+    db.db.insert(tenants).values({ ...source, id: "tnt_purged", stage: "test", status, lastRunId: "run_purged" }).run();
+    db.db.insert(tenantApps).values({ id: "tna_purged", tenantId: "tnt_purged", name: "erp", status: "purged", lastRunId: "run_purged" }).run();
+  }
+  const add = { ...request, sourceTenantId: "tnt_1", stage: "test" };
+
+  it("plans a fresh stage after native purge while preserving its inventory identity", async () => {
+    const p = stagePorts(); target();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!(add, planCtx());
+    expect(result.outcome).toBe("planned");
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    await def.steps(result.params)[0]!.run(context(result.params));
+    await def.steps(result.params).find((step) => step.name === "test-record-provisional")!.run(context(result.params));
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_purged")).get()).toMatchObject({ status: "provisioning", lastRunId: "run_stages" });
+    expect(db.db.select().from(tenantApps).where(eq(tenantApps.id, "tna_purged")).get()).toMatchObject({ status: "provisioning", lastRunId: "run_stages" });
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()).toMatchObject({ status: "active", stage: "prod" });
+  });
+
+  it("attests a purged history row that appears after the fresh plan", async () => {
+    const p = stagePorts(); const def = makeCreateTenantDef(p);
+    const result = await def.planStream!(add, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    target();
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).resolves.toBeUndefined();
+  });
+
+  it("restores only its own purged lifecycle at provisional recording", async () => {
+    const p = stagePorts(); const def = makeCreateTenantDef(p);
+    const result = await def.planStream!(add, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    target();
+    await def.steps(result.params).find((step) => step.name === "test-record-provisional")!.run(context(result.params));
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_purged")).get()).toMatchObject({ status: "provisioning", suspended: false });
+    expect(db.db.select().from(tenantApps).where(eq(tenantApps.id, "tna_purged")).get()).toMatchObject({ status: "provisioning" });
+  });
+
+  it.each(["active", "suspended", "provisioning", "offboarded"] as const)("refuses %s history both at planning and at attestation", async (status) => {
+    const p = stagePorts(); const def = makeCreateTenantDef(p);
+    const result = await def.planStream!(add, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    target(status);
+    await expect(def.planStream!(add, planCtx())).rejects.toThrow("already has a test stage");
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow("no standing stage is replaced");
+  });
+
+  it.each(["present", "unreadable"] as const)("refuses a purged stage with a %s GitOps pointer", async (pointer) => {
+    const p = stagePorts(); const def = makeCreateTenantDef(p);
+    const result = await def.planStream!(add, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    target();
+    const source = (await p.registrations.readTenant("prod", GUID))!.entry;
+    const books = new FakePlatformRepo();
+    for (const stage of ["prod", "test"] as const) {
+      const write = tenantRegistrationWrite(stage, GUID, source);
+      books.seed(books.booksBranch, write.path, stage === "test" && pointer === "unreadable" ? "invalid: [" : write.content);
+    }
+    p.registrations = new TenantRegistrations(books);
+    await expect(def.planStream!(add, planCtx())).rejects.toThrow("already has a test stage");
+    await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow("no standing stage is replaced");
   });
 });
