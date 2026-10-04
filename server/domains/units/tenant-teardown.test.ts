@@ -421,7 +421,7 @@ describe("tenantTeardownSteps — a full non-replace teardown", () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: WATCH, argoNamespace: ARGO_NS, units: ["example-platform"] })]);
+    await buildRbac.applyBuildRbac([renderTenantArgoSync({ stage: "prod", guid: GUID, applications: WATCH, argoNamespace: ARGO_NS, units: ["example-platform"] })]);
     expect(buildRbac.keys()).toEqual([`Role ${ARGO_NS}/${GUID}-argo-sync`, `RoleBinding ${ARGO_NS}/${GUID}-argo-sync`]);
 
     const logs: string[] = [];

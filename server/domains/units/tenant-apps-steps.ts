@@ -14,7 +14,7 @@
 // when something changed; a unit already registered build-only has its release re-run rather than
 // being onboarded again.
 import { z } from "zod";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema, consumerName, tenantAppsTemplate, type ConsumerManifest, type TenantSpec } from "../../../shared/consumer.ts";
@@ -66,6 +66,7 @@ export interface TenantAppsStepParams extends TenantAppsUnit {
   subdomain: string;
   guid: string;
   stage: Stage;
+  stages?: readonly Stage[];
   owner: string;
   /** The chosen apps' NAMES: only the names shape the repository. */
   apps: readonly string[];
@@ -211,8 +212,15 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           // repository lacks and never overwrites or removes — the repository is the tenant's.
           const write: RepoFileWrite[] = [];
           for (const f of files) if ((await writer.readFile(session.workdir, f.path)) === null) write.push(f);
-          if ((await writer.readFile(session.workdir, CONSUMER_MANIFEST_PATH)) === null) {
-            write.push({ path: CONSUMER_MANIFEST_PATH, content: tenantAppsManifest({ unit, owner: p.owner, envs: template.manifest.envs, containerfile: build.containerfile, context: build.context }) });
+          const manifest = await writer.readFile(session.workdir, CONSUMER_MANIFEST_PATH);
+          const stages = p.stages ?? template.manifest.envs;
+          if (manifest === null) {
+            write.push({ path: CONSUMER_MANIFEST_PATH, content: tenantAppsManifest({ unit, owner: p.owner, envs: stages, containerfile: build.containerfile, context: build.context }) });
+          } else {
+            const currentManifest = ConsumerManifestSchema.parse(parseYaml(manifest));
+            if (stages.some((stage) => !currentManifest.envs.includes(stage))) {
+              write.push({ path: CONSUMER_MANIFEST_PATH, content: stringifyYaml({ ...parseYaml(manifest), envs: [...new Set([...currentManifest.envs, ...stages])] }) });
+            }
           }
           const current = await writer.readFile(session.workdir, APPS_MANIFEST_PATH);
           const merged = mergeAppsManifest(template.appsYaml, current, chosen, sites);

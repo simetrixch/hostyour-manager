@@ -1,5 +1,5 @@
 import type { Step, StepCtx } from "../../executor/types.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantLifecyclePorts } from "./lifecycle.ts";
 
 // A TENANT'S APPS BUNDLE GOES WITH ITS LAST APP (hostyour-manager#217). The build-only registration
@@ -33,7 +33,15 @@ export async function removeTenantAppsRegistration(ctx: StepCtx, ports: TenantLi
   }
   const { appsRepo, appsImage } = current.entry;
   ctx.log("meta", `repository ${appsRepo} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`);
-  if (ports.buildRegistrations) {
+  // An unreadable sibling cannot prove that the shared build registration is unused.
+  const siblings = await Promise.all(STAGE.filter((stage) => stage !== t.stage).map(async (stage) => {
+    const sibling = await ports.registrations.scanTenant(stage, t.guid);
+    return sibling.status === "unreadable" || (sibling.status === "read" && (await ports.registrations.readTenant(stage, t.guid))?.entry.appsImage === appsImage);
+  }));
+  const shared = siblings.some(Boolean);
+  if (shared) {
+    ctx.log("meta", `build registration of ${appsImage} stays for another stage of tenant ${t.guid}`);
+  } else if (ports.buildRegistrations) {
     const { removed } = await ports.buildRegistrations.removeBuildRegistration(appsImage, ctx.runId);
     ctx.log("meta", removed ? `build registration of ${appsImage} removed` : `build registration of ${appsImage} already absent`);
   } else {

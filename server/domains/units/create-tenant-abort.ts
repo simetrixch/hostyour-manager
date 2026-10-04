@@ -14,6 +14,7 @@ import { removeIssuerRecordsStep, tenantTeardownSteps, type TenantTeardownOpts, 
 // Type-only, so there is no runtime import cycle back into create-tenant.run.ts — the same shape
 // create-tenant-activate.ts has.
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
+import { removeBookedRecords } from "#unit/server/unit-dns.ts";
 
 /** The create-tenant ABORT flavour of the shared teardown: the compensating inverse of everything this
  *  run deploys. FAIL-LOUD, exactly like tenant-offboard and for its reason — an abort deletes no Tenant
@@ -81,7 +82,10 @@ export function createTenantCleanups(ports: TenantOnboardPorts, p: CreateTenantP
   // The `cascade` deletes NO cluster state (see ABORT_TEARDOWN); it removes the identity provider's DNS
   // mark provision-dns may have published, which would otherwise outlive the tenant this run never made.
   const target = abortTeardownTarget(p);
-  return tenantTeardownSteps(ports, target, ABORT_TEARDOWN, [removeIssuerRecordsStep(ports, target, ABORT_TEARDOWN)]);
+  return tenantTeardownSteps(ports, target, ABORT_TEARDOWN, [removeIssuerRecordsStep(ports, target, ABORT_TEARDOWN), ...(p.sourceTenantId ? [{
+    name: `abort-${p.guid}-remove-stage-hosts`, title: `Roll back ${p.guid}: remove the new stage's recorded hosts`,
+    run: (ctx: Parameters<Cleanup["run"]>[0]) => removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: p.stage }, except: [] }),
+  }] : [])]);
 }
 
 /** The abort's PRECONDITION (RunDefinition.assertAbortable): the cleanups above are a

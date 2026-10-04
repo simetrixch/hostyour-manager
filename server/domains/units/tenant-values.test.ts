@@ -29,7 +29,7 @@ describe("registryHostFromChain", () => {
   });
 });
 
-describe("resolveTenantCluster — the tenant's stage is one the cluster carries", () => {
+describe("resolveTenantCluster — tenant placement is independent of the machine stage", () => {
   let db: DbHandle;
   beforeEach(() => {
     db = openDb(":memory:");
@@ -46,12 +46,10 @@ describe("resolveTenantCluster — the tenant's stage is one the cluster carries
     expect(resolveTenantCluster(db.db, "cls_1", "test")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
   });
 
-  it("PLANTED DEFECT: refuses a stage the cluster carries no tenant role for, naming the roles it holds", () => {
-    // A dev tenant on a prod cluster would log in with tenant-eso-dev, a role the cluster does not hold.
-    expect(() => resolveTenantCluster(db.db, "cls_1", "dev")).toThrow(/tenant at dev cannot be created on s1\.example\.com, a prod cluster.*tenant-eso-prod and tenant-eso-test alone.*create it at prod or test/);
-    // A test cluster carries its own stage alone: a prod tenant there is refused.
+  it("places every tenant stage independently of the machine's platform stage", () => {
+    for (const stage of ["dev", "test", "prod"] as const) expect(resolveTenantCluster(db.db, "cls_1", stage).clusterId).toBe("cls_1");
     db.db.update(clusters).set({ stage: "test" }).run();
-    expect(() => resolveTenantCluster(db.db, "cls_1", "prod")).toThrow(/tenant at prod cannot be created on s1\.example\.com, a test cluster.*tenant-eso-test alone.*create it at test$/);
+    expect(resolveTenantCluster(db.db, "cls_1", "prod").stage).toBe("test");
   });
 
   it("refuses a cluster that is not active, and an unknown one", () => {

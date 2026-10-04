@@ -144,9 +144,9 @@ export const mongoEnv = (stage: Stage): JobEnvVar[] => [
  *  listing job answers through and parseDbLines reads back. mongosh writes to a file first, because
  *  `sh -e` misses a failure inside a pipe: a Mongo that cannot be listed must fail the job, not read
  *  as one without databases, which would drop nothing on a clear and read as destroyed data at a move. */
-export const listMongoDbs = (prefix: string): string =>
+export const listMongoDbs = (prefix: string, suffix = ""): string =>
   `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/mongo-databases
-{ grep "^${prefix}" /tmp/mongo-databases || true; } | while read -r d; do echo "DB $d"; done`;
+{ grep "^${prefix}.*${suffix}$" /tmp/mongo-databases || true; } | while read -r d; do echo "DB $d"; done`;
 
 /** The `DB <name>` lines of a listing job's log, in order — how a step reads a database listing. */
 export function parseDbLines(logs: string): string[] {

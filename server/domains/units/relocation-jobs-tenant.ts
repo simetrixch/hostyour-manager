@@ -1,6 +1,7 @@
 // The tenant's jobs of move/backup/restore: its registration, its `<guid>_*` Mongo databases, its
 // bucket and its crypto material, each job placed in the namespace whose Secrets it reads. The job
 // algebra they are composed from is the unit's (plugins/unit/server/relocation-jobs.ts).
+import { tenantBucketName } from "./tenant-storage.ts";
 import type { JobEnvVar } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
@@ -85,7 +86,7 @@ export function tenantDumpJobs(i: TenantJobInputs & { registrationYaml: string }
           writeFile("/tmp/registration.yaml", i.registrationYaml) +
           hashLine("/tmp/registration.yaml", "registration.yaml") +
           `rclone copyto /tmp/registration.yaml "box:${i.folder}/registration.yaml"
-${listMongoDbs(`${i.guid}_`)} > /tmp/dbs
+${listMongoDbs(`${i.guid}_`, `_${i.stage}`)} > /tmp/dbs
 cat /tmp/dbs
 sed 's/^DB //' /tmp/dbs | while read -r db; do
   ${mongodumpLine("$db", "/tmp/$db.archive")}  ${hashLine("/tmp/$db.archive", "mongo/$db.archive")}  rclone copyto "/tmp/$db.archive" "box:${i.folder}/mongo/$db.archive"
@@ -112,11 +113,11 @@ done
       spec: {
         ...boxSpec("dump-bucket", i.guid, tenantS3Env()),
         image: i.image,
-        script: BOX_REMOTE + S3_REMOTE + `rclone size "s3:${i.guid}" --json > /tmp/source-size
+        script: BOX_REMOTE + S3_REMOTE + `rclone size "s3:${tenantBucketName(i.guid, i.stage)}" --json > /tmp/source-size
 want=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/source-size)
 [ -n "$want" ] || { echo "UNCOUNTED source bucket: rclone answered no count"; exit 1; }
 rclone mkdir "box:${i.folder}/bucket"
-rclone sync "s3:${i.guid}" "box:${i.folder}/bucket" --create-empty-src-dirs
+rclone sync "s3:${tenantBucketName(i.guid, i.stage)}" "box:${i.folder}/bucket" --create-empty-src-dirs
 rclone size "box:${i.folder}/bucket" --json > /tmp/copied-size
 have=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/copied-size)
 [ -n "$have" ] || { echo "UNCOUNTED copied bucket: rclone answered no count"; exit 1; }
@@ -189,7 +190,7 @@ done < /tmp/archives
       spec: {
         ...boxSpec("restore-bucket", i.guid, tenantS3Env()),
         image: i.image,
-        script: BOX_REMOTE + S3_REMOTE + `rclone sync "box:${i.folder}/bucket" "s3:${i.guid}" --create-empty-src-dirs\n`,
+        script: BOX_REMOTE + S3_REMOTE + `rclone sync "box:${i.folder}/bucket" "s3:${tenantBucketName(i.guid, i.stage)}" --create-empty-src-dirs\n`,
       },
     });
   }
@@ -209,7 +210,7 @@ export function tenantVerifyCompletenessJobs(i: TenantJobInputs): RelocationJob[
         image: i.image,
         script:
           BOX_REMOTE +
-          `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' > /tmp/have
+          `${listMongoDbs(`${i.guid}_`, `_${i.stage}`)} | sed 's/^DB //' > /tmp/have
 rclone lsf "box:${i.folder}/mongo/" > /tmp/archives
 sed 's/\\.archive$//' /tmp/archives > /tmp/want
 while read -r want; do
@@ -233,7 +234,7 @@ echo "COMPLETE mongo"
           // Each count lands in a file first: `sh -e` misses a failure inside a command substitution's
           // pipe, and two counts that could not be read would otherwise compare equal, both empty.
           `rclone size "box:${i.folder}/bucket" --json > /tmp/box-size
-rclone size "s3:${i.guid}" --json > /tmp/target-size
+rclone size "s3:${tenantBucketName(i.guid, i.stage)}" --json > /tmp/target-size
 want=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/box-size)
 have=$(sed -n 's/.*"count":\\([0-9]*\\).*/\\1/p' /tmp/target-size)
 [ -n "$want" ] && [ -n "$have" ] || { echo "UNCOUNTED bucket objects: rclone answered no count"; exit 1; }
@@ -257,7 +258,7 @@ export function tenantSourceDbListJob(i: { guid: string; stage: Stage; image: st
       name: relocationJobName("list-source", i.guid),
       image: i.image,
       env: mongoEnv(i.stage),
-      script: listMongoDbs(`${i.guid}_`) + "\n",
+      script: listMongoDbs(`${i.guid}_`, `_${i.stage}`) + "\n",
     },
   };
 }
@@ -272,7 +273,7 @@ export function tenantClearSourceJobs(i: { guid: string; stage: Stage; image: st
         name: relocationJobName("clear-source", i.guid),
         env: mongoEnv(i.stage),
         image: i.image,
-        script: `${listMongoDbs(`${i.guid}_`)} | sed 's/^DB //' | while read -r db; do
+        script: `${listMongoDbs(`${i.guid}_`, `_${i.stage}`)} | sed 's/^DB //' | while read -r db; do
   mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"
   echo "DROPPED $db"
 done

@@ -47,6 +47,7 @@ export function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase
       // could drift out of step with them.
       identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
       routing: p.routing,
+      ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
       seedUsers: p.seedUsers,
       owner: p.owner, provenance: "manager" as const,
       lastRunId: ctx.runId, updatedAt: new Date(),

@@ -549,6 +549,7 @@ export type TenantDetailView = TenantView & { apps: TenantAppView[] };
  *  mandatory members of every tenant. */
 export interface TenantCreateForm {
   clusterId: string;
+  stages?: { stage: Stage; clusterId: string }[];
   /** The tenant's stage — the target cluster's, as the wizard read it off the chosen target row
    *  (TenantTargetView.stage); every member's namespace suffix and the registration path. */
   stage: Stage;
@@ -579,6 +580,7 @@ export interface TenantAppRequest {
 }
 export interface CreateTenantBody {
   clusterId: string;
+  stages?: { stage: Stage; clusterId: string }[];
   stage: Stage;
   subdomain: string;
   owner: string;
@@ -603,6 +605,7 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
   const adminEmail = f.adminEmail?.trim();
   return {
     clusterId: f.clusterId,
+    ...(f.stages ? { stages: f.stages } : {}),
     stage: f.stage,
     subdomain: f.subdomain.trim(),
     owner: f.owner.trim(),
@@ -623,6 +626,8 @@ export const listTenantTargets = (): Promise<TenantTargetView[]> => req<TenantTa
  *  is not wired or the catalog is momentarily unreadable), so the wizard just shows an inline
  *  "catalog unavailable" note and can still onboard a tenant with no apps. */
 export const listTenantAppCatalog = (): Promise<AppsManifest> => req<AppsManifest>("/api/tenants/app-catalog");
+export const addTenantStage = (id: string, stage: Stage, clusterId: string): Promise<{ runId: string }> => post(`/api/tenants/${id}/stages`, { stage, clusterId });
+
 export const getTenant = (id: string): Promise<TenantDetailView> => req<TenantDetailView>(`/api/tenants/${id}`);
 /** ONE tenant's catalog (GET /api/tenants/:id/app-catalog): the apps the deploy repository's template offers,
  *  each marked deployed. The route degrades with `reason` or `error` (shared/apps-manifest.ts

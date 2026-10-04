@@ -185,7 +185,7 @@ describe("tenant-migrate", () => {
     const resolver = ports.resolver;
     ports.resolver = { resolve: async (id) => ({ ...await resolver.resolve(id), argoNamespace: id === SOURCE.clusterId ? "source-argo" : "target-argo" }) };
     const apps = ["auth", "jobs", "report", "web"].map((m) => `${GUID}-${m}-prod`);
-    await f.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: apps, argoNamespace: "source-argo", units: ["auth", "platform", "bundle"] })]);
+    await f.buildRbac.applyBuildRbac([renderTenantArgoSync({ stage: "prod", guid: GUID, applications: apps, argoNamespace: "source-argo", units: ["auth", "platform", "bundle"] })]);
     const sourceBinding = f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`);
     const p = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
     const step = makeTenantMigrateDef(ports).steps(p).find((s) => s.name === "provision-target")!;

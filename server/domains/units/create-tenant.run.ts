@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { makeTenantStagesDef, bundleStageSteps } from "./tenant-stage-plan.ts";
 import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
+import { refreshTenantApplications } from "./lifecycle.ts";
 import { upsertTenantInventory } from "./create-tenant-inventory.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
@@ -55,8 +57,7 @@ import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
 // template, writes the chosen apps into it and builds its first image (tenant-apps-steps.ts) after
 // the platform build units and before its own writes, and the registration carries the three
 // facts. The STAGE is the tenant's own, an input of the request, and one the target cluster carries:
-// its own, and test on a prod cluster, the stages its Vault holds a tenant role for
-// (resolveTenantCluster). Everything not per-member — the tenant's Vault path, its databases, its
+// with a separate namespace and Vault role for each tenant stage. Everything not per-member — the tenant's Vault path, its databases, its
 // crypto — is either claimed by the member chart that needs it (ServiceClaims) or written by this
 // run itself (the tenant's crypto entry in Vault).
 // It shares onboard's streaming-plan skeleton: the plan phase runs the long fan-out validation
@@ -166,7 +167,7 @@ export interface TenantOnboardPorts {
 
 /** The frozen create-tenant params: the operator's fields + everything the streaming plan resolved
  *  (the minted guid, the pinned chartsRef, the approved report, the frozen expected-Application set). */
-export const CreateTenantParams = z.object({
+export const CreateTenantStageParams = z.object({
   guid: guidSchema, // minted + collision-checked at plan time; the sole tenant identity (<guid>)
   subdomain: subdomainSchema,
   stage: z.enum(STAGE),
@@ -235,7 +236,15 @@ export const CreateTenantParams = z.object({
   // The facts the apps-repo steps need, resolved once at the plan (tenant-apps-steps.ts); present
   // exactly when the bundle above is.
   appsUnit: TenantAppsUnitSchema.optional(),
+  appsStages: z.array(z.enum(STAGE)).optional(), bundleStage: z.enum(STAGE).optional(),
+  appsImageTag: appsBundleFields.appsImageTag, ownDomain: z.string().optional(), ownDomainRedirects: z.array(z.string()).optional(),
+  approvedTags: z.record(z.string(), z.record(z.string(), z.string())).optional(),
+  isStandingTenant: z.boolean().optional(),
+  sourceTenantId: z.string().startsWith("tnt_").optional(), sourceStage: z.enum(STAGE).optional(),
+  sourceRegistration: z.string().optional(),
 });
+export type CreateTenantStageParams = z.infer<typeof CreateTenantStageParams>;
+export const CreateTenantParams = CreateTenantStageParams.extend({ additionalStages: z.array(CreateTenantStageParams).optional() });
 export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
 
 /** The raw operator request from the create-tenant wizard (before the plan mints the guid + resolves
@@ -243,10 +252,10 @@ export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
  *  the target cluster row, never trusted from input. */
 export const CreateTenantRequest = z.object({
   clusterId: z.string().startsWith("cls_"),
-  // The tenant's own stage — the registration path registrations/<guid>/<stage>.yaml, every member's
-  // namespace suffix and the Vault path <stage>/tenants/<guid>. It must be the target cluster's own
-  // stage, and the plan refuses any other (resolveTenantCluster, tenant-values.ts).
+  // The tenant's stage owns its registration, member namespaces and Vault path independently of the machine's stage.
   stage: z.enum(STAGE),
+  stages: z.array(z.object({ stage: z.enum(STAGE), clusterId: z.string().startsWith("cls_") })).min(1).max(3).refine((stages) => new Set(stages.map((s) => s.stage)).size === stages.length, "choose each stage only once").optional(),
+  sourceTenantId: z.string().startsWith("tnt_").optional(),
   subdomain: subdomainSchema,
   owner: z.string().min(1),
   // Per-app seed tiers — each selected app's Reference + Demo checkboxes. Absent ⇒ both false.
@@ -269,10 +278,10 @@ export const CreateTenantRequest = z.object({
 export type CreateTenantRequest = z.infer<typeof CreateTenantRequest>;
 
 
-function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[] {
+export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStageParams): Step[] {
   // What the build units hand the steps after them: the image set and the sync units as they stand
   // once the builds wrote their pins. In-run memory of this closure, like the release cycle's own.
-  const runtime: TenantBuildRuntime = {};
+  const runtime: TenantBuildRuntime = { ...(p.appsImageTag ? { appsImageTag: p.appsImageTag } : {}) };
   // Every member of this tenant, standing ones first then one per app. One namespace and one
   // AppProject per entry — the tenant owns several of each, never one shared pair. Read defensively
   // because the armed check evaluates def.steps({}) with NO params at all.
@@ -290,7 +299,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
   // only tenant-purge deletes any of it. Its member databases go with the prune's ServiceClaim
   // deletions regardless — the plan summary warns the operator before approval.
   const replaceSteps = (p.replaces ?? []).flatMap((t) => tenantTeardownSteps(ports, t, REPLACE_TEARDOWN, [removeIssuerRecordsStep(ports, t, REPLACE_TEARDOWN)]));
-  return [
+  const steps: Step[] = [
     {
       name: "attest-target",
       title: "Attest the target cluster (deploy-state fresh)",
@@ -344,7 +353,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     // The tenant's own apps repository, after the platform's images and for the same reason: created
     // through the App, written from the template with the chosen apps, onboarded build-only and built
     // once — its tag lands in the runtime for refresh-images and write-registration.
-    ...(p.appsUnit ? tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: appFolders(p.apps ?? []) }, runtime) : []),
+    ...(p.appsUnit ? tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: appFolders(p.apps ?? []), ...(p.appsStages ? { stages: p.appsStages } : {}) }, runtime) : []),
     {
       name: "seed-tenant-crypto",
       title: "Seed the tenant's crypto entry in Vault (create-only)",
@@ -474,6 +483,7 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
         // The completeness gate: wait for EVERY expected Application (frozen at plan time from
         // tenantApplicationSet — a name ArgoCD never creates hangs forever) to appear AND converge
         // Synced/Healthy. Filtered by platform/tenant=<guid>; an absent member reads Missing.
+        await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
         const until = syncedAt(p.expectedApps);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(p.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, p.expectedApps, until, {
@@ -528,12 +538,17 @@ function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantParams): St
     // create-tenant-activate.ts, mirroring the consumer's onboard-activate.ts).
     tenantActivateStep(ports, p),
   ];
+  return bundleStageSteps(ports, p, runtime, steps);
 }
 
 export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<CreateTenantParams> {
+  return makeTenantStagesDef(ports, makeCreateTenantStageDef);
+}
+
+export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?: string): RunDefinition<CreateTenantStageParams> {
   return {
     kind: "tenant-create",
-    paramsSchema: CreateTenantParams,
+    paramsSchema: CreateTenantStageParams,
     mutating: true, // mutating ⇒ steps()[0] MUST be attest-target, asserted at registrations boot
     plan: () => {
       // create-tenant is planned by the streaming planner (fan-out validation), never plan().
@@ -569,7 +584,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       }
       const appsImage = appsUnit ? tenantAppsUnit(appsUnit.templateBuild, req.subdomain) : undefined;
       const appsImageTag = withApps ? placeholderTagFromChain(clusterValueFiles) : undefined;
-      const guid = await mintFreeGuid(ports, req.stage);
+      const guid = chosenGuid ?? await mintFreeGuid(ports);
       // The books branch first: LOG AND CONTINUE on failure, as boot does — a trunk that cannot be
       // carried leaves the branch one product state behind, never a wrong one, and the plan reads
       // it as it stands.
@@ -634,7 +649,7 @@ export function makeCreateTenantDef(ports: TenantOnboardPorts): RunDefinition<Cr
       // tenant pulls is read off the registration branch, so no list of components is kept anywhere.
       // Refreshed after the builds (refresh-images) where a build unit ran.
       const syncUnits = tenantSyncUnits(requiredImages, await ports.attestedBuilds());
-      const params: CreateTenantParams = {
+      const params: CreateTenantStageParams = {
         guid,
         // Frozen from the approved validation: the run executes what was approved.
         members: outcome.memberRecords, identityProvider: outcome.identityProvider,

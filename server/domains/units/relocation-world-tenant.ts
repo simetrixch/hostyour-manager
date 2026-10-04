@@ -115,7 +115,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       const images = [...pins.map((p) => ({ repo: p.image })), ...(entry.appsImage ? [{ repo: entry.appsImage }] : [])];
       const units = tenantSyncUnits(images, await ports.attestedBuilds());
       const liveApplications = tenantApplicationSet(entry.members.map((m) => m.name), tc.guid, tc.stage);
-      await ports.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: tc.guid, applications: liveApplications, argoNamespace, units })]);
+      await ports.buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: tc.guid, stage: tc.stage, applications: liveApplications, argoNamespace, units })]);
       c.log("meta", `tenant ${tc.guid} release access on ${target.cluster}: ${units.join(", ") || "no attested builders"}; ${liveApplications.join(", ")}`);
       c.log("meta", `${memberNames.length} member AppProject(s) + admission policies + the argo-sync grant applied in ${argoNamespace}, destination pinned to ${target.cluster}`);
     };
@@ -248,7 +248,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
           // ever reaps it, and the target cluster carries its own copy since provision-target.
           await clusterReader.deleteAdmissionPolicy(tenantMemberAdmissionPolicyName(tc.guid, member, tc.stage));
         }
-        const grantRemoved = await deleteTenantArgoSync(ports, tc.guid, argoNamespace);
+        const grantRemoved = await deleteTenantArgoSync(ports, tc.guid, argoNamespace, tc.stage);
         // The namespaces by LABEL, unioned with the derivable names — the same complete reap the
         // purge makes, because a member nobody records still carries the label. The label names the
         // guid alone, so the labelled set is narrowed to THIS stage's suffix: a sibling stage of the

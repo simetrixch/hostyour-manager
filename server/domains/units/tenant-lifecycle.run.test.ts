@@ -384,7 +384,7 @@ describe("tenant-offboard run", () => {
     seedTenant();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const buildRbac = new FakeBuildRbacWriter();
-    await buildRbac.applyBuildRbac([renderTenantArgoSync({ guid: GUID, applications: [`${GUID}-auth-prod`], argoNamespace: "argocd", units: ["example-platform"] })]);
+    await buildRbac.applyBuildRbac([renderTenantArgoSync({ stage: "prod", guid: GUID, applications: [`${GUID}-auth-prod`], argoNamespace: "argocd", units: ["example-platform"] })]);
     const del = makeOffboardTenantDef(ports(reg, { buildRbac })).steps({ tenantId: "tnt_1" }).find((s) => s.name === "delete-appprojects")!;
     await del.run(ctx("run_off", "delete-appprojects", {}, []));
     expect(buildRbac.keys()).toEqual([]);

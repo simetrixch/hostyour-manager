@@ -110,7 +110,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         const deletes = await deleteTenantMembers(kube, tc.guid, tc.stage, members);
         // The inverse of create-tenant's provision-argo-sync, in the same namespace and the same step
         // as the projects: a Role naming this guid's Applications must not outlive the guid.
-        const removed = await deleteTenantArgoSync(ports, tc.guid, kube.argoNamespace);
+        const removed = await deleteTenantArgoSync(ports, tc.guid, kube.argoNamespace, tc.stage);
         ctx.checkpoint({ members, ...deletes, argoSyncDeleted: removed });
         ctx.log("meta", describeTenantMemberDeletes(deletes, removed));
       },

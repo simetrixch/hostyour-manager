@@ -16,6 +16,7 @@ import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
 import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { SetDemoAction } from "../components/SetDemoAction.tsx";
 import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
+import { TenantStageActions } from "../components/TenantStageActions.tsx";
 import { TenantWebsites } from "../components/TenantWebsites.tsx";
 import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
@@ -165,10 +166,7 @@ export function TenantDetail() {
               holds none, and neither does the tenant's registration. The live targeted-vs-deployed answer
               lives one click back on the Tenants card, where the live route reads both off the base
               Application and gives them a verdict (server/domains/units/api.ts driftOf). */}
-          <p className="page__desc">
-            {t.domain} · {t.stage}
-            {t.owner ? ` · ${t.owner}` : ""}
-          </p>
+          <p className="page__desc">{t.domain} · {t.stage}{t.owner ? ` · ${t.owner}` : ""}</p>
         </div>
         <div className="page__actions">
           <TenantStatusBadge status={t.status} suspended={t.suspended} />
@@ -220,7 +218,7 @@ export function TenantDetail() {
         {t.seedUsers && <span className="chip">seed-users</span>}
       </div>
 
-      <h3 className="steps-panel__title">Apps</h3>
+      <div>{!unfinished && !settled && <TenantStageActions tenant={t} />}<h3 className="steps-panel__title">Apps</h3></div>
       {/* The bundle's apps lead, deployed or not; an inventory row the bundle no longer names follows.
           While the catalog is unreadable the list is the inventory alone, and the control below says why. */}
       {(() => {

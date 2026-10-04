@@ -18,17 +18,18 @@ import { TENANT_STORAGE_PROPERTIES } from "./tenant-crypto-mint.ts";
 // configuration is incomplete rather than falling back to local disk. A tenant created without these
 // three has an engine that never starts.
 
-/** The name every key of one tenant is minted under. Deterministic, so an operator reading the
- *  account's tokens can tell whose key each one is — and it carries the stage, because one guid can
- *  exist at two stages and each has a bucket and a key of its own. */
+/** Keep the established PROD bucket while giving each non-prod stage its own bucket. */
+export function tenantBucketName(guid: string, stage: Stage): string {
+  return stage === "prod" ? guid : `${guid}-${stage}`;
+}
+
 export function tenantKeyName(guid: string, stage: Stage): string {
   return `tenant-${guid}-${stage}`;
 }
 
 /** Make the tenant's bucket and mint the one key that reaches it.
  *
- *  THE BUCKET IS THE TENANT'S GUID, which is what the engine chart already addresses
- *  (UPLOAD_S3_BUCKET) and what the relocation jobs address as `s3:<guid>`. Idempotent: a bucket a
+ *  The bucket matches the engine chart: GUID in prod, GUID-stage otherwise. Idempotent: a bucket a
  *  previous run made is left exactly as it stands, objects and all.
  *
  *  THE KEY IS MINTED FRESH ON EVERY CALL, beside whatever stands, and that is deliberate. A key's
@@ -48,8 +49,8 @@ export async function provisionTenantStorage(
     );
   }
   const signal = p.signal ? { signal: p.signal } : {};
-  const { created } = await store.ensureBucket({ bucket: p.guid, ...signal });
-  const bucket = await store.mintBucketKey({ bucket: p.guid, name: tenantKeyName(p.guid, p.stage), ...signal });
+  const { created } = await store.ensureBucket({ bucket: tenantBucketName(p.guid, p.stage), ...signal });
+  const bucket = await store.mintBucketKey({ bucket: tenantBucketName(p.guid, p.stage), name: tenantKeyName(p.guid, p.stage), ...signal });
   const [k, s, e] = TENANT_STORAGE_PROPERTIES;
   return {
     bucket,

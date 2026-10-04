@@ -14,16 +14,7 @@ import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema, publicFqdn } from "./consumer.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
-import { MEMBER_ROUTING, type Stage } from "./enums.ts";
-
-/** The stages a tenant may have on a cluster of `clusterStage`: the cluster's own, and on a prod
- *  cluster a customer's test stage too (hostyour-manager#295). A cluster carries exactly the tenant
- *  stages its Vault holds a tenant role for: `tenant-eso-<its stage>`, and `tenant-eso-test` on a prod
- *  installation (hostyour-deploy deploy-platform-services.yaml and register-slave.yaml). The first
- *  is the cluster's own stage, the one the create form offers first. */
-export function tenantStagesOn(clusterStage: Stage): readonly Stage[] {
-  return clusterStage === "prod" ? ["prod", "test"] : [clusterStage];
-}
+import { MEMBER_ROUTING } from "./enums.ts";
 
 /** GUID_ALPHABET — Crockford base32 (minus i/l/o/u): 32 symbols = 10 digits + 22 lower-case
  *  letters. mintTenantGuid() (server/kernel/ids.ts) draws 12 chars from this set; the `guid`
