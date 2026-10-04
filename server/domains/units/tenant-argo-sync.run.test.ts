@@ -13,6 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { BUILD_PIPELINE_SERVICE_ACCOUNT } from "#unit/server/build-rbac.ts";
+import { provisionArgoSyncStep } from "./tenant-builds.ts";
 import type { StepCtx, PlanStreamCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -236,6 +237,29 @@ describe("planStream derives the subjects from the tenant's own images", () => {
 });
 
 describe("add-app extends the grant", () => {
+  it("a refresh planned before add-app cannot replace the current grant or its new builder", async () => {
+    const buildRbac = new FakeBuildRbacWriter();
+    const registrations = await seededRegistrations();
+    const prt = ports({ buildRbac, registrations });
+    const oldPlan = createParams();
+    const added = addParams({ syncUnits: ["example-platform", "example-crm"] });
+    await makeAddAppDef(addAppPorts(prt)).steps(added).find(s => s.name === "provision-argo-sync")!.run(ctx(added, []));
+    await registrations.updateTenantApps("prod", GUID, { op: "append", app: NEW_APP, member: added.member, runId: "run_add" });
+
+    await expect(provisionArgoSyncStep(prt, oldPlan, {}).run(ctx(oldPlan, []))).rejects.toThrow("members changed since this run was planned");
+    expect(roleOf(buildRbac)?.rules).toEqual([{
+      apiGroups: ["argoproj.io"], resources: ["applications"], verbs: ["get", "patch"],
+      resourceNames: [`${GUID}-auth-prod`, `${GUID}-jobs-prod`, `${GUID}-report-prod`, `${GUID}-erp-prod`, `${GUID}-crm-prod`],
+    }]);
+    expect(bindingOf(buildRbac)?.subjects).toEqual([
+      { kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: "example-platform-build" },
+      { kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: "example-crm-build" },
+    ]);
+    const currentPlan = createParams({ expectedApps: [...oldPlan.expectedApps, memberApplication(GUID, NEW_APP, "prod")], syncUnits: added.syncUnits });
+    await provisionArgoSyncStep(prt, currentPlan, {}).run(ctx(currentPlan, []));
+    expect(roleOf(buildRbac)?.rules[0]?.resourceNames).toContain(memberApplication(GUID, NEW_APP, "prod"));
+  });
+
   it("re-renders it over EVERY member — the live registration's apps plus the one being added", async () => {
     const buildRbac = new FakeBuildRbacWriter();
     const p = addParams();
