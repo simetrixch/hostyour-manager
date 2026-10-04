@@ -16,6 +16,7 @@ const draft = (of: readonly UnitSizeView[]): Record<string, SizeDraft> => Object
 }]));
 const render = (of: readonly UnitSizeView[]) => renderToStaticMarkup(createElement(SizeTables, { rows: of, draft: draft(of), saving: null, saved: null, onEdit: () => undefined, onSave: () => undefined }));
 const PART: Record<string, string> = { member: "tenant app", base: "Application", postgresql: "+ own PostgreSQL", mongodb: "+ own MongoDB, per member" };
+const FIGURE: Record<string, string> = { requestsCpu: "requests.cpu", requestsMemory: "requests.memory", limitsCpu: "limits.cpu", limitsMemory: "limits.memory", pods: "pods", persistentVolumeClaims: "PVCs" };
 type Handlers = { label?: string; onChange?: (v: string) => void; onClick?: () => void };
 
 /** Every element of the tree that takes an edit or a click, with its props. */
@@ -49,8 +50,9 @@ describe("SizeTables", () => {
     const handlers: Handlers[] = []; walk(tree, handlers);
     for (const p of handlers.filter((h) => h.onChange)) {
       const before = edits.length; p.onChange!("1");
-      const [component, name] = edits[before]!.split("|")[0]!.split("/");
-      expect(p.label!.startsWith(`${UNIT_SIZE_LETTER[name as UnitSizeView["name"]]} ${PART[component!]} `)).toBe(true);
+      const [key, field] = edits[before]!.split("|");
+      const [component, name] = key!.split("/");
+      expect(p.label).toBe(`${UNIT_SIZE_LETTER[name as UnitSizeView["name"]]} ${PART[component!]} ${FIGURE[field!]}`);
     }
     for (const p of handlers.filter((h) => h.onClick)) p.onClick!();
     expect(new Set(edits).size).toBe(90);
