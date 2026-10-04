@@ -70,11 +70,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
   return async (ctx: StepCtx): Promise<RelocationWorld> => {
     const tc = loadTenantCluster(ctx.db, tenantId);
     const apps = await tenantAppNames(ports, ctx, tenantId, tc.stage, tc.guid);
-    // EVERY member of the tenant: the standing set the row records, plus one per app. The row keeps
-    // the standing set alone because an app's presence is its own row and its status, so every reader
-    // unions the two — and a move that used the row alone would leave each app's namespace,
-    // AppProject and Application standing on the source.
-    const allMembers = [...tc.members, ...apps];
+    // The registration is the live bracket. An offboarded restore has no registration yet;
+    // its inventory fallback lasts only until the dumped registration is re-committed.
+    const current = await ports.registrations.readTenant(tc.stage, tc.guid);
+    const allMembers = current?.entry.members.map((m) => m.name) ?? [...tc.members, ...apps];
     const image = ports.dbtoolsImage ?? "";
     const watchSet = async (c: StepCtx, clusterId: string, intent: string): Promise<void> => {
       const entry = await readRegistration(ports, tc.stage, tc.guid);
@@ -146,7 +145,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         const entry = dumpedRegistrationYaml !== undefined ? TenantRegistrationSchema.parse(parseYaml(dumpedRegistrationYaml)) : await readRegistration(ports, tc.stage, tc.guid);
         // The DUMPED registration's apps, not this run's: a restore reconstructs the tenant the box
         // holds, whose app set may differ from whatever the inventory still says.
-        const members = [...tc.members, ...entry.apps.map((a) => a.name)];
+        const members = entry.members.map((m) => m.name);
         // The standing members' namespace labels ride the registration; an app member carries none.
         await applyIsolation(c, target, members, new Map(entry.members.map((m) => [m.name, m.namespaceLabels])), entry);
         const { clusterReader } = await ports.resolver.resolve(target.clusterId);
@@ -159,7 +158,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
             await clusterReader.annotateNamespace(ns, { [CLAIM_RELOCATING_ANNOTATION]: null });
           }
         }
-        c.log("meta", `tenant ${tc.guid} isolation applied on ${target.cluster} (${members.length} member(s): ${tc.members.length} standing + ${entry.apps.length} app(s))`);
+        c.log("meta", `tenant ${tc.guid} isolation applied on ${target.cluster} (${members.length} member(s): ${members.length - entry.apps.length} standing + ${entry.apps.length} app(s))`);
       },
       repoint: async (c, target) => {
         // ONE mark, BEFORE the flip, and it is the one that saves the data. Every MEMBER namespace
@@ -211,7 +210,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // own delete) and an empty one without: nothing holds the object, so it vanishes at once and
         // the watch always passes. The member Applications are what the source actually stops
         // producing.
-        const names = [...tc.members, ...apps].map((m) => memberApplication(tc.guid, m, tc.stage));
+        const names = allMembers.map((m) => memberApplication(tc.guid, m, tc.stage));
         await refreshTenantApplications(ports.resolver, tc.clusterId, names, c);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const status = await argoReader.watchApplicationSet(argoNamespace, names, allPruned(names), {

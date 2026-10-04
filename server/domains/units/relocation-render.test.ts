@@ -80,6 +80,20 @@ describe("relocation waits for the desired render", () => {
     expect(describeUnsynced(["auth"], pending)).toContain("refresh=pending");
   });
 
+  it("refuses source release while a registration-only member still stands", async () => {
+    seedTenantRows(db);
+    const f = makeFakes();
+    const ports = tenantPorts(f);
+    await ports.registrations.commitTenant({ stage: "prod", guid: GUID, runId: "run_create", registration: tenantEntry({ members: testMembers(["extra", "web"]) }) });
+    f.source.argo.setStatuses(new Map([[`${GUID}-extra-prod`, tenantStatus(true)]]));
+    const ctx = stepCtx(db, "verify-source-released", {}, []);
+    const world = await tenantWorld(ports, "tnt_1")(ctx);
+    expect(world.namespaces).toContain(`${GUID}-extra-prod`);
+    await expect(world.verifySourceHandleReleased(ctx)).rejects.toThrow(/extra-prod/);
+    f.source.argo.setStatuses(new Map());
+    await world.verifySourceHandleReleased(ctx);
+  });
+
   it("refreshes the source generator before measuring that the repoint pruned it", async () => {
     seedTenantRows(db);
     const f = makeFakes();
