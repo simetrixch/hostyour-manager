@@ -19,12 +19,12 @@ export function TenantStageActions({ tenant }: { tenant: TenantView }) {
       const stages = all.filter((t) => t.guid === tenant.guid);
       setSiblings(stages);
       setTargets(machines.filter((t) => t.status === "active"));
-      setStage(STAGE.find((s) => !stages.some((t) => t.stage === s)) ?? "test");
+      setStage(STAGE.find((s) => !stages.some((t) => t.stage === s && t.status !== "purged")) ?? "test");
       setLoaded(true);
     }).catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
   }, [tenant.guid]);
-  const missing = STAGE.filter((s) => !siblings.some((t) => t.stage === s));
+  const missing = STAGE.filter((s) => !siblings.some((t) => t.stage === s && t.status !== "purged"));
   return <div className="card">
     <h3 className="steps-panel__title">Stages</h3>
     {siblings.map((sibling) => <p key={sibling.id}>
