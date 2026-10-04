@@ -1,4 +1,6 @@
 import { describe, it, expect, afterAll } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { BOTH, LIBRARY_MANIFEST, MANIFEST, RUNS, bothSpellings, expectSameBytes, fixtureRepo, originRefs, removeTempDirs } from "./release-twins.fixture.ts";
 
 // The repository's own step after the release (deploy/after-release.sh and .ps1), run by both
@@ -15,6 +17,34 @@ const step = (code: number): { sh: string; ps1: string } => ({
 });
 
 describe.skipIf(!BOTH)("the repository's own step after the release", () => {
+  for (const failure of [
+    { name: "deploy request", ref: "refs/tags/deploy/*", manifest: MANIFEST, released: true },
+    { name: "release commit", ref: "refs/heads/master", manifest: MANIFEST, released: false },
+    { name: "release tag", ref: "refs/tags/1.2.3-*", manifest: LIBRARY_MANIFEST, released: false },
+  ]) {
+    it(`never invokes the hook after a rejected ${failure.name} push`, RUNS, async () => {
+      const o = await bothSpellings(() => fixtureRepo({
+        manifest: failure.manifest,
+        packageJson: true,
+        origin: true,
+        originPreReceive: `while read old new ref; do case "$ref" in ${failure.ref}) exit 1 ;; esac; done`,
+        afterRelease: {
+          sh: "printf 'called\\n' >> hook-count\n",
+          ps1: '[IO.File]::AppendAllText((Join-Path (Get-Location) "hook-count"), "called`n")\n',
+        },
+      }), ["1.2.3", "stable", ...(failure.manifest === MANIFEST ? ["dev"] : [])]);
+      const { stdout } = expectSameBytes(o);
+      expect(o.sh.status).toBe(1);
+      expect(stdout).not.toContain("running deploy/after-release");
+      for (const result of [o.sh, o.ps1]) {
+        expect(existsSync(join(result.root, "work", "hook-count"))).toBe(false);
+        const refs = originRefs(result);
+        expect(/refs\/tags\/1[.]2[.]3-stable-\d{14}/.test(refs)).toBe(failure.released);
+        expect(refs).not.toContain("refs/tags/deploy/");
+      }
+    });
+  }
+
   it("PLANTED DEFECT: runs it last, with the tag, the release commit and the stage, from the repository root", RUNS, async () => {
     const { stdout } = expectSameBytes(
       await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, origin: true, afterRelease: step(0) }), ["1.2.3", "stable", "dev"]),

@@ -134,7 +134,7 @@ export function normalise(text: string, root: string): string {
  *  difference between two runs is which spelling performed it. `core.autocrlf false` keeps git's own
  *  normalisation warnings — a property of the developer's global configuration, not of these
  *  scripts — out of a comparison that is about what the two spellings print. */
-export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; origin?: boolean; dirty?: boolean; afterRelease?: { sh?: string; ps1?: string } }): Fixture {
+export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; origin?: boolean; originPreReceive?: string; dirty?: boolean; afterRelease?: { sh?: string; ps1?: string } }): Fixture {
   const base = tempDir();
   const work = join(base, "work");
   mkdirSync(work);
@@ -180,6 +180,7 @@ export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; pr
     if (init.status !== 0) throw new Error(`git init --bare failed: ${init.stderr}`);
     git("remote", "add", "origin", origin);
     git("push", "-q", "origin", "HEAD:master");
+    if (opts.originPreReceive !== undefined) writeFileSync(join(origin, "hooks", "pre-receive"), `#!/bin/sh\n${opts.originPreReceive}\n`, { mode: 0o755 });
   }
   if (opts.dirty) writeFileSync(join(work, "uncommitted.txt"), "not committed\n");
   return { cwd: work, root: base };
