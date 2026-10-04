@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import type { OrphanScanView, PurgeTenantTarget, WorkloadStatusView } from "../../../shared/api-types.ts";
 import {
   listTenants, getTenantLive, scanTenantOrphans, purgeTenant,
   type TenantView,
 } from "../api.ts";
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
-import { defaultEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
-import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
+import { groupTenantEnvironments, splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
+import { ChosenTenantEnvironment } from "../components/TenantEnvironmentBar.tsx";
 import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
 import { CheckChip } from "../components/CheckChip.tsx";
 import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
@@ -184,8 +184,8 @@ export function Tenants() {
   // tenant's card, or a row from the offboarded list. Always a SELECTION, from a scan entry or a tenants
   // row: there is no free-text guid anywhere, because the guid is minted by the plan, never chosen.
   const [purgeFor, setPurgeFor] = useState<PurgeTenantTarget | null>(null);
-  // The environment each tenant's card shows, by guid; a card nobody switched opens on defaultEnvironment.
-  const [chosen, setChosen] = useState<Record<string, string>>({});
+  // The environment each tenant's card shows lives in the URL (cardEnvironment), so Back and a reload keep it.
+  const [search, setSearch] = useSearchParams();
 
   useEffect(() => {
     listTenants()
@@ -331,11 +331,10 @@ export function Tenants() {
           </div>
         ) : (
           <ul className="cards">
-            {/* One card per TENANT: its environments are rows of their own, grouped here for display only.
-                The bar picks the row the rest of the card shows and acts on. */}
-            {groupTenantEnvironments(rows ?? []).map((group) => {
-              const t = Object.values(group.byStage).find((r) => r.id === chosen[group.key] && !tenantRowOffer(r.status).settled) ?? defaultEnvironment(group);
-              if (!t) return null;
+            {/* One card per TENANT, its environments grouped for display only; the URL picks the row it acts on. */}
+            {groupTenantEnvironments(rows ?? []).map((group) => (
+              <ChosenTenantEnvironment key={group.key} group={group} search={search} setSearch={setSearch}>
+                {(t, bar) => {
               // A tenant whose create-tenant run never finished. It is LISTED —
               // that is the whole point of recording the row before deploying — but it must not read as
               // live: its own badge token, the notice spelling out what the state means, and no
@@ -347,12 +346,12 @@ export function Tenants() {
               // list below, the tenant detail page — is gated by the same answer the purge route gives.
               const offer = tenantRowOffer(t.status);
               return (
-                <li key={group.key} className="card servercard">
+                <li className="card servercard">
                   <div className="card__head">
                     <strong className="servercard__name">{t.subdomain}</strong>
                     <span className="chip">{group.key}</span>
                   </div>
-                  <TenantEnvironmentBar group={group} selectedId={t.id} onSelect={(row) => setChosen((cur) => ({ ...cur, [group.key]: row.id }))} />
+                  {bar}
                   {/* No revision: the row holds none. The registration states no revision either, so the
                       one answer about what a tenant runs comes from the live card below, which reads it
                       off the base Application. */}
@@ -409,7 +408,9 @@ export function Tenants() {
                   </div>
                 </li>
               );
-            })}
+                }}
+              </ChosenTenantEnvironment>
+            ))}
           </ul>
         )}
 

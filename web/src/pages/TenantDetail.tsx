@@ -142,8 +142,8 @@ export function TenantDetail() {
         Loading tenant…
       </div>
     );
-
   const t = tenant;
+
   // WHICH surface this row gets, from the ONE shared rule (tenantRows.ts): `settled` swaps the live
   // action surface for the offboarded bar at the foot, `purgeable` gates every purge trigger on the page
   // so this screen can never offer a purge the route refuses — nor withhold one the route accepts.
@@ -469,7 +469,7 @@ export function TenantDetail() {
         </ConfirmDialog>
       )}
 
-      {moveT && <TenantMoveAction tenant={moveT} onCancel={() => setMoveT(null)}
+      {moveT && <TenantMoveAction tenant={moveT} environments={environments} onCancel={() => setMoveT(null)}
         onConfirm={(stage, targetClusterId) => { setMoveT(null); void act(() => migrateTenant(stage, targetClusterId)); }} />}
 
       {relocT && (

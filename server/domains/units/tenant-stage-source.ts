@@ -18,6 +18,7 @@ import { tenantZone, standingHostFrom } from "#unit/server/unit-dns.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { provisionOwnDomainRecord, recordsToReplace } from "./own-domain-records.ts";
+import { websiteHosts } from "./website-domain.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 
@@ -120,7 +121,9 @@ export function stageHostsStep(ports: TenantOnboardPorts, p: CreateTenantStagePa
       if (!row) throw errValidation(`tenant ${p.guid} ${p.stage} has no provisional inventory row`);
       const tc = loadTenantCluster(ctx.db, row.id);
       const apex = await ports.resolveUnitApex(p.domain, p.stage);
-      const hosts = [...new Set([p.ownDomain, ...(p.ownDomainRedirects ?? []), ...p.apps.map((app) => app.domain)].filter((host): host is string => Boolean(host)))];
+      // Every host a website answers at, its www. included, as Add website writes them; a host the own
+      // domain holds is written once.
+      const hosts = [...new Set([p.ownDomain, ...(p.ownDomainRedirects ?? []), ...p.apps.flatMap((app) => (app.domain ? websiteHosts(app.domain) : []))].filter((host): host is string => Boolean(host)))];
       for (const host of hosts) {
         const replacements = await recordsToReplace(ctx.db, ports, p.guid, tenantZone(tc.subdomain, tc.stage, apex), [host], ctx.signal);
         if (replacements.length) throw errValidation(`new stage host ${host} already has web records; Add stage replaces no existing host`);

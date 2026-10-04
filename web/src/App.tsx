@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { BrowserRouter, Routes, Route } from "react-router";
+import { BrowserRouter, Routes, Route, useParams } from "react-router";
 import { NavRail } from "./components/NavRail.tsx";
 import { TabBar } from "./components/TabBar.tsx";
 import { LogoMark } from "./components/icons.tsx";
@@ -22,6 +22,11 @@ const ConsumerOnboard = lazy(() => import("./pages/ConsumerOnboard.tsx").then((m
 const Tenants = lazy(() => import("./pages/Tenants.tsx").then((m) => ({ default: m.Tenants })));
 const TenantCreate = lazy(() => import("./pages/TenantCreate.tsx").then((m) => ({ default: m.TenantCreate })));
 const TenantDetail = lazy(() => import("./pages/TenantDetail.tsx").then((m) => ({ default: m.TenantDetail })));
+/** One tenant page per row: a switch of environment mounts it afresh, so no open dialog or loaded row
+ *  of the previous environment carries over to the next. */
+export function TenantDetailOfRow() {
+  return <TenantDetail key={useParams().id} />;
+}
 
 /**
  * The authenticated shell. NavRail (desktop) and TabBar (mobile) both render the one menu navFor
@@ -71,7 +76,7 @@ export function App() {
               <Route path="/consumers/onboard" element={<ConsumerOnboard />} />
               <Route path="/tenants" element={<Tenants />} />
               <Route path="/tenants/create" element={<TenantCreate />} />
-              <Route path="/tenants/:id" element={<TenantDetail />} />
+              <Route path="/tenants/:id" element={<TenantDetailOfRow />} />
               {/* The global /runs list was removed; each section owns its runs. The
                   detail route stays — every plan-then-approve and "Last run →" navigates here. */}
               <Route path="/runs/:id" element={<RunDetail />} />
