@@ -335,6 +335,23 @@ describe("readBranchCommit (#299)", () => {
   });
 });
 
+describe("deleteBranch", () => {
+  it("deletes a branch whose name carries a slash, takes one already gone as done, and throws on a refusal or a protected branch", async () => {
+    const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "DELETE /repos/x/acme/git/refs/heads/deploy/test": { status: 204, body: null },
+      "DELETE /repos/x/acme/git/refs/heads/deploy/dev": { status: 422, body: { message: "Reference does not exist" } },
+      "DELETE /repos/x/acme/git/refs/heads/deploy/qa": { status: 404, body: { message: "Not Found" } },
+      "DELETE /repos/x/acme/git/refs/heads/deploy/prod": { status: 403, body: { message: "Resource not accessible by personal access token" } },
+      "DELETE /repos/x/acme/git/refs/heads/deploy/main": { status: 422, body: { message: "Cannot delete this protected branch" } },
+    }) });
+    await client.deleteBranch({ owner: "x", repo: "acme", branch: "deploy/test", token: "tkn" });
+    await client.deleteBranch({ owner: "x", repo: "acme", branch: "deploy/dev", token: "tkn" });
+    await client.deleteBranch({ owner: "x", repo: "acme", branch: "deploy/qa", token: "tkn" });
+    await expect(client.deleteBranch({ owner: "x", repo: "acme", branch: "deploy/prod", token: "tkn" })).rejects.toThrow(/403: Resource not accessible/);
+    await expect(client.deleteBranch({ owner: "x", repo: "acme", branch: "deploy/main", token: "tkn" })).rejects.toThrow(/422: Cannot delete this protected branch/);
+  });
+});
+
 describe("github-consumer adapter — readTokenAccess (#252)", () => {
   it("answers the token's account, the owner's kind, and its highest right on the repository; one it cannot see is none", async () => {
     const client = new HttpGitHubConsumer({ fetchImpl: stubFetch({

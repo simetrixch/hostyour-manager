@@ -203,6 +203,8 @@ export interface GitHubConsumer {
   /** The commit a branch stands on and its parents (GET .../commits/heads/<branch>, which takes a
    *  branch name with slashes), or null where the repository has no such branch. */
   readBranchCommit(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<BranchCommit | null>;
+  /** Delete a branch (DELETE .../git/refs/heads/<branch>). A branch that is already gone is no error; a protected one throws. */
+  deleteBranch(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<void>;
   /** Fire the release workflow once (POST .../actions/workflows/<file>/dispatches — HTTP 204, no
    *  body). Throws WorkflowNotFoundError on a 404: a workflow committed moments ago is not indexed
    *  yet, and the trigger step RETRIES exactly that case. A 422 (the workflow refuses the inputs —
