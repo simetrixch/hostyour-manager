@@ -24,7 +24,7 @@ const TenantCreate = lazy(() => import("./pages/TenantCreate.tsx").then((m) => (
 const TenantDetail = lazy(() => import("./pages/TenantDetail.tsx").then((m) => ({ default: m.TenantDetail })));
 /** One tenant page per row: a switch of environment mounts it afresh, so no open dialog or loaded row
  *  of the previous environment carries over to the next. */
-function TenantDetailOfRow() {
+export function TenantDetailOfRow() {
   return <TenantDetail key={useParams().id} />;
 }
 

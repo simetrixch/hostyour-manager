@@ -155,11 +155,6 @@ export function chooseEnvironment(search: URLSearchParams, key: string, stage: S
   return next;
 }
 
-/** The tenant page's row: the loaded one only while it is the row the URL names. A switch of
- *  environment changes the URL before the new row has loaded, and until then — or for good, where the
- *  read fails — the previous environment's row must not stand behind the page's buttons. */
-export const rowOfUrl = <T extends { id: string }>(row: T | null, id: string): T | null => (row?.id === id ? row : null);
-
 /** The environments a Move can act on: the tenant's own that run (the page offers no Move on an
  *  unfinished or suspended one), DEV to PROD. The page's own row is always among them. */
 export function movableEnvironments<T extends { id: string; guid: string; stage: Stage; status: TenantStatus; suspended: boolean }>(page: T, all: readonly T[]): T[] {

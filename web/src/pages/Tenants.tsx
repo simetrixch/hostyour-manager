@@ -6,7 +6,7 @@ import {
   type TenantView,
 } from "../api.ts";
 import { TENANT_RUN_KINDS } from "../runKinds.ts";
-import { chooseEnvironment, groupTenantEnvironments, splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
+import { groupTenantEnvironments, splitTenantRows, tenantRowOffer } from "../tenantRows.ts";
 import { ChosenTenantEnvironment } from "../components/TenantEnvironmentBar.tsx";
 import { adminBadge, neverChecked, withoutAnAdministrator } from "../tenantAdmin.ts";
 import { CheckChip } from "../components/CheckChip.tsx";
@@ -333,7 +333,7 @@ export function Tenants() {
           <ul className="cards">
             {/* One card per TENANT, its environments grouped for display only; the URL picks the row it acts on. */}
             {groupTenantEnvironments(rows ?? []).map((group) => (
-              <ChosenTenantEnvironment key={group.key} group={group} search={search} onChoose={(row) => setSearch(chooseEnvironment(search, group.key, row.stage), { replace: true })}>
+              <ChosenTenantEnvironment key={group.key} group={group} search={search} setSearch={setSearch}>
                 {(t, bar) => {
               // A tenant whose create-tenant run never finished. It is LISTED —
               // that is the whole point of recording the row before deploying — but it must not read as

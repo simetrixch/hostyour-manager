@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cardEnvironment, chooseEnvironment, defaultEnvironment, groupTenantEnvironments, movableEnvironments, rowOfUrl, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
+import { cardEnvironment, chooseEnvironment, defaultEnvironment, groupTenantEnvironments, movableEnvironments, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
 import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // The tenant screens' one status rule: which surface a tenants row gets, and whether a purge may be
@@ -151,15 +151,6 @@ describe("the card's chosen environment", () => {
     const [g] = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "offboarded")]);
     expect(cardEnvironment(g!, new URLSearchParams("env.ak64h58875qw=test"))?.id).toBe("tnt_p");
     expect(cardEnvironment(g!, new URLSearchParams("env.ak64h58875qw=nonsense"))?.id).toBe("tnt_p");
-  });
-});
-
-describe("the tenant page's row", () => {
-  it("is the loaded row only while it is the row the URL names, so no action runs on the previous environment", () => {
-    const prod = { id: "tnt_p" };
-    expect(rowOfUrl(prod, "tnt_p")).toBe(prod);
-    expect(rowOfUrl(prod, "tnt_t")).toBeNull();
-    expect(rowOfUrl(null, "tnt_t")).toBeNull();
   });
 });
 

@@ -44,7 +44,7 @@ describe("ChosenTenantEnvironment", () => {
   // The Tenants card: what it opens and acts on is the environment the page URL names.
   const card = (search: string, rows = simetrix): string =>
     renderToStaticMarkup(createElement(ChosenTenantEnvironment, {
-      group: groupTenantEnvironments(rows)[0]!, search: new URLSearchParams(search), onChoose: () => undefined,
+      group: groupTenantEnvironments(rows)[0]!, search: new URLSearchParams(search), setSearch: () => undefined,
       children: (t: TenantView, bar: import("react").ReactNode) => createElement("div", null, bar, createElement("a", { href: `/tenants/${t.id}` }, `Open ${t.stage}`)),
     }));
 
