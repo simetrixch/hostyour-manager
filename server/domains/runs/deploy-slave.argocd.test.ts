@@ -155,6 +155,29 @@ describe("the three ArgoCD reads of a cluster deployment", () => {
     expect(said.join(" ")).toContain("all 1 applications");
   });
 
+  for (const failure of ["refresh", "reread"] as const) {
+    it(`does not accept old healthy rows when the ${failure} fails`, async () => {
+      const h = await masterWorld();
+      const refusal = errUpstream(`${failure} failed during API restart`);
+      if (failure === "refresh") vi.spyOn(h.argo, "refreshApplications").mockRejectedValueOnce(refusal);
+      else vi.spyOn(h.argo, "listApplications").mockResolvedValueOnce([argoRow("platform-apps-prod")]).mockRejectedValueOnce(refusal);
+      const said: string[] = [];
+      let succeeded = false;
+      vi.useFakeTimers();
+      try {
+        const done = argocdFollowStep(statedTarget(MASTER_ID, MASTER_FQDN, FIXTURE_STAGE), h.runPorts)
+          .run(hostedStepCtx(h, { log: (_s, text) => said.push(text) }));
+        void done.then(() => { succeeded = true; });
+        await drainToNextTimer();
+        expect(succeeded).toBe(false);
+        expect(said.join(" ")).toContain("the kube API did not answer");
+        await vi.advanceTimersByTimeAsync(15_000);
+        await done;
+      } finally { vi.useRealTimers(); }
+      expect(succeeded).toBe(true);
+    });
+  }
+
   it("PLANTED INNOCENT: the slave's own two reads still go over its session, raised", async () => {
     // The counter-probe of every "sends nothing" above. Without it, a step list that stopped
     // reaching a machine ALTOGETHER — one that never ran, or a harness that logged no command —

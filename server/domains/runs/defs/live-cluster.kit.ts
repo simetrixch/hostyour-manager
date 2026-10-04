@@ -106,6 +106,7 @@ export function argocdFollowStep(target: SlaveTarget, ports: DeploySlavePorts): 
           }
         } catch (e) {
           if (!(e instanceof AppError) || e.code !== "UPSTREAM") throw e;
+          rows = undefined;
           refusal = `the kube API did not answer — ${e.message}`;
         }
         if (rows !== undefined) {
