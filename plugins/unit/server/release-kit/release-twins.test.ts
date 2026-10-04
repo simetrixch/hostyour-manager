@@ -71,6 +71,14 @@ describe.skipIf(!BOTH)("both release-kit assets, run", () => {
     );
   }
 
+  it.each(["0.4.9", "0.4.09", "0.4.0009", "0.4.1000"])("refuses a patch without exactly three digits: %s", RUNS, async (version) => {
+    const o = await bothSpellings(() => bareDir(), [version, "stable", "prod"]);
+    const { stderr, stdout } = expectSameBytes(o);
+    expect(o.sh.status).toBe(1);
+    expect(stderr).toBe(`release: version must be x.y.z, the third position three digits such as 000 (got '${version}')\n`);
+    expect(stdout).toBe("");
+  });
+
   it("refuses a malformed version identically", RUNS, async () => {
     const { stderr, stdout } = expectSameBytes(await bothSpellings(() => bareDir(), ["1.2", "stable", "dev"]));
     expect(stderr).toBe("release: version must be x.y.z, the third position three digits such as 000 (got '1.2')\n");
