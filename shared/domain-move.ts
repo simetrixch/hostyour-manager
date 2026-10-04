@@ -24,8 +24,9 @@ export function movePublicAddress(value: string, from: string, to: string): stri
   if (publicFqdn.safeParse(value).success) return moveDomain(value, from, to);
   if (!/^https?:\/\//i.test(value)) return value;
   const url = new URL(value);
+  // An internal or unrelated URL is outside this migration, including its private parameters.
+  if (url.hostname !== from && !url.hostname.endsWith(`.${from}`)) return value;
   if (url.username || url.password || url.search || url.hash) throw new Error("a public domain address contains credentials, a query or a fragment");
-  if (moveDomain(url.hostname, from, to) === url.hostname) return value;
   url.hostname = moveDomain(url.hostname, from, to);
   return url.toString().replace(/\/$/, value.endsWith("/") ? "/" : "");
 }
@@ -34,7 +35,7 @@ function at(root: unknown, path: readonly string[]): unknown {
   return path.reduce<unknown>((value, key) => value !== null && typeof value === "object" ? (value as Record<string, unknown>)[key] : undefined, root);
 }
 
-export function domainChanges(root: unknown, from: string, to: string, prefixes: readonly string[]): DomainChange[] {
+export function domainChanges(root: unknown, from: string, to: string, prefixes: readonly string[], onUnsafe?: (path: string[]) => void): DomainChange[] {
   const changes: DomainChange[] = [];
   const walk = (value: unknown, path: string[], anchors: DomainChange["anchors"]): void => {
     if (typeof value === "string") {
@@ -44,7 +45,7 @@ export function domainChanges(root: unknown, from: string, to: string, prefixes:
       if (!domainField.test(field) && !path.includes("ownDomainRedirects") && !(field === "value" && domainField.test(envName))) return;
       let after: string;
       try { after = movePublicAddress(value, from, to); }
-      catch { throw new Error(`domain field ${path.join(".")} cannot be safely journaled`); }
+      catch { if (onUnsafe) { onUnsafe([...path]); return; } throw new Error(`domain field ${path.join(".")} cannot be safely journaled`); }
       if (after !== value) changes.push({ path, before: value, after, anchors });
     } else if (value !== null && typeof value === "object") {
       const object = value as Record<string, unknown>;

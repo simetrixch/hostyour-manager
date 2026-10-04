@@ -77,7 +77,11 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
   const book = listDnsWrites(db), usedBooks = new Set<string>(), recordKeys = new Set<string>();
   const key = (name: string, type: string): string => `${type} ${name}`;
   const addRecord = async (name: string, type: "CNAME" | "TXT", before: string, after: string, owner: DnsWrite["owner"]): Promise<void> => {
-    if (type === "TXT" && (!/^https?:\/\//.test(before) || movePublicAddress(before, fromDomain, toDomain) !== after)) throw errValidation(`${name}: identity-provider mark is not a safe issuer URL`);
+    if (type === "TXT") {
+      const issuer = /^https?:\/\//.test(before) ? new URL(before) : null;
+      if (!issuer || issuer.username || issuer.password || issuer.search || issuer.hash || movePublicAddress(before, fromDomain, toDomain) !== after) throw errValidation(`${name}: identity-provider mark is not a safe issuer URL`);
+      moveDomain(issuer.hostname, fromDomain, toDomain);
+    }
     const old = await ports.dns.listRecordContents({ name, type, ...(signal ? { signal } : {}) });
     // The preceding machine phase may already have repointed the OLD unit name to the new machine.
     // Journal the value that actually stands; a rollback must preserve that completed phase.
@@ -130,7 +134,7 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
       if (row && (row.clusterId !== cluster.id || row.subdomain !== entry.subdomain || row.routing !== entry.routing || row.ownDomain !== entry.ownDomain || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(entry.ownDomainRedirects))) throw errValidation(`tenant ${pointer.guid}/${stage} inventory disagrees with its registration`);
       const identityProvider = entry.identityProvider;
       if (row && row.identityProvider !== identityProvider) throw errValidation(`tenant ${pointer.guid}/${stage} identity-provider inventory disagrees with its registration`);
-      const changes = domainChanges(entry, fromDomain, toDomain, ["ownDomain", "ownDomainRedirects", "apps", "members"]);
+      const changes = domainChanges(entry, fromDomain, toDomain, ["ownDomain", "ownDomainRedirects", "apps", "members"], path => snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: domain field ${path.join(".")} cannot be safely journaled; its private address must be resolved before cutover`));
       snapshot.registrations.push({ kind: "tenant", name: pointer.guid, stage, changes });
       const ownDomainAfter = movePublicAddress(entry.ownDomain, fromDomain, toDomain), redirectsAfter = entry.ownDomainRedirects.map(h => moveDomain(h, fromDomain, toDomain));
       snapshot.tenants.push({ id: row?.id ?? null, guid: pointer.guid, stage,

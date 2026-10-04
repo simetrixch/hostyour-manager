@@ -88,6 +88,14 @@ describe("installation domain unit phase", () => {
     seed("prod"); recordDnsWrite(db.db, { name: `post.${FROM}`, type: "CNAME", content: OLD_HOST, act: "inserted", owner: { kind: "consumer", name: "other", stage: "prod" }, runId: "run_foreign" });
     await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow(/book entry disagrees/);
   });
+  it("refuses an unrelated private TXT issuer without exposing its value", async () => {
+    seed("prod"); const mark = tenantIssuerRecord("_idp", "host", "auth", "prod", "shop", FROM).name;
+    const content = "https://outside.example/auth?token=private-fixture";
+    dns.seed(mark, "TXT", content);
+    recordDnsWrite(db.db, { name: mark, type: "TXT", content, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });
+    await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow(`${mark}: identity-provider mark is not a safe issuer URL`);
+    expect(cloud.commits).toHaveLength(0); expect(dns.upserts).toHaveLength(0);
+  });
   it("forward retry and rollback preserve old records, unrelated TXT, data/reset fields and later suspension edits", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     await applyInstallationDomain(ctx(), ports(), snapshot, false, "run_move");

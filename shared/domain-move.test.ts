@@ -13,6 +13,17 @@ describe("public domain journal", () => {
   it("refuses credentials and signed public URLs before they enter the journal", () => {
     for (const url of ["https://user:password@auth.old.example", "https://auth.old.example?token=private", "https://auth.old.example#private"]) expect(() => movePublicAddress(url, FROM, TO)).toThrow();
   });
+  it("leaves unrelated/internal private URLs unchanged and never journals their parameters", () => {
+    for (const value of ["http://engine:3000/revalidate?token=private-fixture", "http://engine.ns.svc.cluster.local/revalidate?token=private-fixture", "https://outside.example/revalidate?token=private-fixture"]) {
+      expect(movePublicAddress(value, FROM, TO)).toBe(value);
+      expect(domainChanges({ members: [{ name: "web", revalidateUrl: value }] }, FROM, TO, ["members"])).toEqual([]);
+    }
+    const unsafe: string[][] = [];
+    const changes = domainChanges({ apps: [{ name: "web", domain: "web.old.example", revalidateUrl: "https://web.old.example/revalidate?token=private-fixture" }] }, FROM, TO, ["apps"], path => unsafe.push(path));
+    expect(changes).toHaveLength(1); expect(changes[0]!.path).toEqual(["apps", "0", "domain"]);
+    expect(unsafe).toEqual([["apps", "0", "revalidateUrl"]]);
+    expect(JSON.stringify(changes)).not.toContain("private-fixture");
+  });
   it("journals host fields and named environment values, preserving data and reset fields", () => {
     const entry = { members: [{ name: "auth", sources: [{ chart: "charts/auth", values: { cookieDomain: ".shop.old.example", env: [{ name: "AUTH_URL", value: "https://auth.old.example" }], password: "old.example", resetNonce: "old.example" } }] }] };
     const changes = domainChanges(entry, FROM, TO, ["members"]);
