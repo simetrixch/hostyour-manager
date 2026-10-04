@@ -408,7 +408,7 @@ describe("create-tenant streaming planner", () => {
 describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
   /** Runs just that step against a scripted seeder, and hands back what it was asked to write, what
    *  the log said, and the object store it made the tenant's bucket and key in. */
-  async function seedStep(over: Partial<VaultSeeder> = {}, store = new FakeObjectStore()): Promise<{ seen: TenantCryptoSeedInput[]; logs: string[]; store: FakeObjectStore }> {
+  async function seedStep(over: Partial<VaultSeeder> = {}, store = new FakeObjectStore(), overrides: Partial<CreateTenantParams> = {}): Promise<{ seen: TenantCryptoSeedInput[]; logs: string[]; store: FakeObjectStore }> {
     const seen: TenantCryptoSeedInput[] = [];
     const prt = ports({
       objectStore: store,
@@ -422,8 +422,8 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
       },
     });
     const logs: string[] = [];
-    const p = params();
-    const step = makeCreateTenantDef(prt).steps(p).find((s) => s.name === "seed-tenant-crypto")!;
+    const p = { ...params(), ...overrides };
+    const step = makeCreateTenantDef(prt).steps(p).find((s) => s.name.endsWith("seed-tenant-crypto"))!;
     await step.run(ctx(p, step.name, logs));
     return { seen, logs, store };
   }
@@ -433,6 +433,15 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     const keyed: string[] = [];
     await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.app}`); return { created: true }; } });
     expect(keyed).toEqual(APPS.map((a) => `prod/${GUID}/${a.name}`));
+  });
+
+  it.each(["prod", "test"] as const)("seeds website keys before %s registration, and only Password keys for ordinary apps", async (stage) => {
+    const keyed: string[] = [];
+    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; } }, new FakeObjectStore(), {
+      stage, ...(stage === "test" ? { sourceTenantId: "tnt_prod" } : {}),
+      apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", domain: `${stage}.company.example`, seedReference: false, seedDemo: false, selections: {} }],
+    });
+    expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", "revalidate-secret/site", "form-signing-key/site"].map((key) => `${stage}/${GUID}/${key}`));
   });
 
   it("writes the tenant's own leaf with every property its members read", async () => {

@@ -20,7 +20,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { provisionTenantStorage } from "./tenant-storage.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { seedTenantAppKeys, tenantAppKeysLine } from "./tenant-app-keys.ts";
+import { seedTenantAppKeys, seedTenantWebsiteKeys, tenantAppKeysLine } from "./tenant-app-keys.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
 import { placeholderTagFromChain, registryHostFromChain, resolveTenantCluster } from "./tenant-values.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
@@ -396,7 +396,7 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
         // (tenant-app-keys.ts). Create-only as well, so a re-run keeps every key it finds.
         const appKeys = await seedTenantAppKeys(ports.seeder, "password-field-key", p.stage, p.guid, (p.apps ?? []).map((a) => a.name));
         ctx.log("meta", tenantAppKeysLine("password-field-key", p.stage, p.guid, appKeys));
-        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys });
+        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys, websiteKeys: await seedTenantWebsiteKeys(ports.seeder, p.stage, p.guid, p.apps ?? [], ctx) });
         ctx.log(
           "meta",
           created

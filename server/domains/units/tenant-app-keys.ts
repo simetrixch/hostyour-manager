@@ -26,7 +26,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { TenantAppKeyKind, VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { mintAes256Key } from "#unit/server/secret-mint.ts";
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 /** What a person reads about each kind of key: its name, and what an app lacks without it. */
@@ -61,6 +61,18 @@ export function tenantAppKeysLine(kind: TenantAppKeyKind, stage: Stage, guid: st
     outcome.existing.length > 0 ? `already standing for ${outcome.existing.join(", ")} and left untouched` : null,
   ].filter((p): p is string => p !== null);
   return `${KEY_KIND_TEXT[kind].keys} under ${stage}/tenants/${guid}/${kind}/: ${parts.length > 0 ? parts.join("; ") : "no app to key"}`;
+}
+
+/** Creation seeds the website keys before the registration starts their engines and renderers. */
+export async function seedTenantWebsiteKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly { name: string; domain?: string }[], ctx: Pick<StepCtx, "log">): Promise<(TenantAppKeysOutcome & { kind: TenantAppKeyKind })[]> {
+  const websites = apps.filter((a) => a.domain).map((a) => a.name);
+  const outcomes = [];
+  for (const kind of ["revalidate-secret", "form-signing-key"] as const) {
+    const keys = await seedTenantAppKeys(seeder, kind, stage, guid, websites);
+    outcomes.push({ kind, ...keys });
+    ctx.log("meta", tenantAppKeysLine(kind, stage, guid, keys));
+  }
+  return outcomes;
 }
 
 /** The step that writes one app's key of [kind] as it joins a standing tenant (add-app). It stands
