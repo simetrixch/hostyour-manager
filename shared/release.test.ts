@@ -73,3 +73,15 @@ describe("nextReleaseVersion", () => {
     expect(nextReleaseVersion(["v1"], "1.0.0")).toBe("1.0.0");
   });
 });
+
+
+describe("future versions after historical tags", () => {
+  it("keeps Core9 readable while proposing padded Core010", () => {
+    const tag = "0.4.9-stable-20261004075646";
+    expect(parseReleaseTag(tag)).toEqual({ version: "0.4.9", channel: "stable", ts14: "20261004075646" });
+    expect(nextReleaseVersion([tag])).toBe("0.4.010");
+  });
+  it("proposes a padded first version for a new repository", () => {
+    expect(nextReleaseVersion([])).toBe("0.1.000");
+  });
+});
