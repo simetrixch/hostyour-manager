@@ -21,6 +21,15 @@ function sibling(stage: Stage, clusterId: string = SOURCE.clusterId): void {
 }
 
 describe("one-stage tenant Move", () => {
+  it.each(["prod", "dev"] as const)("allows %s to share a target with a sibling DEV/PROD stage without moving the sibling", async (stage) => {
+    const other: Stage = stage === "prod" ? "dev" : "prod";
+    db.db.update(tenants).set({ stage }).where(eq(tenants.id, move.tenantId)).run(); sibling(other, TARGET.clusterId);
+    const before = db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get();
+    const plan = await makeTenantMigrateDef(tenantPorts(makeFakes())).plan({ ...move, stage }, { db: db.db });
+    expect(plan.steps).toHaveLength(16);
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get()).toEqual(before);
+  });
+
   it("keeps stored legacy runs recoverable, while refusing legacy-shaped new plans and half-specified bindings", async () => {
     const ports = tenantPorts(makeFakes()); const def = makeTenantMigrateDef(ports);
     const legacy = { tenantId: move.tenantId, targetClusterId: move.targetClusterId };

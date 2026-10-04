@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { tenantStagesNeedSeparateMachines } from "../../../shared/tenant-stage-placement.ts";
 import { listTenants, listTenantTargets, type TenantView } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
@@ -24,7 +25,7 @@ export function TenantMoveAction({ tenant, onCancel, onConfirm }: {
     title={`Move "${tenant.subdomain}" ${selected.stage} from ${selected.domain}?`}
     kind="move" confirmLabel="Plan stage move" currentClusterId={selected.clusterId}
     loadTargets={async () => (await listTenantTargets()).filter((target) => !(siblings ?? []).some((t) =>
-      t.id !== selected.id && t.clusterId === target.id && !TENANT_SETTLED_STATUS.some((status) => status === t.status)))}
+      t.id !== selected.id && t.clusterId === target.id && tenantStagesNeedSeparateMachines(selected.stage, t.stage) && !TENANT_SETTLED_STATUS.some((status) => status === t.status)))}
     onCancel={onCancel} onConfirm={(target) => onConfirm(selected, target)}
   >
     <p>Only <strong>{selected.stage}</strong> moves, with every member, its data, registration and DNS record under the unchanged tenant identity. Other stages stay on their machines.</p>

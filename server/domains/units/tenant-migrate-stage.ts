@@ -3,6 +3,7 @@ import type { Db } from "../../db/client.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { tenantStagesNeedSeparateMachines } from "../../../shared/tenant-stage-placement.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
 import type { WorldOf } from "#unit/server/relocation.ts";
@@ -26,8 +27,8 @@ export function loadTenantMove(db: Db, p: StageMove) {
   const row = rows.find((r) => r.id === p.tenantId)!;
   if (row.status !== "active" || row.suspended) throw errValidation("Move needs an active, unsuspended tenant stage");
   const target = assertMovableTo(db, source.clusterId, p.targetClusterId);
-  if (rows.some((r) => r.id !== p.tenantId && r.clusterId === target.clusterId && !TENANT_SETTLED_STATUS.some((s) => s === r.status))) {
-    throw errValidation("another stage of this tenant uses the target machine — choose a different machine");
+  if (rows.some((r) => r.id !== p.tenantId && r.clusterId === target.clusterId && tenantStagesNeedSeparateMachines(p.stage, r.stage) && !TENANT_SETTLED_STATUS.some((s) => s === r.status))) {
+    throw errValidation("another stage of this tenant requires a separate machine: TEST and PROD cannot share a machine");
   }
   return { source, target };
 }
