@@ -73,7 +73,7 @@ describe("migrate (consumer)", () => {
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
     let leavingAtRelease: string | undefined;
-    await driveSteps(db, makeMigrateDef(ports).steps(params), params, [], {
+    await driveSteps(db, f, makeMigrateDef(ports).steps(params), params, [], {
       // After the repoint the source appset stops generating the Application — model exactly that.
       // The registration still NAMES the source in `leaving` here: the source's fences stand until
       // the Application is gone (hostyour-cloud#214).
@@ -212,7 +212,7 @@ describe("tenant-migrate", () => {
 
     f.target.reader.setSecretValue(`${GUID}-auth-prod`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
-    await driveSteps(db, def.steps(params), params, [], {
+    await driveSteps(db, f, def.steps(params), params, [], {
       // After the repoint the source appset stops matching this registration and ArgoCD prunes every
       // member Application — model exactly that, which is what the release IS for a tenant.
       "verify-source-released": () => f.source.argo.setStatuses(new Map()),
@@ -263,7 +263,7 @@ describe("tenant-migrate", () => {
 
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
     await expect(
-      driveSteps(db, makeTenantMigrateDef(ports).steps(params), params, [], {
+      driveSteps(db, f, makeTenantMigrateDef(ports).steps(params), params, [], {
         "verify-source-released": () => f.source.argo.setStatuses(new Map()),
       }),
     ).rejects.toThrow(/disk full/);

@@ -12,7 +12,7 @@ import { TenantRegistrationSchema, type TenantRegistration } from "../../../shar
 import { parse as parseYaml } from "yaml";
 import { localTx } from "../../executor/stepkit.ts";
 import { serializePointer } from "#unit/server/registration-laws.ts";
-import { loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { loadTenantCluster, refreshTenantApplications, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts";
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
@@ -76,8 +76,19 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
     // AppProject and Application standing on the source.
     const allMembers = [...tc.members, ...apps];
     const image = ports.dbtoolsImage ?? "";
-    const watchSet = (names: string[]) => async (c: StepCtx, clusterId: string, intent: string): Promise<void> => {
-      const until = syncedAt(names);
+    const watchSet = async (c: StepCtx, clusterId: string, intent: string): Promise<void> => {
+      const entry = await readRegistration(ports, tc.stage, tc.guid);
+      const names = tenantApplicationSet(entry.members.map((m) => m.name), tc.guid, tc.stage);
+      const quiesced = intent === "quiesced";
+      if (entry.quiesced !== quiesced) throw errValidation(`tenant ${tc.guid} registration no longer requests the ${intent} render`);
+      await refreshTenantApplications(ports.resolver, clusterId, names, c);
+      const until = (byName: Parameters<ReturnType<typeof syncedAt>>[0]): boolean => syncedAt(names)(byName) && names.every((name) => {
+        const charts = (byName.get(name)?.syncSources ?? []).filter((s) => s.repoURL === ports.deployRepoUrl && s.path);
+        return charts.length > 0 && charts.every((s) => {
+          const value = (s.valuesObject?.["tenant"] as { quiesced?: unknown } | undefined)?.quiesced;
+          return quiesced ? value === true : value === false || value === undefined;
+        });
+      });
       const { argoReader, argoNamespace } = await ports.resolver.resolve(clusterId);
       const byName = await argoReader.watchApplicationSet(argoNamespace, names, until, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal, labelSelector: tenantSelector(tc.guid) });
       if (!until(byName)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on the ${intent} render — ${describeUnsynced(names, byName)}`);
@@ -124,7 +135,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       homeNamespace: memberNamespace(tc.guid, tc.identityProvider, tc.stage),
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),
       readRegistrationYaml: async () => serializePointer(TenantRegistrationSchema, await readRegistration(ports, tc.stage, tc.guid)),
-      watchConverged: async (c, clusterId, intent) => watchSet(tenantApplicationSet(allMembers, tc.guid, tc.stage))(c, clusterId, intent),
+      watchConverged: watchSet,
       dumpJobs: async (folder, registrationYaml) => tenantDumpJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image, registrationYaml }),
       expectedDumpEntries: async () => tenantExpectedDumpEntries(apps),
       restoreJobs: async (folder) => tenantRestoreJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image }),
@@ -201,6 +212,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // the watch always passes. The member Applications are what the source actually stops
         // producing.
         const names = [...tc.members, ...apps].map((m) => memberApplication(tc.guid, m, tc.stage));
+        await refreshTenantApplications(ports.resolver, tc.clusterId, names, c);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const status = await argoReader.watchApplicationSet(argoNamespace, names, allPruned(names), {
           timeoutMs: ports.argoWatchTimeoutMs,

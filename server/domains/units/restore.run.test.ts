@@ -58,7 +58,7 @@ describe("tenant-restore", () => {
 
     const logs: string[] = [];
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, def.steps(params), params, logs);
+    await driveSteps(db, f, def.steps(params), params, logs);
 
     // The registration is BACK, repointed at the target, open (open-access lifted the quiesce it was
     // re-committed under) — and otherwise byte-for-byte the dumped content.
@@ -97,7 +97,7 @@ describe("tenant-restore", () => {
     f.target.reader.setJobResult(`reloc-restore-mongo-${GUID}`, { succeeded: false, logs: "mongorestore: connection refused" });
 
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeTenantRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/connection refused/);
+    await expect(driveSteps(db, f, makeTenantRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/connection refused/);
 
     // Nothing cleared the folder or the source, nothing switched DNS, nothing settled the rows.
     expect([...jobNames(f.source), ...jobNames(f.target)].find((n) => n.startsWith("reloc-clear-source"))).toBeUndefined();
@@ -124,7 +124,7 @@ describe("tenant-restore", () => {
     f.target.reader.setJobResult(`reloc-read-reg-${GUID}`, { succeeded: true, logs: "REGISTRATION-BEGIN\nREGISTRATION-END" });
 
     const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeTenantRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/no readable registration/);
+    await expect(driveSteps(db, f, makeTenantRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/no readable registration/);
   });
 });
 
@@ -152,7 +152,7 @@ describe("restore (consumer)", () => {
     scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
 
     const restored = await ports.registrations.readRegistration("prod", CONSUMER);
     expect(restored?.entry.cluster).toBe(TARGET.cluster);
@@ -189,7 +189,7 @@ describe("restore (consumer)", () => {
     // of it, so nothing is extracted into it.
     f.target.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0", "cache-0"], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }, { claim: "cache", ordinals: true, user: 3000, group: 3000 }]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
@@ -205,7 +205,7 @@ describe("restore (consumer)", () => {
     // generation still holds the claim's tar.
     f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0\nCLAIMS 1" });
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, nor does a StatefulSet there name it, so the restore stops/);
+    await expect(driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, nor does a StatefulSet there name it, so the restore stops/);
     expect(jobNames(f.target).filter((n) => n.startsWith("reloc-restore-"))).toEqual([]);
   });
 
@@ -219,7 +219,7 @@ describe("restore (consumer)", () => {
     // Rendered at replicas 0, the MTA's StatefulSet has made no claim; its template names queue-mta-<n>.
     f.target.reader.setClaims(`${CONSUMER}-prod`, [], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
     expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
@@ -236,7 +236,7 @@ describe("restore (consumer)", () => {
     const queue = { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 };
     f.target.reader.setClaims(`${CONSUMER}-prod`, [], [queue]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, makeRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/holds legacy-data/);
+    await expect(driveSteps(db, f, makeRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/holds legacy-data/);
     expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
     // The chart gains the missing claim; the restore step runs again and extracts into both.
     f.target.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0", "legacy-data"], [queue, { claim: "legacy-data", ordinals: false, user: 1000, group: 1000 }]);
@@ -261,7 +261,7 @@ describe("restore (consumer)", () => {
     });
     scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
     const restored = await ports.registrations.readRegistration("prod", CONSUMER);
     expect(restored?.entry.fqdn).toBe("shop.customer.test");
     expect(restored?.entry.smtpEntry).toEqual(smtpEntry);
@@ -288,7 +288,7 @@ describe("restore (consumer)", () => {
         quota: seedQuota("small"), fqdn: "shop.customer.test", smtpEntry: { service: "acme-mta", port: 2525 },
       }));
       const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-      return driveSteps(db, makeRestoreDef(ports).steps(params), params, []);
+      return driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
     };
     await expect(setup({ fqdn: "shop.customer.test" })).rejects.toThrow(/other now attests at prod/);
     db.sqlite.close();

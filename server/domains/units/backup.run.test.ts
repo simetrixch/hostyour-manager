@@ -48,7 +48,7 @@ describe("backup (consumer)", () => {
     await seedConsumerRegistration(ports.registrations);
 
     const logs: string[] = [];
-    await driveSteps(db, makeBackupDef(ports).steps({ appId: "app_1" }), { appId: "app_1" }, logs);
+    await driveSteps(db, f, makeBackupDef(ports).steps({ appId: "app_1" }), { appId: "app_1" }, logs);
 
     // The registration ends OPEN — quiesced held only for the dump.
     expect((await ports.registrations.readRegistration("prod", CONSUMER))?.entry.quiesced).toBe(false);
@@ -83,7 +83,7 @@ describe("backup (consumer)", () => {
     f.probe.set(`https://${CONSUMER}.${SOURCE.domain}/`, { reachable: true, status: 200, detail: "HTTP 200" });
 
     const steps = makeBackupDef(ports).steps({ appId: "app_1" });
-    await expect(driveSteps(db, steps, { appId: "app_1" }, [])).rejects.toThrow(/still answers/);
+    await expect(driveSteps(db, f, steps, { appId: "app_1" }, [])).rejects.toThrow(/still answers/);
     // Nothing was dumped: the measurement stopped the run before any store was touched.
     expect(jobNames(f.source).find((n) => n.startsWith("reloc-dump"))).toBeUndefined();
   });
@@ -95,7 +95,7 @@ describe("backup (consumer)", () => {
     const ports = { ...consumerPorts(f) };
     delete (ports as { storageBox?: unknown }).storageBox;
     await seedConsumerRegistration(ports.registrations);
-    await expect(driveSteps(db, makeBackupDef(ports).steps({ appId: "app_1" }), { appId: "app_1" }, [])).rejects.toThrow(/storage-box/);
+    await expect(driveSteps(db, f, makeBackupDef(ports).steps({ appId: "app_1" }), { appId: "app_1" }, [])).rejects.toThrow(/storage-box/);
   });
 });
 
@@ -113,7 +113,7 @@ describe("tenant-backup", () => {
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_ORDER);
 
     const logs: string[] = [];
-    await driveSteps(db, def.steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, logs);
+    await driveSteps(db, f, def.steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, logs);
 
     expect((await ports.registrations.readTenant("prod", GUID))?.entry.quiesced).toBe(false);
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("active");
@@ -154,7 +154,7 @@ describe("tenant-backup", () => {
     f.source.reader.setJobResult(`reloc-verify-dump-${GUID}`, { succeeded: false, logs: "MISSING vault" });
 
     const def = makeTenantBackupDef(ports);
-    await expect(driveSteps(db, def.steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, [])).rejects.toThrow(/MISSING vault/);
+    await expect(driveSteps(db, f, def.steps({ tenantId: "tnt_1" }), { tenantId: "tnt_1" }, [])).rejects.toThrow(/MISSING vault/);
     // The registration is still quiesced — the run stopped before open-access, and a retry resumes.
     expect((await ports.registrations.readTenant("prod", GUID))?.entry.quiesced).toBe(true);
     // The unverified generation is no backup: nothing may restore it.

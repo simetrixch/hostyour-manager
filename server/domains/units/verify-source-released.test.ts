@@ -69,7 +69,7 @@ describe("verify-source-released (step level)", () => {
       // The source fan-out is pruned only AT the verify step: the steps BEFORE it watch that same set
       // converge on the source, so clearing it at setup would fail the run earlier and for the wrong
       // reason. That is the real order too — the prune follows the repoint.
-      driveSteps(db, makeTenantMigrateDef(ports).steps(params), params, [], {
+      driveSteps(db, f, makeTenantMigrateDef(ports).steps(params), params, [], {
         "verify-source-released": () => f.source.argo.setStatuses(new Map()),
       }),
     ).rejects.toThrow(/relocating annotation/);

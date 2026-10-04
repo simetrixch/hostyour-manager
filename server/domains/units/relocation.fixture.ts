@@ -218,8 +218,13 @@ export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<strin
 
 /** Drive steps in order; `before` lets a test flip a fake's scripted world at a named step (e.g.
  *  the source Application going Missing after the repoint). */
-export async function driveSteps(db: DbHandle, steps: Step[], p: Readonly<Record<string, unknown>>, logs: string[], before: Partial<Record<string, () => void>> = {}): Promise<void> {
+export async function driveSteps(db: DbHandle, f: RelocationFakes, steps: Step[], p: Readonly<Record<string, unknown>>, logs: string[], before: Partial<Record<string, () => void>> = {}): Promise<void> {
   for (const step of steps) {
+    // Journeys explicitly model the controller consuming each write. Counter-probes call the
+    // world directly with a planted stale render, so this never hides their observation.
+    if (step.name === "verify-quiesced") renderRelocation(f.source, true);
+    if (step.name === "watch") renderRelocation(f.target, true);
+    if (step.name === "open-access") renderRelocation(p["targetClusterId"] === TARGET.clusterId ? f.target : f.source, false);
     before[step.name]?.();
     await step.run(stepCtx(db, step.name, p, logs));
   }
@@ -228,4 +233,12 @@ export async function driveSteps(db: DbHandle, steps: Step[], p: Readonly<Record
 /** The job names one side actually ran — what the choreography assertions read. */
 export function jobNames(side: FakeSide): string[] {
   return side.reader.jobs.map((j) => j.spec.name);
+}
+
+/** Script an actual deploy-chart render, independently of the registration under test. */
+export function renderRelocation(side: FakeSide, quiesced: boolean): void {
+  side.argo.setStatus({ ...synced, syncSources: [{ repoURL: "https://github.com/x/acme.git", revision: SHA, path: "deploy/chart", valuesObject: { quiesced } }] });
+  side.argo.setStatuses(new Map(TENANT_WATCH.map((name) => [name, { ...synced,
+    syncSources: [{ repoURL: "https://github.com/acme/acme-deploy.git", revision: SHA, path: "charts/example-engine", valuesObject: { tenant: { quiesced } } }],
+  }])));
 }

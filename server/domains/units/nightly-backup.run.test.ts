@@ -54,7 +54,7 @@ describe("consumer-nightly-backup", () => {
     seedEarlierNights(["20260910", "20260911", "20260912", "20260913", "20260914", "20260915", "20260916", "20260917", "20260918"]);
 
     const def = makeConsumerNightlyBackupDef(ports);
-    await driveSteps(db, def.steps({}), {}, []);
+    await driveSteps(db, f, def.steps({}), {}, []);
 
     // Access was never closed: no quiesce commit, no probe of the public address.
     expect((await ports.registrations.readRegistration("prod", CONSUMER))?.entry.quiesced).toBe(false);
@@ -80,7 +80,7 @@ describe("consumer-nightly-backup", () => {
     const ports = consumerPorts(f);
     await seedConsumerRegistration(ports.registrations);
 
-    await expect(driveSteps(db, makeConsumerNightlyBackupDef(ports).steps({}), {}, [])).rejects.toThrow(/^1 of 2 consumer\(s\) failed the nightly backup: consumer ghost \(prod\) \(consumer "ghost" is not registered at prod/);
+    await expect(driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, [])).rejects.toThrow(/^1 of 2 consumer\(s\) failed the nightly backup: consumer ghost \(prod\) \(consumer "ghost" is not registered at prod/);
     expect(listBackups(db.db, consumer).map((b) => b.state)).toEqual(["ok"]);
     const ghost = listBackups(db.db, { ...consumer, unit: "ghost" });
     expect(ghost.map((b) => [b.trigger, b.state])).toEqual([["nightly", "failed"]]);
@@ -172,7 +172,7 @@ describe("tenant-nightly-backup", () => {
     const ports = tenantPorts(f);
     await seedTenantWorld(ports.registrations);
 
-    await driveSteps(db, makeTenantNightlyBackupDef(ports).steps({}), {}, []);
+    await driveSteps(db, f, makeTenantNightlyBackupDef(ports).steps({}), {}, []);
 
     expect((await ports.registrations.readTenant("prod", GUID))?.entry.quiesced).toBe(false);
     const [g] = listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" });

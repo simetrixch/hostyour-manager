@@ -82,7 +82,6 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       const claims = tarredClaims(inputs);
       return claims.length > 0 ? claimsIdentity(namespace, claims, await (await ports.resolver.resolve(clusterId)).clusterReader.listClaimUsers(namespace)) : undefined;
     };
-    const converged = (s: ArgoAppStatus): boolean => s.sync === "Synced" && s.health === "Healthy";
     const appName = consumerArgoAppName(ac.name, ac.stage);
     return {
       unit: ac.name,
@@ -98,7 +97,19 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       setQuiesced: (q, runId) => ports.registrations.setQuiesced(ac.stage, ac.name, q, runId),
       readRegistrationYaml: async () => serializePointer(ConsumerRegistrationSchema, await readStageRegistration(ports, ac.stage, ac.name)),
       watchConverged: async (c, clusterId, intent) => {
+        const entry = await readStageRegistration(ports, ac.stage, ac.name);
+        const quiesced = intent === "quiesced";
+        if (entry.quiesced !== quiesced) throw errValidation(`consumer ${ac.name} registration no longer requests the ${intent} render`);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(clusterId);
+        await argoReader.refreshApplicationSet(argoNamespace, "consumer-apps");
+        await argoReader.refreshApplications(argoNamespace, [appName]);
+        const converged = (s: ArgoAppStatus): boolean => {
+          const charts = (s.syncSources ?? []).filter((src) => src.repoURL === entry.repoURL && src.path === entry.chartPath);
+          return !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy" && charts.length > 0 && charts.every((src) => {
+            const value = src.valuesObject?.["quiesced"];
+            return quiesced ? value === true : value === false || value === undefined;
+          });
+        };
         const status = await argoReader.watchApplication(argoNamespace, appName, converged, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal });
         if (!converged(status)) {
           throw errValidation(`Application ${appName} did not reach Synced/Healthy on the ${intent} render — last seen sync=${status.sync}, health=${status.health}${status.message ? ` (${status.message})` : ""}`);
@@ -257,6 +268,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       },
       verifySourceHandleReleased: async (c) => {
         const { argoReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
+        await argoReader.refreshApplicationSet(argoNamespace, "consumer-apps");
         const gone = (s: ArgoAppStatus): boolean => s.health === "Missing";
         const status = await argoReader.watchApplication(argoNamespace, appName, gone, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal });
         if (!gone(status)) {

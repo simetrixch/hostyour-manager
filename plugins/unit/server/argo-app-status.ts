@@ -14,7 +14,7 @@ export function syncedAt(expected: readonly string[]): (byName: ArgoAppStatusMap
 }
 
 function isSynced(s: ArgoAppStatus | undefined): boolean {
-  return !!s && s.sync === "Synced" && s.health === "Healthy";
+  return !!s && !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy";
 }
 
 /** A precise failure message for a set-watch timeout: which Applications are not settled and why. */
@@ -23,7 +23,7 @@ export function describeUnsynced(expected: readonly string[], byName: ArgoAppSta
     .filter((name) => !isSynced(byName.get(name)))
     .map((name) => {
       const s = byName.get(name);
-      return s ? `${name}(sync=${s.sync},health=${s.health})` : `${name}(absent)`;
+      return s ? `${name}(sync=${s.sync},health=${s.health}${s.refreshRequested ? ",refresh=pending" : ""})` : `${name}(absent)`;
     });
   return `${lagging.length} of ${expected.length} Application(s) are not Synced/Healthy: ${lagging.join(", ")}`;
 }
