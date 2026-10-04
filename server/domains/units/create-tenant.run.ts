@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { makeTenantStagesDef, bundleStageSteps } from "./tenant-stage-plan.ts";
-import { TenantSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
+import { TenantSizeSchema, DEFAULT_UNIT_SIZE, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
@@ -605,9 +606,8 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
           stage: req.stage,
           apps: req.apps,
           probeGuid: guid,
-          subdomain: req.subdomain,
-          seedUsers: req.seedUsers,
-          demo: req.demo, size: req.size,
+          subdomain: req.subdomain, seedUsers: req.seedUsers,
+          demo: req.demo, size: req.size, quota: resolveUnitQuota(ctx.db, req.size, TENANT_BRINGS),
           ...(appsImage !== undefined ? { appsImage, appsImageTag } : {}),
           clusterValueFiles,
           clusterFqdn: rc.domain, // G27 judges the wildcard's zone here, before seed-tenant-crypto writes

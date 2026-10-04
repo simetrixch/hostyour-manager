@@ -18,7 +18,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
-import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
@@ -146,7 +146,7 @@ export class HeldImagesGoneArgo extends FakeMasterArgoReader {
 }
 
 const IMAGE = `${REGISTRY_HOST}/example-app:1.0.0`;
-const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE }] } } } };
+const DEPLOYMENT = { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "app", image: IMAGE, resources: TEST_RESOURCES }] } } } };
 
 export function ports(members: TenantMemberRecord[], over: { missing?: string[]; argo?: readonly (() => Map<string, ArgoAppStatus>)[]; argoReader?: (tenantRegistrations: TenantRegistrations) => FakeMasterArgoReader; carried?: string[]; carry?: () => Promise<void>; manifest?: string; files?: Record<string, string>; earlier?: Record<string, string>; apps?: { name: string; databases?: string[] }[] } = {}): TenantOnboardPorts {
   const tenantRegistrations = new TenantRegistrations(platformRepo(members, over.files, over.earlier, over.apps));

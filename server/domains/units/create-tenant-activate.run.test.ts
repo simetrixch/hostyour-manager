@@ -24,6 +24,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 
 // The final `activate` step of create-tenant (impl: create-tenant-activate.ts) — the tenant analogue
@@ -70,7 +71,7 @@ const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" }
 const GREEN: ArgoAppStatus = { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" };
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {

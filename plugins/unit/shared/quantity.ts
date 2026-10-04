@@ -69,3 +69,9 @@ export function timesCpu(value: string, n: number): string {
 export function timesMemory(value: string, n: number): string {
   return format(parse(value, MEM_SUFFIX, "memory") * n, MEM_ORDER);
 }
+
+/** A CPU quantity in millicores, for comparing two of them: "1" is 1000, "250m" is 250. */
+export const cpuMillis = (value: string): number => parse(value, CPU_SUFFIX, "cpu");
+
+/** A memory quantity in bytes, for comparing two of them. */
+export const memoryBytes = (value: string): number => parse(value, MEM_SUFFIX, "memory");

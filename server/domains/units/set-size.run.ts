@@ -3,10 +3,12 @@ import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
 import { eq } from "drizzle-orm";
 import { UnitSizeSchema, TenantSizeSchema, TENANT_BRINGS, type UnitSize } from "#unit/shared/unit-size.ts";
 import { tenants } from "../../db/schema/inventory.ts";
-import { errValidation } from "../../kernel/errors.ts";
+import { errInternal, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
-import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
+import { validateTenant } from "./validate-tenant.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { UnitComposition } from "#unit/shared/unit-size.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -118,7 +120,7 @@ export function makeSetSizeDef(ports: LifecyclePorts): RunDefinition<SetSizePara
 
 // ---- Tenant ----
 
-function tenantSetSizeSteps(ports: TenantLifecyclePorts, p: TenantSetSizeParams): Step[] {
+function tenantSetSizeSteps(ports: TenantOnboardPorts, p: TenantSetSizeParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
     {
@@ -136,17 +138,39 @@ function tenantSetSizeSteps(ports: TenantLifecyclePorts, p: TenantSetSizeParams)
   ];
 }
 
-export function makeTenantSetSizeDef(ports: TenantLifecyclePorts): RunDefinition<TenantSetSizeParams> {
+/** The members are rendered as the tenant stands, at the size asked for, and held against the quota
+ *  that size resolves to (T5): a size whose quota cannot hold the members' pods twice is refused here,
+ *  before any registration names it. */
+export function makeTenantSetSizeDef(ports: TenantOnboardPorts): RunDefinition<TenantSetSizeParams> {
   return {
     kind: "tenant-set-size",
     paramsSchema: TenantSetSizeParams,
     mutating: true,
-    plan: async (params, { db }) => {
-      const tc = loadTenantCluster(db, params.tenantId);
+    plan: () => { throw errInternal("tenant-set-size is planned via planStream (its members are rendered at the size), not plan()"); },
+    planStream: async (raw, ctx) => {
+      const params = TenantSetSizeParams.parse(raw);
+      const tc = loadTenantCluster(ctx.db, params.tenantId);
       if (tc.members.length === 0) throw errValidation(`tenant ${tc.guid} has no members — there is no namespace to bound`);
-      const quota = resolveUnitQuota(db, params.size, TENANT_BRINGS);
+      const current = await ports.registrations.readTenant(tc.stage, tc.guid);
+      if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
+      const quota = resolveUnitQuota(ctx.db, params.size, TENANT_BRINGS);
+      const e = current.entry;
+      const outcome = await validateTenant({
+        repoURL: ports.deployRepoUrl, ref: ports.registrations.branch, stage: tc.stage,
+        apps: e.apps, members: e.members, identityProvider: e.identityProvider, isStandingTenant: true,
+        appDatabases: Object.fromEntries(e.apps.filter((a) => a.databases).map((a) => [a.name, a.databases!])),
+        probeGuid: tc.guid, subdomain: e.subdomain, seedUsers: e.seedUsers, demo: e.demo === true,
+        appsImage: e.appsImage, appsImageTag: e.appsImageTag, ownDomain: e.ownDomain, ownDomainRedirects: e.ownDomainRedirects,
+        approvedTags: e.approvedTags, routing: e.routing, quota, size: params.size,
+        clusterValueFiles: await ports.resolveClusterValueFiles(tc.domain, tc.stage),
+        ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
+      }, { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal });
+      if (outcome.verdict !== "pass") {
+        const failed = outcome.report.gates.filter((g) => g.status !== "pass").map((g) => g.id).join(", ");
+        return { outcome: "rejected", summary: `Sizing tenant ${tc.guid} "${params.size}" was rejected: ${failed}`, planJson: outcome.report };
+      }
       const stepDefs = tenantSetSizeSteps(ports, params);
-      return {
+      return { outcome: "planned", params, plan: {
         kind: "tenant-set-size",
         targetKind: "tenant",
         targetId: params.tenantId,
@@ -156,7 +180,7 @@ export function makeTenantSetSizeDef(ports: TenantLifecyclePorts): RunDefinition
         locks: tenantLocks(ports.registrations),
         warnings: [],
         requiredSecrets: [],
-      };
+      } };
     },
     steps: (params) => tenantSetSizeSteps(ports, params),
   };

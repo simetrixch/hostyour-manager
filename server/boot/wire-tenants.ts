@@ -374,7 +374,8 @@ export function buildTenantOnboarding(
     // The tenant twin of the consumer restart run kind: same act, walked over the tenant's member
     // namespaces instead of a consumer's single one.
     makeTenantRestartWorkloadsDef(lifecyclePorts),
-    makeTenantSetSizeDef(lifecyclePorts),
+    // Renders the members at the size asked for, so it reads the deploy repository like create-tenant.
+    makeTenantSetSizeDef(onboardPorts),
     // The routing move reads the IdP at its new address with the same public probe the moves between
     // clusters read with.
     makeTenantSetRoutingDef({ ...lifecyclePorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),

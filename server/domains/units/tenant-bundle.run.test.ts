@@ -35,7 +35,7 @@ import type { RoleBindingManifest } from "../../adapters/kube/port.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, STANDING_MEMBER_NAMES as TEST_MEMBERS, TEST_BUNDLE, testMembers, TEST_CHANNEL_STAGES, TEST_QUOTA, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { ORG, PLACEHOLDER_TAG as PLACEHOLDER, SHA, TEMPLATE_MANIFEST, TEMPLATE_SPEC, TEMPLATE_URL, TENANT_URL, UNIT, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 
@@ -77,8 +77,8 @@ const withBundle = (tag: string): RenderedDoc[] => [
   doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }),
   doc("Deployment", {
     raw: { kind: "Deployment", spec: { template: { spec: {
-      containers: [{ name: "engine", image: `${HOST}/example-engine:0.4.0` }],
-      initContainers: [{ name: "app-fetch", image: `${HOST}/${UNIT}:${tag}` }],
+      containers: [{ name: "engine", image: `${HOST}/example-engine:0.4.0`, resources: TEST_RESOURCES }],
+      initContainers: [{ name: "app-fetch", image: `${HOST}/${UNIT}:${tag}`, resources: TEST_RESOURCES }],
     } } } },
   }),
 ];
@@ -310,7 +310,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
 
 describe("validateTenant — the bundle is delivered under tenant: as the ApplicationSet delivers it", () => {
   const deps = (helm: FakeHelmRenderer) => ({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: deployManifest(""), ...APP_OVERLAYS } }), helm, log: () => undefined, signal: new AbortController().signal });
-  const base = { repoURL: DEPLOY_URL, ref: "main", stage: "prod" as const, apps: APPS, probeGuid: GUID, subdomain: "acme", clusterValueFiles: CHAIN };
+  const base = { repoURL: DEPLOY_URL, ref: "main", stage: "prod" as const, apps: APPS, probeGuid: GUID, subdomain: "acme", clusterValueFiles: CHAIN, quota: TEST_QUOTA };
   it("hands every member the image and the tag, and the empty pair to a tenant without one", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [] } });
     await validateTenant({ ...base, appsImage: TEST_BUNDLE.appsImage, appsImageTag: TEST_BUNDLE.appsImageTag }, deps(helm));
@@ -323,7 +323,7 @@ describe("validateTenant — the bundle is delivered under tenant: as the Applic
 });
 
 describe("refreshImagesStep — the fan-out rendered again with the tag the build read", () => {
-  const refreshParams = (p: CreateTenantParams) => ({ guid: GUID, domain: "s1.example", stage: "prod" as const, subdomain: "acme", apps: APPS, seedUsers: false, registryHost: HOST, requiredImages: p.requiredImages, appsImage: p.appsImage });
+  const refreshParams = (p: CreateTenantParams) => ({ guid: GUID, domain: "s1.example", stage: "prod" as const, subdomain: "acme", apps: APPS, seedUsers: false, registryHost: HOST, requiredImages: p.requiredImages, appsImage: p.appsImage, size: p.size });
   it("delivers the runtime's tag, and the re-read set carries the bundle at it", async () => {
     const runtime: TenantBuildRuntime = { appsImageTag: BUILT_TAG };
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: withBundle(BUILT_TAG) } });

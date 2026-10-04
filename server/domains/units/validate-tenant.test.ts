@@ -23,6 +23,7 @@ import type { RepoReader } from "../../adapters/git/port.ts";
 import type { RenderedDoc, HelmRenderResult } from "../../adapters/helm/port.ts";
 import type { GateResult } from "../../../shared/gates.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { TEST_QUOTA } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
@@ -68,7 +69,7 @@ const CHAIN = [
 
 const REPO_OF_REQ = "https://github.com/acme/acme-deploy.git";
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
-  return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
+  return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, quota: TEST_QUOTA, ...over };
 }
 
 function deps(repo: RepoReader, helm: FakeHelmRenderer, log: (l: string) => void = () => {}): ValidateTenantDeps {
@@ -278,7 +279,7 @@ describe("composeTenantReport", () => {
 // ── validateTenant (orchestration over the fakes) ────────────────────────────────────────────────
 
 describe("validateTenant", () => {
-  it("pass: clones the deploy repository, renders every member at the probe guid INTO ITS OWN member namespace, and freezes a T1..T4+G9 report", async () => {
+  it("pass: clones the deploy repository, renders every member at the probe guid INTO ITS OWN member namespace, and freezes a T1..T5+G9 report", async () => {
     const repo = repoWithManifest();
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC, doc("Deployment")] } });
     const lines: string[] = [];
@@ -287,7 +288,7 @@ describe("validateTenant", () => {
     expect(outcome.verdict).toBe("pass");
     expect(outcome.resolvedSha).toBe(SHA);
     expect(outcome.report.chartsRef).toBe(SHA);
-    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "G9"]);
+    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "G9"]);
     expect(outcome.report.appsValidated).toEqual(["erp"]);
     expect(outcome.report.resolvedMembers).toEqual(["auth", "jobs", "report", "erp-1", "erp-2"]);
     expect(outcome.report.manifest?.name).toBe("deploy");

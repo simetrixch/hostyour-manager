@@ -14,6 +14,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { TEST_QUOTA } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const PROBE = "zsjs023ctne0"; // a live-shaped throwaway guid
@@ -60,7 +61,7 @@ const CHAIN = [
   { path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.m1.example\n" },
 ];
 function req(over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest {
-  return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, ...over };
+  return { repoURL: REPO_OF_REQ, ref: "master", stage: "prod", apps: [app("erp")], probeGuid: PROBE, subdomain: "acme", clusterValueFiles: CHAIN, quota: TEST_QUOTA, ...over };
 }
 function deps(repo: RepoReader, helm: FakeHelmRenderer, log: (l: string) => void = () => {}): ValidateTenantDeps {
   return { repo, helm, log, signal: new AbortController().signal, now: () => 1000 };

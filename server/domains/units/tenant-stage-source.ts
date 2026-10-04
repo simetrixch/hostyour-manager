@@ -18,6 +18,8 @@ import { tenantZone, standingHostFrom } from "#unit/server/unit-dns.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { provisionOwnDomainRecord, recordsToReplace } from "./own-domain-records.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
+import { TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 
 function stageHost(host: string, source: Stage, target: Stage): string {
   if (!host) return "";
@@ -64,6 +66,7 @@ export async function planStandingStage(
     apps, members, identityProvider: entry.identityProvider, isStandingTenant: true,
     appDatabases: Object.fromEntries(apps.filter((app) => app.databases).map((app) => [app.name, app.databases!])),
     probeGuid: source.guid, subdomain: entry.subdomain, seedUsers: false, demo: entry.demo === true,
+    quota: resolveUnitQuota(ctx.db, request.size, TENANT_BRINGS), size: request.size,
     appsImage: entry.appsImage, appsImageTag: entry.appsImageTag, ownDomain, ownDomainRedirects,
     approvedTags, routing: entry.routing, clusterValueFiles, clusterFqdn: rc.domain,
     ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),

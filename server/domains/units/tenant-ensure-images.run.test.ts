@@ -17,10 +17,11 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 
 // The ensure-images gate at RUN level — its placement inside the create-tenant/add-app step lists,
@@ -71,7 +72,7 @@ const CLEAN_DOCS = [
 ];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -258,10 +259,10 @@ describe("create-tenant planStream freezes requiredImages", () => {
       doc("Deployment", {
         raw: { kind: "Deployment", spec: { template: { spec: {
           containers: [
-            { name: "engine", image: `${HOST}/example-engine:0.4.0` },
-            { name: "cache", image: "docker.io/library/redis:7" }, // a foreign registrations is never ours to check
+            { name: "engine", image: `${HOST}/example-engine:0.4.0`, resources: TEST_RESOURCES },
+            { name: "cache", image: "docker.io/library/redis:7", resources: TEST_RESOURCES }, // a foreign registrations is never ours to check
           ],
-          initContainers: [{ name: "auth-wait", image: `${HOST}/example-auth:0.5.0` }],
+          initContainers: [{ name: "auth-wait", image: `${HOST}/example-auth:0.5.0`, resources: TEST_RESOURCES }],
         } } } },
       }),
     ];

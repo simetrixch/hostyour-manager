@@ -13,7 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter } from
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { type TenantValidationReport } from "../../../shared/tenant.ts";
 import type { Cleanup } from "../../executor/types.ts";
-import { APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, TEST_BUNDLE, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { ORG } from "./tenant-apps-repo.fixture.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 import { CLEAN_DOCS, GUID, MANIFEST_YAML, NEW_APP, NS_DOC, REGISTRY_HOST, SHA, TEMPLATE_APPS, ctx, db, doc, params, planCtx, ports, runAll, seedClusters, seededPlatformRepo, useMemoryDb } from "./add-app.fixture.ts";
@@ -269,7 +269,7 @@ describe("add-app streaming planner", () => {
     - repo: ${PLATFORM_REPO}
       builds: [example-engine]
   members:`), ...APP_OVERLAYS } });
-    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC, doc("Deployment", { raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "engine", image: `${REGISTRY_HOST}/example-engine:0.4.0` }] } } } } })] } });
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC, doc("Deployment", { raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "engine", image: `${REGISTRY_HOST}/example-engine:0.4.0`, resources: TEST_RESOURCES }] } } } } })] } });
     const def = makeAddAppDef(ports({ repo, helm, registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }) }));
     const result = await def.planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     expect(result.outcome).toBe("planned");

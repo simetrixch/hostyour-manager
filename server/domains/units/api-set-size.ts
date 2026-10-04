@@ -91,6 +91,6 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
     const body = (await c.req.json().catch(() => ({}))) as { size?: unknown };
     const parsed = TenantSetSizeParams.safeParse({ tenantId: id, size: body.size });
     if (!parsed.success) throw errValidation(`invalid tenant size request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    return c.json(await executor.plan("tenant-set-size", parsed.data), 201);
+    return c.json(await executor.planStreamed("tenant-set-size", parsed.data), 201);
   });
 }

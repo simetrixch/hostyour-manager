@@ -13,6 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { seedQuota, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 import type { LifecyclePorts, TenantLifecyclePorts } from "./lifecycle.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -57,8 +58,10 @@ function consumerPorts(reg: Registrations): LifecyclePorts {
   };
 }
 
-function tenantPorts(reg: TenantRegistrations): TenantLifecyclePorts {
-  return {
+/** The steps read the registrations and the cluster resolver alone; the plan's render is
+ *  tenant-set-size.run.test.ts's. */
+function tenantPorts(reg: TenantRegistrations): TenantOnboardPorts {
+  return ({
     registrations: reg,
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader(ATTESTING),
@@ -70,7 +73,7 @@ function tenantPorts(reg: TenantRegistrations): TenantLifecyclePorts {
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
-  };
+  } satisfies TenantLifecyclePorts) as unknown as TenantOnboardPorts;
 }
 
 function seedCluster(): void {
@@ -153,7 +156,7 @@ describe("set-size run (consumer)", () => {
 });
 
 describe("tenant-set-size run", () => {
-  it("writes the figures once, and the summary says they bound EACH member namespace", async () => {
+  it("writes the size word and the member row's figures in one commit", async () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
     await seedTenant(reg);
@@ -169,11 +172,6 @@ describe("tenant-set-size run", () => {
     expect(entry?.size).toBe("medium");
     expect(repo.commits.length - before).toBe(1);
     expect(db.db.select({ size: tenants.size }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.size).toBe("medium");
-    const plan = await makeTenantSetSizeDef(tenantPorts(reg)).plan(params, { db: db.db });
-    // A tenant owns one namespace per member, so the same figures apply per member — an operator
-    // reading "3Gi" must not take it for the tenant's total.
-    expect(plan.summary).toContain("EACH of its member namespaces");
-    expect(plan.targetKind).toBe("tenant");
   });
 
   it("takes only a size a tenant is offered: XS to L", () => {
