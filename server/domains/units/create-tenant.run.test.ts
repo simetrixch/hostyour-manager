@@ -328,7 +328,7 @@ describe("create-tenant streaming planner", () => {
   it("plans a dev tenant on a machine whose platform stage is prod", async () => {
     seedClusters();
     const reader = repoWithManifest();
-    const result = await makeCreateTenantDef(ports({ repo: reader })).planStream!({ clusterId: "cls_1", stage: "dev", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(withAppsTemplate(ports({ repo: reader }))).planStream!({ clusterId: "cls_1", stage: "dev", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     expect(reader.clones.length).toBeGreaterThan(0);
   });

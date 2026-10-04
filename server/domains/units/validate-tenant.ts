@@ -271,6 +271,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           ownDomain: req.ownDomain ?? "",
           routing: req.routing ?? t1.spec!.routing,
           ownDomainRedirects: req.ownDomainRedirects ?? [],
+          approvedTags: req.approvedTags ?? {},
           stage: req.stage,
           zone: tenantZone(req.subdomain, req.stage, unitApex),
           // The four tenant flags, under tenant: where every member chart reads them (the off
@@ -306,7 +307,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           workdir: cloned.workdir,
           chartPath: member.chart,
           valueFiles: pinned ? [...member.valueFiles, pin] : member.valueFiles,
-          valuesObject: mergeDeep(mergeDeep(mergeDeep(chainValues, deliveredTo(member)), member.values), { images: { tags: req.approvedTags?.[member.member] ?? {} } }),
+          valuesObject: mergeDeep(mergeDeep(chainValues, deliveredTo(member)), member.values),
           releaseName: `${req.probeGuid}-${member.name}`,
           namespace,
           signal: deps.signal, // a DELETE/budget abort kills the in-flight helm child immediately

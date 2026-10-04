@@ -213,7 +213,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           const write: RepoFileWrite[] = [];
           for (const f of files) if ((await writer.readFile(session.workdir, f.path)) === null) write.push(f);
           const manifest = await writer.readFile(session.workdir, CONSUMER_MANIFEST_PATH);
-          const stages = p.stages ?? [p.stage];
+          const stages = p.stages ?? template.manifest.envs;
           if (manifest === null) {
             write.push({ path: CONSUMER_MANIFEST_PATH, content: tenantAppsManifest({ unit, owner: p.owner, envs: stages, containerfile: build.containerfile, context: build.context }) });
           } else {

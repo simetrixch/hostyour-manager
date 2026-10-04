@@ -154,8 +154,8 @@ describe("the Mongo jobs that list the generation's archives", () => {
   const cases = [
     { job: named(consumerRestoreJobs(consumer), "reloc-restore-mongo"), archive: "acme_main", what: "the consumer's restore" },
     { job: named(consumerVerifyCompletenessJobs(consumer), "reloc-verify-mongo"), archive: "acme_main", what: "the consumer's completeness check" },
-    { job: named(tenantRestoreJobs(tenant), "reloc-restore-mongo"), archive: `${GUID}_web`, what: "the tenant's restore" },
-    { job: named(tenantVerifyCompletenessJobs(tenant), "reloc-verify-mongo"), archive: `${GUID}_web`, what: "the tenant's completeness check" },
+    { job: named(tenantRestoreJobs(tenant), "reloc-restore-mongo"), archive: `${GUID}_web_prod`, what: "the tenant's restore" },
+    { job: named(tenantVerifyCompletenessJobs(tenant), "reloc-verify-mongo"), archive: `${GUID}_web_prod`, what: "the tenant's completeness check" },
   ];
 
   it.each(cases)("$what fails where the mongo/ listing fails", ({ job, archive }) => {
@@ -173,13 +173,13 @@ describe("the Mongo jobs that list the generation's archives", () => {
 describe("the Mongo jobs that list the databases themselves", () => {
   const GUID = "zsjs023ctne0";
   const tenant = { guid: GUID, stage: "prod" as const, image: "dbtools" };
-  const databases = [`${GUID}_web`, `${GUID}_auth`, "other_core"];
+  const databases = [`${GUID}_web_prod`, `${GUID}_auth_prod`, `${GUID}_web_test`, "other_core"];
 
   it("clears a tenant's source of its own databases, as the listing names them, and of nothing else", () => {
     const root = box({});
-    expect(run(tenantClearSourceJobs(tenant)[0]!, root, { databases })).toContain(`DROPPED ${GUID}_web`);
+    expect(run(tenantClearSourceJobs(tenant)[0]!, root, { databases })).toContain(`DROPPED ${GUID}_web_prod`);
     const dropped = readFileSync(join(root, "dropped"), "utf8");
-    expect([dropped.includes(`${GUID}_web`), dropped.includes(`${GUID}_auth`), dropped.includes("other_core")]).toEqual([true, true, false]);
+    expect([dropped.includes(`${GUID}_web_prod`), dropped.includes(`${GUID}_auth_prod`), dropped.includes(`${GUID}_web_test`), dropped.includes("other_core")]).toEqual([true, true, false, false]);
   });
 
   it("fails a tenant's clear-source where Mongo cannot be listed, and drops nothing", () => {
@@ -190,7 +190,7 @@ describe("the Mongo jobs that list the databases themselves", () => {
 
   it("fails the source listing where Mongo cannot be listed, rather than answering no database", () => {
     expect(() => run(tenantSourceDbListJob(tenant), box({}), { databases, failMongo: true })).toThrow();
-    expect(run(tenantSourceDbListJob(tenant), box({}), { databases })).toBe(`DB ${GUID}_web\nDB ${GUID}_auth\n`);
+    expect(run(tenantSourceDbListJob(tenant), box({}), { databases })).toBe(`DB ${GUID}_web_prod\nDB ${GUID}_auth_prod\n`);
   });
 
   it("PLANTED INNOCENT: a consumer's clear-source drops its registered databases, and fails where Mongo does", () => {

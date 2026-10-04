@@ -2,6 +2,9 @@ import { and, eq } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import type { Db } from "../../db/client.ts";
+import { STAGE } from "../../../shared/enums.ts";
+import { TENANT_LIVE_STATUS } from "./tenant-live-guard.ts";
 import { CreateTenantParams, CreateTenantRequest, createTenantSteps, type CreateTenantStageParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { mintFreeGuid } from "./create-tenant-registration.ts";
@@ -23,7 +26,15 @@ function stageContext(ctx: StepCtx, p: CreateTenantStageParams, name: string): S
 }
 
 function scopedCleanup(p: CreateTenantStageParams, cleanup: Cleanup): Cleanup {
-  return { name: `${p.stage}-${cleanup.name}`, title: `${p.stage}: ${cleanup.title}`, run: (ctx) => cleanup.run(stageContext(ctx, p, cleanup.name)) };
+  return { name: `${p.stage}-${cleanup.name}`, title: `${p.stage}: ${cleanup.title}`, run: async (ctx) => {
+    if (completedStage(ctx.db, p)) { ctx.log("meta", `keeping completed ${p.stage} stage of tenant ${p.guid}`); return; }
+    await cleanup.run(stageContext(ctx, p, cleanup.name));
+  } };
+}
+
+function completedStage(db: Db, p: CreateTenantStageParams): boolean {
+  const row = db.select({ status: tenants.status }).from(tenants).where(and(eq(tenants.guid, p.guid), eq(tenants.stage, p.stage))).get();
+  return Boolean(row && TENANT_LIVE_STATUS.includes(row.status));
 }
 
 function stagePlans(p: CreateTenantParams): CreateTenantStageParams[] {
@@ -33,6 +44,7 @@ function stagePlans(p: CreateTenantParams): CreateTenantStageParams[] {
 function composedSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[] {
   if (!p.additionalStages && !p.sourceTenantId) return createTenantSteps(ports, p);
   const stages = stagePlans(p);
+  const activations: Step[] = [];
   return [
     {
       name: "attest-target", title: "Attest every selected machine and stage identity",
@@ -57,11 +69,15 @@ function composedSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[]
         const beforeRegistration = steps.findIndex((step) => step.name === "write-registration");
         steps.splice(beforeRegistration, 0, stageHostsStep(ports, stage));
       }
-      return steps.map((step) => ({
+      const scoped = steps.map((step) => ({
         ...step, name: `${stage.stage}-${step.name}`, title: `${stage.stage}: ${step.title}`,
         run: (ctx: StepCtx) => step.run(stageContext(ctx, stage, step.name)),
       }));
+      const activation = scoped.find((step) => step.name === `${stage.stage}-activate`);
+      if (activation) activations.push(activation);
+      return scoped.filter((step) => step !== activation);
     }),
+    ...activations,
   ];
 }
 
@@ -77,7 +93,7 @@ export function makeTenantStagesDef(
       if (!request.stages && !request.sourceTenantId) return single.planStream!(request, ctx);
       const placements = request.stages ?? [{ stage: request.stage, clusterId: request.clusterId }];
       // The broadest channel builds the shared bundle once and admits it to every selected stage.
-      placements.sort((a, b) => ["prod", "test", "dev"].indexOf(a.stage) - ["prod", "test", "dev"].indexOf(b.stage));
+      placements.sort((a, b) => STAGE.indexOf(b.stage) - STAGE.indexOf(a.stage));
       const guid = request.sourceTenantId ? undefined : await mintFreeGuid(ports);
       const results = [];
       for (const placement of placements) {
@@ -109,7 +125,10 @@ export function makeTenantStagesDef(
     steps: (p) => composedSteps(ports, p),
     cleanups: (p) => !p.additionalStages && !p.sourceTenantId ? createTenantCleanups(ports, p) : stagePlans(p).flatMap((stage) => createTenantCleanups(ports, stage).map((cleanup) => scopedCleanup(stage, cleanup))),
     assertAbortable: async (p, deps) => {
-      for (const stage of stagePlans(p)) await assertCreateTenantAbortable(ports, stage, deps.db);
+      const incomplete = stagePlans(p).filter((stage) => !completedStage(deps.db, stage));
+      // A failed invite after all stages completed keeps the existing live-tenant refusal.
+      if (!incomplete.length) await assertCreateTenantAbortable(ports, p, deps.db);
+      for (const stage of incomplete) await assertCreateTenantAbortable(ports, stage, deps.db);
     },
   };
 }

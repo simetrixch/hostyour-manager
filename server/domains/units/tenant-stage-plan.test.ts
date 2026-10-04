@@ -19,6 +19,8 @@ import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { createTenantCleanups } from "./create-tenant-abort.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import { and, eq } from "drizzle-orm";
+import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 
 useMemoryDb();
 
@@ -37,6 +39,7 @@ function stagePorts() {
   }), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
   p.seeder = fakeTenantSeeder();
   p.objectStore = new FakeObjectStore();
+  p.dns = new FakeDnsProvider();
   return p;
 }
 
@@ -71,6 +74,29 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(CreateTenantRequest.safeParse({ ...request, stages: [{ stage: "test", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_1" }] }).success).toBe(false);
   });
 
+  it("invites only after every selected stage has been provisioned", async () => {
+    const p = stagePorts();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_1" }] }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    const names = def.steps(result.params).map((step) => step.name);
+    expect(names.slice(-2)).toEqual(["prod-activate", "test-activate"]);
+    expect(names.indexOf("test-record-inventory")).toBeLessThan(names.indexOf("prod-activate"));
+  });
+
+  it("aborts a failed stage while preserving a completed sibling", async () => {
+    const p = stagePorts();
+    const def = makeCreateTenantDef(p);
+    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_1" }] }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    for (const stage of ["prod", "test"]) await def.steps(result.params).find((step) => step.name === `${stage}-record-provisional`)!.run(context(result.params));
+    db.db.update(tenants).set({ status: "active" }).where(and(eq(tenants.guid, result.params.guid), eq(tenants.stage, "prod"))).run();
+    await expect(def.assertAbortable!(result.params, { db: db.db })).resolves.toBeUndefined();
+    const cleanups = def.cleanups!(result.params);
+    for (const stage of ["prod", "test"]) await cleanups.find((cleanup) => cleanup.name.startsWith(`${stage}-`) && cleanup.name.endsWith("-record"))!.run(context(result.params));
+    expect(db.db.select({ stage: tenants.stage, status: tenants.status }).from(tenants).where(eq(tenants.guid, result.params.guid)).all()).toEqual(expect.arrayContaining([{ stage: "prod", status: "active" }, { stage: "test", status: "offboarded" }]));
+  });
+
   it("adds a stage to the standing guid without replacing the source", async () => {
     const p = stagePorts();
     const source = await p.registrations.readTenant("prod", GUID);
@@ -81,6 +107,8 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params.members).toEqual(source!.entry.members);
     expect(result.params.appsRepo).toBe(source!.entry.appsRepo);
     expect(result.params.appsImageTag).toBe(source!.entry.appsImageTag);
+    const rendered = (p.helm as FakeHelmRenderer).requests[0]!.valuesObject!;
+    expect(rendered["tenant"]).toMatchObject({ approvedTags: result.params.approvedTags });
     expect(makeCreateTenantDef(p).steps(result.params).map((s) => s.name)).not.toContain("test-create-repo");
     expect(await p.registrations.readTenant("prod", GUID)).toEqual(source);
   });
