@@ -187,7 +187,7 @@ describe("tenant-migrate", () => {
     const apps = ["auth", "jobs", "report", "web"].map((m) => `${GUID}-${m}-prod`);
     await f.buildRbac.applyBuildRbac([renderTenantArgoSync({ stage: "prod", guid: GUID, applications: apps, argoNamespace: "source-argo", units: ["auth", "platform", "bundle"] })]);
     const sourceBinding = f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`);
-    const p = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
+    const p = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
     const step = makeTenantMigrateDef(ports).steps(p).find((s) => s.name === "provision-target")!;
     await step.run(stepCtx(db, step.name, p, []));
     const role = f.buildRbac.get("Role", "target-argo", `${GUID}-argo-sync`) as RoleManifest;
@@ -207,11 +207,11 @@ describe("tenant-migrate", () => {
     f.source.reader.setJobResult(`reloc-list-source-${GUID}`, { succeeded: true, logs: `DB ${GUID}_auth_prod\nDB ${GUID}_web_prod` });
 
     const def = makeTenantMigrateDef(ports);
-    const plan = await def.plan({ tenantId: "tnt_1", targetClusterId: TARGET.clusterId }, { db: db.db });
+    const plan = await def.plan({ tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId }, { db: db.db });
     expect(plan.steps.map((s) => s.name)).toEqual(STEP_ORDER);
 
     f.target.reader.setSecretValue(`${GUID}-auth-prod`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
-    const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
+    const params = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
     await driveSteps(db, f, def.steps(params), params, [], {
       // After the repoint the source appset stops matching this registration and ArgoCD prunes every
       // member Application — model exactly that, which is what the release IS for a tenant.
@@ -261,7 +261,7 @@ describe("tenant-migrate", () => {
     f.source.reader.setJobResult(`reloc-list-source-${GUID}`, { succeeded: true, logs: `DB ${GUID}_auth_prod` });
     f.target.reader.setJobResult(`reloc-restore-mongo-${GUID}`, { succeeded: false, logs: "mongorestore: disk full" });
 
-    const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
+    const params = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
     await expect(
       driveSteps(db, f, makeTenantMigrateDef(ports).steps(params), params, [], {
         "verify-source-released": () => f.source.argo.setStatuses(new Map()),

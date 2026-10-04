@@ -676,8 +676,8 @@ export const restoreTenant = (tenantId: string, targetClusterId: string, generat
   post<{ runId: string }>(`/api/tenants/${tenantId}/restore`, { targetClusterId, generation });
 /** Move the tenant to the named cluster through a new backup generation — the whole bracket, one
  *  wildcard record updated; the source is cleared last. */
-export const migrateTenant = (tenantId: string, targetClusterId: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/migrate`, { targetClusterId });
+export const migrateTenant = (tenant: Pick<TenantView, "id" | "stage" | "clusterId">, targetClusterId: string): Promise<{ runId: string }> =>
+  post<{ runId: string }>(`/api/tenants/${tenant.id}/migrate`, { stage: tenant.stage, sourceClusterId: tenant.clusterId, targetClusterId });
 /** Plan the move onto the other member routing: the new record first, the old one removed once the
  *  identity provider answers at its new address. */
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>

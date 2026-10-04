@@ -6,7 +6,7 @@ import { makeTenantMigrateDef } from "./migrate.run.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import {
   openFixtureDb, seedClusters, seedMaster, seedTenantRows, seedConsumerRow, seedTenantWorld, seedConsumerRegistration,
-  makeFakes, tenantPorts, consumerPorts, driveSteps, stepCtx, jobNames, missing, GUID, TARGET,
+  makeFakes, tenantPorts, consumerPorts, driveSteps, stepCtx, jobNames, missing, GUID, SOURCE, TARGET,
 } from "./relocation.fixture.ts";
 
 // verify-source-released — the safety property of the whole step, measured LIVE with a REAL failure
@@ -64,7 +64,7 @@ describe("verify-source-released (step level)", () => {
     // (The list job's default answer is an empty log, which is exactly that observation.)
     f.target.reader.setSecretValue(`${GUID}-auth`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
 
-    const params = { tenantId: "tnt_1", targetClusterId: TARGET.clusterId };
+    const params = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
     await expect(
       // The source fan-out is pruned only AT the verify step: the steps BEFORE it watch that same set
       // converge on the source, so clearing it at setup would fail the run earlier and for the wrong

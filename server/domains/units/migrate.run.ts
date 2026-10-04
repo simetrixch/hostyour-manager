@@ -6,7 +6,10 @@
 // and it falls only in clear-source, last.
 import { z } from "zod";
 import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
-import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
+import { attestTargetStep, loadAppCluster } from "./lifecycle.ts";
+import { STAGE } from "../../../shared/enums.ts";
+import { errValidation } from "../../kernel/errors.ts";
+import { loadTenantMove, tenantMoveWorld, tenantMoveCleanupWorld, attestTenantMoveStep } from "./tenant-migrate-stage.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
 import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, generationOfThisRun, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
@@ -14,12 +17,15 @@ import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessSt
 import { repointStep, clearSourceStep } from "#unit/server/relocation-migrate.ts";
 import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
-import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
+import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 
 export const MigrateParams = z.object({ appId: z.string().startsWith("app_"), targetClusterId: z.string().startsWith("cls_") });
 export type MigrateParams = z.infer<typeof MigrateParams>;
 
-export const TenantMigrateParams = z.object({ tenantId: z.string().startsWith("tnt_"), targetClusterId: z.string().startsWith("cls_") });
+const tenantMoveBase = z.object({ tenantId: z.string().startsWith("tnt_"), targetClusterId: z.string().startsWith("cls_") });
+export const TenantMigrateRequest = tenantMoveBase.extend({ stage: z.enum(STAGE), sourceClusterId: z.string().startsWith("cls_") });
+// Stored runs retain their original recovery contract; every new plan requires the explicit request.
+export const TenantMigrateParams = z.union([TenantMigrateRequest, tenantMoveBase.strict()]);
 export type TenantMigrateParams = z.infer<typeof TenantMigrateParams>;
 
 const masterKubeLock: LockClaim = { resource: "master-kube", key: "m" };
@@ -83,14 +89,14 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
     paramsSchema: TenantMigrateParams,
     mutating: true,
     plan: async (params, { db }) => {
-      const tc = loadTenantCluster(db, params.tenantId);
-      const target = assertMovableTo(db, tc.clusterId, params.targetClusterId);
-      const stepDefs = migrateSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, attestTenantTargetStep(ports, params.tenantId), "moved tenant");
+      if (!("stage" in params)) throw errValidation("Move requires the selected stage and source machine — choose the stage and plan again");
+      const { source: tc, target } = loadTenantMove(db, params);
+      const stepDefs = migrateSteps(ports, tenantMoveWorld(ports, params), params.targetClusterId, attestTenantMoveStep(ports, params), "moved tenant stage");
       return {
         kind: "tenant-migrate",
         targetKind: "tenant",
         targetId: params.tenantId,
-        summary: `Move tenant ${tc.guid} (${tc.stage}) from ${tc.domain} to ${target.domain} through a new backup generation on the Storage Box — the WHOLE bracket, under the unchanged guid: quiesce and verify closed, dump every ${tc.guid}_* database + the bucket + the crypto material, provision every member on the target, repoint (every source member namespace is marked relocating first, which is what keeps its databases when the flip prunes the ServiceClaims), verify the source released the tenant — its fan-out pruned — while still holding its data, restore, verify completeness, switch the one wildcard record, smoke, reopen, clear the source. ${summaryTail}`,
+        summary: `Move tenant ${tc.guid} stage ${tc.stage} from ${tc.domain} to ${target.domain} through a new backup generation on the Storage Box — the WHOLE bracket, under the unchanged guid: quiesce and verify closed, dump every database of stage ${tc.stage} + its bucket + its crypto material, provision every member on the target, repoint (every source member namespace is marked relocating first, which is what keeps its databases when the flip prunes the ServiceClaims), verify the source released the tenant — its fan-out pruned — while still holding its data, restore, verify completeness, switch the one wildcard record, smoke, reopen, clear that stage from the source. Every other stage stays in place with its data, registration and hosts unchanged. ${summaryTail}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -98,7 +104,7 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
         requiredSecrets: [],
       };
     },
-    steps: (params) => migrateSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, attestTenantTargetStep(ports, params.tenantId), "moved tenant"),
-    cleanups: (params) => [discardGenerationCleanup(ports, tenantWorld(ports, params.tenantId))],
+    steps: (params) => migrateSteps(ports, tenantMoveWorld(ports, params), params.targetClusterId, attestTenantMoveStep(ports, params), "moved tenant stage"),
+    cleanups: (params) => [discardGenerationCleanup(ports, tenantMoveCleanupWorld(ports, params))],
   };
 }

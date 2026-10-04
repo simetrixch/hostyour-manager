@@ -4,6 +4,7 @@ import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Db } from "../../db/client.ts";
 import { STAGE } from "../../../shared/enums.ts";
+import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { TENANT_LIVE_STATUS } from "./tenant-live-guard.ts";
 import { CreateTenantParams, CreateTenantRequest, createTenantSteps, type CreateTenantStageParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
@@ -41,6 +42,12 @@ function stagePlans(p: CreateTenantParams): CreateTenantStageParams[] {
   return [p, ...(p.additionalStages ?? [])];
 }
 
+function sourceDefinition(entry: TenantRegistration): string {
+  // Versions are frozen by the new stage's own gate; a sibling's release may advance independently.
+  const { approvedTags: _approvedTags, appsImageTag: _appsImageTag, ...definition } = entry;
+  return JSON.stringify(definition);
+}
+
 function composedSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[] {
   if (!p.additionalStages && !p.sourceTenantId) return createTenantSteps(ports, p);
   const stages = stagePlans(p);
@@ -56,7 +63,7 @@ function composedSteps(ports: TenantOnboardPorts, p: CreateTenantParams): Step[]
           if ((row || pointer.status !== "absent") && row?.lastRunId !== ctx.runId) throw errValidation(`tenant ${stage.guid} already has a ${stage.stage} stage; no standing stage is replaced`);
           if (stage.sourceStage && stage.sourceRegistration) {
             const source = await ports.registrations.readTenant(stage.sourceStage, stage.guid);
-            if (!source || JSON.stringify(source.entry) !== stage.sourceRegistration) throw errValidation(`tenant ${stage.guid} ${stage.sourceStage} changed after this Add stage plan; plan again before creating ${stage.stage}`);
+            if (!source || sourceDefinition(source.entry) !== sourceDefinition(TenantRegistrationSchema.parse(JSON.parse(stage.sourceRegistration)))) throw errValidation(`tenant ${stage.guid} ${stage.sourceStage} changed after this Add stage plan; plan again before creating ${stage.stage}`);
           }
         }
       },
