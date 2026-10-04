@@ -78,6 +78,19 @@ describe("standing tenant demo switch", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
   });
 
+  it("refuses a queued stale demo plan but permits its own write retry", async () => {
+    seedClusters();
+    const prt = ports();
+    const { def, p } = await planned(prt, true);
+    const write = def.steps(p).find((s) => s.name === "write-demo")!;
+    await write.run(ctx(params(), "write-demo", []));
+    await write.run(ctx(params(), "write-demo", []));
+    db.db.update(tenants).set({ lastRunId: "run_other" }).where(eq(tenants.id, "tnt_1")).run();
+    await expect(write.run(ctx(params(), "write-demo", []))).rejects.toThrow(/demo mode changed/);
+    await def.cleanups!(p)[0]!.run(ctx(params(), "restore-demo", []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
+  });
+
   it.each(["provisioning", "offboarded", "purged"] as const)("refuses a %s tenant", async (status) => {
     seedClusters();
     db.db.update(tenants).set({ status }).where(eq(tenants.id, "tnt_1")).run();

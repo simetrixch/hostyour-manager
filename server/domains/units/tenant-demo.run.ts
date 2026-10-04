@@ -55,7 +55,11 @@ function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
     {
       name: "write-demo", title: `Set demo mode ${p.demo ? "on" : "off"} for every member`,
       run: async (ctx) => {
-        const { tc } = await currentDemo(ports, p, ctx);
+        const { tc, entry } = await currentDemo(ports, p, ctx);
+        const owner = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, p.tenantId)).get();
+        if ((entry.demo ?? false) !== p.previous && !((entry.demo ?? false) === p.demo && owner?.lastRunId === ctx.runId)) {
+          throw errValidation("demo mode changed since this switch was planned — plan it again");
+        }
         ctx.registerCleanup(restoreDemo(ports, p));
         const { commit } = await ports.registrations.setDemo(tc.stage, tc.guid, p.demo, ctx.runId);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
