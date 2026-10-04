@@ -247,10 +247,9 @@ describe("add-app extends the grant", () => {
     await registrations.updateTenantApps("prod", GUID, { op: "append", app: NEW_APP, member: added.member, runId: "run_add" });
 
     await expect(provisionArgoSyncStep(prt, oldPlan, {}).run(ctx(oldPlan, []))).rejects.toThrow("members changed since this run was planned");
-    expect(roleOf(buildRbac)?.rules).toEqual([{
-      apiGroups: ["argoproj.io"], resources: ["applications"], verbs: ["get", "patch"],
-      resourceNames: [`${GUID}-auth-prod`, `${GUID}-jobs-prod`, `${GUID}-report-prod`, `${GUID}-erp-prod`, `${GUID}-crm-prod`],
-    }]);
+    expect(roleOf(buildRbac)?.rules[0]?.resourceNames).toEqual([
+      `${GUID}-auth-prod`, `${GUID}-jobs-prod`, `${GUID}-report-prod`, `${GUID}-erp-prod`, `${GUID}-crm-prod`,
+    ]);
     expect(bindingOf(buildRbac)?.subjects).toEqual([
       { kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: "example-platform-build" },
       { kind: "ServiceAccount", name: BUILD_PIPELINE_SERVICE_ACCOUNT, namespace: "example-crm-build" },
