@@ -34,11 +34,12 @@ const request = (over: Record<string, unknown>): Record<string, unknown> => ({
 });
 const planCtx = () => ({ db: db.db, log: () => undefined, signal: new AbortController().signal });
 
+const PAT = "github_pat_test";
 const logged: string[] = [];
 function ctx(p: OnboardParams, stepName: string): StepCtx {
   return {
     runId: "run_onb", stepName, db: db.db, params: p,
-    creds: { open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as CredentialStore,
+    creds: { open: () => Promise.resolve(Buffer.from(PAT, "utf8")) } as unknown as CredentialStore,
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal,
     logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
@@ -78,6 +79,9 @@ describe("onboard clears a leftover deploy/<stage> before the registration", () 
     expect(github.deletedBranches).toEqual(["x/acme/deploy/test"]);
     expect(await github.readBranchCommit({ owner: "x", repo: "acme", branch: "deploy/test", token: "t" })).toBeNull();
     expect(logged.join("\n")).toContain(LEFTOVER.sha);
+    // The branch is deleted with the repository's PAT, and the PAT reaches no line of the run.
+    expect(github.deleteTokens).toEqual([PAT]);
+    expect(logged.join("\n")).not.toContain(PAT);
     expect(await github.readBranchCommit({ owner: "x", repo: "acme", branch: "deploy/prod", token: "t" })).not.toBeNull();
   });
 
@@ -93,7 +97,10 @@ describe("onboard clears a leftover deploy/<stage> before the registration", () 
     github.seedBranch("x", "acme", "deploy/test", LEFTOVER);
     const { run } = await planAtTest(github);
     await run("write-registration");
-    await expect(run("clear-leftover-branch")).rejects.toThrow(/registration of acme at test/);
+    const refusal = await run("clear-leftover-branch").then(() => null, (e: unknown) => e as Error);
+    expect(refusal?.message).toMatch(/registration of acme at test/);
+    expect(refusal?.message).not.toContain(PAT);
+    expect(logged.join("\n")).not.toContain(PAT);
     expect(github.deletedBranches).toEqual([]);
   });
 });

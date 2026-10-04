@@ -122,11 +122,13 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     return this.branches.get(`${this.key(input.owner, input.repo)}/${input.branch}`) ?? null;
   }
 
-  /** Every deleteBranch call, as owner/repo/branch. */
+  /** Every deleteBranch call, as owner/repo/branch, and the token each was made with. */
   readonly deletedBranches: string[] = [];
+  readonly deleteTokens: string[] = [];
   async deleteBranch(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<void> {
     const key = `${this.key(input.owner, input.repo)}/${input.branch}`;
     this.deletedBranches.push(key);
+    this.deleteTokens.push(input.token);
     this.branches.delete(key);
   }
 
