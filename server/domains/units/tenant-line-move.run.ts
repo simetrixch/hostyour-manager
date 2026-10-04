@@ -16,7 +16,7 @@ import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { discardGenerationCleanup, takeOnlineGeneration } from "#unit/server/relocation.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
-import { loadTenantCluster } from "./lifecycle.ts";
+import { loadTenantCluster, refreshTenantApplications } from "./lifecycle.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { rendersApproval, sameApprovals } from "./tenant-versions.ts";
@@ -114,6 +114,7 @@ function restorePairingCleanup(ports: TenantLineMovePorts, p: TenantLineMovePara
       }
       const { commit } = await ports.registrations.setLinePairing(p.stage, p.guid, p.previous, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: p.previous.approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
       ctx.log("meta", `tenant ${p.guid} back on its line-${p.fromLine} pairing (${commit})`);
     },
   };
@@ -200,6 +201,7 @@ function tenantLineMoveSteps(ports: TenantLineMovePorts, p: TenantLineMoveParams
         const { commit } = await ports.registrations.setLinePairing(p.stage, p.guid, p.target, ctx.runId);
         ctx.db.update(tenants).set({ approvedTags: p.target.approvedTags, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
+        await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
         ctx.log("meta", `tenant ${p.guid}: bundle ${p.target.appsImageTag} and its platform part on line ${p.line} written in one commit (${commit})`);
       },
     },

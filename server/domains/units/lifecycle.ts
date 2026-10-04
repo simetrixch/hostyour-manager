@@ -7,7 +7,7 @@
 //; both formats' attest steps share assertDeployState (the fail-closed deploy-state gate,
 // plugins/unit/server/lifecycle.ts).
 import { eq } from "drizzle-orm";
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { errNotFound } from "../../kernel/errors.ts";
@@ -185,4 +185,14 @@ export function attestTenantTargetStep(ports: TenantLifecyclePorts, tenantId: st
       ctx.log("meta", `target ${tc.domain} attested for ${tc.guid} at ${tc.stage} — deploy-state generation ${state.generation}`);
     },
   };
+}
+
+/** The registration supplies generated member specs, so refresh its generator first.
+ * Patching only members leaves their old inline registration values until the next Git poll. */
+export async function refreshTenantApplications(resolver: ClusterKubeResolver, clusterId: string, names: readonly string[], ctx: Pick<StepCtx, "log">): Promise<void> {
+  const { argoReader, argoNamespace } = await resolver.resolve(clusterId);
+  await argoReader.refreshApplicationSet(argoNamespace, "tenants");
+  ctx.log("meta", `ArgoCD ApplicationSet ${argoNamespace}/tenants refresh requested`);
+  const refreshed = await argoReader.refreshApplications(argoNamespace, names);
+  ctx.log("meta", `ArgoCD Applications refreshed in ${argoNamespace}: ${refreshed.join(", ") || "none generated yet"}`);
 }

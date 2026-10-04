@@ -87,9 +87,25 @@ describe("the three ArgoCD reads of a cluster deployment", () => {
     await argocdFollowStep(statedTarget(MASTER_ID, MASTER_FQDN, FIXTURE_STAGE), h.runPorts)
       .run(hostedStepCtx(h, { log: (_s, text) => said.push(text) }));
 
-    expect(h.argo.listed).toEqual([MASTER_ARGO_NS]);
+    expect(h.argo.listed).toEqual([MASTER_ARGO_NS, MASTER_ARGO_NS]);
+    expect(h.argo.refreshed).toEqual([`${MASTER_ARGO_NS}/${SLAVE_ARGO_NS}-apps`]);
     expect(said.join(" ")).toContain(`all 1 applications in ns ${MASTER_ARGO_NS} are Synced + Healthy`);
     expect(h.hosts.log).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: skipping refresh leaves the application stale and the follow must not pass", async () => {
+    const h = await masterWorld();
+    let refreshed = false;
+    const refresh = h.argo.refreshApplications.bind(h.argo);
+    h.argo.refreshApplications = async (namespace, names) => { refreshed = true; return refresh(namespace, names); };
+    let reads = 0;
+    h.argo.listApplications = async () => {
+      if (reads++ && !refreshed) throw new Error("refresh was skipped; desired state is still stale");
+      return [argoRow("platform-apps-prod", refreshed ? "Synced" : "OutOfSync")];
+    };
+    await argocdFollowStep(statedTarget(MASTER_ID, MASTER_FQDN, FIXTURE_STAGE), h.runPorts).run(hostedStepCtx(h));
+    expect(refreshed).toBe(true);
+    expect(h.argo.refreshed).toEqual([`${MASTER_ARGO_NS}/platform-apps-prod`]);
   });
 
   it("argocd-follow RETRIES a namespace holding zero Applications rather than passing it", async () => {

@@ -7,6 +7,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { TEMPLATE_FILES, TEMPLATE_URL } from "./tenant-apps-repo.fixture.ts";
@@ -28,6 +29,21 @@ describe("tenant-refresh-members", () => {
     const erp = (await prt.registrations.readTenant("prod", GUID))?.entry.members.find((m) => m.name === "erp");
     expect(erp?.sources[1]?.chart).toBe("charts/example-ui");
     expect(logs.some((l) => l.includes("Synced + Healthy"))).toBe(true);
+  });
+
+  it("refreshes the registration generator and members immediately after writes, before the watch", async () => {
+    seedTenant();
+    const prt = ports(staleMembers());
+    const p = await planned(prt);
+    const { argoReader } = await prt.resolver.resolve(p.clusterId);
+    const argo = argoReader as FakeMasterArgoReader;
+    argo.operations.length = 0;
+    for (const step of makeTenantRefreshMembersDef(prt).steps(p)) await step.run(stepCtx(p, [], []));
+    expect(argo.refreshedSets).toContain("argocd/tenants");
+    expect(argo.refreshed).toEqual(expect.arrayContaining(p.expectedApps.map(name => `argocd/${name}`)));
+    const watch = argo.operations.findIndex(call => call.startsWith("watch-set:"));
+    expect(watch).toBeGreaterThan(0);
+    expect(argo.operations.slice(0, watch)).toContain("refresh-set:argocd/tenants");
   });
 
   it("an abort writes the previous member entries back", async () => {

@@ -10,7 +10,7 @@ import { localTx } from "../../executor/stepkit.ts";
 import type { ArgoAppStatusMap, WorkloadStatus } from "../../adapters/kube/port.ts";
 import { TENANT_LABEL_KEY, memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { attestTenantTargetStep, loadTenantCluster, refreshTenantApplications, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 import { websiteRecordHosts } from "./website-domain.ts";
 import { removeOwnDomainRecord } from "./own-domain-records.ts";
@@ -126,7 +126,7 @@ export const allPruned = (names: readonly string[]) => (m: ArgoAppStatusMap): bo
 const allSynced = (names: readonly string[]) => (m: ArgoAppStatusMap): boolean =>
   names.every((n) => {
     const s = m.get(n);
-    return !!s && s.sync === "Synced" && s.health === "Healthy";
+    return !!s && s.sync === "Synced" && s.health === "Healthy" && !s.refreshRequested;
   });
 
 /** The members that did NOT prune, for a fail message (name=health, …). */
@@ -160,6 +160,7 @@ function suspendSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams
         const tc = loadTenantCluster(ctx.db, tenantId);
         const { commit } = await ports.registrations.setTenantSuspended(tc.stage, tc.guid, true, ctx.runId);
         ctx.checkpoint({ commit });
+        await refreshTenantApplications(ports.resolver, tc.clusterId, tenantWatchSet(ctx.db, tc), ctx);
         ctx.log("meta", `tenant ${tc.guid} flipped to suspended on ${ports.registrations.branch} (${commit}) — ArgoCD will now re-sync every member into its off state`);
       },
     },
@@ -221,6 +222,7 @@ function resumeSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams)
         const tc = loadTenantCluster(ctx.db, tenantId);
         const { commit } = await ports.registrations.setTenantSuspended(tc.stage, tc.guid, false, ctx.runId);
         ctx.checkpoint({ commit });
+        await refreshTenantApplications(ports.resolver, tc.clusterId, tenantWatchSet(ctx.db, tc), ctx);
         ctx.log("meta", `tenant ${tc.guid} flipped back to active on ${ports.registrations.branch} (${commit}) — ArgoCD will now scale every member back up`);
       },
     },
@@ -271,6 +273,7 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
           const { commit, approvedTags } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
           ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
           ctx.checkpoint({ commit, websiteHosts });
+          await refreshTenantApplications(ports.resolver, tc.clusterId, [memberApplication(tc.guid, app, tc.stage)], ctx);
           ctx.log("meta", `app "${app}" dropped from tenant ${tc.guid} on ${ports.registrations.branch} (${commit}) — ArgoCD will now prune only this member's Application`);
         }
         for (const host of websiteHosts) await removeOwnDomainRecord(ctx, ports, tc, host);

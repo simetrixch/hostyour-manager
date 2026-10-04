@@ -69,7 +69,7 @@ export function attestClusterStep(target: SlaveTarget): Step {
  *  abortable; zero Applications means the appset has not generated yet and is retried, never read as
  *  "nothing to wait for".
  *
- *  IT SENDS THE CLUSTER NOTHING. The Applications are read over the Manager pod's own
+ *  Applications are refreshed and read over the Manager pod's own
  *  ServiceAccount, through the same resolver every unit run kind reaches ArgoCD with, and both the
  *  reader and the namespace come from ONE resolve: `argoNamespace` is `argocd` for a target carrying
  *  the master part and the per-slave instance's namespace on the master for a slave, and pairing
@@ -86,6 +86,7 @@ export function argocdFollowStep(target: SlaveTarget, ports: DeploySlavePorts): 
       const { argoReader, argoNamespace } = await requireResolver(ports).resolve(cluster.id);
       const where = `ns ${argoNamespace}`;
       const deadline = Date.now() + ARGOCD_FOLLOW_TIMEOUT_MS;
+      const refreshed = new Set<string>();
       for (;;) {
         // A kube read that failed is a failing TICK and not a step death. This step runs right after
         // deploy-platform-services restarted kubelite on the master arm, and the Manager's own
@@ -95,12 +96,20 @@ export function argocdFollowStep(target: SlaveTarget, ports: DeploySlavePorts): 
         let refusal = "";
         try {
           rows = await argoReader.listApplications(argoNamespace);
+          const names = rows.map(row => row.name).filter(name => !refreshed.has(name));
+          if (names.length) {
+            const accepted = await argoReader.refreshApplications(argoNamespace, names);
+            for (const name of accepted) refreshed.add(name);
+            ctx.log("meta", `ArgoCD Applications refreshed in ${argoNamespace}: ${accepted.join(", ")}`);
+            // The list predates the refresh, so only a fresh read may satisfy the watch.
+            rows = await argoReader.listApplications(argoNamespace);
+          }
         } catch (e) {
           if (!(e instanceof AppError) || e.code !== "UPSTREAM") throw e;
           refusal = `the kube API did not answer — ${e.message}`;
         }
         if (rows !== undefined) {
-          const pending = rows.filter((row) => row.sync !== "Synced" || row.health !== "Healthy");
+          const pending = rows.filter((row) => row.sync !== "Synced" || row.health !== "Healthy" || row.refreshRequested);
           if (rows.length > 0 && pending.length === 0) {
             ctx.checkpoint({ namespace: argoNamespace, applications: rows.length });
             ctx.log("meta", `all ${rows.length} applications in ${where} are Synced + Healthy — the cluster runs its branch's state`);

@@ -3,7 +3,7 @@
 //  - MasterArgoReader — over the Manager pod's in-cluster ServiceAccount (or the dev kubeconfig
 //    override); watch the generated Application CR (which lives on the master) reach Synced/Healthy
 //    at the frozen SHA: watch-sync, watch-prune, watch-removal. No SSH tunnel — the CRs are local
-//    to the master. Read-only: ArgoCD's own git poll is what picks a registration commit up.
+//    to the master. Refresh requests prompt ArgoCD after desired-state commits; existing watches prove convergence.
 //  - ClusterReader — over a slave's cluster-admin bearer (from the plane's credentialIds, harvested by
 //    deploy-slave; or the pod SA's in-cluster access for the master); smoke-reads a namespace on the target cluster
 //    and reads the deploy-state ConfigMap that attest-target checks fail-closed. It ALSO carries the
@@ -51,6 +51,8 @@ export interface ArgoTargetSource {
 }
 
 export interface ArgoAppStatus {
+  /** ArgoCD has not consumed a queued refresh yet; pre-refresh status is not proof. */
+  refreshRequested?: boolean;
   syncRevision: string | null; // the revision Argo last synced to (single-source apps)
   /** The labels the Application's spec asks its managed namespace to carry
    *  (`.spec.syncPolicy.managedNamespaceMetadata.labels`); absent where it asks for none. */
@@ -156,6 +158,11 @@ export interface ArgoApplicationRow extends ArgoAppStatus {
 }
 
 export interface MasterArgoReader {
+  /** Request ArgoCD's native refresh without changing its desired spec or sync policy.
+   * Missing Applications are still being generated; only accepted names are returned. */
+  refreshApplications(namespace: string, names: readonly string[]): Promise<string[]>;
+  /** Refresh a registration generator before watching its generated Applications. */
+  refreshApplicationSet(namespace: string, name: string): Promise<void>;
   getApplication(namespace: string, name: string): Promise<ArgoAppStatus | null>;
   /** Every Application the namespace HOLDS, in the order the API server lists them. What it returns
    *  is what it FINDS, so a caller counting a set nobody can name — an ApplicationSet's own output —

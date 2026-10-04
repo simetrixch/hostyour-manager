@@ -29,6 +29,7 @@ const pick = <T extends string>(allowed: readonly T[], v: string | undefined): T
 // ---- Argo Application (argoproj.io/v1alpha1) ----------------------------------------------
 
 interface RawArgoApp {
+  metadata?: { annotations?: Record<string, unknown> };
   /** The DESIRED side of the CR — where the GitOps pointer's pin lives. An app may declare either
    *  the single `source` or the `sources[]` array (the tenant base Application uses the array even
    *  with ONE source, which is why the singular status.sync.revision stays empty on it). Each entry
@@ -76,6 +77,7 @@ export function mapArgoStatus(raw: unknown): ArgoAppStatus {
   const targetSources = mapTargetSources(app.spec);
   const namespaceLabels = mapNamespaceLabels(app.spec);
   return {
+    ...(typeof app.metadata?.annotations?.["argocd.argoproj.io/refresh"] === "string" ? { refreshRequested: true } : {}),
     syncRevision: status?.sync?.revision ?? null,
     ...(namespaceLabels !== undefined ? { namespaceLabels } : {}),
     ...(syncSources !== undefined ? { syncSources } : {}),

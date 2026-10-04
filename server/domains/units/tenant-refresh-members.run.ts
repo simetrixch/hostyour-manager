@@ -8,7 +8,7 @@ import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts"
 import { validateTenant } from "./validate-tenant.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { RequiredImageSchema, requiredImagesFrom } from "./ensure-images.ts";
-import { loadTenantCluster } from "./lifecycle.ts";
+import { loadTenantCluster, refreshTenantApplications } from "./lifecycle.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { publishIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
@@ -160,6 +160,7 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
         return;
       }
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
+      await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
       ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit}); the apps' database lists stay as their catalog entries declare them`);
     },
   };
@@ -242,6 +243,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
+        await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
         ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them once its ApplicationSet regenerates the member Applications`);
       },
     },

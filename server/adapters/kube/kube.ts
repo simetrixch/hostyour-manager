@@ -17,10 +17,10 @@ import { REFRESH_REQUESTED_ANNOTATION, RESTART_ANNOTATION } from "./port.ts";
 import { runKubeJob } from "./kube-job.ts";
 import * as claims from "./kube-claims.ts";
 import * as ns from "./kube-namespace.ts";
+import * as argo from "./kube-argo-refresh.ts";
 import { AppError, errUpstream } from "../../kernel/errors.ts";
 import { DEPLOY_STATE_CONFIGMAP } from "../../../shared/deploy-state.ts";
 import {
-  mapArgoStatus,
   mapApplicationSet,
   MISSING_APP_STATUS,
   deploymentRolledOut,
@@ -29,13 +29,12 @@ import {
   mapStatefulSet,
   mapDaemonSet,
   externalSecretsAllReady,
-  mapApplications,
   mapExternalSecrets,
   mapDeployState,
   claimUsersOf,
 } from "./kube-map.ts";
 
-const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
+export const ARGO = { group: "argoproj.io", version: "v1alpha1", plural: "applications" } as const;
 /** THE VERSION THE INSTALLATION'S CRD ACTUALLY SERVES.
  *  The vendored CRD serves `v1` and marks `v1beta1` `served: false` (hostyour-cloud
  *  clusters/inventories/external-secrets/templates/crd-externalsecret.yaml), and every ExternalSecret
@@ -176,16 +175,17 @@ export class KubeMasterArgoReader implements MasterArgoReader {
     this.custom = buildKubeConfig(input).makeApiClient(CustomObjectsApi);
   }
 
+  refreshApplications(namespace: string, names: readonly string[]): Promise<string[]> {
+    return argo.refreshApplications(this.custom, namespace, names);
+  }
+
+  refreshApplicationSet(namespace: string, name: string): Promise<void> {
+    return argo.refreshApplicationSet(this.custom, namespace, name);
+  }
+
   /** NEEDS a live cluster — integration-tested on the live clusters. Mapping is pure (kube-map.ts). */
-  async getApplication(namespace: string, name: string): Promise<ArgoAppStatus | null> {
-    let raw: unknown;
-    try {
-      raw = await this.custom.getNamespacedCustomObject({ ...ARGO, namespace, name });
-    } catch (e) {
-      if (isNotFound(e)) return null;
-      throw upstream(`get Argo Application ${namespace}/${name}`, e);
-    }
-    return mapArgoStatus(raw);
+  getApplication(namespace: string, name: string): Promise<ArgoAppStatus | null> {
+    return argo.getApplication(this.custom, namespace, name);
   }
 
   /** Poll getApplication every pollMs until `until(status)` holds, `failFast(status)` trips (a
@@ -217,14 +217,8 @@ export class KubeMasterArgoReader implements MasterArgoReader {
 
   /** Every Application namespace HOLDS — what the list finds, not what a caller expected. NEEDS a
    *  live cluster; the mapping is pure (kube-map.ts mapApplications). */
-  async listApplications(namespace: string): Promise<ArgoApplicationRow[]> {
-    let raw: unknown;
-    try {
-      raw = await this.custom.listNamespacedCustomObject({ ...ARGO, namespace });
-    } catch (e) {
-      throw upstream(`list Argo Applications in ${namespace}`, e);
-    }
-    return mapApplications((raw as { items?: unknown[] }).items ?? []);
+  listApplications(namespace: string): Promise<ArgoApplicationRow[]> {
+    return argo.listApplications(this.custom, namespace);
   }
 
   /** Poll a SET of Applications (a tenant fan-out): one list per pollMs tick (filtered by

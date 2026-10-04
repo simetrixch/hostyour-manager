@@ -9,6 +9,10 @@ export class FakeMasterArgoReader implements MasterArgoReader {
   /** Every `namespace/name` a single-app watch was asked for — lets a test assert a run watched
    *  the GENERATED Application name (`<consumer>-<stage>`, consumerArgoAppName), not the bare one. */
   readonly watched: string[] = [];
+  readonly refreshed: string[] = [];
+  readonly refreshedSets: string[] = [];
+  readonly operations: string[] = [];
+
   /** The opts the most recent single-app watch was called with — lets a test inspect the budget and
    *  the fail-fast predicate watch-sync supplied for the phase-aware watch. */
   lastWatchOpts?: { timeoutMs?: number; signal?: AbortSignal; failFast?: (s: ArgoAppStatus) => boolean };
@@ -24,6 +28,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
     everyName?: ArgoAppStatus;
     throwOnGet?: Error;
     throwOnSet?: Error;
+    throwOnRefresh?: Error;
     /** What a namespace HOLDS, per namespace — what listApplications answers. An unlisted namespace
      *  reads [], which is the "the ApplicationSet has not generated anything yet" case every caller
      *  of the list retries on rather than passing. */
@@ -32,6 +37,21 @@ export class FakeMasterArgoReader implements MasterArgoReader {
      *  restarting. A gate that polls has to read that as a failing tick, not as a step death. */
     throwOnList?: Error | undefined;
   } = {}) {}
+
+  async refreshApplications(namespace: string, names: readonly string[]): Promise<string[]> {
+    if (this.scripted.throwOnRefresh) throw this.scripted.throwOnRefresh;
+    for (const name of new Set(names)) {
+      this.refreshed.push(`${namespace}/${name}`);
+      this.operations.push(`refresh:${namespace}/${name}`);
+    }
+    return [...new Set(names)];
+  }
+
+  async refreshApplicationSet(namespace: string, name: string): Promise<void> {
+    if (this.scripted.throwOnRefresh) throw this.scripted.throwOnRefresh;
+    this.refreshedSets.push(`${namespace}/${name}`);
+    this.operations.push(`refresh-set:${namespace}/${name}`);
+  }
 
   /** Script what a namespace holds; a later call replaces it, so a test can converge a loop. */
   setApplications(namespace: string, rows: readonly ArgoApplicationRow[]): void {
@@ -77,17 +97,19 @@ export class FakeMasterArgoReader implements MasterArgoReader {
     // evaluates `until` against it (so a non-terminal scripted status models a timeout, and a
     // scripted Failed/Error opPhase models the observation the live loop's fail-fast stops on). The
     // opts are recorded so a test can assert the budget + the fail-fast predicate the step supplied.
+    this.operations.push(`watch:${namespace}/${name}`);
     this.watched.push(`${namespace}/${name}`);
     this.lastWatchOpts = opts;
     return this.scripted.status ?? { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Unknown" };
   }
 
   async watchApplicationSet(
-    _namespace: string,
+    namespace: string,
     names: readonly string[],
     _until: (byName: ArgoAppStatusMap) => boolean,
     _opts: { timeoutMs: number; signal?: AbortSignal; labelSelector?: string },
   ): Promise<ArgoAppStatusMap> {
+    this.operations.push(`watch-set:${namespace}/${names.join(",")}`);
     if (this.scripted.throwOnSet) throw this.scripted.throwOnSet; // model an ArgoCD list failure
     // Single-shot: script the terminal per-name statuses via setStatuses; every EXPECTED name
     // absent from the script reads Missing, so the caller's `until` sees the whole set (a

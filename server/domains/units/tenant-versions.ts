@@ -20,7 +20,7 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
-import { loadTenantCluster } from "./lifecycle.ts";
+import { loadTenantCluster, refreshTenantApplications } from "./lifecycle.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -216,6 +216,7 @@ export function restoreVersionsCleanup(ports: TenantOnboardPorts, p: TenantVersi
     run: async (ctx) => {
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, p.previousApproved, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: p.previousApproved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      await refreshTenantApplications(ports.resolver, p.clusterId, p.members.map(m => memberApplication(p.guid, m.name, p.stage)), ctx);
       ctx.log("meta", `tenant ${p.guid}: versions back to what they were (${commit})`);
     },
   };
@@ -238,6 +239,7 @@ export function writeVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsPa
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, approved, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: approved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.checkpoint({ commit });
+      await refreshTenantApplications(ports.resolver, p.clusterId, p.members.map(m => memberApplication(p.guid, m.name, p.stage)), ctx);
       ctx.log("meta", `tenant ${p.guid}: versions recorded (${commit})`);
     },
   };
