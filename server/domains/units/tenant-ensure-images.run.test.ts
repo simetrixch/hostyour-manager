@@ -17,10 +17,11 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 
 // The ensure-images gate at RUN level — its placement inside the create-tenant/add-app step lists,
@@ -71,7 +72,7 @@ const CLEAN_DOCS = [
 ];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -139,7 +140,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -235,7 +236,7 @@ describe("create-tenant planStream resolves the registry host", () => {
         return [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n  endpoints:\n    registry:\n      host: zot.build1.example\n" }];
       },
     });
-    const result = await makeCreateTenantDef(withAppsTemplate(prt)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(withAppsTemplate(prt)).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.registryHost).toBe("zot.build1.example");
@@ -246,7 +247,7 @@ describe("create-tenant planStream resolves the registry host", () => {
     seedClusters();
     // A chain that states no registry host — registryHostFromChain itself must reject the plan loud.
     const prt = ports({ resolveClusterValueFiles: async () => [{ path: clusterMapPath("m1.example"), content: "global:\n  unitApex: example.com\n" }] });
-    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a", owner: "o", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
+    await expect(makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "a", owner: "o", size: "small", apps: [] }, planCtx())).rejects.toThrow(/registry\.host/);
   });
 });
 
@@ -258,16 +259,16 @@ describe("create-tenant planStream freezes requiredImages", () => {
       doc("Deployment", {
         raw: { kind: "Deployment", spec: { template: { spec: {
           containers: [
-            { name: "engine", image: `${HOST}/example-engine:0.4.0` },
-            { name: "cache", image: "docker.io/library/redis:7" }, // a foreign registrations is never ours to check
+            { name: "engine", image: `${HOST}/example-engine:0.4.0`, resources: TEST_RESOURCES },
+            { name: "cache", image: "docker.io/library/redis:7", resources: TEST_RESOURCES }, // a foreign registrations is never ours to check
           ],
-          initContainers: [{ name: "auth-wait", image: `${HOST}/example-auth:0.5.0` }],
+          initContainers: [{ name: "auth-wait", image: `${HOST}/example-auth:0.5.0`, resources: TEST_RESOURCES }],
         } } } },
       }),
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(withAppsTemplate(ports({ helm })));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.requiredImages).toEqual([

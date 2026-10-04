@@ -62,6 +62,8 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication } from "./tenant-fanout.ts";
+import { resolveUnitQuota } from "#unit/server/unit-size.ts";
+import { TENANT_BRINGS, type UnitSize } from "#unit/shared/unit-size.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
  *  params at plan time; the credential id is present only for a unit already registered. Every
@@ -326,7 +328,7 @@ export function buildUnitStep(
 export interface RefreshImagesPorts {
   repo: RepoReader;
   helm: HelmRenderer;
-  registrations: { branch: string };
+  registrations: Pick<TenantRegistrations, "branch" | "readTenant">;
   deployRepoUrl: string;
   deployCredentialId?: string;
   resolveClusterValueFiles: (domain: string, stage: Stage) => Promise<ClusterValueFile[]>;
@@ -353,6 +355,8 @@ export interface RefreshImagesParams {
   requiredImages: readonly RequiredImage[];
   /** The tenant's own apps bundle, rendered at the tag the apps-repo steps read off its release. */
   appsImage?: string | undefined;
+  /** The size a new stage is created at; absent for a standing tenant, whose registration says it. */
+  size?: UnitSize | undefined;
 }
 
 /** After the builds: the fan-out rendered again against the books branch, where the bumps wrote the
@@ -372,11 +376,17 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
       if (p.appsImage !== undefined && appsImageTag === undefined) {
         throw errValidation(`the tag the apps bundle ${p.appsImage} was built at is not in this pass's memory — onboard-build-only reads it off the release; retry from that step`);
       }
+      // The quota the members will stand under: a new stage's resolved at its size now, as its
+      // registration will be written; a standing tenant's as its registration carries it.
+      const standing = p.size ? undefined : (await ports.registrations.readTenant(p.stage, p.guid))?.entry;
+      const quota = p.size ? resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS) : standing?.quota;
+      if (!quota) throw errValidation(`tenant ${p.guid} has no registration at ${p.stage} to read its quota from`);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
           ref: ports.registrations.branch,
           stage: p.stage,
+          quota, size: p.size ?? standing?.size,
           apps: p.apps,
           ...(p.isStandingTenant ? { isStandingTenant: true } : {}),
           ...(p.members ? { members: p.members } : {}),

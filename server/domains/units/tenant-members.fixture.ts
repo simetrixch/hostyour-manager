@@ -58,6 +58,10 @@ export const APP_OVERLAYS: Record<string, string> = Object.fromEntries(["erp", "
  *  needs one, and a literal repeated per file is a literal free to drift from what the seed says. */
 export const TEST_QUOTA = seedQuota("small");
 
+/** A container shape that declares all four figures and fits any quota: a rendered test workload is
+ *  held against the member quota (T5) like a real one, and a fixture is not what that gate judges. */
+export const TEST_RESOURCES = { requests: { cpu: "1m", memory: "1Mi" }, limits: { cpu: "1m", memory: "1Mi" } };
+
 /** The test tenant's OWN apps bundle: every tenant that selects an app mounts its own
  *  `<bundle>-<subdomain>` bundle and the deploy repository's is mounted by none, so every seeded registration of
  *  a tenant with an app carries it. A create-tenant request never names it: the plan derives it

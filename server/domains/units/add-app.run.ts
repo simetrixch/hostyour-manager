@@ -413,6 +413,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
           apps: [{ name: req.app, ...website, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
+          quota: current.entry.quota, size: current.entry.size,
           seedUsers: current.entry.seedUsers,
           demo: current.entry.demo === true,
           // The tenant's own bundle, as the appset delivers it: the new app's engine renders with it

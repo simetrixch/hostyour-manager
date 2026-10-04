@@ -71,7 +71,7 @@ const DEPLOY_URL = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_URL = "https://github.com/simetrixch/hostyour-cloud.git";
 // A zero-app tenant: the abort under test is about the run, and a tenant with an app would first create
 // and build its apps repository through the consumer onboarding, which this harness does not wire.
-const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [] };
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", size: "small", apps: [] };
 const config = parseConfig({ ...REQUIRED_ENV, PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s", MANAGER_VERSION: "test", DATA_DIR: "/d", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent" } as NodeJS.ProcessEnv);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));

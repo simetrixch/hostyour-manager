@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
-import { DEFAULT_UNIT_SIZE, seedQuota, UNIT_SIZE, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, seedQuota, seededSizes, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { hardGatesPass, type GateReport, type GateResult } from "../../../../shared/gates.ts";
@@ -277,7 +277,7 @@ describe("G24 unit size (hard)", () => {
     gateUnitSize({ unitName: "acme", size: s, brings: { postgresql, mongodb }, quota: seedQuota(s, { postgresql, mongodb }) });
 
   it("passes a unit that brings no database units of its own, at every size", () => {
-    for (const s of UNIT_SIZE) expect(size(s, false, "shared").status, s).toBe("pass");
+    for (const s of seededSizes("base")) expect(size(s, false, "shared").status, s).toBe("pass");
   });
 
   it(`REFUSES a unit that brings its own PostgreSQL at "${DEFAULT_UNIT_SIZE}", and names both halves of the fix`, () => {
@@ -299,9 +299,15 @@ describe("G24 unit size (hard)", () => {
   }
 
   it("passes the SAME compositions once the operator assigns a larger size", () => {
-    for (const s of UNIT_SIZE.filter((x) => x !== DEFAULT_UNIT_SIZE)) {
+    for (const s of seededSizes("base").filter((x) => x !== DEFAULT_UNIT_SIZE)) {
       expect(size(s, true, "replicaset").status, s).toBe("pass");
     }
+  });
+
+  it(`REFUSES a unit that brings its own database at a size BELOW "${DEFAULT_UNIT_SIZE}": the sizes compare by rank`, () => {
+    // No consumer row exists for xsmall today, so the quota handed in is a stand-in: the gate reads the word.
+    const g = gateUnitSize({ unitName: "acme", size: "xsmall", brings: { postgresql: true, mongodb: "shared" }, quota: seedQuota("small", { postgresql: true, mongodb: "shared" }) });
+    expect(g.status).toBe("fail");
   });
 
   it("REPORTS the six figures on a pass — the operator approves a number, not a word", () => {

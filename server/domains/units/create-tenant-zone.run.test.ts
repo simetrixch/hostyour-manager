@@ -28,6 +28,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
+import { TEST_QUOTA } from "./tenant-members.fixture.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -92,7 +93,7 @@ function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()):
   };
 }
 
-const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", apps: [] };
+const REQUEST = { clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", size: "small", apps: [] };
 
 function planCtx(logs: string[]): PlanStreamCtx {
   return { db: db.db, log: (l) => logs.push(l), signal: new AbortController().signal };
@@ -110,7 +111,7 @@ function ctx(p: CreateTenantParams, logs: string[]): StepCtx {
 
 describe("G27 over the tenant's wildcard — validateTenant reads the zone where the plan will write it", () => {
   const req = (over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest => ({
-    repoURL: "https://github.com/acme/acme-deploy.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", ...over,
+    repoURL: "https://github.com/acme/acme-deploy.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", quota: TEST_QUOTA, ...over,
   });
   const deps = (over: Partial<ValidateTenantDeps> = {}): ValidateTenantDeps => ({
     repo: new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML, ...APP_OVERLAYS } }),
@@ -143,7 +144,7 @@ describe("G27 over the tenant's wildcard — validateTenant reads the zone where
     const { clusterFqdn: _drop, ...noZone } = req();
     const outcome = await validateTenant(noZone, deps({ standingHost: async () => ({ kind: "collision", cluster: "s2.example" }) }));
     expect(outcome.verdict).toBe("pass");
-    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "G9"]);
+    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "G9"]);
   });
 });
 
@@ -217,7 +218,7 @@ describe("create-tenant plans the zone before the first write", () => {
     const prt = ports(dns);
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
       report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const logs: string[] = [];
@@ -235,7 +236,7 @@ describe("create-tenant marks the identity provider in DNS where the product dec
   const MARK_NAME = `_digita-idp.auth.${SUB}.example.com`;
   const createParams = (prt: TenantOnboardPorts, over: Record<string, unknown> = {}) => CreateTenantParams.parse({
     guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
     report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     ...over,
   });

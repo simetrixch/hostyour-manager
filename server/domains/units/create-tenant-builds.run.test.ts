@@ -27,10 +27,10 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts";
+import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts"; import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -81,8 +81,8 @@ const withImages = (tags: { jobs: string; engine: string }): RenderedDoc[] => [
   doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }),
   doc("Deployment", {
     raw: { kind: "Deployment", spec: { template: { spec: { containers: [
-      { name: "jobs", image: `${HOST}/example-jobs:${tags.jobs}` },
-      { name: "engine", image: `${HOST}/example-engine:${tags.engine}` },
+      { name: "jobs", image: `${HOST}/example-jobs:${tags.jobs}`, resources: TEST_RESOURCES },
+      { name: "engine", image: `${HOST}/example-engine:${tags.engine}`, resources: TEST_RESOURCES },
     ] } } } },
   }),
 ];
@@ -90,7 +90,7 @@ const TRUNK_DOCS = withImages({ jobs: "0.2.0", engine: "0.4.0" });
 const BUILT_DOCS = withImages({ jobs: "0.1.0-stable-20260101000000-abc1234", engine: "0.4.0" });
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -138,7 +138,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS), identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -199,7 +199,7 @@ describe("create-tenant planStream — the build units and their owner's identit
   it("lists a build unit per missing image's repository, asks nothing at approve, and places its steps before the tenant's writes", async () => {
     seedClusters();
     const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([{ unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false }]);
@@ -215,7 +215,7 @@ describe("create-tenant planStream — the build units and their owner's identit
     seedClusters();
     dropCredentialRows(db.db, { kind: "owner", id: "acme" });
     const prt = withAppsTemplate(ports({ registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }) }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/build unit example-jobs .* has no identity: .*owner acme records no repository PAT .* consumer wizard/);
@@ -226,7 +226,7 @@ describe("create-tenant planStream — the build units and their owner's identit
       registryProbe: new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] }),
       buildUnitRegistration: async (unit) => (unit === "example-platform" ? { form: "build-only" } : null),
     }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits[0]).toMatchObject({ unit: "example-platform", registered: true });
@@ -235,10 +235,10 @@ describe("create-tenant planStream — the build units and their owner's identit
   it("refuses a render that pulls the apps TEMPLATE (tenant.appsBundle), by name, before the registry is asked — a stale chart is named, never built", async () => {
     seedClusters();
     // The deploy repository names example-apps as the template; the fixture's engine chart still mounts it.
-    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-apps:0.9.0` }] } } } } })] } });
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-apps:0.9.0`, resources: TEST_RESOURCES }] } } } } })] } });
     const probe = new FakeRegistryProbe({ missing: [] }); // the registry still carries the template's image
     const prt = withAppsTemplate(ports({ helm, registryProbe: probe }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/example-apps:0\.9\.0.*"example-apps" is the deploy repository's apps template \(tenant\.appsBundle\).*never built and never mounted/);
@@ -246,7 +246,7 @@ describe("create-tenant planStream — the build units and their owner's identit
   });
   it("no image missing ⇒ no build unit and no secret; the refresh step stays, because the tenant's own bundle is built by the run", async () => {
     seedClusters();
-    const result = await makeCreateTenantDef(withAppsTemplate(ports())).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(withAppsTemplate(ports())).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     expect(result.params.buildUnits).toEqual([]);
@@ -255,9 +255,9 @@ describe("create-tenant planStream — the build units and their owner's identit
   });
   it("refuses a missing image no buildRepos entry names, by name", async () => {
     seedClusters();
-    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-nobody:1` }] } } } } })] } });
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [...TRUNK_DOCS, doc("Deployment", { name: "x", raw: { kind: "Deployment", spec: { template: { spec: { containers: [{ name: "n", image: `${HOST}/example-nobody:1`, resources: TEST_RESOURCES }] } } } } })] } });
     const prt = withAppsTemplate(ports({ helm, registryProbe: new FakeRegistryProbe({ missing: ["example-nobody:1"] }) }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/tenant\.buildRepos names no repository.*example-nobody:1/);
@@ -268,7 +268,7 @@ describe("create-tenant planStream — the build units and their owner's identit
       registryProbe: new FakeRegistryProbe({ missing: ["example-jobs:0.2.0"] }),
       buildUnitRegistration: async (unit) => (unit === "example-jobs" ? { form: "deployable" } : null),
     }));
-    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
     expect(result.summary).toMatch(/registered as deployable \(example-jobs\)/);
@@ -413,7 +413,7 @@ describe("refreshImagesStep — the image set re-read off the pins the builds wr
     const prt = ports({ helm: new FakeHelmRenderer({ fallback: { ok: true, docs: BUILT_DOCS } }) });
     const p = params({ requiredImages: [{ repo: "example-jobs", tag: "0.2.0" }, { repo: "example-engine", tag: "0.4.0" }] });
     const logs: string[] = [];
-    await refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: APPS, seedUsers: false, registryHost: HOST, requiredImages: p.requiredImages }, runtime).run(ctx(p, logs));
+    await refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: APPS, seedUsers: false, registryHost: HOST, requiredImages: p.requiredImages, size: "small" }, runtime).run(ctx(p, logs));
     expect(runtime.requiredImages).toEqual([{ repo: "example-engine", tag: "0.4.0" }, { repo: "example-jobs", tag: "0.1.0-stable-20260101000000-abc1234" }]);
     expect(runtime.syncUnits).toEqual(["example-platform"]);
     expect(logs.some((l) => l.includes("example-jobs: 0.2.0 -> 0.1.0-stable-20260101000000-abc1234"))).toBe(true);

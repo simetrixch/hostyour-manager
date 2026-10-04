@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
+import { TENANT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { addTenantStage, listTenants, listTenantTargets, type TenantView, type TenantTargetView } from "../api.ts";
 
 export function TenantStageActions({ tenant }: { tenant: TenantView }) {
@@ -45,7 +45,7 @@ export function TenantStageActions({ tenant }: { tenant: TenantView }) {
     }}>
       <label className="field"><span className="field__label">Add stage</span><select value={stage} onChange={(e) => setStage(e.target.value as Stage)}>{missing.map((s) => <option key={s}>{s}</option>)}</select></label>
       <label className="field"><span className="field__label">Machine</span><select value={clusterId} required onChange={(e) => setClusterId(e.target.value)}><option value="" disabled>Choose a machine</option>{targets.map((target) => <option key={target.id} value={target.id}>{target.domain}</option>)}</select></label>
-      <label className="field"><span className="field__label">Size</span><select value={size} required onChange={(e) => setSize(e.target.value as UnitSize)}><option value="" disabled>Choose a size</option>{UNIT_SIZE.map((s) => <option key={s}>{s}</option>)}</select></label>
+      <label className="field"><span className="field__label">Size</span><select value={size} required onChange={(e) => setSize(e.target.value as UnitSize)}><option value="" disabled>Choose a size</option>{TENANT_SIZE.map((s) => <option key={s} value={s}>{UNIT_SIZE_LETTER[s]}</option>)}</select></label>
       <p className="field__hint">Uses the same tenant identity and members, with fresh data, users, sessions and keys, and the size chosen here for each of its member namespaces. Other stages stay as they are. Versions and follow releases are controlled separately on each stage page.</p>
       <button className="btn" disabled={busy || !clusterId || !size}>Validate &amp; plan Add stage</button>
     </form>}

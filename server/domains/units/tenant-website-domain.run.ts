@@ -145,6 +145,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
           appDatabases,
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
+          quota: current.entry.quota, size: current.entry.size,
           seedUsers: current.entry.seedUsers,
           demo: current.entry.demo === true,
           appsImage: current.entry.appsImage,

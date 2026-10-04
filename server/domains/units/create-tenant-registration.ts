@@ -15,6 +15,7 @@ import type { TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
+import { TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { probeDeploy } from "./tenant-probes.ts";
 import { stagePinsOf } from "./tenant-versions.ts";
 import { bundleReleaseRefusal, stepLog, throwEngineLineRefusal } from "./engine-line.ts";
@@ -63,11 +64,9 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
         apps: p.apps,
         // Resolved HERE, at write time, against the size table as it stands now — see the params
         // field. Per MEMBER: every member namespace of this tenant gets this ceiling.
-        quota: resolveUnitQuota(ctx.db, p.size, {
-          // A tenant brings no database of its own: its members claim the cluster's shared MongoDB
-          // replica set, and no tenant runs a PostgreSQL. So its quota is the base row alone.
-          postgresql: false, mongodb: "shared",
-        }),
+        // The word beside the figures, so a screen can say which size the stage stands on.
+        size: p.size,
+        quota: resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS),
         seedUsers: p.seedUsers,
         ...(p.demo ? { demo: true as const } : {}),
         approvedTags,

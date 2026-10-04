@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { UNIT_SIZE_LETTER } from "#unit/shared/unit-size.ts";
 import { unitSizeOptions, type UnitSizeOptions } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 
@@ -7,11 +8,11 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
  *
  *  It SHOWS THE FIGURES, it does not just name the sizes. What `medium` means is a property of this
  *  installation's size table and the operator may have changed it minutes ago, so a picker offering
- *  three bare words would be asking someone to approve a number they cannot see.
+ *  bare letters would be asking someone to approve a number they cannot see.
  *
- *  And it shows THIS unit's figures, not the table's. A unit's ceiling is the base row plus what it
- *  brings — its own PostgreSQL, its own MongoDB times its member count — so the server composes the
- *  three sizes for the unit named in the path and hands back the parts beside each total. That is the
+ *  And it shows THIS unit's figures, not the table's. A consumer's ceiling is the base row plus what
+ *  it brings — its own PostgreSQL, its own MongoDB times its member count — and a tenant member's is
+ *  the member row, so the server composes the sizes offered to the unit named in the path and hands back the parts beside each total. That is the
  *  same arithmetic the run will perform when it writes the registration.
  *
  *  Confirming only PLANS a run. The figures are read AGAIN when that run writes the registration, so
@@ -78,7 +79,7 @@ export function SetSizeDialog(props: {
         <label className="field field--row" key={s.name}>
           <input type="radio" name="unit-size" value={s.name} checked={chosen === s.name} onChange={() => setChosen(s.name)} />
           <span>
-            <strong>{s.name}</strong> — {s.quota.requestsCpu} CPU / {s.quota.requestsMemory} requested,{" "}
+            <strong>{UNIT_SIZE_LETTER[s.name]}</strong> — {s.quota.requestsCpu} CPU / {s.quota.requestsMemory} requested,{" "}
             {s.quota.limitsCpu} CPU / {s.quota.limitsMemory} at the limit, {s.quota.pods} pods,{" "}
             {s.quota.persistentVolumeClaims} PVCs
             {s.parts.length > 1 && (

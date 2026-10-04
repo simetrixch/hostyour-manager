@@ -33,6 +33,7 @@ import type { AppEnv } from "../../http/app-env.ts";
 import { testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 // The tenant ORPHAN SURFACE over HTTP: the two discovery reads that make an
 // unrecorded tenant nameable at all, plus the purge trigger they hand their target to.
@@ -54,7 +55,7 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
@@ -214,7 +215,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
 // The tenant lands on cls_2 here; placement is free, so this is a fixture choice, not a rule.
 // A zero-app tenant: these routes read the run's row, and a tenant with an app needs the GitHub App and the
 // deploy repository's template at the plan, which this harness does not wire.
-const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [] };
+const CREATE_REQ = { clusterId: "cls_2", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [] };
 
 describe("GET /api/tenants/orphans (the pointer scan)", () => {
   it("lists a live pointer with no inventory row, resolved to its cluster row", async () => {

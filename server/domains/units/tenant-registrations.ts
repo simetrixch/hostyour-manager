@@ -24,7 +24,7 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 //
 // Boundary: domain layer — imports shared/ (type + schema) and the git PlatformRepo port; the
 // concrete second repo bound to the deploy repository (its workRoot + repo-qualified lock) is wired by the adapter.
-import type { UnitQuota } from "#unit/shared/unit-size.ts";
+import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
 import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
@@ -319,16 +319,16 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, quiesced }, `${runKind}(${guid}) ${trailer(runId)}`);
   }
 
-  /** Write the tenant's `quota` — the six figures that bound EVERY member namespace of it, resolved
-   *  by the caller from the size table as it stands NOW. Named setQuota and not setSize because the
-   *  registration carries figures, not a size name: what a cluster reads is what the unit gets.
+  /** Write the tenant's size word and its `quota` — the six figures that bound EVERY member namespace
+   *  of it, resolved by the caller from the size table as it stands NOW — in one commit. The figures
+   *  are what a cluster reads; the word says which size they were resolved from.
    *
-   *  One field of one file, like the flips above; writing the same figures commits nothing, so a
-   *  re-apply whose numbers did not move leaves no history. tenant-set-size. */
-  async setQuota(stage: Stage, guid: string, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
+   *  Two fields of one file, like the flips above; writing the same word and figures commits nothing,
+   *  so a re-apply whose numbers did not move leaves no history. tenant-set-size. */
+  async setSize(stage: Stage, guid: string, size: UnitSize, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    return this.write(stage, guid, { ...current.entry, quota }, `size(${guid}) ${trailer(runId)}`);
+    return this.write(stage, guid, { ...current.entry, size, quota }, `size(${guid}) ${trailer(runId)}`);
   }
 
   /** Write how the tenant's members are addressed below its zone. One field of one file, like the

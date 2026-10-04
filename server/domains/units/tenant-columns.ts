@@ -24,6 +24,7 @@ export const TENANT_COLUMNS = {
   ownDomainRedirects: tenants.ownDomainRedirects,
   approvedTags: tenants.approvedTags,
   senderDomain: tenants.senderDomain,
+  size: tenants.size,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   followReleases: tenants.followReleases,

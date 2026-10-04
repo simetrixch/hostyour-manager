@@ -24,6 +24,7 @@ import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 
 // The final `activate` step of create-tenant (impl: create-tenant-activate.ts) — the tenant analogue
@@ -70,7 +71,7 @@ const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" }
 const GREEN: ArgoAppStatus = { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" };
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -118,7 +119,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
     members: testMembers(APPS),
     identityProvider: "auth",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
     ...over,
   });
@@ -268,7 +269,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     seedSlave();
     const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
     const result = await makeCreateTenantDef(withAppsTemplate(ports())).planStream!(
-      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS, adminEmail: "admin@acme.test" },
+      { clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS, adminEmail: "admin@acme.test" },
       planCtx,
     );
     expect(result.outcome).toBe("planned");

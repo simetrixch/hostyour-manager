@@ -29,7 +29,7 @@ import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "#unit/server/build-rbac.ts";
 import { capGateText } from "#unit/server/unit-host-gate.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
-import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, UNIT_SIZE, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
 
 /** One build name another unit has already attested in its `registrations/<unit>/build.yaml`. */
 export interface ForeignBuild {
@@ -396,7 +396,8 @@ export function gateUnitSize(input: {
     `requests ${quota.requestsCpu}/${quota.requestsMemory}, limits ${quota.limitsCpu}/${quota.limitsMemory}, ` +
     `${quota.pods} pod(s), ${quota.persistentVolumeClaims} PVC(s)`;
   const composition = owned.length > 0 ? owned.join(" and ") : "no database units of its own — it uses the cluster's shared MongoDB and no PostgreSQL";
-  const ok = owned.length === 0 || size !== DEFAULT_UNIT_SIZE;
+  // By rank, not by word: a size below the default is no more room than the default itself.
+  const ok = owned.length === 0 || UNIT_SIZE.indexOf(size) > UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE);
   return {
     id: "G24",
     title: "unit size",

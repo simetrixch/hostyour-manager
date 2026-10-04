@@ -72,7 +72,7 @@ function ports(engine: string, books = new FakePlatformRepo()): TenantOnboardPor
 }
 
 const plan = (prt: TenantOnboardPorts, logs: string[] = []) =>
-  makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: [{ name: "erp" }] }, { db: db.db, log: (l) => logs.push(l), signal: new AbortController().signal } satisfies PlanStreamCtx);
+  makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [{ name: "erp" }] }, { db: db.db, log: (l) => logs.push(l), signal: new AbortController().signal } satisfies PlanStreamCtx);
 
 describe("create-tenant holds the catalog's engine line against the engine stage pin", () => {
   it("plans a tenant whose catalog bundle is written for the line its engines start on", async () => {

@@ -22,6 +22,8 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { MemberRouting, Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
+import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
+import { gateT5Fit } from "./gates/tenant-fit.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
@@ -77,6 +79,11 @@ export interface ValidateTenantRequest {
   seedUsers?: boolean;
   /** A demo tenant: delivered as tenant.demo, as the ApplicationSet delivers it, only where true. */
   demo?: boolean;
+  /** The size word the registration will carry: delivered as tenant.size, "" where none is recorded,
+   *  as the ApplicationSet delivers it. */
+  size?: UnitSize | undefined;
+  /** The quota each member namespace will stand under — T5 holds every member's pods against it. */
+  quota: UnitQuota;
   /** The tenant's own apps bundle as the registration will carry it: the flat build name the engines
    *  mount and the immutable image tag of its last release. Delivered under `tenant:` like the
    *  deploy does, so the render yields the bundle's image ref and ensure-images probes it. Absent
@@ -281,6 +288,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           quiesced: false,
           seedUsers: req.seedUsers ?? false,
           ...(req.demo ? { demo: true } : {}),
+          size: req.size ?? "",
           apps,
           // The tenant's own bundle, or the empty pair — always both keys, as the registration
           // always carries both and the appset reads them bare.
@@ -324,7 +332,8 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
       const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: req.members ? req.members.map((m) => m.name).filter((name) => !req.apps.some((a) => a.name === name)) : t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
-      for (const g of [t2, t3, t4]) {
+      const t5 = gateT5Fit(docsByMember, req.quota);
+      for (const g of [t2, t3, t4, t5]) {
         gates.push(g);
         streamGate(deps, g);
       }

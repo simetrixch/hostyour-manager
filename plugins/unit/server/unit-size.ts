@@ -1,26 +1,26 @@
 import { and, eq } from "drizzle-orm";
 import type { Db } from "#core/server/db/client.ts";
 import { unitSizes } from "./schema.ts";
-import { errNotFound } from "#core/server/kernel/errors.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
 import {
-  UNIT_SIZE, SIZE_COMPONENT, UNIT_SIZE_SEED, composeQuota,
-  type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition,
+  UNIT_SIZE, SIZE_COMPONENT, composeQuota, quotaParts, missingRow, seededSizes, UNIT_SIZE_SEED,
+  type SizeTable, type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition,
 } from "../shared/unit-size.ts";
 
 // The size table's two operations: fill it on a fresh database, and work out the ONE quota a unit
 // gets. What a size means, and where the seed figures come from, is stated once in plugins/unit/shared/unit-size.ts.
 
-/** The whole table as the composer wants it — component -> size -> figures. Read once per resolve, so
- *  every part of one quota comes from the same moment; reading them one at a time would let an edit
- *  land between two parts and produce a sum that never stood in the table. */
-function readTable(db: Db): Record<SizeComponent, Record<UnitSize, UnitQuota>> {
+/** The whole table as the composer wants it — component -> size -> figures, holding the rows that
+ *  exist: not every component has every size. Read once per resolve, so every part of one quota comes
+ *  from the same moment; reading them one at a time would let an edit land between two parts and
+ *  produce a sum that never stood in the table. */
+function readTable(db: Db): SizeTable {
   const rows = db.select().from(unitSizes).all();
-  const table = {} as Record<SizeComponent, Record<UnitSize, UnitQuota>>;
+  const table = Object.fromEntries(SIZE_COMPONENT.map((c) => [c, {}])) as SizeTable;
   for (const c of SIZE_COMPONENT) {
-    table[c] = {} as Record<UnitSize, UnitQuota>;
     for (const s of UNIT_SIZE) {
       const r = rows.find((x) => x.component === c && x.name === s);
-      if (!r) throw errNotFound(`unit size "${s}" of component "${c}" — the size table holds no such row`);
+      if (!r) continue;
       table[c][s] = {
         requestsCpu: r.requestsCpu, requestsMemory: r.requestsMemory,
         limitsCpu: r.limitsCpu, limitsMemory: r.limitsMemory,
@@ -44,10 +44,11 @@ function readTable(db: Db): Record<SizeComponent, Record<UnitSize, UnitQuota>> {
  */
 export function seedUnitSizes(db: Db): string[] {
   const created: string[] = [];
+  const seed: SizeTable = UNIT_SIZE_SEED;
   for (const component of SIZE_COMPONENT) {
-    for (const name of UNIT_SIZE) {
+    for (const name of seededSizes(component)) {
       if (db.select().from(unitSizes).where(and(eq(unitSizes.component, component), eq(unitSizes.name, name))).get()) continue;
-      db.insert(unitSizes).values({ component, name, ...UNIT_SIZE_SEED[component][name] }).run();
+      db.insert(unitSizes).values({ component, name, ...seed[component][name]! }).run();
       created.push(`${component}/${name}`);
     }
   }
@@ -64,18 +65,27 @@ export function seedUnitSizes(db: Db): string[] {
  * members — because the quota is base + postgresql + mongodb x members. It is NOT a second size: the
  * databases run at the unit's own size.
  *
- * Throws when a row is missing. There is no fall back to `small`: a unit whose size cannot be resolved
+ * Refuses, naming the row, when one is missing. There is no fall back to `small`: a unit whose size cannot be resolved
  * has no ceiling anyone chose, and writing a registration with a guessed one is how a customer
  * silently gets a different product than they were sold.
  */
 export function resolveUnitQuota(db: Db, size: UnitSize, brings: UnitComposition): UnitQuota {
-  return composeQuota(readTable(db), size, brings).quota;
+  return explainUnitQuota(db, size, brings).quota;
 }
 
 /** The same resolve, with the PARTS it was summed from — what a screen shows so the one number can be
  *  read back to where it came from. */
 export function explainUnitQuota(db: Db, size: UnitSize, brings: UnitComposition): ReturnType<typeof composeQuota> {
-  return composeQuota(readTable(db), size, brings);
+  const table = readTable(db);
+  for (const p of quotaParts(brings)) if (!table[p.component][size]) throw errValidation(missingRow(p.component, size));
+  return composeQuota(table, size, brings);
+}
+
+/** The sizes a unit that brings this can be put on: those every one of its parts has a row for,
+ *  smallest first. What a size picker offers, so it never offers a size the resolve would refuse. */
+export function offeredSizes(db: Db, brings: UnitComposition): UnitSize[] {
+  const table = readTable(db);
+  return UNIT_SIZE.filter((s) => quotaParts(brings).every((p) => table[p.component][s] !== undefined));
 }
 
 /** The whole table, in the declared component and size order rather than the table's row order — the
@@ -83,5 +93,8 @@ export function explainUnitQuota(db: Db, size: UnitSize, brings: UnitComposition
  *  what the edit screen fills itself from. */
 export function listUnitSizes(db: Db): Array<{ component: SizeComponent; name: UnitSize } & UnitQuota> {
   const table = readTable(db);
-  return SIZE_COMPONENT.flatMap((component) => UNIT_SIZE.map((name) => ({ component, name, ...table[component][name] })));
+  return SIZE_COMPONENT.flatMap((component) => UNIT_SIZE.flatMap((name) => {
+    const row = table[component][name];
+    return row ? [{ component, name, ...row }] : [];
+  }));
 }

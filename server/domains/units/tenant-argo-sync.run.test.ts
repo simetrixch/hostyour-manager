@@ -20,9 +20,10 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
-import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
 
 // The tenant's argo-sync grant at RUN level: where create-tenant writes it, what add-app extends it
@@ -75,7 +76,7 @@ const doc = (kind: string, over: Partial<RenderedDoc> = {}): RenderedDoc => ({
 const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" } }), doc("Deployment")];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -131,7 +132,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
     members: testMembers(APPS),
     identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
-    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme",
+    apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
     syncUnits: ["example-platform"],
     ...over,
@@ -219,15 +220,15 @@ describe("planStream derives the subjects from the tenant's own images", () => {
       doc("Deployment", {
         raw: { kind: "Deployment", spec: { template: { spec: {
           containers: [
-            { name: "engine", image: `${HOST}/example-engine:0.4.0` },
-            { name: "cache", image: "docker.io/library/redis:7" }, // upstream, built by no unit of ours
+            { name: "engine", image: `${HOST}/example-engine:0.4.0`, resources: TEST_RESOURCES },
+            { name: "cache", image: "docker.io/library/redis:7", resources: TEST_RESOURCES }, // upstream, built by no unit of ours
           ],
         } } } },
       }),
     ];
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: docsWithImages } });
     const def = makeCreateTenantDef(withAppsTemplate(ports({ helm })));
-    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", apps: APPS }, planCtx());
+    const result = await def.planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
     // example-platform builds example-engine, which this tenant pulls; swissbookai builds nothing it

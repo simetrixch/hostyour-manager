@@ -64,14 +64,17 @@ async function make(registrations?: Registrations): Promise<{ app: Hono<AppEnv>;
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
 
 describe("the size table", () => {
-  it("serves NINE rows — every component at every size", async () => {
+  // Fifteen since tenants got their own component: base, postgresql and mongodb at the three consumer
+  // sizes, and member at all six.
+  it("serves FIFTEEN rows — the consumer components at three sizes, the member component at six", async () => {
     const { app, cookie } = await make();
     const body = (await (await app.request("/api/unit/sizes", authed(cookie))).json()) as { sizes: Array<{ component: string; name: string }> };
-    expect(body.sizes).toHaveLength(9);
+    expect(body.sizes).toHaveLength(15);
     expect(body.sizes.map((s) => `${s.component}/${s.name}`)).toEqual([
       "base/small", "base/medium", "base/large",
       "postgresql/small", "postgresql/medium", "postgresql/large",
       "mongodb/small", "mongodb/medium", "mongodb/large",
+      "member/xsmall", "member/small", "member/medium", "member/large", "member/xlarge", "member/xxlarge",
     ]);
   });
 

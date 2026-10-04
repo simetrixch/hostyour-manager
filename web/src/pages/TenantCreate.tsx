@@ -2,7 +2,7 @@ import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate } from "react-router";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
-import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
+import { TENANT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
 import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
@@ -20,7 +20,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
  *  operator approves. */
 export function TenantCreate() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ subdomain: "", owner: "", clusterId: "", adminEmail: "", size: DEFAULT_UNIT_SIZE as string });
+  const [form, setForm] = useState({ subdomain: "", owner: "", clusterId: "", adminEmail: "", size: "" });
   const [selectedStages, setSelectedStages] = useState<Stage[]>(["prod"]);
   const [stageMachines, setStageMachines] = useState<Partial<Record<Stage, string>>>({});
   const [demo, setDemo] = useState(false);
@@ -177,9 +177,12 @@ export function TenantCreate() {
           <label className="field">
             <span className="field__label">Size</span>
             <select value={form.size} onChange={set("size")} required>
-              {UNIT_SIZE.map((s) => (
+              <option value="" disabled>
+                Choose a size
+              </option>
+              {TENANT_SIZE.map((s) => (
                 <option key={s} value={s}>
-                  {s}
+                  {UNIT_SIZE_LETTER[s]}
                 </option>
               ))}
             </select>
@@ -209,7 +212,7 @@ export function TenantCreate() {
         </div>
 
         <div className="form-foot">
-          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || !form.owner}>
+          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || !form.owner || !form.size}>
             {busy ? "Validating…" : "Validate & plan"}
           </button>
         </div>

@@ -340,7 +340,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       ctx.log(`deploy trunk carried into the books branch ${ports.registrations.branch}`);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      const { apps, appsImage, appsImageTag, seedUsers, subdomain } = current.entry;
+      const { apps, appsImage, appsImageTag, seedUsers, subdomain, quota, size } = current.entry;
       const demo = current.entry.demo === true;
       const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
       const outcome = await validateTenant(
@@ -354,6 +354,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           appDatabases,
           probeGuid: tc.guid,
           subdomain,
+          quota, size,
           seedUsers,
           demo,
           ...(appsImage ? { appsImage, appsImageTag } : {}),

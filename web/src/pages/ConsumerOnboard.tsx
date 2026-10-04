@@ -5,7 +5,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
 import { addStageForm, admittedStage } from "../consumerAddStage.ts";
-import { DEFAULT_UNIT_SIZE, UNIT_SIZE, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, seededSizes, type UnitSize } from "#unit/shared/unit-size.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -315,7 +315,8 @@ export function ConsumerOnboard() {
                 <option value="" disabled>
                   Choose a size
                 </option>
-                {UNIT_SIZE.map((s) => (
+                {/* A consumer is offered the sizes its base row is seeded at: no consumer row exists for the others. */}
+                {seededSizes("base").map((s) => (
                   <option key={s} value={s}>
                     {s}
                   </option>
