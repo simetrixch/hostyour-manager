@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { tenants } from "../../db/schema/inventory.ts";
+import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { Cleanup, RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { errInternal, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
@@ -15,6 +15,7 @@ import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.
 export const TenantSetDemoRequest = z.object({ tenantId: z.string().startsWith("tnt_"), demo: z.boolean() });
 export const TenantSetDemoParams = TenantSetDemoRequest.extend({
   previous: z.boolean(), guid, clusterId: z.string().startsWith("cls_"), members: z.array(memberName).min(1),
+  previousRunId: z.string().nullable(),
 });
 export type TenantSetDemoParams = z.infer<typeof TenantSetDemoParams>;
 
@@ -23,7 +24,8 @@ async function currentDemo(ports: TenantOnboardPorts, p: TenantSetDemoParams, ct
   assertTenantProvisioned(loadTenantStatus(ctx.db, p.tenantId), "setting demo mode");
   const current = await ports.registrations.readTenant(tc.stage, tc.guid);
   if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-  if (tc.guid !== p.guid || tc.clusterId !== p.clusterId || current.entry.members.map((m) => m.name).join(",") !== p.members.join(",")) {
+  const cluster = ctx.db.select({ name: clusters.name }).from(clusters).where(eq(clusters.id, tc.clusterId)).get();
+  if (tc.guid !== p.guid || tc.clusterId !== p.clusterId || current.entry.cluster !== cluster?.name || current.entry.members.map((m) => m.name).join(",") !== p.members.join(",")) {
     throw errValidation("the tenant target or members changed since this demo switch was planned — plan it again");
   }
   if (current.entry.suspended || (TENANT_SETTLED_STATUS as readonly string[]).includes(loadTenantStatus(ctx.db, p.tenantId).status)) {
@@ -57,12 +59,13 @@ function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
       run: async (ctx) => {
         const { tc, entry } = await currentDemo(ports, p, ctx);
         const owner = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, p.tenantId)).get();
-        if ((entry.demo ?? false) !== p.previous && !((entry.demo ?? false) === p.demo && owner?.lastRunId === ctx.runId)) {
+        if (owner?.lastRunId !== ctx.runId && (owner?.lastRunId !== p.previousRunId || (entry.demo ?? false) !== p.previous)) {
           throw errValidation("demo mode changed since this switch was planned — plan it again");
         }
         ctx.registerCleanup(restoreDemo(ports, p));
-        const { commit } = await ports.registrations.setDemo(tc.stage, tc.guid, p.demo, ctx.runId);
+        // Persist ownership before git commits, so a crash after that commit can retry or undo it.
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        const { commit } = await ports.registrations.setDemo(tc.stage, tc.guid, p.demo, ctx.runId);
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${tc.guid}: demo ${p.previous} → ${p.demo}; members ${p.members.join(", ")} (${commit})`);
         await refreshTenantApplications(ports.resolver, tc.clusterId, p.members.map((m) => memberApplication(tc.guid, m, tc.stage)), ctx);
@@ -101,7 +104,8 @@ export function makeTenantSetDemoDef(ports: TenantOnboardPorts): RunDefinition<T
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-      const params = { ...request, previous: current.entry.demo ?? false, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
+      const owner = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, request.tenantId)).get();
+      const params = { ...request, previous: current.entry.demo ?? false, previousRunId: owner?.lastRunId ?? null, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentDemo(ports, params, ctx);
       const steps = demoSteps(ports, params);
       return { outcome: "planned", params, plan: {

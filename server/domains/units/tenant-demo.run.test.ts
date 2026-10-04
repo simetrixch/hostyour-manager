@@ -91,6 +91,44 @@ describe("standing tenant demo switch", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
   });
 
+  it("refuses a queued plan after another run changes demo on and back off", async () => {
+    seedClusters();
+    const prt = ports();
+    const { def, p } = await planned(prt, true);
+    await prt.registrations.setDemo("prod", GUID, true, "run_on");
+    await prt.registrations.setDemo("prod", GUID, false, "run_off");
+    db.db.update(tenants).set({ lastRunId: "run_off" }).where(eq(tenants.id, "tnt_1")).run();
+    await expect(def.steps(p).find((s) => s.name === "write-demo")!.run(ctx(params(), "write-demo", []))).rejects.toThrow(/demo mode changed/);
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBeUndefined();
+  });
+
+  it("retries and undoes a switch after the git commit succeeds but its caller fails", async () => {
+    seedClusters();
+    const prt = ports();
+    const { def, p } = await planned(prt, true);
+    const setDemo = prt.registrations.setDemo.bind(prt.registrations);
+    let failOnce = true;
+    prt.registrations.setDemo = async (...args) => {
+      const result = await setDemo(...args);
+      if (failOnce) { failOnce = false; throw new Error("process stopped after git commit"); }
+      return result;
+    };
+    const write = def.steps(p).find((s) => s.name === "write-demo")!;
+    await expect(write.run(ctx(params(), "write-demo", []))).rejects.toThrow(/process stopped/);
+    await write.run(ctx(params(), "write-demo", []));
+    await def.cleanups!(p)[0]!.run(ctx(params(), "restore-demo", []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBeUndefined();
+  });
+
+  it("refuses a moved registration while inventory still names the old cluster", async () => {
+    seedClusters();
+    const prt = ports();
+    const { def, p } = await planned(prt, true);
+    await prt.registrations.setTenantCluster("prod", GUID, "s2", "run_move");
+    await expect(def.steps(p).find((s) => s.name === "write-demo")!.run(ctx(params(), "write-demo", []))).rejects.toThrow(/target or members changed/);
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBeUndefined();
+  });
+
   it.each(["provisioning", "offboarded", "purged"] as const)("refuses a %s tenant", async (status) => {
     seedClusters();
     db.db.update(tenants).set({ status }).where(eq(tenants.id, "tnt_1")).run();
