@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
+import { createElement, isValidElement, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { UnitSizeView } from "#core/web/api.ts";
-import { SIZE_COMPONENT, UNIT_SIZE_SEED } from "../../shared/unit-size.ts";
+import { SIZE_COMPONENT, UNIT_SIZE_LETTER, UNIT_SIZE_SEED } from "../../shared/unit-size.ts";
 import { SizeTables, type SizeDraft } from "./UnitSizes.tsx";
 
 // The seed's rows, as the page fetches them: 3 + 3 + 3 + 6.
@@ -15,6 +15,17 @@ const draft = (of: readonly UnitSizeView[]): Record<string, SizeDraft> => Object
   requestsCpu: s.requestsCpu, requestsMemory: s.requestsMemory, limitsCpu: s.limitsCpu, limitsMemory: s.limitsMemory, pods: String(s.pods), persistentVolumeClaims: String(s.persistentVolumeClaims),
 }]));
 const render = (of: readonly UnitSizeView[]) => renderToStaticMarkup(createElement(SizeTables, { rows: of, draft: draft(of), saving: null, saved: null, onEdit: () => undefined, onSave: () => undefined }));
+const PART: Record<string, string> = { member: "tenant app", base: "Application", postgresql: "+ own PostgreSQL", mongodb: "+ own MongoDB, per member" };
+type Handlers = { label?: string; onChange?: (v: string) => void; onClick?: () => void };
+
+/** Every element of the tree that takes an edit or a click, with its props. */
+function walk(node: ReactNode, out: Handlers[]): void {
+  if (Array.isArray(node)) { node.forEach((n: ReactNode) => walk(n, out)); return; }
+  if (!isValidElement(node)) return;
+  const p = node.props as Handlers & { children?: ReactNode };
+  if (typeof p.onChange === "function" || typeof p.onClick === "function") out.push(p);
+  walk(p.children, out);
+}
 
 describe("SizeTables", () => {
   it("shows a tenant table and a consumer table, each figure once, in the operator's words", () => {
@@ -30,5 +41,20 @@ describe("SizeTables", () => {
     expect(html.match(/>Save</g)).toHaveLength(6 + 9);
     expect(html).toContain("XL (not offered)");
     expect(html).not.toMatch(/>(base|member|postgresql|mongodb)</);
+  });
+
+  it("wires each input to its own component, size and figure, and each Save to its own row", () => {
+    const edits: string[] = []; const saves: string[] = [];
+    const tree = SizeTables({ rows, draft: {}, saving: null, saved: null, onEdit: (k, f) => edits.push(`${k}|${f}`), onSave: (s) => saves.push(`${s.component}/${s.name}`) });
+    const handlers: Handlers[] = []; walk(tree, handlers);
+    for (const p of handlers.filter((h) => h.onChange)) {
+      const before = edits.length; p.onChange!("1");
+      const [component, name] = edits[before]!.split("|")[0]!.split("/");
+      expect(p.label!.startsWith(`${UNIT_SIZE_LETTER[name as UnitSizeView["name"]]} ${PART[component!]} `)).toBe(true);
+    }
+    for (const p of handlers.filter((h) => h.onClick)) p.onClick!();
+    expect(new Set(edits).size).toBe(90);
+    expect(edits).toHaveLength(90);
+    expect([...saves].sort()).toEqual(rows.map((s) => `${s.component}/${s.name}`).sort());
   });
 });
