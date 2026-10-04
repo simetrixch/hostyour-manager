@@ -101,7 +101,9 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
     const next = await ports.dns.listRecordContents({ name: targetName, type, ...(signal ? { signal } : {}) });
     if (type === "CNAME") {
       if (next.some(v => v !== after && !(targetName === name && v === before)) || next.length > 1) snapshot.blockers.push(`${targetName}: target CNAME is occupied`);
-      for (const other of ["A", "AAAA", "TXT"] as const) if ((await ports.dns.listRecordContents({ name: targetName, type: other, ...(signal ? { signal } : {}) })).length) snapshot.blockers.push(`${targetName}: target has a ${other} record; no takeover is permitted`);
+      // A typed update of an existing owned CNAME preserves an apex's coexisting TXT.
+      const ownedRepoint = targetName === name && sourceBook && old.length === 1 && old[0] === before;
+      for (const other of ["A", "AAAA", "TXT"] as const) if (!(other === "TXT" && ownedRepoint) && (await ports.dns.listRecordContents({ name: targetName, type: other, ...(signal ? { signal } : {}) })).length) snapshot.blockers.push(`${targetName}: target has a ${other} record; no takeover is permitted`);
     }
     if (sourceBook) usedBooks.add(key(name, type));
     snapshot.records.push({ name, targetName, type, before, after, owner, targetHadValue: next.includes(after), sourceBook: sourceBook ? { ...sourceBook, type } : null, targetBook: targetBook ? { ...targetBook, type } : null });

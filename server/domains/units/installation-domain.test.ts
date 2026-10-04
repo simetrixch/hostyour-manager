@@ -78,6 +78,24 @@ describe("installation domain unit phase", () => {
     cloud.seed(cloud.booksBranch, clusterMapPath(OLD_HOST), `global:\n  domain: ${OLD_HOST}\n  clusterName: s1\n  unitApex: ${FROM}\n`);
     expect((await readInstallationDomain(db.db, ports(), FROM, TO)).blockers.join("\n")).toContain("machine/control-plane phase");
   });
+  it("permits TXT beside only a same-name book-owned CNAME with its recorded baseline", async () => {
+    seed("prod"); const name = "company.example", before = `shop.${FROM}`;
+    const tenant = (await tenantRegistrations.readTenant("prod", GUID))!.entry;
+    const write = tenantRegistrationWrite("prod", GUID, { ...tenant, ownDomain: name });
+    deploy.seed(deploy.booksBranch, write.path, write.content);
+    dns.seed(name, "CNAME", before); dns.seed(name, "TXT", "keep-verification");
+    expect((await readInstallationDomain(db.db, ports(), FROM, TO)).blockers).toContain(`${name}: target has a TXT record; no takeover is permitted`);
+    recordDnsWrite(db.db, { name, type: "CNAME", content: before, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });
+    const allowed = await readInstallationDomain(db.db, ports(), FROM, TO);
+    expect(allowed.blockers.some(b => b.startsWith(`${name}:`))).toBe(false);
+    expect(allowed.records.find(r => r.name === name)).toMatchObject({ targetName: name, before, after: `shop.${TO}` });
+    dns.seed(`post.${TO}`, "TXT", "foreign-target"); dns.seed(name, "A", "192.0.2.9");
+    const guarded = await readInstallationDomain(db.db, ports(), FROM, TO);
+    expect(guarded.blockers).toContain(`post.${TO}: target has a TXT record; no takeover is permitted`);
+    expect(guarded.blockers).toContain(`${name}: target has a A record; no takeover is permitted`);
+    expect(await dns.listRecordContents({ name, type: "TXT" })).toEqual(["keep-verification"]);
+    expect(dns.upserts).toHaveLength(0); expect(dns.deletes).toHaveLength(0);
+  });
   it("refuses unreadable/uncovered registrations and foreign DNS book ownership", async () => {
     seed("prod"); cloud.seed(cloud.booksBranch, "registrations/broken/test.yaml", "not: [yaml");
     await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow();
