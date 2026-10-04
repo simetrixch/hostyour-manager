@@ -227,7 +227,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
     }, runtime),
     // The grant names the units whose builds the new render pulls, so a release of theirs may sync
     // this tenant; the member Applications it names are the same as before.
-    provisionArgoSyncStep(ports, { guid: p.guid, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, runtime),
+    provisionArgoSyncStep(ports, { guid: p.guid, stage: p.stage, clusterId: p.clusterId, expectedApps: p.expectedApps, syncUnits: p.syncUnits }, runtime),
     {
       name: "write-members",
       title: "Write the resolved member entries into the registration",

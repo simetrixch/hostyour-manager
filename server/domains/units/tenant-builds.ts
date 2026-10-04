@@ -60,6 +60,8 @@ import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/p
 import { ensureImagesStep } from "./ensure-images.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantAppsRepoRuntime } from "./tenant-apps-steps.ts";
+import type { TenantRegistrations } from "./tenant-registrations.ts";
+import { memberApplication } from "./tenant-fanout.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
  *  params at plan time; the credential id is present only for a unit already registered. Every
@@ -420,8 +422,8 @@ export function tenantImageSteps(
 
 /** The tenant's scoped argo-sync grant, over the sync units as they stand after the builds. */
 export function provisionArgoSyncStep(
-  ports: { resolver: ClusterKubeResolver; buildRbac: BuildRbacWriter },
-  p: { guid: string; clusterId: string; expectedApps: readonly string[]; syncUnits: readonly string[] },
+  ports: { resolver: ClusterKubeResolver; buildRbac: BuildRbacWriter; registrations: Pick<TenantRegistrations, "readTenant"> },
+  p: { guid: string; stage: Stage; clusterId: string; expectedApps: readonly string[]; syncUnits: readonly string[] },
   runtime: TenantBuildRuntime,
 ): Step {
   return {
@@ -429,6 +431,15 @@ export function provisionArgoSyncStep(
     title: "Provision the tenant's scoped argo-sync grant",
     run: async (ctx) => {
       const syncUnits = runtime.syncUnits ?? p.syncUnits;
+      // A queued refresh may predate add-app. The standing registration owns the member set;
+      // only initial create, before its registration exists, uses the planned Applications.
+      const current = await ports.registrations.readTenant(p.stage, p.guid);
+      const applications = current
+        ? current.entry.members.map((member) => memberApplication(p.guid, member.name, p.stage))
+        : p.expectedApps;
+      if (current && (applications.length !== p.expectedApps.length || applications.some(name => !p.expectedApps.includes(name)))) {
+        throw errValidation(`tenant ${p.guid}'s members changed since this run was planned — plan it again before replacing its argo-sync grant`);
+      }
       // Beside the AppProjects and before the registration, in the same ArgoCD namespace: the grant
       // is what lets a release of a platform unit sync the pin it just bumped into this tenant,
       // instead of leaving the new image to ArgoCD's next poll. resourceNames name THIS tenant's
@@ -436,14 +447,14 @@ export function provisionArgoSyncStep(
       // No registerCleanup — the shared teardown armed at record-provisional deletes it beside the
       // member AppProjects. Idempotent on resume (the writer replaces both objects in place).
       const { argoNamespace } = await ports.resolver.resolve(p.clusterId);
-      const syncGrant = renderTenantArgoSync({ guid: p.guid, applications: p.expectedApps, argoNamespace, units: syncUnits });
+      const syncGrant = renderTenantArgoSync({ guid: p.guid, applications, argoNamespace, units: syncUnits });
       const { created } = await ports.buildRbac.applyBuildRbac([syncGrant]);
       ctx.checkpoint({ argoSync: `${argoNamespace}/${syncGrant.role.metadata.name}`, units: syncUnits, created });
       ctx.log(
         "meta",
         syncUnits.length > 0
-          ? `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${p.expectedApps.length} Application(s) — the release pipelines of ${syncUnits.join(", ")} may sync this tenant and no other`
-          : `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${p.expectedApps.length} Application(s) with NO subject — no registered unit attests a build this tenant pins, so every bump reaches it on ArgoCD's own poll`,
+          ? `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${applications.length} Application(s) — the release pipelines of ${syncUnits.join(", ")} may sync this tenant and no other`
+          : `argo-sync grant ${syncGrant.role.metadata.name} applied in ${argoNamespace} over ${applications.length} Application(s) with NO subject — no registered unit attests a build this tenant pins, so every bump reaches it on ArgoCD's own poll`,
       );
     },
   }
