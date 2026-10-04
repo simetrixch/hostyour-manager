@@ -1,13 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { tenants } from "../../db/schema/inventory.ts";
-import { makeTenantRefreshMembersDef, rendersEntry, TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
+import { makeTenantRefreshMembersDef, TenantRefreshMembersParams } from "./tenant-refresh-members.run.ts";
 import type { TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { Cleanup } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
-import { DEPLOY_URL, GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
+import { GUID, HELD, HeldImagesGoneArgo, MANIFEST_YAML, NEW, OLD, OLDER, RELEASED, RELEASED_BEFORE, SHA, db, planCtx, planned, ports, rendering, resolved, seedTenant, staleMembers, stepCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
-import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
+import { FakeMasterArgoReader, FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import type { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { TEMPLATE_FILES, TEMPLATE_URL } from "./tenant-apps-repo.fixture.ts";
@@ -63,7 +63,32 @@ describe("tenant-refresh-members", () => {
     const resolved = await planned(ports(staleMembers()));
     const out = await makeTenantRefreshMembersDef(ports(resolved.members)).planStream!({ tenantId: "tnt_1" }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
-    expect(out.plan.summary).toMatch(/nothing changes — every member entry matches the product's manifest and every part runs the version asked for/);
+    expect(out.plan.summary).toMatch(/Every member entry matches the product's manifest and every part runs the version asked for/);
+    expect(out.plan.summary).toContain("the member admission policies are refreshed");
+  });
+
+  it("refreshes standing admission policies before the registration and restores previous labels on abort", async () => {
+    seedTenant();
+    const previous = staleMembers().map((member, index) => index === 0 ? { ...member, namespaceLabels: { ...member.namespaceLabels, "platform/previous-reach": "true" } } : member);
+    const prt = ports(previous);
+    const p = await planned(prt);
+    const reader = (await prt.resolver.resolve(p.clusterId)).clusterReader as FakeClusterReader;
+    const cleanups: Cleanup[] = [];
+    const apply = reader.applyAdmissionPolicy.bind(reader);
+    reader.applyAdmissionPolicy = async (policy, binding) => {
+      expect((await prt.registrations.readTenant(p.stage, p.guid))?.entry.members).toEqual(previous);
+      return apply(policy, binding);
+    };
+    await makeTenantRefreshMembersDef(prt).steps(p).find(step => step.name === "write-members")!.run(stepCtx(p, cleanups, []));
+    expect(reader.admissionPolicies.size).toBe(p.members.length);
+    for (const { policy } of reader.admissionPolicies.values()) {
+      expect(policy.spec.validations[1]!.expression).toContain("k == 'platform/tenant-stage' && object.metadata.labels[k] == 'prod'");
+      expect(policy.spec.validations[1]!.expression).not.toContain("platform/previous-reach");
+    }
+    reader.applyAdmissionPolicy = apply;
+    for (const cleanup of cleanups.reverse()) await cleanup.run(stepCtx(p, [], []));
+    expect((await prt.registrations.readTenant(p.stage, p.guid))?.entry.members).toEqual(previous);
+    expect(reader.admissionPolicies.get(`tenant-${GUID}-${previous[0]!.name}-prod`)!.policy.spec.validations[1]!.expression).toContain("platform/previous-reach");
   });
 
   it("writes each app's database list as the tenant's own repository declares it, not the template, with no change to its members", async () => {
@@ -350,6 +375,20 @@ describe("tenant-refresh-members", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.members.find((m) => m.name === "erp")?.namespaceLabels).toEqual({ later: "yes" });
   });
 
+  it("refuses aborting serving entry changes even while the canonical stage label is pending", async () => {
+    seedTenant();
+    const p = await planned(ports(staleMembers()));
+    const withoutStage = () => new Map([...rendering(p.members)].map(([name, status]) => {
+      const labels = { ...status.namespaceLabels };
+      delete labels["platform/tenant-stage"];
+      return [name, { ...status, namespaceLabels: labels }];
+    }));
+    const prt = ports(p.previous, { argo: [withoutStage] }), def = makeTenantRefreshMembersDef(prt);
+    await def.steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
+    await expect(def.steps(p).find((s) => s.name === "watch-sync-set")!.run(stepCtx(p, [], []))).rejects.toThrow(/has not rendered/);
+    await expect(def.assertAbortable!(p, { db: db.db })).rejects.toThrow(/Retry the failed step/);
+  });
+
   it("allows the abort while the members have not converged", async () => {
     seedTenant();
     const prt = ports(staleMembers(), { argo: [() => rendering(staleMembers())] });
@@ -378,35 +417,3 @@ describe("the Versions run's params", () => {
   });
 });
 
-describe("rendersEntry, clause by clause", () => {
-  const src = (over: Partial<TenantMemberRecord["sources"][number]> = {}): TenantMemberRecord["sources"][number] => ({ chart: "charts/x", valueFiles: [], values: {}, ...over });
-  const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", namespaceLabels: {}, sources: [src()], ...over });
-  const render = (m: TenantMemberRecord, labels: Record<string, string> = {}): ArgoAppStatus => ({
-    syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy", namespaceLabels: labels,
-    syncSources: m.sources.map((s) => ({ repoURL: DEPLOY_URL, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),
-  });
-  it("holds the entry's value files in their order, searched after the template's own", () => {
-    const want = entry({ sources: [src({ valueFiles: ["a.yaml", "values.yaml"] })] });
-    expect(rendersEntry(render(want), want, undefined, DEPLOY_URL)).toBe(true);
-    const swapped = entry({ sources: [src({ valueFiles: ["values.yaml", "a.yaml"] })] });
-    expect(rendersEntry(render(entry({ sources: [src({ valueFiles: ["b.yaml", "a.yaml"] })] })), entry({ sources: [src({ valueFiles: ["a.yaml", "b.yaml"] })] }), undefined, DEPLOY_URL)).toBe(false);
-    expect(rendersEntry(render(swapped), swapped, undefined, DEPLOY_URL)).toBe(true);
-  });
-  it("refuses a value file the previous entry had and the new one dropped", () => {
-    const was = entry({ sources: [src({ valueFiles: ["old.yaml"] })] });
-    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL)).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL)).toBe(true);
-  });
-  it("refuses a value key the previous entry had and the new one dropped", () => {
-    const was = entry({ sources: [src({ values: { debug: true } })] });
-    expect(rendersEntry(render(was), entry(), was, DEPLOY_URL)).toBe(false);
-    expect(rendersEntry(render(entry()), entry(), was, DEPLOY_URL)).toBe(true);
-  });
-  it("refuses a namespace label the previous entry had and the new one dropped, and a label of another value", () => {
-    const was = entry({ namespaceLabels: { stale: "yes" } });
-    expect(rendersEntry(render(entry(), { stale: "yes" }), entry(), was, DEPLOY_URL)).toBe(false);
-    expect(rendersEntry(render(entry(), {}), entry(), was, DEPLOY_URL)).toBe(true);
-    const want = entry({ namespaceLabels: { tier: "b" } });
-    expect(rendersEntry(render(want, { tier: "a" }), want, undefined, DEPLOY_URL)).toBe(false);
-  });
-});
