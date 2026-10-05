@@ -26,7 +26,7 @@ import { seedUnitSizes } from "#unit/server/unit-size.ts";
 const SHA = "a".repeat(40);
 
 const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],

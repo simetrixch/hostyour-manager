@@ -57,7 +57,7 @@ afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */
 const CONSUMER_MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
@@ -76,7 +76,7 @@ function passReport(): GateReport {
   };
 }
 
-const fakeSeeder = () => ({ seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} });
+const fakeSeeder = () => ({ seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} });
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` for the two consumer

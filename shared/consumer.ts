@@ -4,7 +4,7 @@
 // authoritative contract; hostyour-cloud's tools/checks/consumer-contract.census.sh hashes them and
 // fails when this mirror drifts.
 import { z } from "zod";
-import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, PartSizesSchema, PartVolumesSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
+import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, RedisModeSchema, PartSizesSchema, PartVolumesSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "./enums.ts";
 import { HOST_LABEL_RE, PLATFORM_HOST_LABEL, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 
@@ -338,6 +338,12 @@ const PIN_OWN_KEYS = ["name", "image", "tag"];
 const PIN_VALUE = /^[ !#-[\]-~]*$/;
 
 /** deploy/platform.yaml — what a consumer declares (contract v1.3). */
+/** What a Redis of a consumer's own does when it reaches its maxmemory, spelled as Redis spells its
+ *  maxmemory-policy. `noeviction`, the default and the shared server's, refuses writes and loses no key;
+ *  `allkeys-lru` makes the server a cache that drops the least recently used keys. */
+export const REDIS_MAXMEMORY_POLICY = ["noeviction", "allkeys-lru"] as const;
+export const RedisMaxmemoryPolicySchema = z.enum(REDIS_MAXMEMORY_POLICY);
+
 export const ConsumerManifestSchema = z.object({
   apiVersion: z.literal("hostyour.cloud/v1"),
   kind: z.literal("ConsumerManifest"),
@@ -388,6 +394,13 @@ export const ConsumerManifestSchema = z.object({
   // sets. That is why no size field stands beside it: a unit has ONE size, and a second size field is
   // a second answer to a question already answered.
   mongodb: MongodbModeSchema.default("shared"),
+  // HOW this consumer runs Redis. `shared` (the default) is the cluster's own server; `standalone` is a
+  // server of its OWN in its namespace, sized like its other data parts, bounded by its own maxmemory
+  // and backed up with it. Only beside services: [redis], which is what makes its claim.
+  redis: RedisModeSchema.default("shared"),
+  // What its own Redis does at its maxmemory (REDIS_MAXMEMORY_POLICY); absent is `noeviction`. Only
+  // for `redis: standalone`: the shared server's policy is the platform's, never one consumer's.
+  redisMaxmemoryPolicy: RedisMaxmemoryPolicySchema.optional(),
   // NOT a manifest field: the domain a consumer answers at beside its platform host is set per stage
   // in the Manager, the domain's one writer, so it switches without a commit in the repository. A
   // manifest that still declares one is refused, and the refusal names the route that sets it.
@@ -470,6 +483,12 @@ export const ConsumerManifestSchema = z.object({
     // chart, so a self-contained chart alongside a tenant: block is a contradiction.
     if (m.tenant && m.chart) {
       ctx.addIssue({ code: "custom", path: ["tenant"], message: "a manifest that declares a tenant: fan-out block must not also declare its own chart — the fan-out repo deploys others, never itself as one chart" });
+    }
+    if (m.redis === "standalone" && !m.services.includes("redis")) {
+      ctx.addIssue({ code: "custom", path: ["redis"], message: "redis: standalone needs services: [redis] — the claim is what hands the application its credential" });
+    }
+    if (m.redisMaxmemoryPolicy !== undefined && m.redis !== "standalone") {
+      ctx.addIssue({ code: "custom", path: ["redisMaxmemoryPolicy"], message: "redisMaxmemoryPolicy needs redis: standalone — the shared server's policy is the platform's" });
     }
     // The entry names a Service of the unit's own chart, so only a unit that deploys one can declare it.
     if (m.smtpEntry !== undefined && !m.chart) {
@@ -623,6 +642,11 @@ export const ConsumerRegistrationSchema = z
     // How this consumer runs MongoDB, copied VERBATIM from the manifest. The appset gates its
     // conditional MongoDB source on it, and the quota above was summed from it.
     mongodb: MongodbModeSchema.optional(),
+    // How this consumer runs Redis, and its own server's maxmemory policy, copied VERBATIM from the
+    // manifest for a Redis of its own and absent otherwise: the appset reads an absent `redis` as the
+    // shared server, so a registration written before the field stands as it was.
+    redis: RedisModeSchema.optional(),
+    redisMaxmemoryPolicy: RedisMaxmemoryPolicySchema.optional(),
     // The six figures that bound this consumer's namespace, resolved by the Manager from its size
     // table when it writes the registration (plugins/unit/server/unit-size.ts resolveUnitQuota) and
     // passed straight through to hostyour-cloud/apps/unit-quota by the ApplicationSet.
@@ -691,7 +715,7 @@ export const ConsumerRegistrationSchema = z
       if (e.smtpEntry !== undefined) {
         ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry belongs in a stage registration — build.yaml describes no serving surface" });
       }
-      for (const k of ["sizes", "volumes"] as const) {
+      for (const k of ["sizes", "volumes", "redis", "redisMaxmemoryPolicy"] as const) {
         if (e[k] !== undefined) ctx.addIssue({ code: "custom", path: [k], message: `"${k}" belongs in a stage registration — build.yaml runs no data part` });
       }
       return;

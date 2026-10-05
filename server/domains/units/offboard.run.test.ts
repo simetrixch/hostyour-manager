@@ -52,13 +52,13 @@ type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; proj
 function seederWith(over: Partial<VaultSeeder>): VaultSeeder {
   return {
     seed: async () => ({ created: true }), patchApp: async () => undefined,
-    seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }),
+    seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }),
     seedBuildRepoPat: async () => ({ created: true }),
     refreshBuildRepoPat: async () => {},
     seedTenantCrypto: async () => ({ created: true }),
     deleteBuildRepoPat: async () => {},
     deleteApp: async () => {},
-    deletePostgres: async () => {}, deleteMongodb: async () => {},
+    deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {},
     seedTenantAppKey: async () => ({ created: true }),
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
@@ -380,7 +380,8 @@ describe("offboard run definition", () => {
     // Unconditional in both cases: this run cannot know what the manifest asked for.
     expect(seeder.deletedPostgres).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(seeder.deletedMongodb).toEqual([{ stage: "prod", consumerName: "acme" }]);
-    expect(logs.some((l) => l.includes("secret/prod/consumer/acme/{postgres,mongodb}"))).toBe(true);
+    expect(seeder.deletedRedis).toEqual([{ stage: "prod", consumerName: "acme" }]);
+    expect(logs.some((l) => l.includes("secret/prod/consumer/acme/{postgres,mongodb,redis}"))).toBe(true);
   });
 
   it("remove-database-secrets fails closed when the Vault delete fails (a surviving leaf would be inherited under cas=0)", async () => {

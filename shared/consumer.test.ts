@@ -395,3 +395,41 @@ describe("TenantSpecSchema libraryRepos (the product's libraries the boot writes
     }
   });
 });
+
+describe("redis (how a consumer runs Redis) and redisMaxmemoryPolicy", () => {
+  const manifest = {
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
+    envs: ["prod"], chart: { path: "deploy/chart" },
+  } as const;
+  const stage = {
+    name: "acme", repoURL: "https://github.com/x/acme.git",
+    chartPath: "deploy/chart", cluster: "s1", host: "acme", databases: [] as string[], services: [] as string[], size: "small" as const, mongodb: "shared" as const, quota: seedQuota("small"),
+  };
+  const issue = (r: { success: boolean; error?: { issues: { path: PropertyKey[]; message: string }[] } }, path: string) =>
+    r.error?.issues.find((i) => i.path.join(".") === path)?.message;
+
+  it("defaults to the shared server and no policy", () => {
+    const m = ConsumerManifestSchema.parse(manifest);
+    expect([m.redis, m.redisMaxmemoryPolicy]).toEqual(["shared", undefined]);
+  });
+
+  it("takes a Redis of its own only beside services: [redis]", () => {
+    expect(ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redis: "standalone" }).success).toBe(true);
+    const r = ConsumerManifestSchema.safeParse({ ...manifest, redis: "standalone" });
+    expect(issue(r, "redis")).toMatch(/services: \[redis\]/);
+  });
+
+  it("takes a maxmemory policy only for a Redis of its own, and only noeviction or allkeys-lru", () => {
+    const own = { ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redis: "standalone" };
+    expect(ConsumerManifestSchema.parse({ ...own, redisMaxmemoryPolicy: "allkeys-lru" }).redisMaxmemoryPolicy).toBe("allkeys-lru");
+    expect(ConsumerManifestSchema.safeParse({ ...own, redisMaxmemoryPolicy: "volatile-ttl" }).success).toBe(false);
+    const shared = ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redisMaxmemoryPolicy: "allkeys-lru" });
+    expect(issue(shared, "redisMaxmemoryPolicy")).toMatch(/redis: standalone/);
+  });
+
+  it("carries both in a stage registration and refuses them in build.yaml", () => {
+    expect(ConsumerRegistrationSchema.safeParse({ ...stage, redis: "standalone", redisMaxmemoryPolicy: "noeviction" }).success).toBe(true);
+    const build = ConsumerRegistrationSchema.safeParse({ name: "acme", repoURL: "https://github.com/x/acme.git", builds: [], redis: "standalone", redisMaxmemoryPolicy: "noeviction" });
+    expect([issue(build, "redis"), issue(build, "redisMaxmemoryPolicy")].every((m) => m !== undefined && /stage registration/.test(m))).toBe(true);
+  });
+});

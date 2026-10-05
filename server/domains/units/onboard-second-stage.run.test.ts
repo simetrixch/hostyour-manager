@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
+import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardParams } from "./onboard.run.ts";
@@ -100,5 +102,37 @@ describe("onboard a consumer with a data part of its own", () => {
     const entry = (await prt.registrations.readRegistration("prod", "acme"))?.entry;
     // A new size has no preset volume to fall back to in the appset: the pin is what sizes the claim.
     expect([entry?.size, entry?.sizes, entry?.volumes]).toEqual(["xlarge", { postgresql: "xlarge" }, { postgresql: "100Gi" }]);
+  });
+
+  it("registers a Redis of the consumer's own with its maxmemory policy, its size, its volume and its row in the quota", async () => {
+    seedClusters();
+    const own = { ...MANIFEST, services: ["redis" as const], keyPatterns: ["acme:*"], redis: "standalone" as const, redisMaxmemoryPolicy: "allkeys-lru" as const };
+    const prt = ports({
+      runner: new FakeGateRunner({ report: passReport(own) }),
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
+    });
+    const plan = await makeOnboardDef(prt).planStream!(request({ stage: "prod", clusterId: "cls_1", size: "medium" }), planCtx());
+    if (plan.outcome !== "planned") throw new Error(plan.summary);
+    await makeOnboardDef(prt).steps(plan.params).find((s) => s.name === "write-registration")!.run(ctx(plan.params, "write-registration"));
+    const entry = (await prt.registrations.readRegistration("prod", "acme"))?.entry;
+    expect([entry?.redis, entry?.redisMaxmemoryPolicy, entry?.sizes, entry?.volumes]).toEqual(["standalone", "allkeys-lru", { redis: "medium" }, { redis: "4Gi" }]);
+    expect(entry?.quota).toEqual(seedQuota("medium", { postgresql: false, mongodb: "shared", redis: "standalone" }));
+  });
+
+  it("writes noeviction for a Redis of its own that names no policy, and no redis key for the shared server", async () => {
+    seedClusters();
+    const own = { ...MANIFEST, services: ["redis" as const], keyPatterns: ["acme:*"], redis: "standalone" as const };
+    const cases: [ConsumerManifest, unknown[]][] = [[own, ["standalone", "noeviction"]], [{ ...MANIFEST, services: ["redis"], keyPatterns: ["acme:*"] }, [undefined, undefined]]];
+    for (const [manifest, want] of cases) {
+      const prt = ports({
+        runner: new FakeGateRunner({ report: passReport(manifest) }),
+        repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
+      });
+      const plan = await makeOnboardDef(prt).planStream!(request({ stage: "prod", clusterId: "cls_1", size: "medium" }), planCtx());
+      if (plan.outcome !== "planned") throw new Error(plan.summary);
+      await makeOnboardDef(prt).steps(plan.params).find((s) => s.name === "write-registration")!.run(ctx(plan.params, "write-registration"));
+      const entry = (await prt.registrations.readRegistration("prod", "acme"))?.entry;
+      expect([entry?.redis, entry?.redisMaxmemoryPolicy]).toEqual(want);
+    }
   });
 });

@@ -27,7 +27,7 @@ export const MINTED_TAG = "1.0.0-stable-20260719120000";
 
 /** The manifest every DEPLOYABLE fixture onboards: a chart + one declared build. */
 export const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
@@ -63,6 +63,7 @@ export class FakeSeeder implements VaultSeeder {
   async seed(i: VaultSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: this.created }; }
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: this.created }; }
   async refreshBuildRepoPat(i: BuildRepoPatSeedInput): Promise<void> { this.refreshedRepoPats.push(i); }
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
@@ -77,6 +78,7 @@ export class FakeSeeder implements VaultSeeder {
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
+  async deleteRedis(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }

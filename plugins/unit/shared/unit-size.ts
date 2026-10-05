@@ -48,14 +48,14 @@ export const TenantSizeSchema = z.enum(TENANT_SIZE);
  *  them, its own databases — and each weighs differently, so each has its own row per size. The
  *  quota a unit gets is their SUM, worked out from what it actually brings:
  *
- *      quota = app(size) + postgresql(size)? + mongodb(size) x members
+ *      quota = app(size) + postgresql(size)? + mongodb(size) x members + redis(size)?
  *
  *  where `app` is `base` for a consumer's own application and `member` for one member namespace of a
  *  tenant, whose pods are the product's and were measured as such. A handful of rows per component the
  *  operator adjusts — against hundreds if every combination were its own row, which is a table nobody
  *  maintains. The parts stay visible in the UI, so the one number a unit gets can be read back to
  *  where it came from. */
-export const SIZE_COMPONENT = ["base", "postgresql", "mongodb", "member"] as const;
+export const SIZE_COMPONENT = ["base", "postgresql", "mongodb", "redis", "member"] as const;
 export type SizeComponent = (typeof SIZE_COMPONENT)[number];
 export const SizeComponentSchema = z.enum(SIZE_COMPONENT);
 
@@ -68,6 +68,13 @@ export const MONGODB_MODE = ["shared", "standalone", "replicaset"] as const;
 export type MongodbMode = (typeof MONGODB_MODE)[number];
 export const MongodbModeSchema = z.enum(MONGODB_MODE);
 export const MONGODB_MEMBERS: Record<MongodbMode, number> = { shared: 0, standalone: 1, replicaset: 3 };
+
+/** How a unit runs Redis. `shared` (the default) is the cluster's own server, whose ACL users bound a
+ *  consumer's keys but not its bytes, so one consumer can fill it for every other. `standalone` is a
+ *  server of the unit's own, bounded by its own maxmemory and pod limit and backed up with the unit. */
+export const REDIS_MODE = ["shared", "standalone"] as const;
+export type RedisMode = (typeof REDIS_MODE)[number];
+export const RedisModeSchema = z.enum(REDIS_MODE);
 
 /** The six figures one namespace is bounded by — the ResourceQuota hostyour-cloud/apps/unit-quota
  *  renders, field for field. Strings for the resource quantities because that is what Kubernetes takes
@@ -93,6 +100,7 @@ export type UnitQuota = z.infer<typeof UnitQuotaSchema>;
  *   postgresql   what ONE PostgreSQL instance gets, when the unit brings its own (all six sizes)
  *   mongodb      what ONE MongoDB MEMBER gets — multiplied by 1 for a standalone, 3 for a replica set
  *                (all six sizes)
+ *   redis        what ONE Redis of the unit's own gets, its exporter included (all six sizes)
  *   member       what ONE member namespace of a tenant gets (all six sizes)
  *
  * A consumer is offered only the sizes its parts have rows for; the extra consumer sizes wait for
@@ -168,6 +176,18 @@ export const UNIT_SIZE_SEED = {
     xlarge: { requestsCpu: "750m", requestsMemory: "3Gi", limitsCpu: "6", limitsMemory: "12Gi", pods: 1, persistentVolumeClaims: 1 },
     xxlarge: { requestsCpu: "1", requestsMemory: "4Gi", limitsCpu: "8", limitsMemory: "16Gi", pods: 1, persistentVolumeClaims: 1 },
   },
+  // A Redis of the unit's own: the server and its metrics exporter, two pods, one claim. Its maxmemory is
+  // half the memory limit (the chart's preset), because the append-only file's rewrite forks the server
+  // and the fork's copy-on-write pages can reach the whole dataset again. Redis runs commands on one
+  // thread, so the CPU limit stops at 2.
+  redis: {
+    xsmall: { requestsCpu: "25m", requestsMemory: "128Mi", limitsCpu: "250m", limitsMemory: "512Mi", pods: 2, persistentVolumeClaims: 1 },
+    small:  { requestsCpu: "50m", requestsMemory: "256Mi", limitsCpu: "500m", limitsMemory: "1Gi", pods: 2, persistentVolumeClaims: 1 },
+    medium: { requestsCpu: "100m", requestsMemory: "512Mi", limitsCpu: "1", limitsMemory: "2Gi", pods: 2, persistentVolumeClaims: 1 },
+    large:  { requestsCpu: "200m", requestsMemory: "1Gi", limitsCpu: "2", limitsMemory: "4Gi", pods: 2, persistentVolumeClaims: 1 },
+    xlarge: { requestsCpu: "300m", requestsMemory: "2Gi", limitsCpu: "2", limitsMemory: "8Gi", pods: 2, persistentVolumeClaims: 1 },
+    xxlarge: { requestsCpu: "400m", requestsMemory: "3Gi", limitsCpu: "2", limitsMemory: "12Gi", pods: 2, persistentVolumeClaims: 1 },
+  },
   member: {
     xsmall: withSolver({ requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 }),
     small: withSolver({ requestsCpu: "200m", requestsMemory: "1152Mi", limitsCpu: "4", limitsMemory: "4Gi", pods: 8, persistentVolumeClaims: 1 }),
@@ -193,6 +213,7 @@ export function quotaParts(brings: UnitComposition): { component: SizeComponent;
     { component: brings.app ?? "base", members: 1 },
     ...(brings.postgresql ? [{ component: "postgresql" as const, members: 1 }] : []),
     ...(members > 0 ? [{ component: "mongodb" as const, members }] : []),
+    ...(brings.redis === "standalone" ? [{ component: "redis" as const, members: 1 }] : []),
   ];
 }
 
@@ -211,6 +232,8 @@ export interface UnitComposition {
   app?: "base" | "member";
   postgresql: boolean;
   mongodb: MongodbMode;
+  /** How the unit runs Redis; a unit without the key runs on the shared server. */
+  redis?: RedisMode;
 }
 
 /** A tenant brings no database of its own: its members claim the cluster's shared MongoDB replica set
@@ -218,19 +241,20 @@ export interface UnitComposition {
 export const TENANT_BRINGS: UnitComposition = { app: "member", postgresql: false, mongodb: "shared" };
 
 /** The data parts a unit may run of its own, each with a size and a volume of its own. */
-export const DATA_PART = ["postgresql", "mongodb"] as const;
+export const DATA_PART = ["postgresql", "mongodb", "redis"] as const;
 export type DataPart = (typeof DATA_PART)[number];
 
 /** Each data part's size, beside the unit's `size` (the application's). The consumers ApplicationSet
  *  reads `dig "sizes" "<part>" .size`, so a part without one runs at the unit's size, and the key is a
  *  map or absent: its dig fails on null or a list, and stops the whole set. */
-export const PartSizesSchema = z.object({ postgresql: UnitSizeSchema.optional(), mongodb: UnitSizeSchema.optional() });
+export const PartSizesSchema = z.object({ postgresql: UnitSizeSchema.optional(), mongodb: UnitSizeSchema.optional(), redis: UnitSizeSchema.optional() });
 export type PartSizes = z.infer<typeof PartSizesSchema>;
 
 /** Each data part's volume, as the quantity its claim was created with — for MongoDB, each member's.
  *  A claim cannot grow on these clusters (microk8s-hostpath expands nothing) and its spec is immutable,
  *  so it is written once and no resize touches it: Set size changes CPU and memory only. */
-export const PartVolumesSchema = z.object({ postgresql: z.string().regex(/^[0-9]+[MGT]i$/).optional(), mongodb: z.string().regex(/^[0-9]+[MGT]i$/).optional() });
+const VolumeSchema = z.string().regex(/^[0-9]+[MGT]i$/);
+export const PartVolumesSchema = z.object({ postgresql: VolumeSchema.optional(), mongodb: VolumeSchema.optional(), redis: VolumeSchema.optional() });
 export type PartVolumes = z.infer<typeof PartVolumesSchema>;
 
 /** The volume a data part is created with, per size. The three old sizes' are the presets' own, which
@@ -239,15 +263,17 @@ export type PartVolumes = z.infer<typeof PartVolumesSchema>;
 export const ONBOARDING_VOLUME: Record<DataPart, Record<UnitSize, string>> = {
   postgresql: { xsmall: "2Gi", small: "5Gi", medium: "20Gi", large: "50Gi", xlarge: "100Gi", xxlarge: "200Gi" },
   mongodb: { xsmall: "5Gi", small: "10Gi", medium: "40Gi", large: "100Gi", xlarge: "200Gi", xxlarge: "400Gi" },
+  // About four times the size's maxmemory: the append-only file, its rewrite and one dump.
+  redis: { xsmall: "1Gi", small: "2Gi", medium: "4Gi", large: "8Gi", xlarge: "16Gi", xxlarge: "24Gi" },
 };
 
 /** The size a component of a unit runs at: a data part its own when it has one, all else the unit's. */
 export const sizeOf = (component: SizeComponent, size: UnitSize, sizes: PartSizes = {}): UnitSize =>
-  component === "postgresql" || component === "mongodb" ? sizes[component] ?? size : size;
+  (DATA_PART as readonly string[]).includes(component) ? sizes[component as DataPart] ?? size : size;
 
 /** The data parts a unit runs of its own. */
 export const dataParts = (brings: UnitComposition): DataPart[] =>
-  DATA_PART.filter((p) => (p === "postgresql" ? brings.postgresql : MONGODB_MEMBERS[brings.mongodb] > 0));
+  DATA_PART.filter((p) => (p === "postgresql" ? brings.postgresql : p === "mongodb" ? MONGODB_MEMBERS[brings.mongodb] > 0 : brings.redis === "standalone"));
 
 /** What an onboarding writes beside `size`: every part it runs at that one size, each pinned to that
  *  size's volume. Neither key for a unit with no data part of its own. */
@@ -267,7 +293,7 @@ export function partSizing(size: UnitSize, brings: UnitComposition): { sizes?: P
  *  never schedules. */
 export const MONGODB_EXPORTER: UnitQuota = { requestsCpu: "15m", requestsMemory: "48Mi", limitsCpu: "100m", limitsMemory: "128Mi", pods: 1, persistentVolumeClaims: 0 };
 
-/** The one quota a unit gets: base + postgresql + mongodb x members (+ its exporter), summed as Kubernetes quantities.
+/** The one quota a unit gets: base + postgresql + mongodb x members (+ its exporter) + redis, summed as Kubernetes quantities.
  *  Returned with its PARTS so a screen can show where the number came from — a ceiling nobody can
  *  trace back is a ceiling nobody checks. */
 export function composeQuota(

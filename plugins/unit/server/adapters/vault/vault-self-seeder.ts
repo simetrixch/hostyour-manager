@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind } from "./seeder-port.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind } from "./seeder-port.ts";
 import { TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
@@ -115,6 +115,22 @@ export class VaultSelfSeeder implements VaultSeeder {
     // The offboard/purge inverse of seedMongodb — METADATA delete, for the reason deleteConsumerLeaf
     // states.
     await this.deleteConsumerLeaf(`${input.stage}/consumer/${input.consumerName}/mongodb`, "mongodb-secret");
+  }
+
+  async seedRedis(input: RedisSeedInput): Promise<VaultSeedOutcome> {
+    // Same create-only (cas=0) shape and the same separate-leaf reasoning as seedPostgres.
+    const { addr, token } = await this.login();
+    try {
+      return await this.putConsumerLeaf(addr, `${input.stage}/consumer/${input.consumerName}/redis`, { "redis-password": input.password }, token, "redis");
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async deleteRedis(input: RedisSecretDeleteInput): Promise<void> {
+    // The offboard/purge inverse of seedRedis — METADATA delete, for the reason deleteConsumerLeaf
+    // states.
+    await this.deleteConsumerLeaf(`${input.stage}/consumer/${input.consumerName}/redis`, "redis-secret");
   }
 
   async seedBuildRepoPat(input: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> {

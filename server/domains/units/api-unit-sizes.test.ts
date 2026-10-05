@@ -65,12 +65,12 @@ const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION
 
 describe("the size table", () => {
   // Twenty-four: base, postgresql, mongodb and member, each at all six sizes.
-  it("serves TWENTY-FOUR rows — every component at six sizes", async () => {
+  it("serves THIRTY rows — every component at six sizes", async () => {
     const { app, cookie } = await make();
     const body = (await (await app.request("/api/unit/sizes", authed(cookie))).json()) as { sizes: Array<{ component: string; name: string }> };
-    expect(body.sizes).toHaveLength(24);
+    expect(body.sizes).toHaveLength(30);
     expect(body.sizes.map((s) => `${s.component}/${s.name}`)).toEqual(
-      ["base", "postgresql", "mongodb", "member"].flatMap((c) => ["xsmall", "small", "medium", "large", "xlarge", "xxlarge"].map((n) => `${c}/${n}`)),
+      ["base", "postgresql", "mongodb", "redis", "member"].flatMap((c) => ["xsmall", "small", "medium", "large", "xlarge", "xxlarge"].map((n) => `${c}/${n}`)),
     );
   });
 
@@ -97,7 +97,7 @@ describe("the size table", () => {
       headers: { ...(authed(cookie).headers as Record<string, string>), "content-type": "application/json" },
       body: JSON.stringify({ requestsCpu: "1", requestsMemory: "1Gi", limitsCpu: "1", limitsMemory: "1Gi", pods: 1, persistentVolumeClaims: 1 }),
     });
-    expect((await put("/api/unit/sizes/redis/medium")).status).toBe(404);
+    expect((await put("/api/unit/sizes/memcached/medium")).status).toBe(404);
     expect((await put("/api/unit/sizes/base/enormous")).status).toBe(404);
   });
 
@@ -126,7 +126,7 @@ describe("what the sizes cost ONE unit", () => {
 
     expect(body.unit).toBe("acme");
     expect(body.composed).toBe(true);
-    expect(body.brings).toEqual({ postgresql: true, mongodb: "replicaset" });
+    expect(body.brings).toEqual({ postgresql: true, mongodb: "replicaset", redis: "shared" });
     // Six application sizes, and each one is the SUM the run will write — base + postgresql + mongodb x3
     // + its one exporter, the data parts at the size they stand at (small, the unit's when onboarded).
     expect(body.sizes.map((s) => s.name)).toEqual(["xsmall", "small", "medium", "large", "xlarge", "xxlarge"]);

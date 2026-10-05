@@ -80,8 +80,11 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
           // gates its conditional sources on the second. Each data part starts at that size, its
           // volume pinned to the size's: the claim keeps it whatever the part is resized to later.
           size: p.size,
-          ...partSizing(p.size, { postgresql: p.services.includes("postgresql"), mongodb: p.mongodb }),
+          ...partSizing(p.size, { postgresql: p.services.includes("postgresql"), mongodb: p.mongodb, redis: p.redis }),
           mongodb: p.mongodb,
+          // A Redis of its own, with the policy its server boots with stated as a literal; nothing for
+          // the shared server, which an absent key reads as.
+          ...(p.redis === "standalone" ? { redis: p.redis, redisMaxmemoryPolicy: p.redisMaxmemoryPolicy ?? "noeviction" } : {}),
           // The namespace ceiling, RESOLVED here rather than carried in the plan: the size table is
           // editable while the platform runs, so the figures a unit is onboarded with must be the ones
           // standing when the registration is written, not the ones that stood when the run was planned.
@@ -92,6 +95,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
             // its own database gets a ceiling that covers it instead of one that starves it.
             postgresql: p.services.includes("postgresql"),
             mongodb: p.mongodb,
+            redis: p.redis,
           }),
           // the ATTEST of the manifest's SMTP entry (G29-checked, plan-frozen): from this commit on
           // the unit is its stage's mail sender

@@ -32,7 +32,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
-const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
+const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
@@ -57,7 +57,7 @@ afterEach(() => { db.sqlite.close(); });
 
 /** The manifest every fixture onboards: one declared build, so gate G18's manifest half holds. */
 const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
@@ -166,7 +166,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const planned = getRun(db.db, runId);
     expect(planned?.status).toBe("planned");
     expect(planned?.steps.map((s) => s.name)).toEqual([
-      "attest-target", "preflight-scopes", "check", "record-provisional", "clear-leftover-branch", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-repo-pat",
+      "attest-target", "preflight-scopes", "check", "record-provisional", "clear-leftover-branch", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-redis-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
       "inject-release-kit", "setup-webhook", "await-unit-fences", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
@@ -222,12 +222,14 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
       async patchApp(): Promise<void> {}
       async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }
   async refreshBuildRepoPat(): Promise<void> {}
       async deleteBuildRepoPat(): Promise<void> {}
       async deleteApp(): Promise<void> {}
       async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
+  async deleteRedis(): Promise<void> {}
       async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
       async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
@@ -236,7 +238,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const seeder = new RecordingSeeder();
     const activator = new FakeActivator(); // 201 { activate_url: https://example-auth.s1.example/activate?token=inv_test }
     const manifest: ConsumerManifest = {
-      apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "acme", owner: "team-acme",
+      apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const, name: "acme", owner: "team-acme",
       envs: ["prod"], chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], builds: [{ name: "acme-api", containerfile: "Containerfile" }],
       secrets: [{ key: "AUTH_BOOTSTRAP_TOKEN", required: true, generate: "hex32" }],
       activation: { path: "/api/v1/bootstrap/invite-admin", method: "POST", tokenSecret: "AUTH_BOOTSTRAP_TOKEN", tokenHeader: "X-Bootstrap-Token", prompt: [{ field: "email", label: "First administrator email" }] },

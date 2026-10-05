@@ -1,4 +1,4 @@
-import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { VaultSeeder, VaultSeedOutcome, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput, MongodbSecretDeleteInput, RedisSecretDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 
 /** The seeder a TEARDOWN test stands on — offboard, its scoped variant and purge alike: it records
  *  the four deletes those runs make and refuses every write, because a run that removes a unit has
@@ -9,16 +9,19 @@ export class RecordingTeardownSeeder implements VaultSeeder {
   deletedApp: AppSecretsDeleteInput[] = [];
   deletedPostgres: PostgresSecretDeleteInput[] = [];
   deletedMongodb: MongodbSecretDeleteInput[] = [];
+  deletedRedis: RedisSecretDeleteInput[] = [];
   async seed(): Promise<VaultSeedOutcome> { throw new Error("a teardown never seeds"); }
   async patchApp(): Promise<void> { throw new Error("a teardown never patches"); }
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("a teardown never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("a teardown never seeds mongodb"); }
+  async seedRedis(): Promise<VaultSeedOutcome> { throw new Error("a teardown never seeds redis"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("a teardown never seeds a repo pat"); }
   async refreshBuildRepoPat(): Promise<void> { throw new Error("a teardown never refreshes a repo pat"); }
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deleted.push(i); }
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
   async deleteMongodb(i: MongodbSecretDeleteInput): Promise<void> { this.deletedMongodb.push(i); }
+  async deleteRedis(i: RedisSecretDeleteInput): Promise<void> { this.deletedRedis.push(i); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }

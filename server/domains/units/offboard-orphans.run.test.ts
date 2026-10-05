@@ -39,12 +39,14 @@ class FakeSeeder implements VaultSeeder {
   async patchApp(): Promise<void> {}
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds mongodb"); }
+  async seedRedis(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds redis"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("offboard never seeds a repo pat"); }
   async refreshBuildRepoPat(): Promise<void> { throw new Error("offboard never refreshes a repo pat"); }
   async deleteBuildRepoPat(): Promise<void> {}
   async deleteApp(): Promise<void> {}
   async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
+  async deleteRedis(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }

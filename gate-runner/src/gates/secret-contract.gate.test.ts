@@ -32,7 +32,7 @@ const CHAIN: ClusterValueFile[] = [
 function baseManifest(): ConsumerManifest {
   return {
     apiVersion: "hostyour.cloud/v1",
-    kind: "ConsumerManifest", mongodb: "shared" as const,
+    kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
     name: "acme",
     owner: "team-acme",
     envs: ["test"],

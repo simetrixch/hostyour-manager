@@ -317,6 +317,16 @@ describe("G24 unit size (hard)", () => {
     expect(gateUnitSize({ unitName: "acme", size: "small", brings, sizes: { postgresql: "medium", mongodb: "xlarge" }, quota: seedQuota("small", brings, { postgresql: "medium", mongodb: "xlarge" }) }).status).toBe("pass");
   });
 
+  it("holds a Redis of the unit's own to the same rule, and names it; the shared Redis is no part", () => {
+    const brings = { postgresql: false, mongodb: "shared", redis: "standalone" } as const;
+    const g = gateUnitSize({ unitName: "acme", size: "large", brings, sizes: { redis: "small" }, quota: seedQuota("large", brings, { redis: "small" }) });
+    expect([g.status, g.reason]).toEqual(["fail", expect.stringContaining('redis "small"')]);
+    expect(g.found).toContain("its own Redis (redis: standalone)");
+    expect(gateUnitSize({ unitName: "acme", size: "small", brings, sizes: { redis: "medium" }, quota: seedQuota("small", brings, { redis: "medium" }) }).status).toBe("pass");
+    const shared = { postgresql: false, mongodb: "shared", redis: "shared" } as const;
+    expect(gateUnitSize({ unitName: "acme", size: "small", brings: shared, quota: seedQuota("small", shared) }).status).toBe("pass");
+  });
+
   it("REPORTS the six figures on a pass — the operator approves a number, not a word", () => {
     const g = size("medium", true, "replicaset");
     const q = seedQuota("medium", { postgresql: true, mongodb: "replicaset" });

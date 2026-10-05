@@ -30,6 +30,7 @@ export async function consumerComposition(
 const compositionOf = (entry: ConsumerRegistration | undefined): UnitComposition => ({
   postgresql: (entry?.services ?? []).includes("postgresql"),
   mongodb: entry?.mongodb ?? "shared",
+  redis: entry?.redis ?? "shared",
 });
 
 /** What a consumer resize writes beside the quota: the application's size, each data part's — the one

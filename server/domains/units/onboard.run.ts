@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { MongodbModeSchema } from "#unit/shared/unit-size.ts";
+import { MongodbModeSchema, RedisModeSchema } from "#unit/shared/unit-size.ts";
 import { UnitSizeSchema, DEFAULT_UNIT_SIZE } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
@@ -8,7 +8,7 @@ import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema } from "../../../shared/gates.ts";
-import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, RedisMaxmemoryPolicySchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { activateStep } from "./onboard-activate.ts";
@@ -20,6 +20,7 @@ import { awaitUnitFencesStep } from "./onboard-await-unit-fences.ts";
 import { seedRepoPatStep } from "#unit/server/seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
+import { seedRedisInstanceStep } from "./onboard-seed-redis.ts";
 import {
   attestTargetStep, seedSecretsStep, provisionRepoCredentialStep,
   provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
@@ -116,6 +117,11 @@ export const DeployableOnboardParams = BuildParamsBase.extend({
   // missingkey=error; a manifest expressing no preference lands on the cluster's shared replica set
   // and costs the consumer nothing.
   mongodb: MongodbModeSchema.default("shared"),
+  // HOW this consumer runs Redis, and its own server's maxmemory policy, frozen from its manifest at
+  // plan: a Redis of its own adds a part to the quota, a claim the seed step writes the credential of,
+  // and a source the appset renders.
+  redis: RedisModeSchema.default("shared"),
+  redisMaxmemoryPolicy: RedisMaxmemoryPolicySchema.optional(),
   // The SIZE of the unit — the namespace ceiling it is sold, and the size its databases are rendered
   // at, because a unit has exactly one. Frozen at plan as a NAME; write-registration resolves it to
   // figures against the size table as it commits, so a plan that waited for approval across a table
@@ -230,6 +236,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // positioned here for the same reason — the leaf must exist before ArgoCD syncs the instance,
     // because the mongo image creates its root user from it at first init and never again.
     seedMongodbInstanceStep(ports, p),
+    seedRedisInstanceStep(ports, p),
     seedRepoPatStep(ports, p),
     // The provisioning block: the TWO per-unit objects the Manager still writes outside any chart.
     // The ArgoCD repository credential, because its value is a PAT and no chart may carry one; and
@@ -556,6 +563,8 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         // registration is the outward projection and a consumer that changes its mind later must
         // not need its registration rewritten twice.
         mongodb: outcome.report.manifest?.mongodb ?? "shared",
+        redis: outcome.report.manifest?.redis ?? "shared",
+        ...(outcome.report.manifest?.redisMaxmemoryPolicy ? { redisMaxmemoryPolicy: outcome.report.manifest.redisMaxmemoryPolicy } : {}),
         // The namespace ceiling, from the operator's request — deliberately NOT from the manifest, so
         // a consumer cannot declare the ceiling it is bounded by.
         size: req.size,

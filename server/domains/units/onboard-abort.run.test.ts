@@ -57,7 +57,7 @@ const CHART_PINS = `builds:\n  - name: acme-api\n    image: acme-api\n    tag: "
 /** The deployable manifest with ONE platform-minted secret — enough for seed-secrets to make a real
  *  create, which is what arms the ceremony-secret inverse. */
 const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const,
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const,
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [],
   // In the zod output shape (key, required, generate) — the check step holds the frozen params
@@ -111,12 +111,14 @@ class FakeSeeder implements VaultSeeder {
   async patchApp(): Promise<void> {}
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: true }; }
   async refreshBuildRepoPat(): Promise<void> {}
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
   async deleteApp(i: AppSecretsDeleteInput): Promise<void> { this.deletedApp.push(i); }
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
   async deleteMongodb(): Promise<void> {}
+  async deleteRedis(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
