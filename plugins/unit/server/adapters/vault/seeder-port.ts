@@ -172,6 +172,23 @@ export interface RedisSecretDeleteInput {
   consumerName: string;
 }
 
+/** The root password a per-consumer MariaDB instance is initialised with (MARIADB_ROOT_PASSWORD),
+ *  written create-only to secret/<stage>/consumer/<consumerName>/mariadb. Write-only: the mariadb
+ *  image at first start and ESO are its readers. */
+export interface MariadbSeedInput {
+  stage: Stage;
+  consumerName: string;
+  /** The minted 32-byte-hex root password (mintMariadbRootPassword). */
+  password: string;
+}
+
+/** The offboard inverse of `seedMariadb`: metadata-delete of `<stage>/consumer/<consumerName>/mariadb`
+ *  (ALL versions), unconditional and 404-tolerant for the reasons MongodbSecretDeleteInput states. */
+export interface MariadbSecretDeleteInput {
+  stage: Stage;
+  consumerName: string;
+}
+
 /** What the create-only seed actually did. Value-FREE: the seeder never learns, and never reports,
  *  a stored secret — only whether this run was the one that created the entry. */
 export interface VaultSeedOutcome {
@@ -258,6 +275,10 @@ export interface VaultSeeder {
    *  a Redis of the consumer's own; an existing entry is never overwritten (`created: false`), so a
    *  re-onboard onto a surviving data volume boots with the password its clients hold. */
   seedRedis(input: RedisSeedInput): Promise<VaultSeedOutcome>;
+  /** Create the per-consumer MariaDB root password — ONCE (cas=0). Written iff the manifest claims
+   *  mariadb; an existing entry is never overwritten (`created: false`), so a re-onboard onto a
+   *  surviving data volume keeps the root password the database was initialised with. */
+  seedMariadb(input: MariadbSeedInput): Promise<VaultSeedOutcome>;
   /** Write the unit's build repo PAT to secret/build/<name>/repo-pat — ONCE (cas=0). An existing
    *  entry is ATTESTED, never overwritten (`created: false`): the seven hand-seeded platform units
    *  re-run the onboard run kind over a path that already stands, and the cas conflict is exactly the
@@ -292,6 +313,8 @@ export interface VaultSeeder {
   deleteMongodb(input: MongodbSecretDeleteInput): Promise<void>;
   /** Metadata-delete the per-consumer Redis instance password (RedisSecretDeleteInput). */
   deleteRedis(input: RedisSecretDeleteInput): Promise<void>;
+  /** Metadata-delete the per-consumer MariaDB root password (MariadbSecretDeleteInput). */
+  deleteMariadb(input: MariadbSecretDeleteInput): Promise<void>;
   /** Create the tenant's crypto entry — ONCE (cas=0). An existing entry is never overwritten
    *  (`created: false`), which is what makes a re-run of create-tenant safe: the values are re-minted
    *  on every run (the mint is unconditional), so a blind overwrite would rotate a LIVE tenant's

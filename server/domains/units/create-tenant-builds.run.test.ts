@@ -104,10 +104,10 @@ function fakeTenantSeeder(): VaultSeeder {
   return {
     seed: () => Promise.reject(new Error("a tenant run never seeds a consumer entry")),
     patchApp: async () => undefined,
-    seedPostgres: () => Promise.reject(new Error("no")), seedMongodb: () => Promise.reject(new Error("no")), seedRedis: () => Promise.reject(new Error("no")),
+    seedPostgres: () => Promise.reject(new Error("no")), seedMongodb: () => Promise.reject(new Error("no")), seedRedis: () => Promise.reject(new Error("no")), seedMariadb: () => Promise.reject(new Error("no")),
     seedBuildRepoPat: () => Promise.reject(new Error("a tenant run never seeds a repo pat itself")),
     refreshBuildRepoPat: () => Promise.reject(new Error("a tenant run never refreshes a repo pat itself")),
-    deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {},
+    deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
     seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {},
   };
 }

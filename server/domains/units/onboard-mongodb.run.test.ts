@@ -70,6 +70,7 @@ class RecordingSeeder {
   seeded: MongodbSeedInput[] = [];
   async seedMongodb(i: MongodbSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: true }; }
   async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedMariadb(): Promise<VaultSeedOutcome> { return { created: true }; }
 }
 
 function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {

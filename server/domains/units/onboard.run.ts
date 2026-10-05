@@ -21,6 +21,7 @@ import { seedRepoPatStep } from "#unit/server/seed-repo-pat.ts";
 import { seedPostgresSuperuserStep } from "./onboard-seed-postgres.ts";
 import { seedMongodbInstanceStep } from "./onboard-seed-mongodb.ts";
 import { seedRedisInstanceStep } from "./onboard-seed-redis.ts";
+import { seedMariadbInstanceStep } from "./onboard-seed-mariadb.ts";
 import {
   attestTargetStep, seedSecretsStep, provisionRepoCredentialStep,
   provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
@@ -237,6 +238,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // because the mongo image creates its root user from it at first init and never again.
     seedMongodbInstanceStep(ports, p),
     seedRedisInstanceStep(ports, p),
+    seedMariadbInstanceStep(ports, p),
     seedRepoPatStep(ports, p),
     // The provisioning block: the TWO per-unit objects the Manager still writes outside any chart.
     // The ArgoCD repository credential, because its value is a PAT and no chart may carry one; and

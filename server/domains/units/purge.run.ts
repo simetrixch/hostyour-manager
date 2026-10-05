@@ -452,7 +452,11 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           stage: t.stage,
           consumerName: t.name,
         });
-        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${t.stage}/consumer/${t.name}/{postgres,mongodb,redis} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
+        await ports.seeder.deleteMariadb({
+          stage: t.stage,
+          consumerName: t.name,
+        });
+        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${t.stage}/consumer/${t.name}/{postgres,mongodb,redis,mariadb} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
       },
     },
     {

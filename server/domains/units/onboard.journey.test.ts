@@ -32,7 +32,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
-const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
+const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedMariadb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
@@ -166,7 +166,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
     const planned = getRun(db.db, runId);
     expect(planned?.status).toBe("planned");
     expect(planned?.steps.map((s) => s.name)).toEqual([
-      "attest-target", "preflight-scopes", "check", "record-provisional", "clear-leftover-branch", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-redis-instance", "seed-repo-pat",
+      "attest-target", "preflight-scopes", "check", "record-provisional", "clear-leftover-branch", "write-registration", "seed-secrets", "seed-postgres-superuser", "seed-mongodb-instance", "seed-redis-instance", "seed-mariadb-instance", "seed-repo-pat",
       "provision-repo-credential", "await-build-namespace", "provision-smtp-ops-grant", "provision-dns",
       "inject-release-kit", "setup-webhook", "await-unit-fences", "trigger-release", "watch-release-build", "watch-deployment",
       "smoke", "record-inventory",
@@ -223,6 +223,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
       async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedMariadb(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }
   async refreshBuildRepoPat(): Promise<void> {}
       async deleteBuildRepoPat(): Promise<void> {}
@@ -230,6 +231,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
       async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
   async deleteRedis(): Promise<void> {}
+  async deleteMariadb(): Promise<void> {}
       async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
       async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }

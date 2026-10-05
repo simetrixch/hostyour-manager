@@ -392,7 +392,11 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
           stage: ac.stage,
           consumerName: ac.name,
         });
-        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${ac.stage}/consumer/${ac.name}/{postgres,mongodb,redis} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
+        await ports.seeder.deleteMariadb({
+          stage: ac.stage,
+          consumerName: ac.name,
+        });
+        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${ac.stage}/consumer/${ac.name}/{postgres,mongodb,redis,mariadb} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
       },
     },
     {

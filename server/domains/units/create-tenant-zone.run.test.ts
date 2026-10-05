@@ -74,7 +74,7 @@ function seedClusters(): void {
 
 function seeder(): VaultSeeder {
   const no = () => Promise.reject(new Error("not in this test"));
-  return { seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedRedis: no, seedBuildRepoPat: no, refreshBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
+  return { seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedRedis: no, seedMariadb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
 }
 
 function ports(dns: FakeDnsProvider | undefined, store = new FakeObjectStore()): TenantOnboardPorts {

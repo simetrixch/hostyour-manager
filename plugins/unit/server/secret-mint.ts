@@ -55,6 +55,13 @@ export function mintRedisPassword(): string {
   return randomBytes(32).toString("hex");
 }
 
+/** The root password a per-consumer MariaDB is initialised with: 32 random bytes as hex, the shape of
+ *  the database passwords above, which needs no escaping inside a MARIADB_ROOT_PASSWORD or a client's
+ *  --password option. */
+export function mintMariadbRootPassword(): string {
+  return randomBytes(32).toString("hex");
+}
+
 /** The keyfile a MongoDB REPLICA SET authenticates its own members with (--keyFile). MongoDB accepts
  *  6 to 1024 characters from the base64 alphabet and nothing else, so this is base64 TEXT and not
  *  hex: 756 random bytes is what the upstream documentation's `openssl rand -base64 756` produces,

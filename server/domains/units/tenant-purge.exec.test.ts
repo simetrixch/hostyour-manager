@@ -81,6 +81,7 @@ class FakePurgeSeeder implements VaultSeeder {
   async seedPostgres(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds postgres"); }
   async seedMongodb(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds mongodb"); }
   async seedRedis(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds redis"); }
+  async seedMariadb(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds mariadb"); }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds a repo pat"); }
   async refreshBuildRepoPat(): Promise<void> { throw new Error("purge never refreshes a repo pat"); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds tenant crypto"); }
@@ -93,6 +94,7 @@ class FakePurgeSeeder implements VaultSeeder {
   async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
   async deleteRedis(): Promise<void> {}
+  async deleteMariadb(): Promise<void> {}
 }
 
 function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePorts {

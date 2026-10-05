@@ -112,6 +112,7 @@ class FakeSeeder implements VaultSeeder {
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedMariadb(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(i: BuildRepoPatSeedInput): Promise<VaultSeedOutcome> { this.buildRepoPats.push(i); return { created: true }; }
   async refreshBuildRepoPat(): Promise<void> {}
   async deleteBuildRepoPat(i: BuildRepoPatDeleteInput): Promise<void> { this.deletedBuildRepoPats.push(i); }
@@ -119,6 +120,7 @@ class FakeSeeder implements VaultSeeder {
   async deletePostgres(i: PostgresSecretDeleteInput): Promise<void> { this.deletedPostgres.push(i); }
   async deleteMongodb(): Promise<void> {}
   async deleteRedis(): Promise<void> {}
+  async deleteMariadb(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
