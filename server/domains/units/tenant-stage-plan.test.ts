@@ -221,6 +221,22 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.simetrix.ch", ["www.show.test.simetrix.ch"], "veloluck.show.test.simetrix.ch"]);
   });
 
+  it("PLANTED DEFECT: refuses a stage for a domain whose zone cannot be read, and never takes its last two labels for one", async () => {
+    const p = stagePorts();
+    const current = (await p.registrations.readTenant("prod", GUID))!.entry;
+    const entry = TenantRegistrationSchema.parse({ ...current, routing: "path", ownDomain: "show.simetrix.ch", ownDomainRedirects: [], quota: seedQuota("small") });
+    const books = new FakePlatformRepo();
+    const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
+    p.registrations = new TenantRegistrations(books);
+    const plan = () => makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const unheld = new FakeDnsProvider();
+    unheld.unmanaged = ["simetrix.ch"];
+    p.dns = unheld;
+    await expect(plan()).rejects.toThrow(/no zone of this installation's DNS provider holds show\.simetrix\.ch, so the zone of show\.simetrix\.ch, and with it its host at test, cannot be read/);
+    delete p.dns;
+    await expect(plan()).rejects.toThrow(/no DNS provider is configured on this manager, so the zone of show\.simetrix\.ch, and with it its host at test, cannot be read/);
+  });
+
   it("preserves custom website composition while stage-scoping every public host, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;

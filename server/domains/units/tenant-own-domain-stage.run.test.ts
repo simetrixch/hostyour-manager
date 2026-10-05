@@ -27,6 +27,15 @@ describe("tenant-set-own-domain and the stage rule", () => {
     expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "show.test.simetrix.ch", previousAliases: ["test.show.simetrix.ch"] })).status).toBe("planned");
   });
 
+  it("PLANTED INNOCENT: plans a request that sends a standing alias of the old shape again, the domain unchanged", async () => {
+    const h = await make({ stage: "test", ownDomain: "show.test.simetrix.ch" });
+    h.dns.zones = ["simetrix.ch"];
+    h.db.db.update(tenants).set({ ownDomainAliases: ["test.show.simetrix.ch"] }).where(eq(tenants.id, "tnt_1")).run();
+    // The dialog sends the standing list back as it is; nothing in it is typed now.
+    const resent = await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "show.test.simetrix.ch", ownDomainAliases: ["test.show.simetrix.ch"], previousAliases: ["test.show.simetrix.ch"] });
+    expect(resent.status).toBe("planned");
+  });
+
   it("refuses at prod an own domain with a stage label before its zone, and leaves a domain whose zone is held elsewhere unjudged", async () => {
     const h = await make({ unmanaged: ["elsewhere.example"] });
     h.dns.zones = ["simetrix.ch"];
