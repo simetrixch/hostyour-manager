@@ -97,7 +97,9 @@ describe("tenant-set-own-domain through the Executor", () => {
     const regDomain = async (): Promise<string | undefined> => (await reg.readTenant("prod", GUID))?.entry.ownDomain;
     const rowRedirects = (): string[] | undefined => db.db.select({ r: tenants.ownDomainRedirects }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.r;
     const regRedirects = async (): Promise<string[] | undefined> => (await reg.readTenant("prod", GUID))?.entry.ownDomainRedirects;
-    return { db, reg, dns, probe, executor, rowDomain, regDomain, rowRedirects, regRedirects };
+    const rowAliases = (): string[] | undefined => db.db.select({ a: tenants.ownDomainAliases }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.a;
+    const regAliases = async (): Promise<string[]> => (await reg.readTenant("prod", GUID))?.entry.ownDomainAliases ?? [];
+    return { db, reg, dns, probe, executor, rowDomain, regDomain, rowRedirects, regRedirects, rowAliases, regAliases };
   }
 
   /** The streamed plan the route starts, settled: its run, status and summary, and its log, which says
@@ -109,7 +111,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     return { runId, status: run?.status, summary: run?.summary ?? "", error: readEvents(h.db.db, runId).map((e) => e.text).join("\n") };
   }
 
-  async function move(h: Awaited<ReturnType<typeof make>>, ownDomain: string, previous: string, redirects: { ownDomainRedirects?: string[]; previousRedirects?: string[] } = {}): Promise<string> {
+  async function move(h: Awaited<ReturnType<typeof make>>, ownDomain: string, previous: string, redirects: { ownDomainRedirects?: string[]; previousRedirects?: string[]; ownDomainAliases?: string[]; previousAliases?: string[] } = {}): Promise<string> {
     const { runId } = await plan(h, { ownDomain, previous, ...redirects });
     await h.executor.approve(runId);
     await h.executor.settle(runId);
@@ -150,12 +152,66 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(planned.summary).toContain(`Move tenant ${GUID} from ${OWN} to ${BARE}`);
     expect(planned.summary).toContain("so every user of the tenant signs in once more");
     expect(planned.summary).not.toContain("remove the records of");
-    await h.executor.approve(planned.runId);
-    await h.executor.settle(planned.runId);
+    await h.executor.approve(planned.runId); await h.executor.settle(planned.runId);
     expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
     expect([h.rowDomain(), await h.regDomain(), h.rowRedirects(), await h.regRedirects()]).toEqual([BARE, BARE, [OWN], [OWN]]);
     expect([h.dns.upserts, h.dns.creates, h.dns.deletes]).toEqual([[], [], []]);
     expect(h.probe.probed).toEqual([idpAt(BARE), `https://${OWN}/`]);
+  });
+
+  it("keeps the domain it moves from as redirect hosts: no record of the previous hosts is removed", async () => {
+    const NEXT = "www.next.test";
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [NEXT], redirecting: [OWN, BARE] });
+    for (const host of [OWN, BARE]) {
+      h.dns.seed(host, "CNAME", ZONE);
+      recordDnsWrite(h.db.db, { name: host, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
+    }
+    const planned = await plan(h, { ownDomain: NEXT, previous: OWN, previousRedirects: [BARE] });
+    expect(planned.summary).not.toContain("remove the records of");
+    await h.executor.approve(planned.runId);
+    await h.executor.settle(planned.runId);
+    expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
+    // www.customer.test and customer.test are the one alias customer.test, with its www.
+    expect([h.rowRedirects(), await h.regRedirects()]).toEqual([[], []]);
+    expect([h.rowAliases(), await h.regAliases()]).toEqual([[BARE], [BARE]]);
+    expect(h.dns.deletes).toEqual([]);
+    expect([h.dns.record(OWN, "CNAME"), h.dns.record(BARE, "CNAME"), h.dns.record(NEXT, "CNAME")]).toEqual([ZONE, ZONE, ZONE]);
+  });
+
+  it("names the mail records beside its hosts in the plan, and refuses to write where one changed since", async () => {
+    const h = await make({ answers: [OWN], redirecting: [BARE] });
+    h.dns.seed(BARE, "MX", "10 mx.mail.test");
+    h.dns.seed(BARE, "TXT", "v=spf1 include:mail.test -all");
+    h.dns.seed(`_dmarc.${BARE}`, "TXT", "v=DMARC1; p=reject"); h.dns.seed(`autodiscover.${BARE}`, "CNAME", "autodiscover.mail.test");
+    const planned = await plan(h, { ownDomain: OWN, ownDomainRedirects: [BARE], previous: "" });
+    expect(planned.summary).toMatch(/leaves the mail records beside them as they stand: MX customer\.test \(SHA-256 [0-9a-f]{12}\), TXT customer\.test \(SHA-256 [0-9a-f]{12}\), TXT _dmarc\.customer\.test \(SHA-256 [0-9a-f]{12}\), CNAME autodiscover\.customer\.test/);
+    h.dns.seed(BARE, "MX", "10 mx.elsewhere.test");
+    await h.executor.approve(planned.runId); await h.executor.settle(planned.runId);
+    expect(getRun(h.db.db, planned.runId)?.status).toBe("failed");
+    expect(readEvents(h.db.db, planned.runId).map((e) => e.text).join("\n")).toMatch(/the MX records at customer\.test changed since this run was planned/);
+    expect(h.dns.upserts).toEqual([]);
+  });
+
+  it("sets alias domains: a record at each and its www., a redirect awaited at each, and dropping one removes only its records", async () => {
+    const ALIAS = "simetrix.de";
+    const h = await make({ ownDomain: OWN, answers: [OWN], redirecting: [ALIAS, `www.${ALIAS}`] });
+    h.dns.seed(OWN, "CNAME", ZONE);
+    expect(getRun(h.db.db, await move(h, OWN, OWN, { ownDomainAliases: [ALIAS] }))?.status).toBe("succeeded");
+    expect([h.dns.record(ALIAS, "CNAME"), h.dns.record(`www.${ALIAS}`, "CNAME")]).toEqual([ZONE, ZONE]);
+    expect([h.rowAliases(), await h.regAliases(), h.rowRedirects()]).toEqual([[ALIAS], [ALIAS], []]);
+    const dropped = await move(h, OWN, OWN, { previousAliases: [ALIAS] });
+    expect(getRun(h.db.db, dropped)?.status).toBe("succeeded");
+    expect([h.dns.record(ALIAS, "CNAME"), h.dns.record(`www.${ALIAS}`, "CNAME"), h.dns.record(OWN, "CNAME")]).toEqual([undefined, undefined, ZONE]);
+    expect((await h.reg.readTenant("prod", GUID))?.entry).not.toHaveProperty("ownDomainAliases");
+  });
+
+  it("REFUSES an alias that is the domain or a redirect host, one named twice, and making an alias the own domain directly", async () => {
+    const h = await make({ ownDomain: OWN });
+    const refusal = async (request: Record<string, unknown>) => (await plan(h, { previous: OWN, ...request })).error;
+    expect(await refusal({ ownDomain: OWN, ownDomainAliases: ["customer.test"] })).toMatch(/already the own domain or a redirect host/);
+    expect(await refusal({ ownDomain: OWN, ownDomainAliases: ["a.test", "a.test"] })).toMatch(/named twice/);
+    h.db.db.update(tenants).set({ ownDomainAliases: ["simetrix.de"] }).where(eq(tenants.id, "tnt_1")).run();
+    expect(await refusal({ ownDomain: "simetrix.de", previousAliases: ["simetrix.de"] })).toMatch(/drop the alias in one run/);
   });
 
   it("does not take a 2xx for a redirect host: it must answer the redirect itself", async () => {
@@ -180,15 +236,14 @@ describe("tenant-set-own-domain through the Executor", () => {
 
   it("an abort after a failed redirect wait removes the new redirect host's record and records the previous hosts again", async () => {
     const h = await make({ answers: [OWN] });
-    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE], ownDomainAliases: ["simetrix.de"] });
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(h.dns.record(BARE, "CNAME")).toBe(ZONE);
+    expect([h.dns.record(BARE, "CNAME"), h.rowAliases()]).toEqual([ZONE, ["simetrix.de"]]);
     await h.executor.abortWithCleanup(runId);
     await h.executor.settle(runId);
     expect(h.dns.record(BARE, "CNAME")).toBeUndefined();
     expect(h.dns.record(OWN, "CNAME")).toBeUndefined();
-    expect(h.rowRedirects()).toEqual([]);
-    expect(await h.regRedirects()).toEqual([]);
+    expect([h.rowRedirects(), await h.regRedirects(), h.rowAliases(), await h.regAliases(), h.dns.record("simetrix.de", "CNAME")]).toEqual([[], [], [], [], undefined]);
   });
 
   it("REFUSES redirect hosts without a domain, twice named, equal to the domain, in the platform's name space, or another tenant's", async () => {
@@ -259,15 +314,14 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(h.rowDomain()).toBe(OWN);
   });
 
-  it("switches: the previous domain's record goes only after the new host answers", async () => {
-    const h = await make({ ownDomain: OWN, answers: [OTHER] });
+  it("clears: the previous domain's record goes only after the zone answers", async () => {
+    const h = await make({ ownDomain: OWN, answers: [ZONE] });
     h.dns.seed(OWN, "CNAME", ZONE);
     recordDnsWrite(h.db.db, { name: OWN, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
-    const runId = await move(h, OTHER, OWN);
+    const runId = await move(h, "", OWN);
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
-    expect(h.dns.record(OTHER, "CNAME")).toBe(ZONE);
     expect(h.dns.record(OWN, "CNAME")).toBeUndefined();
-    expect(h.rowDomain()).toBe(OTHER);
+    expect(h.rowDomain()).toBe("");
   });
 
   it("an abort after the failed wait records the previous domain again and removes the new domain's record", async () => {
@@ -288,7 +342,7 @@ describe("tenant-set-own-domain through the Executor", () => {
   it("REFUSES the abort once the previous domain's record is gone, and leaves the run as it was", async () => {
     const h = await make({ ownDomain: OWN });
     h.dns.seed(OWN, "CNAME", ZONE);
-    const runId = await move(h, OTHER, OWN);
+    const runId = await move(h, "", OWN);
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
     await h.dns.deleteRecord({ name: OWN, type: "CNAME" });
     await expect(h.executor.abortWithCleanup(runId)).rejects.toThrow(/is gone/);

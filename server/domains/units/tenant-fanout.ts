@@ -68,9 +68,10 @@ export interface AppRef {
   name: string;
   /** The app folder the app runs, where it is not the folder of its own name: a website's. */
   folder?: string;
-  /** A website's site and domain (TenantAppSchema). */
+  /** A website's site, domain and alias domains (TenantAppSchema). */
   site?: string;
   domain?: string;
+  aliases?: readonly string[];
   databases?: readonly string[];
 }
 
@@ -107,6 +108,8 @@ export const FOLDER_TOKEN = "{folder}";
 export const SITE_TOKEN = "{site}";
 export const DOMAIN_TOKEN = "{domain}";
 export const DATABASES_TOKEN = "{databases}";
+/** A website's alias domains, as `{databases}` is a list: dropped with its key where it has none. */
+export const ALIASES_TOKEN = "{aliases}";
 
 /** The tenant's own identity provider — the member the whole tenant authenticates against, so a
  *  caller that needs THAT member rather than the set can name it: the bootstrap-token Secret lives in
@@ -180,6 +183,7 @@ function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSou
   const DROPPED = Symbol("dropped");
   const walk = (v: unknown): unknown => {
     if (app !== undefined && v === DATABASES_TOKEN) return app.databases === undefined ? DROPPED : [...app.databases];
+    if (app !== undefined && v === ALIASES_TOKEN) return app.aliases?.length ? [...app.aliases] : DROPPED;
     if (app !== undefined && ((v === SITE_TOKEN && app.site === undefined) || (v === DOMAIN_TOKEN && app.domain === undefined))) return DROPPED;
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return v.map(walk);

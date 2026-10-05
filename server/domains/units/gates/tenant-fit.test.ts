@@ -32,7 +32,7 @@ describe("T5 size fit (hard)", () => {
     expect(g.severity).toBe("hard");
     expect(g.reason).toContain(`member "website" needs requests 400m/768Mi, limits 4/3Gi, 4 pod(s)`);
     expect(g.reason).toContain("limits cpu, limits memory");
-    expect(g.reason).toContain("requests 100m/576Mi, limits 2/2Gi, 8 pod(s)");
+    expect(g.reason).toContain("requests 110m/640Mi, limits 2100m/2112Mi, 9 pod(s)");
   });
 
   it("REFUSES the XS shapes while the init container declares nothing: counted at the default, the requests no longer fit", () => {
@@ -44,6 +44,13 @@ describe("T5 size fit (hard)", () => {
     const g = gateT5Fit([atXs], XS);
     expect(g.status).toBe("pass");
     expect(g.found).toContain("website: requests 100m/576Mi, limits 2/1792Mi, 4 pod(s)");
+  });
+
+  it("REFUSES a member that fits twice but leaves no room for cert-manager's solver pod", () => {
+    // The XS row before the solver's room: the member alone fits it exactly.
+    const g = gateT5Fit([atXs], { requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 });
+    expect(g.status).toBe("fail");
+    expect(g.reason).toContain("and one cert-manager solver pod (requests 10m/64Mi, limits 100m/64Mi, 1 pod(s)), above the quota in requests cpu, requests memory");
   });
 
   it("REFUSES a main container that declares no requests, naming it", () => {

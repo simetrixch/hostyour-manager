@@ -78,10 +78,15 @@ export function issuerAddressHost(issuer: string): string | null {
   return url.pathname === "/" ? url.host : null;
 }
 
-/** Every host a tenant answers at beside its zone: its own domain and the hosts that redirect to it;
- *  none without an own domain. */
-export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly string[]): string[] {
-  return ownDomain === "" ? [] : [ownDomain, ...ownDomainRedirects];
+/** Every host a tenant answers at beside its zone: its own domain, the hosts that redirect to it, and
+ *  its alias domains with their `www.`; none without an own domain. */
+export function tenantOwnHosts(ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[] = []): string[] {
+  return ownDomain === "" ? [] : [...new Set([ownDomain, ...ownDomainRedirects, ...aliasHosts(ownDomainAliases)])];
+}
+
+/** The hosts alias domains answer at: each alias, typed without `www.`, and its `www.`. */
+export function aliasHosts(aliases: readonly string[]): string[] {
+  return aliases.flatMap((a) => [a, `www.${a}`]);
 }
 
 /** The own hosts an operator's domain entry gives a tenant: the domain is typed without `www.`, the

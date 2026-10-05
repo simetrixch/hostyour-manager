@@ -149,6 +149,17 @@ describe("resolveMembers — the ONE resolution the registration records and the
     expect(resolveMembers(withToken, []).find((x) => x.name === "idp")!.sources[0]!.values).toEqual({ note: "literal {app}" });
   });
 
+  it("fills {aliases} with a website's alias domains, and drops the key where it has none", () => {
+    const spec = TenantSpecSchema.parse({
+      members: [{ name: "idp", chart: "charts/x", identityProvider: true }],
+      perApp: { engine: { chart: "charts/e" }, front: { chart: "charts/f", values: { site: { domain: "{domain}", aliases: "{aliases}" } } } },
+    });
+    const site = (a: AppRef) => resolveMembers(spec, [a]).find((x) => x.name === a.name)!.sources[1]!.values;
+    expect(site({ name: "home", domain: "simplidigita.ai", aliases: ["simetrix.ch", "simetrix.de"] })).toEqual({ site: { domain: "simplidigita.ai", aliases: ["simetrix.ch", "simetrix.de"] } });
+    expect(site({ name: "home", domain: "simplidigita.ai", aliases: [] })).toEqual({ site: { domain: "simplidigita.ai" } });
+    expect(site({ name: "home", domain: "simplidigita.ai" })).toEqual({ site: { domain: "simplidigita.ai" } });
+  });
+
   it("fills {databases} with the app's list where it declares one, and drops the key — and every object left empty by it — where it does not", () => {
     const withList = TenantSpecSchema.parse({
       members: [{ name: "idp", chart: "charts/x", identityProvider: true, values: { note: "literal {databases}" } }],

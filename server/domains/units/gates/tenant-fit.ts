@@ -1,6 +1,7 @@
 // T5 — the tenant's size fits its members' pods TWICE: each member namespace's ResourceQuota holds every
 // pod its rendered workloads run, and a rolling update's surge on top, so a Versions or Set size run
-// cannot leave a member whose next rollout the quota refuses.
+// cannot leave a member whose next rollout the quota refuses. One cert-manager solver pod (CERT_SOLVER)
+// is counted on top: it stands in the namespace while a certificate is issued or renewed.
 //
 // What a pod costs is what the quota admits it at: per resource, the larger of its main containers' sum
 // and its largest init container (init containers run one at a time, before the main ones). A main
@@ -8,7 +9,7 @@
 // the LimitRange default, which is no size anyone chose. An init container that does not is counted at
 // that default and named, until the charts declare them too.
 import type { GateResult } from "../../../../shared/gates.ts";
-import type { UnitQuota } from "#unit/shared/unit-size.ts";
+import { CERT_SOLVER, type UnitQuota } from "#unit/shared/unit-size.ts";
 import { addCpu, addMemory, cpuMillis, memoryBytes } from "#unit/shared/quantity.ts";
 import { capGateText } from "#unit/server/unit-host-gate.ts";
 import type { MemberDocs } from "./tenant-gates.ts";
@@ -93,15 +94,17 @@ export function gateT5Fit(docsByMember: readonly MemberDocs[], quota: UnitQuota)
   const quotaText = figures(ceiling, quota.pods);
   const expected =
     `every member namespace's pods fit its quota (${quotaText}) with a rolling update's surge on top: each Deployment at its replicas ` +
-    `plus maxSurge, each StatefulSet at its replicas, each pod at the larger of its containers' sum and its largest init container; ` +
+    `plus maxSurge, each StatefulSet at its replicas, each pod at the larger of its containers' sum and its largest init container, ` +
+    `and one cert-manager solver pod; ` +
     `every main container declares its requests and limits`;
   const fits = docsByMember.map(fitOf);
+  const solver = Object.fromEntries(FIGURES.map((f) => [f, amount(f, CERT_SOLVER[f])])) as Cost;
   const failures = fits.flatMap((f) => {
-    const over = FIGURES.filter((g) => f.sum[g] > ceiling[g]).map((g) => g.replace(/([A-Z])/, " $1").toLowerCase());
-    if (f.pods > quota.pods) over.push("pods");
+    const over = FIGURES.filter((g) => f.sum[g] + solver[g] > ceiling[g]).map((g) => g.replace(/([A-Z])/, " $1").toLowerCase());
+    if (f.pods + CERT_SOLVER.pods > quota.pods) over.push("pods");
     return [
       ...f.problems.map((p) => `member "${f.member}": ${p}`),
-      ...(over.length > 0 ? [`member "${f.member}" needs ${figures(f.sum, f.pods)}, above the quota in ${over.join(", ")}`] : []),
+      ...(over.length > 0 ? [`member "${f.member}" needs ${figures(f.sum, f.pods)} and one cert-manager solver pod (${figures(solver, CERT_SOLVER.pods)}), above the quota in ${over.join(", ")}`] : []),
     ];
   });
   const found = capGateText(fits.map((f) => `${f.member}: ${figures(f.sum, f.pods)}${f.notes.length > 0 ? ` (${f.notes.join("; ")})` : ""}`).join("; ") || "no member renders a workload");

@@ -3,9 +3,10 @@
 // into the book of DNS writes; a host in a zone nobody here manages is named for the operator to set.
 // An address record, or a CNAME this installation did not write, standing at such a host is replaced:
 // the plan lists it, the run deletes it, and an abort writes it back.
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { and, eq, ne, notInArray } from "drizzle-orm";
-import type { StepCtx } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
@@ -45,7 +46,7 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
   const parent = nestsUnder !== undefined ? nestsUnder : (db.select({ nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get()?.nestsUnder ?? null);
   const others = db
-    .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, nestsUnder: tenants.nestsUnder })
+    .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases, nestsUnder: tenants.nestsUnder })
     .from(tenants)
     .where(and(ne(tenants.id, tenantId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .all();
@@ -56,7 +57,7 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
     `${host} ${theirs === host ? "is already" : "overlaps"} ${what} of tenant ${other} (${theirs})` +
     (host.endsWith(`.${theirs}`) ? ` — where both tenants are one owner's, confirm in Set own domain that this tenant's domain lies under tenant ${other}` : "");
   for (const o of others) {
-    const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects).find(overlaps);
+    const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects, o.ownDomainAliases).find(overlaps);
     if (theirs && !confirmed(o, theirs)) return refusal("a host", o.subdomain, theirs);
   }
   for (const w of websites) {
@@ -199,4 +200,57 @@ export async function waitForAnswer(ctx: StepCtx, ports: AnswerWaitPorts, url: s
     ctx.log("meta", `${url} does not answer with ${wanted} yet (${seen.detail}); asking again in ${Math.round(ports.routingPollMs / 1000)}s`);
     await sleep(ports.routingPollMs, ctx.signal);
   }
+}
+
+/** A mail record beside a host a run writes or removes: its name, its type, and the SHA-256 of every
+ *  content standing there (none hashes too, so a record added since the plan counts as a change). */
+export const MailRecordHash = z.object({ name: z.string().min(1), type: z.enum(["MX", "TXT", "CNAME"]), sha256: z.string().length(64) });
+export type MailRecordHash = z.infer<typeof MailRecordHash>;
+
+/** The names a mail domain's records stand at: the MX and the SPF at the domain, the DMARC policy, and
+ *  the autodiscover CNAME. A DKIM key stands at a selector only its sender knows, so it is not read. */
+function mailNames(domain: string): Pick<MailRecordHash, "name" | "type">[] {
+  return [{ name: domain, type: "MX" }, { name: domain, type: "TXT" }, { name: `_dmarc.${domain}`, type: "TXT" }, { name: `autodiscover.${domain}`, type: "CNAME" }];
+}
+
+async function hashOf(ports: RecordPorts, r: Pick<MailRecordHash, "name" | "type">, signal?: AbortSignal): Promise<string> {
+  const contents = await ports.dns!.listRecordContents({ name: r.name, type: r.type, ...(signal ? { signal } : {}) });
+  return createHash("sha256").update([...contents].sort().join("\n"), "utf8").digest("hex");
+}
+
+/** The mail records beside `hosts`, hashed: those at each host's domain (the host without `www.`). A
+ *  domain in a zone nobody here manages has none — the run writes nothing there. The plan freezes
+ *  them, and checkMailRecordsStep refuses the run where one changed since. */
+export async function mailRecordHashes(ports: RecordPorts, hosts: readonly string[], signal?: AbortSignal): Promise<MailRecordHash[]> {
+  if (!ports.dns) return [];
+  const hashes: MailRecordHash[] = [];
+  for (const domain of new Set(hosts.map((h) => h.replace(/^www\./, "")))) {
+    try {
+      for (const r of mailNames(domain)) hashes.push({ ...r, sha256: await hashOf(ports, r, signal) });
+    } catch (e) {
+      if (!(e instanceof DnsZoneUnknownError)) throw e;
+    }
+  }
+  return hashes;
+}
+
+/** The plan summary's sentence on the mail records it leaves, or "" where it reads none. */
+export function mailRecordSentence(hashes: readonly MailRecordHash[]): string {
+  if (hashes.length === 0) return "";
+  return ` It writes only CNAME records, and leaves the mail records beside them as they stand: ${hashes.map((h) => `${h.type} ${h.name} (SHA-256 ${h.sha256.slice(0, 12)})`).join(", ")} — the run refuses to start where any of them changed since this plan.`;
+}
+
+/** Before the first write: every mail record the plan hashed, read again, and the run refused where one
+ *  changed — the operator then sees what stands now in a new plan. */
+export function checkMailRecordsStep(ports: RecordPorts, hashes: readonly MailRecordHash[]): Step {
+  return {
+    name: "check-mail-records",
+    title: "Check that the mail records beside the hosts stand as planned",
+    run: async (ctx) => {
+      for (const h of hashes) {
+        if ((await hashOf(ports, h, ctx.signal)) !== h.sha256) throw errValidation(`the ${h.type} records at ${h.name} changed since this run was planned — plan it again to see what stands now`);
+      }
+      ctx.log("meta", hashes.length ? `${hashes.length} mail record set(s) stand as planned` : "no mail record beside the hosts is managed here");
+    },
+  };
 }

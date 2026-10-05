@@ -34,6 +34,13 @@ describe("POST /api/tenants/:id/websites/:app/domain", () => {
     expect(r.planned).toEqual([{ tenantId: "tnt_1", app: "example-ch", domain: "example.org" }]);
   });
 
+  it("hands the body's alias domains on, typed as the domain is, and refuses aliases that are no list", async () => {
+    const r = route();
+    expect((await r.post({ domain: "example.ch", aliases: [" Example.DE "] })).status).toBe(201);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", app: "example-ch", domain: "example.ch", aliases: ["example.de"] }]);
+    expect((await r.post({ domain: "example.ch", aliases: "example.de" })).status).toBe(400);
+  });
+
   it("refuses a body without a domain", async () => {
     const r = route();
     expect((await r.post({})).status).toBe(400);

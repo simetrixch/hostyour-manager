@@ -58,10 +58,15 @@ export function removedWebsites<R extends TenantAppRowInput>(rows: readonly R[])
  *  inventory row that names a site, is not settled and is not among them, by name and site. That is
  *  every row while the catalog has not answered (still loading, unreadable or degraded). The Apps list
  *  leaves every row with a site out, so a live website missing here would vanish from the page. */
-export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null }[] {
-  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, domain: w.domain as string | null }));
+export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null; aliases: string[] }[] {
+  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, domain: w.domain as string | null, aliases: w.aliases ?? [] }));
   const unnamed = websiteRows(rows).filter((r) => !SETTLED.includes(r.status) && !named.some((w) => w.name === r.name));
-  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null }))];
+  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null, aliases: [] }))];
+}
+
+/** The alias domains as an operator types them into one field: separated by commas or spaces. */
+export function typedAliases(text: string): string[] {
+  return text.split(/[\s,]+/).map((a) => a.trim().toLowerCase()).filter((a) => a !== "");
 }
 
 /** Why the Websites section shows no domain for a website only the inventory names, as far as the page
