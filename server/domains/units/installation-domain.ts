@@ -8,7 +8,8 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { readOnlyPlatformRepo, type PlatformRepo } from "../../adapters/git/port.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { consumerUnitHost, tenantRecordName, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
+import { websiteHosts } from "./website-domain.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
@@ -50,7 +51,7 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
   if (fromDomain === toDomain || fromDomain.endsWith(`.${toDomain}`) || toDomain.endsWith(`.${fromDomain}`)) throw errValidation("the source and target must be different, disjoint domains");
   const snapshot: InstallationDomainSnapshot = {
     fromDomain, toDomain, booksBranch: ports.platformRepo.booksBranch, clusters: [], records: [], registrations: [], tenants: [], retainedBooks: [], blockers: [],
-    coverage: { clusters: 0, consumers: 0, tenants: 0, stages: [...STAGE], persistedStores: "NOT RUN: external databases, Vault values, IdP clients and control-plane settings belong to the preceding installation phase", sessions: "NOT RUN: cross-apex refresh/session handoff remains a cutover gate", cookieDomains: "Derived from tenant own-domain/zone routing; product overrides are reported, not silently changed" },
+    coverage: { clusters: 0, consumers: 0, tenants: 0, stages: [...STAGE], persistedStores: "Not moved by this run: the census of stored values is hostyour-manager#392", sessions: "Not carried over: everyone signs in once on the new hosts", cookieDomains: "Derived from tenant own-domain/zone routing; product overrides are reported, not silently changed" },
   };
   const rows = db.select().from(clusters).where(eq(clusters.status, "active")).all();
   await ports.platformRepo.withBranch(ports.platformRepo.booksBranch, async books => {
@@ -61,11 +62,12 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
       const map = parseDocument(raw); if (map.errors.length) throw errValidation(`${mapPath} cannot be read`);
       const apex = map.getIn(["global", "unitApex"]);
       if (typeof apex !== "string" || map.getIn(["global", "domain"]) !== row.domain || map.getIn(["global", "clusterName"]) !== row.name) throw errValidation(`${mapPath} disagrees with cluster inventory`);
-      const fromFqdn = moveDomain(row.domain, toDomain, fromDomain), toFqdn = moveDomain(fromFqdn, fromDomain, toDomain);
+      // The units move ahead of the machines: the new records point at the machine where it stands
+      // now, and the machine's own rename repoints them with every other unit record.
+      const fromFqdn = moveDomain(row.domain, toDomain, fromDomain), toFqdn = row.domain;
       const apexAfter = moveDomain(apex, fromDomain, toDomain);
       if (apexAfter === apex) throw errValidation(`${mapPath} does not hold an unmoved unit apex under ${fromDomain}`);
       snapshot.clusters.push({ id: row.id, serverId: row.serverId, name: row.name, fromFqdn, toFqdn, mapPath, apexBefore: apex, apexAfter });
-      if (row.domain !== toFqdn) snapshot.blockers.push(`${row.name}: machine/control-plane phase has not placed inventory and its map at ${toFqdn}`);
     }
   });
   if (!snapshot.clusters.length) throw errValidation("no active cluster has an unmoved unit apex in the source domain");
@@ -146,14 +148,12 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
         cookieAfter: ownDomainAfter ? "" : tenantZone(entry.subdomain, stage, cluster.apexAfter),
         cookieOverrides: cookieOverrides(entry.members, fromDomain, toDomain),
         ownDomainBefore: entry.ownDomain, ownDomainAfter, redirectsBefore: entry.ownDomainRedirects, redirectsAfter });
-      const effect = snapshot.tenants.at(-1)!;
-      if (effect.issuerBefore !== effect.issuerAfter || effect.cookieBefore !== effect.cookieAfter || effect.cookieOverrides.some(c => c.before !== c.after)) snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: cross-apex issuer/cookie session handoff is not verified`);
       snapshot.coverage.tenants++;
       await addRecord(tenantRecordName(entry.routing, entry.subdomain, stage, cluster.apexBefore), "CNAME", cluster.fromFqdn, cluster.toFqdn, owner);
       const marks = book.filter(w => w.type === "TXT" && w.name.startsWith("_") && w.owner.kind === "tenant" && w.owner.name === pointer.guid && w.owner.stage === stage);
       if (!marks.length) snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: no booked identity-provider mark`);
       for (const mark of marks) await addRecord(mark.name, "TXT", mark.content, movePublicAddress(mark.content, fromDomain, toDomain), owner);
-      for (const host of [entry.ownDomain, ...entry.ownDomainRedirects, ...entry.apps.flatMap(a => a.domain ? [a.domain, `www.${a.domain}`] : [])].filter(Boolean)) {
+      for (const host of new Set([...tenantOwnHosts(entry.ownDomain, entry.ownDomainRedirects, entry.ownDomainAliases), ...entry.apps.flatMap(a => a.domain ? websiteHosts(a.domain, a.aliases) : [])])) {
         // External web hosts retain their record names; only an installation-zone target is repointed.
         const target = tenantZone(entry.subdomain, stage, cluster.apexBefore);
         await addRecord(host, "CNAME", target, moveDomain(target, fromDomain, toDomain), owner);
@@ -186,6 +186,10 @@ export async function applyInstallationDomain(ctx: StepCtx, optional: Installati
         if (map.errors.length || (standing !== before && standing !== after) || map.getIn(["global", "clusterName"]) !== cluster.name || map.getIn(["global", "domain"]) !== cluster.toFqdn || ctx.db.select().from(clusters).where(eq(clusters.id, cluster.id)).get()?.domain !== cluster.toFqdn) throw errValidation(`${cluster.mapPath} changed since planning; no map is overwritten`);
         if (standing === after) continue;
         map.setIn(["global", "unitApex"], after);
+        // The old apex beside the new one, in the same commit: the appsets render a redirect from each
+        // unit's old host to its new one while it stands. The way back removes it with the move.
+        if (reverse) map.deleteIn(["global", "previousUnitApex"]);
+        else map.setIn(["global", "previousUnitApex"], before);
         write.push({ path: cluster.mapPath, content: map.toString() });
       }
       if (write.length && !validateOnly) {

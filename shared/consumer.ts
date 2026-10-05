@@ -6,7 +6,7 @@
 import { z } from "zod";
 import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, PartSizesSchema, PartVolumesSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "./enums.ts";
-import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
+import { HOST_LABEL_RE, PLATFORM_HOST_LABEL, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 
 /** WHERE a consumer repository keeps its manifest. One spelling, because two readers ask for it:
  *  the sandbox's structure gate, and the manager on the one path that does not dispatch a sandbox
@@ -29,7 +29,8 @@ export const consumerName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])
 export const hostLabel = z
   .string()
   .regex(HOST_LABEL_RE, "one DNS label: lower-case letters, digits and hyphens, at most 63 characters")
-  .refine((l) => !RESERVED_HOST_LABELS.includes(l), { message: "a stage word cannot be a host label — the stage words are the zones" });
+  .refine((l) => !RESERVED_HOST_LABELS.includes(l), { message: "a stage word cannot be a host label — the stage words are the zones" })
+  .refine((l) => !PLATFORM_HOST_LABEL.test(l), { message: "a platform host cannot be a host label — the platform's own hosts stand under the apex beside the units" });
 
 /** The backing services a consumer may request in its manifest (contract v1.3). THIS list is the
  *  vocabulary's one owner: the published schema restates it for the reader, and hostyour-cloud's

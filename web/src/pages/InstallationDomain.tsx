@@ -23,7 +23,7 @@ export function InstallationDomain() {
   function submit(event: FormEvent): void { event.preventDefault(); void act("preview"); }
   return <>
     <h1>Installation domain</h1>
-    <p>Read the unit records, DNS book, registrations, issuer marks and cookie domains before the installation moves. Old records stay. This does not rename machines or migrate external databases, control-plane clients or sessions.</p>
+    <p>Read the unit records, DNS book, registrations, issuer marks and cookie domains before the units move to the new domain. The new records point at the machines where they stand; old records stay, and each old unit host redirects to its new one. Everyone signs in once on the new hosts. Machines are renamed later, by their own runs.</p>
     {error && <p role="alert" className="alert alert--danger">{error}</p>}
     <form onSubmit={submit}>
       <div className="form-grid">

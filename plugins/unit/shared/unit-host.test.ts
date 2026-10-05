@@ -72,6 +72,15 @@ describe("the host label", () => {
     }
   });
 
+  it("refuses the platform's own hosts — units stand directly under the apex beside them", () => {
+    for (const word of ["www", "show", "mail", "autodiscover", "master", "master1", "apps", "apps3", "appstore", "srv1", "enterprise", "enterpriseregistration"]) {
+      const r = hostLabel.safeParse(word);
+      expect(r.success, word).toBe(false);
+      expect(r.error?.issues[0]?.message, word).toContain("platform host");
+    }
+    for (const ok of ["post", "swissbookai", "simetrix", "shop", "mailer-x", "my-apps", "wwwx"]) expect(hostLabel.safeParse(ok).success, ok).toBe(true);
+  });
+
   it("is the manifest's `host`, or the unit's name where it declares none", () => {
     expect(consumerHostLabel({ name: "digita-auth", host: "auth" })).toBe("auth");
     expect(consumerHostLabel({ name: "digita-auth" })).toBe("digita-auth");
