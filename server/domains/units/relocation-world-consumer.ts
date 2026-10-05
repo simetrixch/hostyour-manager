@@ -324,14 +324,17 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       // MongoDB keeps running for the same reason, as the StatefulSet `mongodb` its chart
       // (clusters/units/mongodb) renders, and only where the registration brings one: dump-mongo reads
       // it there. An own Redis keeps running as the Deployments `redis` and `redis-exporter` its chart
-      // (clusters/units/redis) renders: dump-redis reads its snapshot. Exact names, so an application
-      // workload never passes for the store.
+      // (clusters/units/redis) renders: dump-redis reads its snapshot. An own MariaDB keeps running as
+      // `mariadb` and `mariadb-exporter` (clusters/units/mariadb): dump-mariadb reads it. Exact names,
+      // so an application workload never passes for the store.
       workloadExempt: async () => {
         const reg = await readStageRegistration(ports, ac.stage, ac.name);
         const ownMongo = reg.mongodb !== "shared";
         const ownRedis = reg.redis === "standalone";
+        const ownMariadb = reg.services.includes("mariadb");
         return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
-          (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter"));
+          (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter")) ||
+          (ownMariadb && w.kind === "Deployment" && (w.name === "mariadb" || w.name === "mariadb-exporter"));
       },
     };
   };

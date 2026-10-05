@@ -6,6 +6,7 @@ import { isOrdinalClaim, type JobEnvVar, type JobIdentity, type ClaimUser } from
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { MongodbMode, RedisMode } from "#unit/shared/unit-size.ts";
+import { CONSUMER_MARIADB, CONSUMER_REDIS, ownMariadbDumpJob, ownMariadbRestoreJob, ownMariadbVerifyJob, ownRedisDumpJob, ownRedisRestoreJob } from "./relocation-jobs-own-stores.ts";
 import {
   boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, sharedMongoEnv, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
@@ -16,11 +17,6 @@ import {
  *  `<claim>-<service>` with the claim named after the unit), and `claim`, the PVC its data directory
  *  lives on (hostyour-cloud clusters/units/postgresql, `postgres-data.pvc.name`). */
 export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres", claim: "postgres-data" } as const;
-
-/** A consumer's OWN Redis (hostyour-cloud clusters/units/redis): its Service, the Secret its password
- *  stands in (materialized from secret/<stage>/consumer/<name>/redis), and the claim its append-only
- *  files live on. */
-export const CONSUMER_REDIS = { host: "redis", secret: "redis-credentials", key: "redis-password", claim: "redis-data" } as const;
 
 /** The claim template of a consumer's OWN MongoDB (hostyour-cloud clusters/units/mongodb, the
  *  StatefulSet `mongodb`'s template `data`): `data-mongodb-<n>`, one per member. */
@@ -35,7 +31,8 @@ export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services" | "m
   return i.pvcs.filter((claim) =>
     !(i.services.includes("postgresql") && claim === CONSUMER_POSTGRES.claim) &&
     !(i.mongodb !== "shared" && isOrdinalClaim(OWN_MONGO_CLAIM, claim)) &&
-    !(i.redis === "standalone" && claim === CONSUMER_REDIS.claim));
+    !(i.redis === "standalone" && claim === CONSUMER_REDIS.claim) &&
+    !(i.services.includes("mariadb") && claim === CONSUMER_MARIADB.claim));
 }
 
 /** Where a consumer's MongoDB answers, so where its Mongo jobs run and what they dial: the shared set
@@ -136,47 +133,6 @@ export function parseClaimLines(logs: string): string[] {
 /** The per-consumer PostgreSQL root password, off the instance's own Secret in the unit's namespace —
  *  the same one the dump and the restore dial with. */
 const consumerPostgresEnv = (): JobEnvVar[] => [{ name: "POSTGRES_PASSWORD", secretKeyRef: { name: CONSUMER_POSTGRES.secret, key: CONSUMER_POSTGRES.key } }];
-
-/** The own Redis's password, as redis-cli reads it without a flag on its command line. */
-const consumerRedisEnv = (): JobEnvVar[] => [{ name: "REDISCLI_AUTH", secretKeyRef: { name: CONSUMER_REDIS.secret, key: CONSUMER_REDIS.key } }];
-
-/** Restore an own Redis by replication, never by a file on its claim: the server persists with AOF and
- *  loads only its AOF files at a start, so a dump placed beside them would leave it empty. The job
- *  starts a throwaway server from the snapshot, without persistence, makes the consumer's server its
- *  replica until the sync has ended and both stand at the same offset, and makes it a primary again
- *  whatever the outcome. Its AOF then holds what the replication wrote. The key counts are compared
- *  after the promotion, so a target that came up short fails the job. */
-const REDIS_RESTORE = (folder: string): string => `mkdir -p /tmp/redis
-rclone copyto "box:${folder}/redis/dump.rdb" /tmp/redis/dump.rdb
-redis-server --dir /tmp/redis --dbfilename dump.rdb --appendonly no --save "" --bind 0.0.0.0 --protected-mode no --port 6379 --requirepass "$REDISCLI_AUTH" --daemonize yes
-n=0
-until [ "$(redis-cli -h 127.0.0.1 PING 2>/dev/null)" = PONG ] && redis-cli -h 127.0.0.1 INFO persistence | grep -q '^loading:0'; do
-  n=$((n + 1))
-  [ "$n" -lt 60 ] || { echo "NO SNAPSHOT: the throwaway server did not load the snapshot within 5 minutes"; exit 1; }
-  sleep 5
-done
-want=$(redis-cli -h 127.0.0.1 DBSIZE)
-promote() { redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF NO ONE > /dev/null; redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "" > /dev/null; }
-trap promote EXIT
-redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "$REDISCLI_AUTH" > /dev/null
-redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF "$(hostname -i | cut -d' ' -f1)" 6379 > /dev/null
-offset() { sed -n "s/^$1:\\([0-9]*\\).*/\\1/p" "$2"; }
-n=0
-while :; do
-  redis-cli -h ${CONSUMER_REDIS.host} INFO replication > /tmp/redis/replica
-  redis-cli -h 127.0.0.1 INFO replication > /tmp/redis/primary
-  if grep -q '^master_link_status:up' /tmp/redis/replica && grep -q '^master_sync_in_progress:0' /tmp/redis/replica &&
-    [ "$(offset slave_repl_offset /tmp/redis/replica)" = "$(offset master_repl_offset /tmp/redis/primary)" ]; then break; fi
-  n=$((n + 1))
-  [ "$n" -lt 120 ] || { echo "NO SYNC: the consumer's Redis did not finish replicating the snapshot within 10 minutes"; exit 1; }
-  sleep 5
-done
-have=$(redis-cli -h ${CONSUMER_REDIS.host} DBSIZE)
-promote
-trap - EXIT
-[ "$have" = "$want" ] || { echo "MISSING redis: the target holds $have keys of the snapshot's $want"; exit 1; }
-echo "COMPLETE redis: $have keys"
-`;
 
 
 export interface ConsumerJobInputs {
@@ -281,21 +237,8 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
       },
     });
   }
-  if (i.redis === "standalone") {
-    jobs.push({
-      namespace: i.namespace,
-      spec: {
-        ...boxSpec("dump-redis", i.name, consumerRedisEnv()),
-        image: i.image,
-        // A snapshot the server writes for a replica: consistent, and taken without stopping it.
-        script:
-          BOX_REMOTE +
-          `redis-cli -h ${CONSUMER_REDIS.host} --rdb /tmp/redis.rdb
-${hashLine("/tmp/redis.rdb", "redis/dump.rdb")}rclone copyto /tmp/redis.rdb "box:${i.folder}/redis/dump.rdb"
-`,
-      },
-    });
-  }
+  if (i.services.includes("mariadb")) jobs.push(ownMariadbDumpJob(i));
+  if (i.redis === "standalone") jobs.push(ownRedisDumpJob(i));
   const claims = tarredClaims(i);
   if (claims.length > 0) {
     jobs.push({
@@ -323,6 +266,7 @@ export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "database
     ...(dumpsMongo(i) ? ["mongo"] : []),
     ...(i.services.includes("postgresql") ? ["postgres"] : []),
     ...(i.redis === "standalone" ? ["redis"] : []),
+    ...(i.services.includes("mariadb") ? ["mariadb"] : []),
     ...(tarredClaims(i).length > 0 ? ["pvc"] : []),
   ];
 }
@@ -390,12 +334,8 @@ if [ -n "$(refused)" ]; then refused >&2; echo "the restore failed on the errors
       },
     });
   }
-  if (i.redis === "standalone") {
-    jobs.push({
-      namespace: i.namespace,
-      spec: { ...boxSpec("restore-redis", i.name, consumerRedisEnv()), image: i.image, script: BOX_REMOTE + REDIS_RESTORE(i.folder) },
-    });
-  }
+  if (i.services.includes("mariadb")) jobs.push(ownMariadbRestoreJob(i));
+  if (i.redis === "standalone") jobs.push(ownRedisRestoreJob(i));
   const claims = tarredClaims(i);
   if (claims.length > 0) {
     jobs.push({
@@ -440,6 +380,7 @@ echo "COMPLETE mongo"
       },
     });
   }
+  if (i.services.includes("mariadb")) jobs.push(ownMariadbVerifyJob(i));
   return jobs;
 }
 

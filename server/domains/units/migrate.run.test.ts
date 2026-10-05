@@ -177,6 +177,30 @@ describe("migrate (consumer)", () => {
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-redis-${CONSUMER}`);
     expect([restore?.namespace, restore?.spec.script.includes("REPLICAOF")]).toEqual([`${CONSUMER}-prod`, true]);
   });
+
+  it("journey: a consumer with its own MariaDB moves whole — dumped while it runs, replayed on the target and verified there", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { databases: ["shop"], services: ["mariadb"] });
+    f.source.reader.setSmoke({
+      namespaceExists: true, externalSecretsReady: true,
+      workloads: [
+        { kind: "Deployment", name: `${CONSUMER}-api`, available: true, desired: 0, ready: 0 },
+        { kind: "Deployment", name: "mariadb", available: true, desired: 1, ready: 1 },
+        { kind: "Deployment", name: "mariadb-exporter", available: true, desired: 1, ready: 1 },
+      ],
+    });
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    await driveSteps(db, f, makeMigrateDef(ports).steps(params), params, [], {
+      "verify-source-released": async () => { f.source.argo.setStatus(missing); },
+    });
+    const dump = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-mariadb-${CONSUMER}`);
+    expect([dump?.namespace, dump?.spec.script.includes("mariadb-dump")]).toEqual([`${CONSUMER}-prod`, true]);
+    expect(jobNames(f.target)).toEqual(expect.arrayContaining([`reloc-restore-mariadb-${CONSUMER}`, `reloc-verify-mariadb-${CONSUMER}`]));
+  });
 });
 
 describe("verify-quiesced (consumer)", () => {
