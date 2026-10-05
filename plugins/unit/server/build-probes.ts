@@ -18,7 +18,7 @@ import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { readOwnerIdentity } from "./owners.ts";
 import { CONSUMER_WIZARD, npmrcPackageScopes, packagesReaderMissing, patHookRefusal } from "./repo-identity.ts";
 import { missingConsumerPatScopes, requiredConsumerPatScopesSummary } from "./pat-scopes.ts";
-import { WebhookScopeError, webhookTargetUrl } from "./adapters/github-consumer/port.ts";
+import { GitHubConsumerError, WebhookScopeError, webhookTargetUrl } from "./adapters/github-consumer/port.ts";
 
 export const preflightCheck = (id: string, title: string, severity: PreflightCheck["severity"], status: PreflightCheck["status"], detail: string, hint?: string): PreflightCheck =>
   ({ id, title, severity, status, detail, ...(hint ? { hint } : {}) });
@@ -105,6 +105,15 @@ export async function probePackages(ports: BuildPorts, p: BuildParams, ctx: Prob
   }
 }
 
+/** A hook read GitHub did not answer this time: a 5xx, a 429, or no answer at all. The scheduled
+ *  check says it did not measure rather than blame the unit; a refusal (403/404) is not one. */
+export function unansweredHookRead(err: unknown): string | null {
+  if (!(err instanceof GitHubConsumerError)) return null;
+  if (err.status === undefined) return "GitHub did not answer the hook read this time (no answer)";
+  if (err.status === 429 || err.status >= 500) return `GitHub did not answer the hook read this time (HTTP ${err.status})`;
+  return null;
+}
+
 /** setup-webhook's probe: the hooks are readable with the identity, and the build plane is named.
  *  `standing` is the scheduled check's reading of a unit already onboarded: no run follows it to
  *  create the hook, so a missing one is worth a look rather than a pass. */
@@ -125,6 +134,8 @@ export async function probeWebhook(ports: BuildPorts, p: BuildParams, ctx: Probe
       }
       return [preflightCheck("webhook", title, "hard", "pass", stands ? `a hook already stands at ${targetUrl} and is re-set by the run` : `the hooks are readable; the run creates one at ${targetUrl}`)];
     } catch (err) {
+      const unanswered = standing ? unansweredHookRead(err) : null;
+      if (unanswered) return [unmeasuredCheck("webhook", title, unanswered)];
       if (!(err instanceof WebhookScopeError)) throw err;
       const status = `HTTP ${err.status ?? "403/404"}`;
       const refusal = viaApp ? null : await patHookRefusal(ports.github!, { owner, repo, token, signal: ctx.signal });

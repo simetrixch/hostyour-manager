@@ -12,7 +12,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { checkBadge } from "../../../web/src/unitCheck.ts";
-import { webhookTargetUrl } from "#unit/server/adapters/github-consumer/port.ts";
+import { GitHubConsumerError, webhookTargetUrl } from "#unit/server/adapters/github-consumer/port.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import type { TenantBuildDeps } from "./tenant-builds.ts";
 
@@ -114,7 +114,6 @@ describe("check-units", () => {
     const deps = (): TenantBuildDeps => ({ ports: { github, resolveBuildPlaneFqdn: async () => "m1.example", webhookSubdomain: "build", registrations: { listBuildRegistrations: async () => units } } } as unknown as TenantBuildDeps);
     const ports = {
       dns, resolveUnitApex: async () => "example.com", githubApp: appWith("x"), onboard: deps,
-      attestedBuilds: async () => units.flatMap((u) => u.entry.builds.map((build) => ({ unit: u.unit, build }))),
       registrations: { readTenant: async () => ({ entry: { approvedTags: { auth: { "digita-auth-backend": "1.0.0" }, jobs: { "digita-jobs": "1.0.0" } } } }) },
     } as unknown as TenantOnboardPorts;
     await checkUnitsStep(() => [tenantUnitProbes(ports)]).run(ctx([]));
@@ -123,6 +122,40 @@ describe("check-units", () => {
     expect(findings.map((f) => [f.id, f.status])).toEqual([["dns.record", "pass"], ["unit.digita-auth", "pass"], ["unit.digita-jobs", "warn"]]);
     expect(findings.find((f) => f.id === "unit.digita-jobs")?.detail).toBe(`its stored credential reads the hooks; no hook stands at ${expected}: a push to it starts no build`);
     expect(reads).toHaveBeenCalledTimes(2); // the unrelated unit builds nothing this tenant runs
+  });
+
+  it("a hook read GitHub does not answer (5xx, 429, no answer) is not measured in both walks; one it refuses still fails, by repository", async () => {
+    db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    const github = new FakeGitHubConsumer();
+    const o = onboardPorts({ github });
+    const units = [{ unit: "digita-jobs", entry: { repoURL: "https://github.com/x/digita-jobs.git", builds: ["digita-jobs"] } }];
+    const deps = (): TenantBuildDeps => ({ ports: { github, resolveBuildPlaneFqdn: async () => "m1.example", webhookSubdomain: "build", registrations: { listBuildRegistrations: async () => units } } } as unknown as TenantBuildDeps);
+    const tenantPorts = {
+      dns: emptyZone(), resolveUnitApex: async () => "example.com", githubApp: appWith("x"), onboard: deps,
+      registrations: { readTenant: async () => ({ entry: { approvedTags: { jobs: { "digita-jobs": "1.0.0" } } } }) },
+    } as unknown as TenantOnboardPorts;
+    const walk = async (err: Error) => {
+      vi.spyOn(github, "hookStandsAt").mockRejectedValue(err);
+      await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => o, resolveUnitApex: async () => "example.com", githubApp: appWith("x") }), tenantUnitProbes(tenantPorts)]).run(ctx([]));
+      return [
+        db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_1")).get()?.check?.findings.find((f) => f.id === "webhook"),
+        db.db.select({ check: tenants.checkJson }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.check?.findings.find((f) => f.id === "unit.digita-jobs"),
+      ];
+    };
+    for (const [err, why] of [
+      [new GitHubConsumerError("GitHub GET /repos/x/acme/hooks → 502: Bad Gateway", 502), "HTTP 502"],
+      [new GitHubConsumerError("GitHub GET /repos/x/acme/hooks → 429: rate limited", 429), "HTTP 429"],
+      [new GitHubConsumerError("GitHub request failed (/repos/x/acme/hooks): fetch failed"), "no answer"],
+    ] as const) {
+      for (const finding of await walk(err)) {
+        expect(finding).toMatchObject({ severity: "soft", status: "warn", detail: `not measured: GitHub did not answer the hook read this time (${why})` });
+      }
+    }
+    // A refusal that is neither the scope's nor a passing one stays the hard failure, titled by the repository.
+    const [consumer, tenant] = await walk(new GitHubConsumerError("GitHub GET /repos/x/digita-jobs/hooks → 422: Unprocessable", 422));
+    expect(consumer).toMatchObject({ severity: "hard", status: "fail" });
+    expect(tenant).toMatchObject({ title: "The build unit digita-jobs (x/digita-jobs)", severity: "hard", status: "fail" });
   });
 
   it("the badge is quiet where every probe passed, and absent where no check has reached the unit", () => {

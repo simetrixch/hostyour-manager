@@ -7,25 +7,23 @@ import type { PreflightCheck } from "../../../shared/preflight.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
-import { probeBuildUnit, probeTenantDns } from "./tenant-probes.ts";
+import { buildUnitTitle, probeBuildUnit, probeTenantDns } from "./tenant-probes.ts";
 import { failedProbe, unitProbeCtx, type UnitProbes } from "#unit/server/check-units.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 
 type TenantProbePorts = Pick<TenantOnboardPorts, "dns" | "resolveUnitApex"> &
-  Partial<Pick<TenantOnboardPorts, "registrations" | "attestedBuilds" | "onboard" | "githubApp">>;
+  Partial<Pick<TenantOnboardPorts, "registrations" | "onboard" | "githubApp">>;
 
-/** The units that build what the tenant's registration pins, each with its repository: the build
- *  names under `approvedTags`, matched against the names each build registration attests. */
-async function buildUnitsOf(ports: TenantProbePorts, stage: Stage, guid: string, repoOf: () => Promise<Map<string, string>>): Promise<{ unit: string; repoURL: string }[]> {
-  if (!ports.registrations || !ports.attestedBuilds) return [];
+/** A build registration as the walk reads it: the repository, and the build names it attests. */
+type BuildUnitEntry = { unit: string; repoURL: string; builds: readonly string[] };
+
+/** The units that build what the tenant's registration pins: the build names under `approvedTags`,
+ *  matched against the names each build registration attests. */
+async function buildUnitsOf(ports: TenantProbePorts, stage: Stage, guid: string, unitsOf: () => Promise<BuildUnitEntry[]>): Promise<BuildUnitEntry[]> {
+  if (!ports.registrations) return [];
   const read = await ports.registrations.readTenant(stage, guid);
   const names = new Set(Object.values(read?.entry.approvedTags ?? {}).flatMap((builds) => Object.keys(builds)));
-  const units = [...new Set((await ports.attestedBuilds()).filter((a) => names.has(a.build)).map((a) => a.unit))].sort();
-  const repos = await repoOf();
-  return units.flatMap((unit) => {
-    const repoURL = repos.get(unit);
-    return repoURL ? [{ unit, repoURL }] : [];
-  });
+  return (await unitsOf()).filter((u) => u.builds.some((b) => names.has(b))).sort((a, b) => a.unit.localeCompare(b.unit));
 }
 
 export function tenantUnitProbes(ports: TenantProbePorts): UnitProbes {
@@ -34,18 +32,18 @@ export function tenantUnitProbes(ports: TenantProbePorts): UnitProbes {
     probeAll: async (ctx, now) => {
       const done = { probed: 0, attention: 0 };
       // Once per walk: the build registrations, and each unit's hook, however many tenants run it.
-      let repos: Promise<Map<string, string>> | undefined;
-      const repoOf = (): Promise<Map<string, string>> =>
-        (repos ??= (async () => {
+      let units: Promise<BuildUnitEntry[]> | undefined;
+      const unitsOf = (): Promise<BuildUnitEntry[]> =>
+        (units ??= (async () => {
           const registrations = ports.onboard?.()?.ports.registrations;
           const list = registrations ? await registrations.listBuildRegistrations() : [];
-          return new Map(list.map(({ unit, entry }) => [unit, entry.repoURL]));
+          return list.map(({ unit, entry }) => ({ unit, repoURL: entry.repoURL, builds: entry.builds ?? [] }));
         })());
       const hooks = new Map<string, Promise<PreflightCheck[]>>();
       const hookOf = (unit: string, repoURL: string, domain: string, probeCtx: ProbeCtx): Promise<PreflightCheck[]> => {
         if (!hooks.has(unit)) {
           hooks.set(unit, probeBuildUnit(() => ports.onboard?.(), ports, { domain }, { unit, repoURL, images: [], registered: true }, probeCtx, true)
-            .catch((err: unknown) => [failedProbe(`unit.${unit}`, `The build unit ${unit}`, err)]));
+            .catch((err: unknown) => [failedProbe(`unit.${unit}`, buildUnitTitle(unit, repoURL), err)]));
         }
         return hooks.get(unit)!;
       };
@@ -63,7 +61,7 @@ export function tenantUnitProbes(ports: TenantProbePorts): UnitProbes {
           findings.push(failedProbe("dns.record", `The DNS record of ${t.subdomain}`, err));
         }
         try {
-          for (const u of await buildUnitsOf(ports, t.stage as Stage, t.guid, repoOf)) findings.push(...(await hookOf(u.unit, u.repoURL, t.domain, probeCtx)));
+          for (const u of await buildUnitsOf(ports, t.stage as Stage, t.guid, unitsOf)) findings.push(...(await hookOf(u.unit, u.repoURL, t.domain, probeCtx)));
         } catch (err) {
           findings.push(failedProbe("units", `The build units of ${t.subdomain}`, err));
         }

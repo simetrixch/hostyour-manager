@@ -16,7 +16,8 @@ import type { PreflightCheck } from "../../../shared/preflight.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import type { BuildUnit, TenantBuildDeps } from "./tenant-builds.ts";
-import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
+import { parseGitHubOwnerRepo, splitGitHubRepoURL } from "#unit/server/github-repo-url.ts";
+import { unansweredHookRead } from "#unit/server/build-probes.ts";
 import { judgeRepoIdentity, patHookRefusal, resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { tenantRecordName } from "#unit/shared/unit-host.ts";
@@ -70,12 +71,18 @@ export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org
   return out;
 }
 
+/** What a build unit's findings are titled: the unit and the repository it builds from. */
+export function buildUnitTitle(unit: string, repoURL: string): string {
+  const r = splitGitHubRepoURL(repoURL);
+  return `The build unit ${unit} (${r ? `${r.owner}/${r.repo}` : repoURL})`;
+}
+
 /** build-unit:<unit>'s probe: the unit's identity, as far as one stands before the approve.
  *  `standing` is the scheduled check's reading, after which no release sets the hook: a missing one
  *  is worth a look rather than a pass. */
 export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: Pick<TenantOnboardPorts, "githubApp">, p: Pick<CreateTenantParams, "domain">, unit: BuildUnit, ctx: ProbeCtx, standing = false): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
-  const title = `The build unit ${unit.unit} (${owner}/${repo})`;
+  const title = buildUnitTitle(unit.unit, unit.repoURL);
   // The owner's identity, judged now (repo-identity.ts, #226): what the step resolves and opens.
   const judged = await judgeRepoIdentity({ repoURL: unit.repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal });
   if ("refused" in judged) return [check(`unit.${unit.unit}`, title, "hard", "fail", judged.refused)];
@@ -94,6 +101,8 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
     if (!stands && standing) return [check(`unit.${unit.unit}`, title, "hard", "warn", `its stored credential reads the hooks; no hook stands at ${targetUrl}: a push to it starts no build`)];
     return [check(`unit.${unit.unit}`, title, "hard", "pass", stands ? "its stored credential reads the hooks; the build hook stands" : "its stored credential reads the hooks; the re-release sets the build hook")];
   } catch (err) {
+    const unanswered = standing ? unansweredHookRead(err) : null;
+    if (unanswered) return [unmeasured(`unit.${unit.unit}`, title, unanswered)];
     if (!(err instanceof WebhookScopeError)) throw err;
     const status = `HTTP ${err.status ?? "403/404"}`;
     const refusal = judged.kind === "pat" ? await patHookRefusal(github, { owner, repo, token: token.toString("utf8"), signal: ctx.signal }) : null;
