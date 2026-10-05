@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumerUnitHost, HOST_LABEL_RE, issuerAddressHost, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts } from "./unit-host.ts";
+import { consumerUnitHost, HOST_LABEL_RE, issuerAddressHost, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts, stageHost, prodHostOf, stageHostProblem } from "./unit-host.ts";
 import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
@@ -119,5 +119,41 @@ describe("a tenant identity provider's DNS mark — the issuer under the zone", 
     const mark = tenantIssuerRecord("_idp", "path", "auth", "prod", "show", "digitacloud.app");
     expect(mark.content).toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", ""));
     expect(mark.content).not.toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", "show.example.org"));
+  });
+});
+
+describe("a stage host — the stage stands directly before the zone that holds the host", () => {
+  it("composes a dev or test host as <labels below the zone>.<stage>.<zone>, and keeps a prod host as it is", () => {
+    expect(stageHost("show.simetrix.ch", "simetrix.ch", "test")).toBe("show.test.simetrix.ch");
+    expect(stageHost("veloluck.show.simetrix.ch", "simetrix.ch", "test")).toBe("veloluck.show.test.simetrix.ch");
+    expect(stageHost("simetrix.ch", "simetrix.ch", "dev")).toBe("dev.simetrix.ch");
+    expect(stageHost("show.example.co.uk", "example.co.uk", "test")).toBe("show.test.example.co.uk");
+    expect(stageHost("show.simetrix.ch", "simetrix.ch", "prod")).toBe("show.simetrix.ch");
+  });
+
+  it("reads the prod host back off a stage host, and nothing off a host without the stage before the zone", () => {
+    expect(prodHostOf("veloluck.show.test.simetrix.ch", "simetrix.ch", "test")).toBe("veloluck.show.simetrix.ch");
+    expect(prodHostOf("test.simetrix.ch", "simetrix.ch", "test")).toBe("simetrix.ch");
+    expect(prodHostOf("test.show.simetrix.ch", "simetrix.ch", "test")).toBeNull();
+    expect(prodHostOf("show.simetrix.ch", "simetrix.ch", "prod")).toBe("show.simetrix.ch");
+  });
+
+  it("PLANTED DEFECT: refuses a test host with the stage in front of the whole name, naming the host it is", () => {
+    expect(stageHostProblem("test.show.simetrix.ch", "simetrix.ch", "test")).toBe("test.show.simetrix.ch is no test host: the stage stands directly before the zone simetrix.ch, so it is show.test.simetrix.ch");
+    expect(stageHostProblem("test.veloluck.show.simetrix.ch", "simetrix.ch", "test")).toMatch(/so it is veloluck\.show\.test\.simetrix\.ch$/);
+    expect(stageHostProblem("show.simetrix.ch", "simetrix.ch", "test")).toMatch(/so it is show\.test\.simetrix\.ch$/);
+    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "dev")).toMatch(/is no dev host: .* so it is show\.dev\.simetrix\.ch$/);
+  });
+
+  it("PLANTED DEFECT: refuses a prod host with a stage label before its zone, naming the prod host", () => {
+    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "prod")).toBe("show.test.simetrix.ch carries the stage test before its zone simetrix.ch, and prod carries none: it is show.simetrix.ch");
+  });
+
+  it("PLANTED INNOCENT: passes a host that keeps the rule at its stage", () => {
+    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "test")).toBeNull();
+    expect(stageHostProblem("test.simetrix.ch", "simetrix.ch", "test")).toBeNull();
+    expect(stageHostProblem("veloluck.show.dev.simetrix.ch", "simetrix.ch", "dev")).toBeNull();
+    expect(stageHostProblem("show.simetrix.ch", "simetrix.ch", "prod")).toBeNull();
+    expect(stageHostProblem("simetrix.ch", "simetrix.ch", "prod")).toBeNull();
   });
 });

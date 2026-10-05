@@ -47,6 +47,10 @@ export interface DnsProvider {
   /** Create ONE record beside any others of that name and type — what an abort writes back where a
    *  run deleted several address records of a customer's host. Never proxied, as upsertRecord. */
   createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void>;
+  /** The name of the zone that holds `name` (`simetrix.ch` for `veloluck.show.simetrix.ch`): "our
+   *  domain" of a host, before which a dev or test stage stands (unit-host.ts stageHost). THROWS
+   *  DnsZoneUnknownError where no zone of this provider holds it. */
+  zoneName(input: { name: string; signal?: AbortSignal }): Promise<string>;
 }
 
 /** A name no zone of this provider's token covers: the token is scoped elsewhere, or the domain is

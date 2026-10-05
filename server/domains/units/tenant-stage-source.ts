@@ -19,14 +19,9 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { provisionOwnDomainRecord, recordsToReplace } from "./own-domain-records.ts";
 import { websiteHosts } from "./website-domain.ts";
+import { hostAtStage } from "./stage-hosts.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { TENANT_BRINGS } from "#unit/shared/unit-size.ts";
-
-function stageHost(host: string, source: Stage, target: Stage): string {
-  if (!host) return "";
-  const base = source !== "prod" && host.startsWith(`${source}.`) ? host.slice(source.length + 1) : host;
-  return target === "prod" ? base : `${target}.${base}`;
-}
 
 export async function planStandingStage(
   ports: TenantOnboardPorts, tenantId: string,
@@ -44,11 +39,13 @@ export async function planStandingStage(
   if (ports.carryTrunkToBooksBranch) await ports.carryTrunkToBooksBranch();
   const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, placement.stage);
   const registryHost = registryHostFromChain(clusterValueFiles);
-  const ownDomain = stageHost(entry.ownDomain, source.stage, placement.stage);
-  const ownDomainRedirects = entry.ownDomainRedirects.map((host) => host.startsWith("www.") ? `www.${stageHost(host.slice(4), source.stage, placement.stage)}` : stageHost(host, source.stage, placement.stage));
+  // Every public host at the new stage, the stage directly before the zone that holds it.
+  const atStage = (host: string): Promise<string> => hostAtStage(ports.dns, host, source.stage, placement.stage, ctx.signal);
+  const ownDomain = await atStage(entry.ownDomain);
+  const ownDomainRedirects = await Promise.all(entry.ownDomainRedirects.map(async (host) => host.startsWith("www.") ? `www.${await atStage(host.slice(4))}` : atStage(host)));
   // A website's alias domains stay with the stage they were given on, as the own domain's do (never
   // copied): the new stage is given its own with "Domain and aliases…".
-  const apps = entry.apps.map(({ aliases: _aliases, ...app }) => ({ ...app, ...(app.domain ? { domain: stageHost(app.domain, source.stage, placement.stage) } : {}) }));
+  const apps = await Promise.all(entry.apps.map(async ({ aliases: _aliases, ...app }) => ({ ...app, ...(app.domain ? { domain: await atStage(app.domain) } : {}) })));
   const domains = new Map(entry.apps.filter((app) => app.domain).map((app) => [app.domain!, apps.find((a) => a.name === app.name)!.domain!]));
   // The members' values carry the alias list the fanout rendered from `{aliases}`: it goes with its
   // key, and so does an object the drop leaves empty, as the fanout renders a website without aliases.

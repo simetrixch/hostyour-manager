@@ -72,3 +72,22 @@ describe("CloudflareDns", () => {
     expect(deletes(calls)).toEqual(["a-1", "a-2"]);
   });
 });
+
+describe("CloudflareDns.zoneName — the zone that holds a name, as the label walk finds it", () => {
+  it("answers the zone a name lies in, below the zone as well as at it, and refuses a name no zone holds", async () => {
+    const calls: string[] = [];
+    const fetchImpl = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      calls.push(`${url.pathname}${url.search}`);
+      const name = url.searchParams.get("name");
+      const result = name === "simetrix.ch" ? [{ id: "z1", name: "simetrix.ch" }] : [];
+      return new Response(JSON.stringify({ success: true, result }), { status: 200 });
+    }) as unknown as typeof fetch;
+    const dns = new CloudflareDns({ apiToken: "t", apiBase: API, fetchImpl });
+    expect(await dns.zoneName({ name: "veloluck.show.simetrix.ch" })).toBe("simetrix.ch");
+    expect(await dns.zoneName({ name: "simetrix.ch" })).toBe("simetrix.ch");
+    // The walk asks the name, then each suffix, and keeps the answer for the name it asked for.
+    expect(calls.slice(0, 3)).toEqual(["/client/v4/zones?name=veloluck.show.simetrix.ch&per_page=1", "/client/v4/zones?name=show.simetrix.ch&per_page=1", "/client/v4/zones?name=simetrix.ch&per_page=1"]);
+    await expect(dns.zoneName({ name: "example.org" })).rejects.toThrow(/no Cloudflare zone found/);
+  });
+});

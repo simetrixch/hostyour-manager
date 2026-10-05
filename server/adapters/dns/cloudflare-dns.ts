@@ -48,9 +48,9 @@ const contentOf = (record: CfRecord, type: DnsRecordType | "MX"): string =>
 export class CloudflareDns implements DnsProvider {
   private readonly apiBase: string;
   private readonly fetchImpl: FetchLike;
-  /** Zone ids by the name they were resolved FOR — the label-walk is 1-2 extra calls, so one
+  /** Zones by the name they were resolved FOR — the label-walk is 1-2 extra calls, so one
    *  resolution per distinct name is kept for the lifetime of this instance (zones do not move). */
-  private readonly zoneIds = new Map<string, string>();
+  private readonly zones = new Map<string, { id: string; name: string }>();
 
   constructor(private readonly opts: { apiToken: string; apiBase?: string; fetchImpl?: FetchLike }) {
     this.apiBase = (opts.apiBase ?? "https://api.cloudflare.com/client/v4").replace(/\/$/, "");
@@ -120,22 +120,30 @@ export class CloudflareDns implements DnsProvider {
    *  the exact name as a zone; if none matches, strip the leftmost label and retry, down to the last
    *  dot. Throws when no suffix is a zone — the token is scoped wrong or the domain is not on
    *  Cloudflare, and either way no record can be managed. */
-  private async zoneId(name: string, signal?: AbortSignal): Promise<string> {
+  private async zone(name: string, signal?: AbortSignal): Promise<{ id: string; name: string }> {
     // A wildcard label is never part of a zone name — the zone is resolved for the covered domain.
     let candidate = name.replace(/^\*\./, "");
-    const cached = this.zoneIds.get(candidate);
+    const cached = this.zones.get(candidate);
     if (cached) return cached;
     const asked = candidate;
     while (candidate.includes(".")) {
-      const zones = await this.send<{ id: string }[]>(`/zones?name=${encodeURIComponent(candidate)}&per_page=1`, signal ? { signal } : {});
-      const id = zones?.[0]?.id;
-      if (id) {
-        this.zoneIds.set(asked, id);
-        return id;
+      const found = (await this.send<{ id: string; name?: string }[]>(`/zones?name=${encodeURIComponent(candidate)}&per_page=1`, signal ? { signal } : {}))?.[0];
+      if (found?.id) {
+        const zone = { id: found.id, name: found.name ?? candidate };
+        this.zones.set(asked, zone);
+        return zone;
       }
       candidate = candidate.slice(candidate.indexOf(".") + 1);
     }
     throw new DnsZoneUnknownError(`no Cloudflare zone found for any suffix of "${asked}" — is the DNS token scoped to this zone, and is the domain on Cloudflare?`);
+  }
+
+  private async zoneId(name: string, signal?: AbortSignal): Promise<string> {
+    return (await this.zone(name, signal)).id;
+  }
+
+  async zoneName(input: { name: string; signal?: AbortSignal }): Promise<string> {
+    return (await this.zone(input.name, input.signal)).name;
   }
 
   /** One API call: auth header, JSON body, the success-flag check, and the bounded 429 backoff.

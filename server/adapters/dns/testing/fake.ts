@@ -19,6 +19,9 @@ export class FakeDnsProvider implements DnsProvider {
   /** Zones this fake's token does not cover: every call on a name at or below one of them throws
    *  DnsZoneUnknownError, as the provider does for a domain it holds no zone for. */
   unmanaged: string[] = [];
+  /** The zones this fake holds, for zoneName: the longest one a name lies in. A name in none of them
+   *  lies in the zone of its last two labels, as a registered domain does. */
+  zones: string[] = [];
 
   private key(name: string, type: DnsRecordType | "MX"): string {
     return `${type} ${name}`;
@@ -28,6 +31,14 @@ export class FakeDnsProvider implements DnsProvider {
     const bare = name.replace(/^\*\./, "");
     const outside = this.unmanaged.find((zone) => bare === zone || bare.endsWith(`.${zone}`));
     if (outside !== undefined) throw new DnsZoneUnknownError(`fake: no zone found for any suffix of "${bare}"`);
+  }
+
+  async zoneName(input: { name: string }): Promise<string> {
+    if (this.failWith) throw this.failWith;
+    this.zoneOf(input.name);
+    const bare = input.name.replace(/^\*\./, "");
+    const held = this.zones.filter((zone) => bare === zone || bare.endsWith(`.${zone}`)).sort((a, b) => b.length - a.length)[0];
+    return held ?? bare.split(".").slice(-2).join(".");
   }
 
   /** Seed the records that pre-exist the run under one name. Several contents seed several records

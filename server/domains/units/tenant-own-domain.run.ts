@@ -8,6 +8,7 @@ import type { Db } from "../../db/client.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
+import { refuseOffStageHosts } from "./stage-hosts.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { aliasHosts, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
@@ -278,6 +279,10 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         const problem = customerHostProblem(db, params.tenantId, host, apex, websites, nesting?.tenantId ?? null);
         if (problem !== null) throw errValidation(problem);
       }
+      // Only what is typed now: the domain where it changes, and an alias added. The previous domain
+      // a move keeps as an alias, and an alias dropped, are not judged.
+      const typed = [...(params.ownDomain && params.ownDomain !== params.previous ? [params.ownDomain] : []), ...asked.ownDomainAliases.filter((a) => a !== params.previous && !params.previousAliases.includes(a))];
+      await refuseOffStageHosts(ports.dns, typed, tc.stage, ctx);
       const newHost = params.ownDomain || zone;
       const oldRecords = retiredHosts(params);
       const redirects = [...params.ownDomainRedirects, ...aliasHosts(params.ownDomainAliases)];

@@ -207,6 +207,20 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toEqual({ ...source, site: { domain: "test.company.example" } });
   });
 
+  it("PLANTED DEFECT: puts the stage directly before the zone that holds each host, not in front of the whole name", async () => {
+    const p = stagePorts();
+    (p.dns as FakeDnsProvider).zones = ["simetrix.ch"];
+    const current = (await p.registrations.readTenant("prod", GUID))!.entry;
+    const apps = [{ name: "veloluck", folder: "web", site: "veloluck", domain: "veloluck.show.simetrix.ch", databases: ["core"] }];
+    const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), routing: "path", ownDomain: "show.simetrix.ch", ownDomainRedirects: ["www.show.simetrix.ch"], quota: seedQuota("small") });
+    const books = new FakePlatformRepo();
+    const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
+    p.registrations = new TenantRegistrations(books);
+    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.simetrix.ch", ["www.show.test.simetrix.ch"], "veloluck.show.test.simetrix.ch"]);
+  });
+
   it("preserves custom website composition while stage-scoping every public host, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;

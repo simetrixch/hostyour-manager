@@ -1,0 +1,37 @@
+import { describe, it, expect } from "vitest";
+import { eq } from "drizzle-orm";
+import { tenants } from "../../db/schema/inventory.ts";
+import { useOwnDomainHarness } from "./tenant-own-domain.fixture.ts";
+
+// An own domain at a dev or test stage puts the stage directly before the zone that holds it, and a
+// prod one carries no stage: the plan refuses a host typed now that breaks the rule, naming the host
+// it would be. The previous domain a move keeps as an alias, and an alias dropped, are not judged.
+
+describe("tenant-set-own-domain and the stage rule", () => {
+  const { make, plan } = useOwnDomainHarness();
+
+  it("PLANTED DEFECT: refuses at test an own domain or a new alias with the stage in front of the whole name, naming the host it is", async () => {
+    const h = await make({ stage: "test" });
+    h.dns.zones = ["simetrix.ch"];
+    expect((await plan(h, { ownDomain: "test.show.simetrix.ch", previous: "" })).error).toMatch(/test\.show\.simetrix\.ch is no test host: the stage stands directly before the zone simetrix\.ch, so it is show\.test\.simetrix\.ch/);
+    expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "", ownDomainAliases: ["test.veloluck.show.simetrix.ch"] })).error).toMatch(/so it is veloluck\.show\.test\.simetrix\.ch/);
+    expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "" })).status).toBe("planned");
+  });
+
+  it("PLANTED INNOCENT: moves a test tenant off a domain of the old shape, which the move keeps as an alias, and drops that alias", async () => {
+    const h = await make({ stage: "test", ownDomain: "test.show.simetrix.ch" });
+    h.dns.zones = ["simetrix.ch"];
+    expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "test.show.simetrix.ch" })).status).toBe("planned");
+    // Where the move stands, the previous domain is an alias; a run that only drops it judges nothing.
+    h.db.db.update(tenants).set({ ownDomain: "show.test.simetrix.ch", ownDomainAliases: ["test.show.simetrix.ch"] }).where(eq(tenants.id, "tnt_1")).run();
+    expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "show.test.simetrix.ch", previousAliases: ["test.show.simetrix.ch"] })).status).toBe("planned");
+  });
+
+  it("refuses at prod an own domain with a stage label before its zone, and leaves a domain whose zone is held elsewhere unjudged", async () => {
+    const h = await make({ unmanaged: ["elsewhere.example"] });
+    h.dns.zones = ["simetrix.ch"];
+    expect((await plan(h, { ownDomain: "show.test.simetrix.ch", previous: "" })).error).toMatch(/carries the stage test before its zone simetrix\.ch, and prod carries none: it is show\.simetrix\.ch/);
+    const unjudged = await plan(h, { ownDomain: "test.shop.elsewhere.example", previous: "" });
+    expect(unjudged.error).toMatch(/the stage rule is not checked for test\.shop\.elsewhere\.example/);
+  });
+});

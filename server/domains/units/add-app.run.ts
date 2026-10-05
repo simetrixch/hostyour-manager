@@ -7,6 +7,7 @@ import { STAGE } from "../../../shared/enums.ts";
 import { guid as guidSchema, appName, appDatabases, appFolder, siteId, isWebsiteAppNameOf, websiteAppName, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { ownDomainEntryProblem } from "#unit/shared/unit-host.ts";
+import { refuseOffStageHosts } from "./stage-hosts.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -377,6 +378,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
           const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
           if (problem !== null) throw errValidation(problem);
         }
+        await refuseOffStageHosts(ports.dns, [website.domain], tc.stage, ctx);
       }
       // Every app lives in the tenant's own bundle, and the deploy repository's TEMPLATE names what can be
       // added (#213, #215): the app is judged against the template's catalog, and the bundle steps

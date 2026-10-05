@@ -24,6 +24,40 @@ export function stageApex(unitApex: string, stage: Stage): string {
   return stage === "prod" ? unitApex : `${stage}.${unitApex}`;
 }
 
+/** A domain's host at one stage: the labels below the DNS zone that holds it, then the stage, then
+ *  the zone, as `stageApex` puts the stage before the apex (`show.simetrix.ch` at test is
+ *  `show.test.simetrix.ch`, the zone itself `test.simetrix.ch`). Prod is the host itself. The zone is
+ *  the one the installation's DNS provider resolves for the host, never its last two labels: a zone
+ *  can be `example.co.uk`, or delegated below. */
+export function stageHost(prodHost: string, zone: string, stage: Stage): string {
+  if (stage === "prod") return prodHost;
+  return prodHost === zone ? `${stage}.${zone}` : `${prodHost.slice(0, -(zone.length + 1))}.${stage}.${zone}`;
+}
+
+/** The prod host a host of `stage` stands for, or null where the stage does not stand directly
+ *  before `zone`. The inverse of `stageHost`. */
+export function prodHostOf(host: string, zone: string, stage: Stage): string | null {
+  if (stage === "prod") return host;
+  const stageZone = `${stage}.${zone}`;
+  if (host === stageZone) return zone;
+  return host.endsWith(`.${stageZone}`) ? `${host.slice(0, -(stageZone.length + 1))}.${zone}` : null;
+}
+
+/** Why `host` is no host of `stage` under `zone`, naming the host it would be, or null: a dev or test
+ *  host ends in `.<stage>.<zone>` (or is `<stage>.<zone>`), and a prod host carries no stage label
+ *  directly before its zone. */
+export function stageHostProblem(host: string, zone: string, stage: Stage): string | null {
+  const carried = STAGE.find((s) => s !== "prod" && prodHostOf(host, zone, s) !== null);
+  if (stage === "prod") {
+    return carried === undefined ? null : `${host} carries the stage ${carried} before its zone ${zone}, and prod carries none: it is ${prodHostOf(host, zone, carried)}`;
+  }
+  if (prodHostOf(host, zone, stage) !== null) return null;
+  // The prod host it stands for: one with another stage before the zone drops that stage, and one
+  // with the stage in front of the whole name drops that label.
+  const prod = carried !== undefined ? prodHostOf(host, zone, carried)! : host.startsWith(`${stage}.`) && host !== `${stage}.${zone}` ? host.slice(stage.length + 1) : host;
+  return `${host} is no ${stage} host: the stage stands directly before the zone ${zone}, so it is ${stageHost(prod, zone, stage)}`;
+}
+
 /** A consumer's one public host at one stage: `<label>.<stage apex>`. */
 export function consumerUnitHost(label: string, stage: Stage, unitApex: string): string {
   return `${label}.${stageApex(unitApex, stage)}`;

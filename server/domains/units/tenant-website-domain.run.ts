@@ -15,6 +15,7 @@ import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
 import { tenantBundleManifest } from "./engine-line.ts";
 import { standingAppDatabases } from "./tenant-app-databases.ts";
+import { refuseOffStageHosts } from "./stage-hosts.ts";
 
 // `tenant-set-website-domain` — move one website of a standing tenant to another domain, or give it
 // other alias domains (the same domain with another alias list).
@@ -236,6 +237,10 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
         const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
         if (problem !== null) throw errValidation(problem);
       }
+      // Only what is typed now: the domain where it changes, and an alias added. The domain a move
+      // leaves, kept as an alias, and an alias dropped, are not judged.
+      const typed = [...(req.domain !== entry.domain ? [req.domain] : []), ...aliases.filter((a) => a !== entry.domain && !previousAliases.includes(a))];
+      await refuseOffStageHosts(ports.dns, typed, tc.stage, ctx);
       const previousMember = current.entry.members.find((m) => m.name === req.app);
       if (!previousMember) throw errValidation(`website ${req.app} has no member entry in tenant ${tc.guid}'s registration`);
       // The member resolved again with the new domain, by the same validation add-app renders the
