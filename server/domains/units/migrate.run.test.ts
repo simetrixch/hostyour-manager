@@ -201,6 +201,22 @@ describe("the consumer dump (hostyour-manager#333)", () => {
     expect(jobs.find((j) => j.spec.name.startsWith("reloc-dump-pvc"))?.spec.runAs).toEqual({ user: 1000, group: 1000 });
   });
 
+  it("re-commits a dumped registration with each data part's size and volume pin, so the restored claims are the size they came from", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+    const dumped = { ...(await ports.registrations.readRegistration("prod", CONSUMER))!.entry, services: ["postgresql" as const], mongodb: "standalone" as const, sizes: { postgresql: "large" as const, mongodb: "medium" as const }, volumes: { postgresql: "5Gi", mongodb: "40Gi" } };
+
+    const ctx = stepCtx(db, "restore", {}, []);
+    // JSON is YAML: the dump's registration file, as the restore reads it back.
+    await (await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET);
+    const entry = (await ports.registrations.readRegistration("prod", CONSUMER))?.entry;
+    expect([entry?.cluster, entry?.sizes, entry?.volumes]).toEqual([TARGET.cluster, dumped.sizes, dumped.volumes]);
+  });
+
   it("refuses the dump of a claim no workload mounts, before any job runs", async () => {
     seedMaster(db);
     seedClusters(db);
