@@ -54,6 +54,12 @@ export const TenantSetWebsiteDomainParams = z.object({
   /** The member entry resolved with the new domain, and the one it replaces. */
   member: TenantMemberRecordSchema,
   previousMember: TenantMemberRecordSchema,
+  /** Where the website moves onto the tenant's own domain: the tenant's own-domain aliases after the
+   *  move, which take the names the website leaves, and before it. A website on the own domain has no
+   *  alias of its own (digita-web's ingress-digita-web-redirect.yaml refuses one); the own host's old
+   *  names are the own domain's. Absent for every other move. */
+  ownDomainAliases: z.array(publicFqdn).optional(),
+  previousOwnDomainAliases: z.array(publicFqdn).optional(),
   /** The new hosts whose records this run writes, and the previous hosts whose records it removes:
    *  none of those the tenant's own domain holds. */
   recordHosts: z.array(publicFqdn).default([]),
@@ -78,11 +84,16 @@ function restoreWebsiteDomainCleanup(ports: AddAppPorts, p: TenantSetWebsiteDoma
         ctx.log("meta", `website ${p.app} stands at ${standing?.domain ?? "nothing"} now, not as this run put it — left as it is`);
         return;
       }
-      const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.previous, p.previousAliases, p.previousMember, ctx.runId);
+      const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.previous, p.previousAliases, p.previousMember, ctx.runId, p.previousOwnDomainAliases);
+      if (p.previousOwnDomainAliases) ctx.db.update(tenants).set({ ownDomainAliases: p.previousOwnDomainAliases }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `website ${p.app} back at ${p.previous} (${commit})`);
     },
   };
 }
+
+/** The own-domain aliases a move onto the own domain adds: the names the website leaves. */
+const addedOwnDomainAliases = (p: TenantSetWebsiteDomainParams): string[] =>
+  (p.ownDomainAliases ?? []).filter((a) => !(p.previousOwnDomainAliases ?? []).includes(a));
 
 /** Whether a website's apps[] entry stands at `domain` with exactly `aliases`. */
 function standsAt(entry: { domain?: string | undefined; aliases?: readonly string[] | undefined }, domain: string, aliases: readonly string[]): boolean {
@@ -117,8 +128,8 @@ function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams)
           throw errValidation(`website ${p.app} stands at ${standing?.domain ?? "no domain"} now, not as when this run was planned — plan it again`);
         }
         ctx.registerCleanup(restoreWebsiteDomainCleanup(ports, p));
-        const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.domain, p.aliases, p.member, ctx.runId);
-        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        const { commit } = await ports.registrations.setWebsiteDomain(tc.stage, tc.guid, p.app, p.domain, p.aliases, p.member, ctx.runId, p.ownDomainAliases);
+        ctx.db.update(tenants).set({ ...(p.ownDomainAliases ? { ownDomainAliases: p.ownDomainAliases } : {}), lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         ctx.log("meta", `website ${p.app}: ${p.previous} → ${p.domain}${p.aliases.length ? `, aliases ${p.aliases.join(", ")}` : ""} (${commit}) — its chart serves the new hosts once the ArgoCD on ${tc.domain} syncs`);
       },
@@ -127,7 +138,7 @@ function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams)
       name: "retire-previous-website-domain",
       title: "Wait until the website answers at its new hosts, then remove the previous hosts' records",
       run: async (ctx) => {
-        await waitForWebsite(ctx, ports, p.domain, `The previous hosts' records still stand: retry this step once the new ones answer, or abort the run to put the website back at ${p.previous}.`, p.aliases);
+        await waitForWebsite(ctx, ports, p.domain, `The previous hosts' records still stand: retry this step once the new ones answer, or abort the run to put the website back at ${p.previous}.`, [...p.aliases, ...addedOwnDomainAliases(p)]);
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         for (const host of p.retiredHosts) await removeOwnDomainRecord(ctx, ports, tc, host);
       },
@@ -219,7 +230,18 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
         if (typed !== null) throw errValidation(typed);
       }
       const previousAliases = entry.aliases ?? [];
-      const aliases = keptAliases(req.domain, req.aliases ?? previousAliases, entry.domain, previousAliases);
+      // Onto the tenant's own domain, the names the website leaves become the own domain's aliases,
+      // never its own (TenantSetWebsiteDomainParams.ownDomainAliases says why); an alias typed for it
+      // is refused, because only Own domain… sets the aliases of the own host.
+      const onOwnHost = current.entry.ownDomain !== "" && req.domain === current.entry.ownDomain;
+      const typedOnOwnHost = onOwnHost ? (req.aliases ?? []).filter((a) => a !== entry.domain && !previousAliases.includes(a)) : [];
+      if (typedOnOwnHost.length) {
+        throw errValidation(`${typedOnOwnHost.join(", ")}: website ${req.app} goes onto the tenant's own domain ${req.domain}, where a website has no alias of its own — the own host's aliases are set with Own domain…`);
+      }
+      const previousOwnDomainAliases = current.entry.ownDomainAliases ?? [];
+      const ownHeld = new Set(tenantOwnHosts(current.entry.ownDomain, current.entry.ownDomainRedirects, previousOwnDomainAliases));
+      const toOwn = onOwnHost ? [entry.domain, ...previousAliases].filter((a) => a !== req.domain && !ownHeld.has(a)) : [];
+      const aliases = onOwnHost ? [] : keptAliases(req.domain, req.aliases ?? previousAliases, entry.domain, previousAliases);
       if (standsAt(entry, req.domain, aliases)) return planRecordRepair(ports, ctx, tc, current.entry, req.app, req.domain, aliases);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.domain === req.domain);
       if (serving) throw errValidation(`${req.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
@@ -278,15 +300,22 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       if (!member) throw errValidation(`the validated fan-out has no member for website "${req.app}"`);
       const recordHosts = websiteRecordHosts(req.domain, aliases, current.entry);
       const kept = new Set(recordHosts);
-      const retiredHosts = websiteRecordHosts(entry.domain, previousAliases, current.entry).filter((h) => !kept.has(h));
+      // The names handed to the own domain keep their records: they are the own domain's now.
+      const keptAsOwn = new Set(aliasHosts(toOwn));
+      const retiredHosts = websiteRecordHosts(entry.domain, previousAliases, current.entry).filter((h) => !kept.has(h) && !keptAsOwn.has(h));
       const replacing = await websiteRecordsToReplace(ctx.db, ports, tc, recordHosts, ctx.signal);
       const mailRecords = await mailRecordHashes(ports, [...recordHosts, ...retiredHosts], ctx.signal);
       const params: TenantSetWebsiteDomainParams = {
         tenantId: tc.tenantId, app: req.app, domain: req.domain, previous: entry.domain, aliases, previousAliases, member, previousMember, recordHosts, retiredHosts, replacing, mailRecords,
+        ...(toOwn.length ? { ownDomainAliases: [...previousOwnDomainAliases, ...toOwn], previousOwnDomainAliases: [...previousOwnDomainAliases] } : {}),
       };
       const steps = websiteDomainSteps(ports, params);
-      const [site, ...redirects] = websiteHosts(req.domain, aliases);
-      const what = req.domain === entry.domain ? `Give website ${req.app} of tenant ${tc.guid} at ${req.domain} the aliases ${aliases.join(", ") || "none"}` : `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} to ${req.domain}, keeping ${entry.domain} as an alias`;
+      const [site, ...redirects] = websiteHosts(req.domain, [...aliases, ...toOwn]);
+      const what = req.domain === entry.domain
+        ? `Give website ${req.app} of tenant ${tc.guid} at ${req.domain} the aliases ${aliases.join(", ") || "none"}`
+        : toOwn.length
+          ? `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} onto the tenant's own domain ${req.domain}, keeping ${toOwn.join(", ")} as the own domain's alias (Own domain… drops it later)`
+          : `Move website ${req.app} of tenant ${tc.guid} from ${entry.domain} to ${req.domain}, keeping ${entry.domain} as an alias`;
       return {
         outcome: "planned",
         params,
