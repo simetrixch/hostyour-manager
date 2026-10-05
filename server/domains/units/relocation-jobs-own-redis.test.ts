@@ -57,7 +57,8 @@ case "$*" in
 esac
 `, { mode: 0o755 });
   writeFileSync(join(bin, "hostname"), "#!/bin/sh\necho 10.1.2.3\n", { mode: 0o755 });
-  writeFileSync(join(bin, "sleep"), "#!/bin/sh\n:\n", { mode: 0o755 });
+  // TERM_ON_SLEEP stands for the kubelet stopping the job's pod: SIGTERM to the job's shell.
+  writeFileSync(join(bin, "sleep"), '#!/bin/sh\n[ -z "$TERM_ON_SLEEP" ] || kill -TERM "$PPID"\n', { mode: 0o755 });
   return { dir, box };
 }
 
@@ -106,6 +107,15 @@ describe("a consumer's own Redis, run by a real shell", () => {
     const restored = run(w, restoreJob, { SYNC: "1", SYNCING: "1" });
     expect(restored.status).not.toBe(0);
     expect(restored.stdout).toContain("NO SYNC");
+    expect(readFileSync(join(w.dir, "calls"), "utf8").trim().split("\n").filter((c) => c.startsWith("redis REPLICAOF")).at(-1)).toBe("redis REPLICAOF NO ONE");
+  });
+
+  it("PLANTED DEFECT: makes the target a primary again and stops when the job's pod is stopped mid-sync", () => {
+    const w = world();
+    writeFileSync(join(w.dir, "target.keys"), "3\n");
+    run(w, dumpJob, {});
+    const restored = run(w, restoreJob, { SYNC: "1", SYNCING: "1", TERM_ON_SLEEP: "1" });
+    expect([restored.status, restored.stdout.includes("NO SYNC")]).toEqual([143, false]);
     expect(readFileSync(join(w.dir, "calls"), "utf8").trim().split("\n").filter((c) => c.startsWith("redis REPLICAOF")).at(-1)).toBe("redis REPLICAOF NO ONE");
   });
 

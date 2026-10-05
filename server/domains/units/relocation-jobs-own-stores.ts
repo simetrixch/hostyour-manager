@@ -55,7 +55,10 @@ until [ "$(redis-cli -h 127.0.0.1 PING 2>/dev/null)" = PONG ] && redis-cli -h 12
 done
 want=$(redis-cli -h 127.0.0.1 DBSIZE)
 promote() { redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF NO ONE > /dev/null; redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "" > /dev/null; }
+# dash runs no EXIT trap when a signal kills it, and a TERM trap alone returns into the loop: a
+# stopped pod exits through the EXIT trap.
 trap promote EXIT
+trap 'exit 143' INT TERM
 redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "$REDISCLI_AUTH" > /dev/null
 redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF "$(hostname -i | cut -d' ' -f1)" 6379 > /dev/null
 offset() { sed -n "s/^$1:\\([0-9]*\\).*/\\1/p" "$2"; }

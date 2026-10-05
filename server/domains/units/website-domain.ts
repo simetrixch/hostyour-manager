@@ -100,13 +100,18 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
   };
 }
 
-/** Wait until the website answers at `https://<domain>/`, and its `www.` and alias hosts redirect. The
- *  probe does not follow a redirect, so the site's own root may answer with one too (a language
- *  redirect), and anything below 400 is an answer. */
-export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string, aliases: readonly string[] = []): Promise<void> {
-  const [site, ...redirects] = websiteHosts(domain, aliases);
+/** Wait until a website answers at `https://<site>/`. The probe does not follow a redirect, so the
+ *  site's own root may answer with one (a language redirect), and anything below 400 is an answer. */
+export async function waitForWebsiteRoot(ctx: Parameters<typeof waitForAnswer>[0], ports: Parameters<typeof waitForAnswer>[1], site: string, next: string): Promise<void> {
   const seen = await waitForAnswer(ctx, ports, `https://${site}/`, "an answer below 400", (s) => s >= 200 && s < 400, next);
   ctx.log("meta", `https://${site}/ answers (${seen})`);
+}
+
+/** Wait until the website answers at `https://<domain>/` (waitForWebsiteRoot), and its `www.` and
+ *  alias hosts redirect. */
+export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string, aliases: readonly string[] = []): Promise<void> {
+  const [site, ...redirects] = websiteHosts(domain, aliases);
+  await waitForWebsiteRoot(ctx, ports, site!, next);
   for (const host of redirects) {
     const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400, next);
     ctx.log("meta", `https://${host}/ redirects (${redirect})`);

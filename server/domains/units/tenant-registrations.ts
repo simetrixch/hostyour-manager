@@ -351,18 +351,30 @@ export class TenantRegistrations {
   /** Write the tenant's own domain ("" = none, the tenant is reached at its zone) and the hosts that
    *  redirect to it. Two fields of one file, like the flips above; writing what it already has commits
    *  nothing. tenant-set-own-domain moves the DNS records around this write. */
-  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[], runId: string): Promise<{ commit: string }> {
+  /** Set the tenant's own domain, and move the websites that stand on its own host with it: each one's
+   *  domain and member entry, in the same commit, because a website there is served at the root of the
+   *  tenant's host and has no alias of its own. tenant-set-own-domain. */
+  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[], runId: string, websites: readonly { app: string; domain: string; member: TenantMemberRecord }[] = []): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const hosts = [ownDomain, ...ownDomainRedirects, ...ownDomainAliases].filter(Boolean).join(", ");
     const { ownDomainAliases: _held, ...entry } = current.entry;
-    return this.write(stage, guid, { ...entry, ownDomain, ownDomainRedirects: [...ownDomainRedirects], ...(ownDomainAliases.length ? { ownDomainAliases: [...ownDomainAliases] } : {}) }, `own-domain(${guid}): ${hosts || "none"} ${trailer(runId)}`);
+    const moving = new Map(websites.map((w) => [w.app, w]));
+    const apps = entry.apps.map((a) => {
+      const website = moving.get(a.name);
+      if (!website) return a;
+      const { aliases: _aliases, ...rest } = a;
+      return { ...rest, domain: website.domain };
+    });
+    const members = entry.members.map((m) => moving.get(m.name)?.member ?? m);
+    const carried = websites.length ? `, ${websites.map((w) => `website ${w.app} ${w.domain}`).join(", ")}` : "";
+    return this.write(stage, guid, { ...entry, apps, members, ownDomain, ownDomainRedirects: [...ownDomainRedirects], ...(ownDomainAliases.length ? { ownDomainAliases: [...ownDomainAliases] } : {}) }, `own-domain(${guid}): ${hosts || "none"}${carried} ${trailer(runId)}`);
   }
 
   /** Move one website to another domain, or give it other alias domains: its apps[] entry's domain and
    *  aliases and its member entry, resolved again with them, in one commit, because the member's values carry the domain the chart serves.
    *  tenant-set-website-domain moves the DNS records around this write. */
-  async setWebsiteDomain(stage: Stage, guid: string, app: string, domain: string, aliases: readonly string[], member: TenantMemberRecord, runId: string): Promise<{ commit: string }> {
+  async setWebsiteDomain(stage: Stage, guid: string, app: string, domain: string, aliases: readonly string[], member: TenantMemberRecord, runId: string, ownDomainAliases?: readonly string[]): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const entry = current.entry.apps.find((a) => a.name === app);
@@ -374,7 +386,11 @@ export class TenantRegistrations {
       return { ...rest, domain, ...(aliases.length ? { aliases: [...aliases] } : {}) };
     });
     const members = current.entry.members.map((m) => (m.name === app ? member : m));
-    return this.write(stage, guid, { ...current.entry, apps, members }, `website-domain(${guid}): ${app} ${[domain, ...aliases].join(", ")} ${trailer(runId)}`);
+    // A website moving onto the tenant's own domain hands the names it leaves to the own domain's
+    // aliases in the same commit; every other move leaves them as they stand.
+    const { ownDomainAliases: held, ...rest } = current.entry;
+    const own = ownDomainAliases ?? held ?? [];
+    return this.write(stage, guid, { ...rest, ...(own.length ? { ownDomainAliases: [...own] } : {}), apps, members }, `website-domain(${guid}): ${app} ${[domain, ...aliases].join(", ")} ${trailer(runId)}`);
   }
 
   /** Move one website to another site and the tenant's bundle to a release that carries that site:

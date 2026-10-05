@@ -414,13 +414,20 @@ describe("redis (how a consumer runs Redis) and redisMaxmemoryPolicy", () => {
   });
 
   it("takes a Redis of its own only beside services: [redis]", () => {
-    expect(ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redis: "standalone" }).success).toBe(true);
+    expect(ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], redis: "standalone" }).success).toBe(true);
     const r = ConsumerManifestSchema.safeParse({ ...manifest, redis: "standalone" });
     expect(issue(r, "redis")).toMatch(/services: \[redis\]/);
   });
 
+  it("PLANTED DEFECT: refuses key and channel patterns beside a Redis of its own, whose claim gets every key and channel", () => {
+    const own = { ...manifest, services: ["redis"], redis: "standalone" };
+    expect(issue(ConsumerManifestSchema.safeParse({ ...own, keyPatterns: ["acme:*"] }), "keyPatterns")).toMatch(/redis: standalone.*every key/);
+    expect(issue(ConsumerManifestSchema.safeParse({ ...own, channelPatterns: ["acme:notify:*"] }), "channelPatterns")).toMatch(/redis: standalone.*every channel/);
+    expect(ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], keyPatterns: ["acme:*"], channelPatterns: ["acme:notify:*"] }).success).toBe(true);
+  });
+
   it("takes a maxmemory policy only for a Redis of its own, and only noeviction or allkeys-lru", () => {
-    const own = { ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redis: "standalone" };
+    const own = { ...manifest, services: ["redis"], redis: "standalone" };
     expect(ConsumerManifestSchema.parse({ ...own, redisMaxmemoryPolicy: "allkeys-lru" }).redisMaxmemoryPolicy).toBe("allkeys-lru");
     expect(ConsumerManifestSchema.safeParse({ ...own, redisMaxmemoryPolicy: "volatile-ttl" }).success).toBe(false);
     const shared = ConsumerManifestSchema.safeParse({ ...manifest, services: ["redis"], keyPatterns: ["acme:*"], redisMaxmemoryPolicy: "allkeys-lru" });
