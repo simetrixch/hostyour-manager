@@ -48,6 +48,8 @@ import { inviteOrResendTenantAdmin, BOOTSTRAP_TOKEN_KEY, InviteAdminRequest } fr
 import { TENANT_SECRET } from "./tenant-secrets.ts";
 import { tenantMemberUrl } from "#unit/server/unit-dns.ts";
 import { resolveNextVersion } from "#unit/server/release-version.ts";
+import { onboardRelease } from "./standing-release.ts";
+import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
@@ -286,14 +288,13 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     const req = parsed.data;
     if (!github) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags is not wired");
     const identity = await resolveRepoIdentity({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
-    // The version the onboarding releases: the next number after the release tags, read with the
-    // identity's token before it is sealed. Nobody types it, so no onboarding can name a release that
-    // already stands at another commit (hostyour-manager#139).
-    const { version } = await resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal });
+    // The release the onboarding puts on the stage, read with the identity's token before it is
+    // sealed; nobody types it, so no onboarding names a release that stands at another commit.
+    const { version, channel, existing } = await onboardRelease(github, { ...parseGitHubOwnerRepo(req.repoURL), token: identity.token, signal: c.req.raw.signal }, () => resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal }));
     // The credential the run opens the repository with: the App's one row or the owner's PAT row,
     // resolved now — no row of the unit's (#226).
     const repoCredentialId = await resolveRepoCredentialId({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
-    return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, repoCredentialId }), 201);
+    return c.json(await executor.planStreamed("consumer-onboard", { ...req, version, channel, existing, repoCredentialId }), 201);
   });
 
   // Lifecycle: offboard/suspend/resume plan synchronously (no gate-runner) — approve via the Runs API.

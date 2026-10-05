@@ -22,7 +22,9 @@ describe("ConsumerOnboard as a consumer's Add stage", () => {
     expect(html).toContain('value="https://github.com/x/acme.git"');
     expect(html).toContain('value="acme"');
     expect(html).toContain('<option value="" disabled="" selected="">Choose a size</option>');
-    expect(html.match(/<option value="" disabled="" selected="">Loading…<\/option>/g)).toHaveLength(2);
+    // The machine list is read; the channel is no choice of the operator's, so no select asks for one.
+    expect(html.match(/<option value="" disabled="" selected="">Loading…<\/option>/g)).toHaveLength(1);
+    expect(html).not.toContain('<span class="field__label">Channel</span>');
     expect(html).toMatch(/<button type="submit" class="btn btn--primary" disabled="">/);
   });
   it("leaves a plain onboarding as it was: empty, at the default size", () => {

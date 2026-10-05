@@ -45,9 +45,15 @@ function ctx(p: OnboardParams, stepName: string): StepCtx {
 }
 
 describe("onboard at the unit's own stage", () => {
-  it("holds the stage against the channel's ceiling — alpha reaches dev alone, so alpha at prod is refused before anything is read", async () => {
+  it("PLANTED DEFECT: refuses a release that is not stable, before anything is read: every release a stage runs is stable", async () => {
     seedClusters();
-    await expect(makeOnboardDef(ports()).planStream!(request({ channel: "alpha", stage: "prod" }), planCtx())).rejects.toThrow(/alpha channel, which reaches dev/);
+    await expect(makeOnboardDef(ports()).planStream!(request({ channel: "beta", stage: "test" }), planCtx())).rejects.toThrow(/would put 1\.0\.0-beta on test, and every release a stage runs is stable/);
+  });
+
+  it("holds the stage against the channel's ceiling — a stable release refused where the platform's table lets stable reach prod alone", async () => {
+    seedClusters();
+    const prt = ports({ channelStages: async () => ({ alpha: ["dev"], beta: ["dev", "test"], stable: ["prod"] }) });
+    await expect(makeOnboardDef(prt).planStream!(request({ channel: "stable", stage: "test" }), planCtx())).rejects.toThrow(/stable channel, which reaches prod/);
   });
 
   it("puts a unit at test onto a cluster marked prod — the stage is the unit's, and every derived name carries it", async () => {

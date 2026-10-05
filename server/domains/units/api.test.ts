@@ -167,9 +167,9 @@ function seedSlaveCluster(): void {
 }
 
 const RAW_PAT = "github_pat_raw_secret_value";
-// {channel} — the onboard TRIGGERS the release at the next version after the repo's release tags; the request carries
-// no version, no ref, no tag — and no credential: the unit's identity is its owner's (#220), recorded once.
-const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", channel: "stable", stage: "prod", clusterId: "cls_1", owner: "team" };
+// The request carries no version, no channel, no ref, no tag — and no credential: the Manager reads the
+// release, and the unit's identity is its owner's, recorded once.
+const REQ = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", stage: "prod", clusterId: "cls_1", owner: "team" };
 
 /** Records an owner's identity with REAL sealed rows of the store under test: its packages
  *  reader always, its repository PAT where `repoPat` is given (the App does not reach it). */

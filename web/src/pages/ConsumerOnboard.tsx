@@ -9,8 +9,8 @@ import { DEFAULT_UNIT_SIZE, seededSizes, type UnitSize } from "#unit/shared/unit
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
-/** Onboard wizard: point the Manager at an external GitHub repo, name the release the run
- *  will TRIGGER (version + channel — the repo's release script mints the tag), state the unit's OWN
+/** Onboard wizard: point the Manager at an external GitHub repo, see the release the run will put
+ *  on the stage (read by the Manager: the one another stage runs, else the next stable), state the unit's OWN
  *  stage, and pick where it lands: any active cluster for a unit that deploys itself, nothing more
  *  for a build-only unit. The stage is the unit's, not the cluster's: the namespace `<name>-<stage>`,
  *  the host `<label>.<stage apex>` (the manifest's `host`, or the name; prod is the apex itself), the registration `registrations/<name>/<stage>.yaml` and the
@@ -42,7 +42,7 @@ export function ConsumerOnboard() {
   // chart path; the machine and the size stay unchosen, and the repository is read at once.
   const [params] = useSearchParams();
   const [adding] = useState(() => addStageForm(params));
-  const [form, setForm] = useState({ consumerName: "", repoURL: "", channel: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string, ...(adding ? { ...adding, size: "" } : {}) });
+  const [form, setForm] = useState({ consumerName: "", repoURL: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string, ...(adding ? { ...adding, size: "" } : {}) });
   // Deployable (the manifest declares a chart → pick a cluster) vs build-only (no chart → the stage
   // alone says where the one triggered release run puts the release). The server checks the choice
   // against the manifest's own shape.
@@ -98,7 +98,7 @@ export function ConsumerOnboard() {
       const view = await prefillOnboard({ repoURL: form.repoURL.trim() });
       setPrefill(view);
       setReadURL(form.repoURL.trim());
-      setForm((f) => ({ ...f, channel: view.channel, stage: adding ? f.stage : "" }));
+      setForm((f) => ({ ...f, stage: adding ? f.stage : "" }));
     } catch (err) {
       setError(msg(err));
     } finally {
@@ -121,11 +121,13 @@ export function ConsumerOnboard() {
     setPrefill(await prefillOnboard({ repoURL: form.repoURL.trim() }));
   };
 
-  // The stages the chosen channel admits — the plan holds the same ceiling (assertChannelReaches) at
-  // the point that writes; the wizard only offers what would pass. No channel chosen yet ⇒ nothing to offer.
-  const admittedStages = form.channel ? (channels?.[form.channel as keyof NonNullable<typeof channels>] ?? []) : [];
+  // The channel of the release the Manager read for the onboarding: not the operator's choice.
+  const channel = prefill?.version ? prefill.channel : null;
+  // The stages that channel admits — the plan holds the same ceiling (assertChannelReaches) at the point
+  // that writes; the wizard only offers what would pass. No release read yet ⇒ nothing to offer.
+  const admittedStages = channel ? (channels?.[channel] ?? []) : [];
   // An Add stage's stage, held against the channel the repository answered once both are known.
-  const keptStage = admittedStage(form.stage, channels && form.channel ? admittedStages : null);
+  const keptStage = admittedStage(form.stage, channels && channel ? admittedStages : null);
   useEffect(() => {
     if (keptStage !== form.stage) setForm((f) => ({ ...f, stage: keptStage }));
   }, [keptStage, form.stage]);
@@ -140,7 +142,6 @@ export function ConsumerOnboard() {
       const { runId } = await onboardConsumer({
         consumerName: form.consumerName.trim(),
         repoURL: form.repoURL.trim(),
-        channel: form.channel as "alpha" | "beta" | "stable",
         stage: form.stage as Stage,
         ...(buildOnly ? {} : { clusterId: form.clusterId }),
         owner: form.owner.trim(),
@@ -236,38 +237,23 @@ export function ConsumerOnboard() {
             <span className="field__hint">
               {prefill?.version ? (
                 <>
-                  <code>{prefill.version}</code> — {prefill.versionSource}.{" "}
+                  <code>
+                    {prefill.version}-{prefill.channel}
+                  </code>{" "}
+                  — {prefill.versionSource}; channel: {prefill.channelSource}.{" "}
                 </>
               ) : null}
-              Not typed: the Manager reads the next number after the repository&apos;s release tags when the
-              onboarding is planned, and the repo&apos;s release script mints{" "}
-              <code>{"<version>-<channel>-<timestamp>"}</code> from it, so what the gates validated is what the
-              release builds.
+              Not typed: the Manager reads the release when the onboarding is planned. A unit another stage of
+              which runs a release gets that release, as it stands; its first stage gets the next number after
+              the repository&apos;s release tags, on stable, which the repo&apos;s release script mints as{" "}
+              <code>{"<version>-stable-<timestamp>"}</code>.
             </span>
           </div>
-          <label className="field">
-            <span className="field__label">Channel</span>
-            <select value={form.channel} onChange={(e) => setForm((f) => ({ ...f, channel: e.target.value, stage: "" }))} required>
-              <option value="" disabled>
-                {channels === null ? "Loading…" : "Choose a channel"}
-              </option>
-              {Object.entries(channels ?? {}).map(([channel, stages]) => (
-                <option key={channel} value={channel}>
-                  {channel} → {stages.join(", ")}
-                </option>
-              ))}
-            </select>
-            <span className="field__hint">
-              {prefill ? <>Channel {prefill.channelSource}. </> : null}
-              The channel is the release&apos;s maturity ceiling — the table comes from the platform&apos;s
-              values file, and the plan refuses a stage the channel does not reach.
-            </span>
-          </label>
           <label className="field">
             <span className="field__label">Stage</span>
             <select value={form.stage} onChange={set("stage")} required>
               <option value="" disabled>
-                {form.channel === "" ? "Choose a channel first" : "Choose a stage"}
+                {channel === null ? "Read the repository first" : "Choose a stage"}
               </option>
               {admittedStages.map((s) => (
                 <option key={s} value={s}>
@@ -277,7 +263,7 @@ export function ConsumerOnboard() {
             </select>
             <span className="field__hint">
               The unit&apos;s OWN stage — its namespace, host, registration file and Vault path all carry it, whatever cluster it
-              lands on. Only the stages the chosen channel admits are offered.
+              lands on. Only the stages the release&apos;s channel admits are offered.
             </span>
           </label>
           <label className="field">
@@ -352,7 +338,7 @@ export function ConsumerOnboard() {
               (!buildOnly && noTargets) ||
               !form.consumerName ||
               !form.repoURL ||
-              !form.channel ||
+              channel === null ||
               !form.stage ||
               !targetChosen ||
               !form.owner ||

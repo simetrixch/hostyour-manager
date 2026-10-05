@@ -68,6 +68,25 @@ describe("onboard a standing PROD consumer again at TEST", () => {
   });
 });
 
+describe("onboard a further stage on the release another stage runs", () => {
+  it("PLANTED DEFECT: puts the standing release on the new stage as it stands, and mints, triggers and builds nothing", async () => {
+    seedClusters();
+    const prt = ports({
+      runner: new FakeGateRunner({ report: passReport({ ...MANIFEST, envs: ["test", "prod"] }) }),
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-test.yaml": CHART_PINS, "deploy/chart/values-prod.yaml": CHART_PINS } }),
+    });
+    const test = await makeOnboardDef(prt).planStream!(request({ stage: "test", clusterId: "cls_1", existing: true }), planCtx());
+    if (test.outcome !== "planned" || test.params.form !== "deployable") throw new Error("not a deployable plan");
+    expect(test.params).toMatchObject({ version: "1.0.0", channel: "stable", existing: true });
+    const steps = makeOnboardDef(prt).steps(test.params).map((s) => s.name);
+    expect(steps).toContain("put-release");
+    expect(steps).not.toContain("trigger-release");
+    expect(steps).not.toContain("watch-release-build");
+    // The release still has to come up on the new stage: its deployment is watched as for any release.
+    expect(steps.indexOf("watch-deployment")).toBeGreaterThan(steps.indexOf("put-release"));
+  });
+});
+
 describe("onboard a consumer with a data part of its own", () => {
   it("sizes every part by the one size chosen and pins each part's volume, the new sizes included", async () => {
     seedClusters();

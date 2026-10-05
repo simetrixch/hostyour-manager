@@ -44,11 +44,10 @@ export interface ChannelStagesView {
   channelStages: Partial<Record<ReleaseChannel, Stage[]>>;
 }
 
-/** POST /api/consumers/prefill — what the onboard wizard fills its Version and Channel fields with
- *  before the operator confirms them, read off the consumer's repository: `package.json` `version`
- *  when it is in the release grammar, else the chart's `Chart.yaml` `appVersion`, else `0.1.0`;
- *  the channel is `stable`. Each value names its SOURCE in a sentence the wizard prints as the
- *  field's hint, so the operator sees whether the number was read or defaulted. Both stay editable. */
+/** POST /api/consumers/prefill — the release the onboarding will put on the stage, as the wizard shows
+ *  it before the operator plans: the one another stage of the unit runs, put on the new stage as it
+ *  stands, else the next number after the repository's release tags on stable. Each value names its
+ *  SOURCE in a sentence the wizard prints as the field's hint. Neither is typed by the operator. */
 export interface OnboardPrefillView {
   /** The version the onboarding will release — null while no identity reads the repository (#238). */
   version: string | null;

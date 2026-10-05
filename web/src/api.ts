@@ -305,9 +305,6 @@ export interface ConsumerView {
 export interface OnboardInput {
   consumerName: string;
   repoURL: string;
-  /** The channel the onboarding releases on. The version is not sent: the Manager reads the next
-   *  number after the repository's release tags and the release script mints the tag from it. */
-  channel: "alpha" | "beta" | "stable";
   /** The unit's own stage, for both forms — the namespace, the host, the registration path and the
    *  Vault path all follow it, and the plan holds it against the channel's ceiling. */
   stage: Stage;

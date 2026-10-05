@@ -29,8 +29,16 @@ describe("readOnboardPrefill", () => {
     const github = new FakeGitHubConsumer();
     github.seedTags("x", "acme", ["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034", "v9"]);
     const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
-    expect(view).toEqual({ version: "0.1.003", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "default", identity: "pat" });
-    expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
+    expect(view).toEqual({ version: "0.1.003", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "every release is stable", identity: "pat" });
+    expect(new Set(github.tagReads.map((r) => `${r.owner}/${r.repo}`))).toEqual(new Set(["x/acme"]));
+  });
+
+  it("PLANTED DEFECT: answers the release another stage of the unit runs, put on the new stage as it stands", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedTags("x", "acme", [{ name: "0.4.007-stable-20261001100000", commit: "a".repeat(40) }, { name: "0.4.008-beta-20261005145138", commit: "b".repeat(40) }]);
+    github.seedBranch("x", "acme", "deploy/prod", { sha: "f".repeat(40), parents: ["a".repeat(40)] });
+    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
+    expect(view).toMatchObject({ version: "0.4.007", versionSource: "the release prod runs, 0.4.007-stable-20261001100000, put on the new stage as it stands: nothing is built", channel: "stable", channelSource: "the release prod runs" });
   });
 
   it("starts a repository with no release tag at 0.1.0", async () => {

@@ -27,7 +27,7 @@ import {
 import { deployableOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
 import { buildOnlyCleanups } from "#unit/server/build-registration.ts";
 import {
-  triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime,
+  releaseSteps, type ReleaseCycleRuntime,
 } from "#unit/server/release-cycle.ts";
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import { checkStep } from "./onboard-check.ts";
@@ -39,7 +39,7 @@ import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { clearLeftoverBranchStep, writeRegistrationStep } from "./onboard-registration.ts";
 import type { BuildRbacWriter, RepoCredentialWriter } from "../../adapters/kube/port.ts";
-import { errNotFound, errInternal } from "../../kernel/errors.ts";
+import { errNotFound, errInternal, errValidation } from "../../kernel/errors.ts";
 import { validateOnboard, type OnboardTarget, type TenantSubdomainReader, type ValidationOutcome } from "./validate.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { assertChannelReaches } from "../inventory/channel-stages.ts";
@@ -256,8 +256,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
     // The trigger + the watches: start the cycle ONCE through the injected workflow
     // — the proof of the injection — and read its results back stage by stage.
     awaitUnitFencesStep(ports, p),
-    triggerReleaseStep(ports, p),
-    watchReleaseBuildStep(ports, p, release),
+    ...releaseSteps(ports, p, release),
     watchDeploymentStep(ports, p, release),
     smokeStep(ports, p),
     recordInventoryStep(ports, p),
@@ -296,7 +295,6 @@ function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
 const OnboardRequestFields = z.object({
   consumerName: unitNameSchema,
   repoURL: repoURLSchema,
-  channel: z.enum(RELEASE_CHANNEL),
   owner: z.string().min(1),
   // The chart subpath of a DEPLOYABLE unit; the contract's conventional default. A build-only
   // manifest declares no chart, so its form never reads this.
@@ -320,9 +318,12 @@ export type OnboardRequest = z.infer<typeof OnboardRequest>;
  *  no raw value ever reaches params_json, because the request carries none. */
 export const OnboardPlanRequest = OnboardRequestFields.extend({
   repoCredentialId: z.string().min(1), // the sealed repository identity (the run's read credential)
-  // The version this onboarding releases — the next after the repository's release tags, read by the
-  // API handler; the kit mints <version>-<channel>-<ts14> from it.
+  // The release this onboarding puts on the stage, read by the API handler: the one another stage of
+  // the unit runs, put on it as it stands (`existing`), or for its first stage the next version after
+  // the repository's release tags, on stable, which the kit mints as <version>-<channel>-<ts14>.
   version: z.string().regex(RELEASE_VERSION_RE),
+  channel: z.enum(RELEASE_CHANNEL),
+  existing: z.boolean().default(false),
 });
 export type OnboardPlanRequest = z.infer<typeof OnboardPlanRequest>;
 
@@ -399,6 +400,8 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       // The channel ceiling, held ONCE for both forms and before anything is cloned: the release
       // pipeline refuses to pin a release whose channel does not reach the stage, so an onboarding
       // that would fail there is refused here, where the operator reads the rule off the message.
+      // Every release is stable: a stage never runs a build that was not released as such.
+      if (req.channel !== "stable") throw errValidation(`the onboarding of "${req.consumerName}" would put ${req.version}-${req.channel} on ${req.stage}, and every release a stage runs is stable — put a stable release on the stage the unit's other stages take theirs from`);
       assertChannelReaches(await ports.channelStages(), req.channel, req.stage, `the onboarding of "${req.consumerName}" (version ${req.version})`);
 
       if (req.clusterId === undefined) {
@@ -448,6 +451,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
           owner: req.owner,
           version: req.version,
           channel: req.channel,
+          existing: req.existing,
           stage,
           resolvedSha: outcome.resolvedSha,
           // Nothing of a build-only unit deploys, so the run is about the master alone — the gates run
@@ -531,6 +535,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
         owner: req.owner,
         version: req.version,
         channel: req.channel,
+        existing: req.existing,
         stage: r.target.stage,
         resolvedSha: outcome.resolvedSha,
         domain: r.target.domain,

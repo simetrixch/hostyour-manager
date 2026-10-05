@@ -133,7 +133,7 @@ export function watchReleaseBuildStep(ports: BuildPorts, p: BuildParams, runtime
  *  the same stage before: both carry the same release tag, and taking the finished one would report a
  *  release that never ran. The runs standing before the dispatch are this step's checkpoint, so a
  *  resume waits for the same run and dispatches no second one. */
-export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: ReleaseCycleRuntime): Step {
+export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: ReleaseCycleRuntime, purpose = "set-release:put-release"): Step {
   return {
     name: "put-release",
     title: `Put the release ${p.version}-${p.channel} on ${p.stage} again`,
@@ -146,7 +146,7 @@ export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: Re
       const standing = saved?.standing ?? (await ports.buildPlane.listReleaseRuns(release));
       if (!saved?.dispatched) {
         ctx.checkpoint({ standing, dispatched: false });
-        const where = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, "set-release:put-release", { existing: "true" });
+        const where = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, purpose, { existing: "true" });
         ctx.checkpoint({ standing, dispatched: true });
         ctx.log("meta", `release workflow dispatched on ${where} — ${RELEASE_WORKFLOW_FILE} with version=${p.version} channel=${p.channel} stage=${p.stage} existing=true; ${standing.length} earlier run(s) of this release on ${p.stage} are not taken for the one it fires`);
       }
@@ -157,6 +157,12 @@ export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: Re
       ctx.log("meta", `release PipelineRun ${p.consumerName}-build/${outcome.runName} Succeeded — release ${outcome.releaseTag} stands on ${p.stage} again`);
     },
   };
+}
+
+/** The release steps of an onboarding: a release that stands put on the stage as it stands, where
+ *  another stage of the unit runs one, else the version minted, built and watched. */
+export function releaseSteps(ports: BuildPorts, p: BuildParams, runtime: ReleaseCycleRuntime): Step[] {
+  return p.existing ? [putReleaseStep(ports, p, runtime, "consumer-onboard:put-release")] : [triggerReleaseStep(ports, p), watchReleaseBuildStep(ports, p, runtime)];
 }
 
 /** The release run the query names, awaited to its end. Appearing is bounded: the release script's

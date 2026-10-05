@@ -7,7 +7,7 @@ import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { attestBuildsAgain } from "#unit/server/build-unit-attest.ts";
 import { preflightScopesStep } from "#unit/server/preflight-scopes.ts";
 import { injectReleaseKitStep } from "#unit/server/inject-release-kit.ts";
-import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
+import { releaseSteps, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 
 // The existing internal discriminator freezes the shorter chain into the approved plan. The
@@ -44,7 +44,7 @@ export function standingBuildOnlySteps(ports: BuildPorts, p: StandingBuildOnlyPa
     if (!await hasStandingBuildOnly(ports, unit)) throw errValidation(`build-only unit ${unit.consumerName} is no longer registered — plan the run again`);
     await attestBuildsAgain(ctx, ports, unit.consumerName, unit.builds);
   };
-  const trigger = triggerReleaseStep(ports, unit);
+  const [start, ...watch] = releaseSteps(ports, unit, release);
   return [
     preflightScopesStep(ports, unit),
     check,
@@ -55,8 +55,8 @@ export function standingBuildOnlySteps(ports: BuildPorts, p: StandingBuildOnlyPa
     },
     injectReleaseKitStep(ports, unit),
     // Retry skips completed steps, so the dispatch must prove the standing identity and render too.
-    { ...trigger, run: async (ctx) => { await attest(ctx); await trigger.run(ctx); } },
-    watchReleaseBuildStep(ports, unit, release),
+    { ...start!, run: async (ctx) => { await attest(ctx); await start!.run(ctx); } },
+    ...watch,
     recordBuildOnlyStep(ports, unit, release),
   ];
 }

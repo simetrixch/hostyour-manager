@@ -25,7 +25,7 @@ import { seedRepoPatStep } from "./seed-repo-pat.ts";
 import { awaitBuildNamespaceStep } from "./await-build-namespace.ts";
 import { injectReleaseKitStep } from "./inject-release-kit.ts";
 import { setupWebhookStep } from "./build-webhook.ts";
-import { triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "./release-cycle.ts";
+import { releaseSteps, type ReleaseCycleRuntime } from "./release-cycle.ts";
 
 /** The ref cloned before the gates run, and before an ungated build reads its manifest — the
  *  remote's default branch head. A unit is judged by what its repository IS, not a pin: only the
@@ -56,6 +56,9 @@ export const BuildParamsBase = z.object({
   // existing tag of that version+channel) and pushes the deploy ref for `stage`.
   version: z.string().regex(RELEASE_VERSION_RE),
   channel: z.enum(RELEASE_CHANNEL),
+  // The release stands already, run by another stage of the unit: it is put on `stage` as it stands,
+  // and nothing is minted or built.
+  existing: z.boolean().optional(),
   // The UNIT's own stage, the operator's input for both forms: the registration path
   // registrations/<name>/<stage>.yaml, the namespace <name>-<stage>, the host, the Vault path
   // <stage>/consumer/<name>/… and the deploy ref the triggered release pushes all follow it.
@@ -184,8 +187,7 @@ export function buildOnlySteps(ports: BuildPorts, p: BuildOnlyParams, release: R
     awaitBuildNamespaceStep(ports, p),
     injectReleaseKitStep(ports, p),
     setupWebhookStep(ports, p),
-    triggerReleaseStep(ports, p),
-    watchReleaseBuildStep(ports, p, release),
+    ...releaseSteps(ports, p, release),
     recordBuildOnlyStep(ports, p, release),
   ];
 }

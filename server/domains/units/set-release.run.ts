@@ -16,6 +16,7 @@ import type { BuildPorts } from "#unit/server/build-chain.ts";
 import { injectReleaseKitStep } from "#unit/server/inject-release-kit.ts";
 import { putReleaseStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import type { BranchCommit, GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
+import { listReleases, runningRelease } from "./standing-release.ts";
 import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { resolveRepoCredentialId, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
@@ -74,24 +75,13 @@ function repoUrlOf(db: Db, appId: string): string {
   return row.repoUrl;
 }
 
-/** The release a delivery branch head carries: the release tag naming the head itself, or naming the
- *  commit the pin commit was made on top of. */
-function releaseAt(head: BranchCommit | null, releases: readonly { tag: string; commit: string }[]): string | null {
-  if (!head) return null;
-  return releases.find((r) => r.commit === head.sha)?.tag ?? releases.find((r) => head.parents.includes(r.commit))?.tag ?? null;
-}
-
 /** The repository's releases, newest first, and the one that runs on the stage now. */
 async function readReleases(ports: Pick<SetReleasePorts, "github" | "store" | "githubApp">, owners: OwnerIdentityReader, repoURL: string, stage: string, signal?: AbortSignal): Promise<{ releases: { tag: string; commit: string }[]; running: string | null }> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const identity = await resolveRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, store: ports.store, ...(signal ? { signal } : {}) });
   const read = { owner, repo, token: identity.token, ...(signal ? { signal } : {}) };
-  const releases = (await ports.github.listReleaseTags(read))
-    .filter((t) => parseReleaseTag(t.name) !== null)
-    .map((t) => ({ tag: t.name, commit: t.commit }))
-    .sort((a, b) => parseReleaseTag(b.tag)!.ts14.localeCompare(parseReleaseTag(a.tag)!.ts14));
-  const head = await ports.github.readBranchCommit({ ...read, branch: `deploy/${stage}` });
-  return { releases, running: releaseAt(head, releases) };
+  const releases = await listReleases(ports.github, read);
+  return { releases, running: await runningRelease(ports.github, read, stage, releases) };
 }
 
 /** Whether `tag` was minted before `running`: the ts14 orders releases whatever their x.y.z says. */
