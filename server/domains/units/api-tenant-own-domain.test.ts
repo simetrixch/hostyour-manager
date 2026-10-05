@@ -39,7 +39,7 @@ describe("POST /api/tenants/:id/own-domain", () => {
     expect(r.planned).toEqual([{
       tenantId: "tnt_1", ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"],
       ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [],
-      nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null,
+      nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null, carriedWebsites: [],
     }]);
     // The operator's confirmation that the domain lies under another tenant's, as that tenant's subdomain.
     expect((await r.post({ domain: "shop.test", nestsUnder: " Simetrix " })).status).toBe(201);
@@ -49,7 +49,7 @@ describe("POST /api/tenants/:id/own-domain", () => {
   it("returns the tenant to its zone for an empty domain", async () => {
     const r = route();
     expect((await r.post({ domain: "" })).status).toBe(201);
-    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [], nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null }]);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [], nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null, carriedWebsites: [] }]);
   });
 
   it("takes the alias domains the body names, and keeps the tenant's where it names none", async () => {
