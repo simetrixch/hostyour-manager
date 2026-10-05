@@ -25,12 +25,18 @@ export interface ConsumerUnitProbesPorts {
 }
 
 /** Every probe of one consumer that the row can feed, its findings collected; a probe that throws
- *  answers one failed finding under its name. */
-async function consumerFindings(o: OnboardPorts, p: DeployableOnboardParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+ *  answers one failed finding under its name. The repository's two probes are asked once per walk
+ *  (`perRepo`): a unit standing at three stages is one repository, and one set of hooks. */
+async function consumerFindings(o: OnboardPorts, p: DeployableOnboardParams, ctx: ProbeCtx, perRepo: Map<string, Promise<PreflightCheck[]>>): Promise<PreflightCheck[]> {
+  const once = (id: string, probe: () => Promise<PreflightCheck[]>) => (): Promise<PreflightCheck[]> => {
+    const key = `${id} ${p.repoURL}`;
+    if (!perRepo.has(key)) perRepo.set(key, probe());
+    return perRepo.get(key)!;
+  };
   const out: PreflightCheck[] = [];
   for (const [id, title, probe] of [
-    ["identity", `The identity of ${p.repoURL}`, () => probeIdentity(o, p, ctx)],
-    ["webhook", `The build webhook of ${p.repoURL}`, () => probeWebhook(o, p, ctx)],
+    ["identity", `The identity of ${p.repoURL}`, once("identity", () => probeIdentity(o, p, ctx))],
+    ["webhook", `The build webhook of ${p.repoURL}`, once("webhook", () => probeWebhook(o, p, ctx, true))],
     ["dns.record", `The DNS record of ${p.consumerName}`, () => probeDns(o, p, ctx)],
   ] as const) {
     try {
@@ -47,6 +53,7 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
     noun: "consumer",
     probeAll: async (ctx, now) => {
       const done = { probed: 0, attention: 0 };
+      const perRepo = new Map<string, Promise<PreflightCheck[]>>();
       const onboard = ports.onboard();
       const consumers = ctx.db
         .select({ id: apps.id, name: apps.name, stage: apps.stage, host: apps.host, repoUrl: apps.repoUrl, clusterId: apps.clusterId, domain: clusters.domain })
@@ -74,7 +81,7 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
           }
           // The slice of the onboarding's params the three probes read, off the row and the cluster.
           const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
-          findings = await consumerFindings(onboard, p, unitProbeCtx(ctx, c.name));
+          findings = await consumerFindings(onboard, p, unitProbeCtx(ctx, c.name), perRepo);
         }
         ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();
         done.probed += 1;

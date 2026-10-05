@@ -105,8 +105,10 @@ export async function probePackages(ports: BuildPorts, p: BuildParams, ctx: Prob
   }
 }
 
-/** setup-webhook's probe: the hooks are readable with the identity, and the build plane is named. */
-export async function probeWebhook(ports: BuildPorts, p: BuildParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+/** setup-webhook's probe: the hooks are readable with the identity, and the build plane is named.
+ *  `standing` is the scheduled check's reading of a unit already onboarded: no run follows it to
+ *  create the hook, so a missing one is worth a look rather than a pass. */
+export async function probeWebhook(ports: BuildPorts, p: BuildParams, ctx: ProbeCtx, standing = false): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
   const title = `The build webhook of ${owner}/${repo}`;
   if (!ports.github) return [unmeasuredCheck("webhook", title, "no GitHub client is wired on this manager")];
@@ -116,6 +118,11 @@ export async function probeWebhook(ports: BuildPorts, p: BuildParams, ctx: Probe
   return withIdentity(ctx, p, "consumer-onboard:probe-webhook", async (token, viaApp) => {
     try {
       const stands = await ports.github!.hookStandsAt({ owner, repo, token, targetUrl, signal: ctx.signal });
+      if (standing) {
+        return [stands
+          ? preflightCheck("webhook", title, "hard", "pass", `a hook stands at ${targetUrl}`)
+          : preflightCheck("webhook", title, "hard", "warn", `no hook stands at ${targetUrl}: a push to this repository starts no build`)];
+      }
       return [preflightCheck("webhook", title, "hard", "pass", stands ? `a hook already stands at ${targetUrl} and is re-set by the run` : `the hooks are readable; the run creates one at ${targetUrl}`)];
     } catch (err) {
       if (!(err instanceof WebhookScopeError)) throw err;

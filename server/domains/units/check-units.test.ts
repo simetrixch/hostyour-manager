@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { apps, clusters, servers, tenants } from "../../db/schema/inventory.ts";
@@ -12,6 +12,9 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { checkBadge } from "../../../web/src/unitCheck.ts";
+import { webhookTargetUrl } from "#unit/server/adapters/github-consumer/port.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import type { TenantBuildDeps } from "./tenant-builds.ts";
 
 // THE SCHEDULED CHECK RUNS EVERY STANDING UNIT'S PROBES (#210): over the rows, with the ports the
 // onboarding ran them with, and records what it found on each row — the pass as well as the drift.
@@ -76,6 +79,50 @@ describe("check-units", () => {
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ status: "warn", detail: "not measured: the row records no repository (an adopted unit)" }]);
     await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => undefined, resolveUnitApex: apex })]).run(ctx([]));
     expect(db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, "app_adopted")).get()?.check?.findings).toMatchObject([{ detail: "not measured: the consumer onboarding is not wired on this manager" }]);
+  });
+
+  it("a standing consumer whose only hook stands at another host is worth a look, naming the URL it expected; each repository is read once", async () => {
+    for (const stage of ["prod", "test"] as const) {
+      db.db.insert(apps).values({ id: `app_${stage}`, clusterId: "cls_1", name: "acme", stage, host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
+    }
+    const github = new FakeGitHubConsumer();
+    github.seedHook("x", "acme", "https://build.old.example/github"); // left behind when the build plane moved
+    const o = onboardPorts({ github });
+    const expected = webhookTargetUrl(await o.resolveBuildPlaneFqdn("s1.example"), o.webhookSubdomain);
+    const reads = vi.spyOn(github, "hookStandsAt");
+    await checkUnitsStep(() => [consumerUnitProbes({ onboard: () => o, resolveUnitApex: async () => "example.com", githubApp: appWith("x") })]).run(ctx([]));
+
+    for (const id of ["app_prod", "app_test"]) {
+      const webhook = db.db.select({ check: apps.checkJson }).from(apps).where(eq(apps.id, id)).get()?.check?.findings.find((f) => f.id === "webhook");
+      expect(webhook).toMatchObject({ status: "warn", detail: `no hook stands at ${expected}: a push to this repository starts no build` });
+    }
+    expect(reads).toHaveBeenCalledTimes(1); // two stage rows, one repository
+  });
+
+  it("a tenant's row carries the build hooks of the units that build its images, and of no other unit", async () => {
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    const dns = emptyZone();
+    const github = new FakeGitHubConsumer();
+    const expected = webhookTargetUrl("m1.example", "build");
+    github.seedHook("x", "digita-auth", expected);
+    const reads = vi.spyOn(github, "hookStandsAt");
+    const units = [
+      { unit: "digita-auth", entry: { repoURL: "https://github.com/x/digita-auth.git", builds: ["digita-auth-backend"] } },
+      { unit: "digita-jobs", entry: { repoURL: "https://github.com/x/digita-jobs.git", builds: ["digita-jobs"] } },
+      { unit: "unrelated", entry: { repoURL: "https://github.com/x/unrelated.git", builds: ["unrelated"] } },
+    ];
+    const deps = (): TenantBuildDeps => ({ ports: { github, resolveBuildPlaneFqdn: async () => "m1.example", webhookSubdomain: "build", registrations: { listBuildRegistrations: async () => units } } } as unknown as TenantBuildDeps);
+    const ports = {
+      dns, resolveUnitApex: async () => "example.com", githubApp: appWith("x"), onboard: deps,
+      attestedBuilds: async () => units.flatMap((u) => u.entry.builds.map((build) => ({ unit: u.unit, build }))),
+      registrations: { readTenant: async () => ({ entry: { approvedTags: { auth: { "digita-auth-backend": "1.0.0" }, jobs: { "digita-jobs": "1.0.0" } } } }) },
+    } as unknown as TenantOnboardPorts;
+    await checkUnitsStep(() => [tenantUnitProbes(ports)]).run(ctx([]));
+
+    const findings = db.db.select({ check: tenants.checkJson }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.check?.findings ?? [];
+    expect(findings.map((f) => [f.id, f.status])).toEqual([["dns.record", "pass"], ["unit.digita-auth", "pass"], ["unit.digita-jobs", "warn"]]);
+    expect(findings.find((f) => f.id === "unit.digita-jobs")?.detail).toBe(`its stored credential reads the hooks; no hook stands at ${expected}: a push to it starts no build`);
+    expect(reads).toHaveBeenCalledTimes(2); // the unrelated unit builds nothing this tenant runs
   });
 
   it("the badge is quiet where every probe passed, and absent where no check has reached the unit", () => {

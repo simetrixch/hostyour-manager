@@ -70,8 +70,10 @@ export async function probeAppsRepository(ports: TenantOnboardPorts, unit: { org
   return out;
 }
 
-/** build-unit:<unit>'s probe: the unit's identity, as far as one stands before the approve. */
-export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: TenantOnboardPorts, p: Pick<CreateTenantParams, "domain">, unit: BuildUnit, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+/** build-unit:<unit>'s probe: the unit's identity, as far as one stands before the approve.
+ *  `standing` is the scheduled check's reading, after which no release sets the hook: a missing one
+ *  is worth a look rather than a pass. */
+export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, ports: Pick<TenantOnboardPorts, "githubApp">, p: Pick<CreateTenantParams, "domain">, unit: BuildUnit, ctx: ProbeCtx, standing = false): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(unit.repoURL);
   const title = `The build unit ${unit.unit} (${owner}/${repo})`;
   // The owner's identity, judged now (repo-identity.ts, #226): what the step resolves and opens.
@@ -89,6 +91,7 @@ export async function probeBuildUnit(deps: () => TenantBuildDeps | undefined, po
   const token = await ctx.creds.open(credentialId, { purpose: "tenant-create:probe-build-unit" });
   try {
     const stands = await github.hookStandsAt({ owner, repo, token: token.toString("utf8"), targetUrl, signal: ctx.signal });
+    if (!stands && standing) return [check(`unit.${unit.unit}`, title, "hard", "warn", `its stored credential reads the hooks; no hook stands at ${targetUrl}: a push to it starts no build`)];
     return [check(`unit.${unit.unit}`, title, "hard", "pass", stands ? "its stored credential reads the hooks; the build hook stands" : "its stored credential reads the hooks; the re-release sets the build hook")];
   } catch (err) {
     if (!(err instanceof WebhookScopeError)) throw err;
