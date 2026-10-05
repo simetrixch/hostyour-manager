@@ -15,7 +15,8 @@ import type { AnyRunDefinition } from "../../executor/types.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -89,6 +90,8 @@ export function useOwnDomainHarness() {
       }),
       deployRepoUrl: "https://github.com/acme/acme-deploy.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
       dns, probe, routingWaitMs: 0, routingPollMs: 0,
+      // This tenant runs no website, so nothing resolves a website's member here.
+      repo: new FakeRepoReader({}), helm: new FakeHelmRenderer({}), resolveClusterValueFiles: async () => [],
     });
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
