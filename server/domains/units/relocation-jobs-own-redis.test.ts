@@ -106,6 +106,7 @@ describe("a consumer's own Redis, run by a real shell", () => {
     const restored = run(w, restoreJob, { SYNC: "1", SYNCING: "1" });
     expect(restored.status).not.toBe(0);
     expect(restored.stdout).toContain("NO SYNC");
+    expect(readFileSync(join(w.dir, "calls"), "utf8").trim().split("\n").filter((c) => c.startsWith("redis REPLICAOF")).at(-1)).toBe("redis REPLICAOF NO ONE");
   });
 
   it("leaves the server's data claim out of the tar and expects a redis entry in the generation", () => {
