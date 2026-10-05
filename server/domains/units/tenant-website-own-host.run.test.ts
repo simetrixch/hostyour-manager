@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { eq } from "drizzle-orm";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { APP_OVERLAYS } from "./tenant-members.fixture.ts";
@@ -85,6 +86,39 @@ describe("a website moving onto the tenant's own domain", () => {
     expect([shown?.domain, shown?.aliases, back?.ownDomainAliases, row()]).toEqual([OLD, undefined, undefined, []]);
   });
 
+  it("hands the website's own aliases to the own domain along with the name it leaves", async () => {
+    const dns = atTest();
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at([{ ...SHOW, domain: OLD, aliases: ["old.test.simetrix.ch"] }]), dns }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: OWN, aliases: [] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.retiredHosts]).toEqual([[], [OLD, "old.test.simetrix.ch"], []]);
+  });
+
+  it("waits until every name handed to the own domain redirects before the step ends", async () => {
+    const dns = atTest();
+    const hosts = [OWN, `www.${OWN}`, OLD, `www.${OLD}`].map((h) => `https://${h}/`);
+    const probe = new FakePublicProbe(Object.fromEntries(hosts.map((u, i) => [u, i === 0 ? { reachable: true, status: 200, detail: "HTTP 200" } : { reachable: true, status: 307, detail: "HTTP 307" }])));
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at([{ ...SHOW, domain: OLD }]), dns, probe }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: OWN, aliases: [] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    const retire = def.steps(planned.params).find((s) => s.name === "retire-previous-website-domain")!;
+    await retire.run(ctx(params(), retire.name, []));
+    expect(probe.probed).toEqual(hosts);
+  });
+
+  it("repairs the registration the stuck run of 2026-10-05 left: the website on the own domain with its old name as its own alias", async () => {
+    const dns = atTest();
+    const registrations = at([{ ...SHOW, domain: OWN, aliases: [OLD] }]);
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: OWN, aliases: [] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.retiredHosts]).toEqual([[], [OLD], []]);
+    const write = def.steps(planned.params).find((s) => s.name === "write-website-domain")!;
+    await write.run(ctx(params(), write.name, []));
+    const after = (await registrations.readTenant("test", GUID))?.entry;
+    expect([after?.apps.find((a) => a.name === "show")?.aliases, after?.ownDomainAliases]).toEqual([undefined, [OLD]]);
+  });
+
   it("refuses an alias typed for a website on the own domain, naming where those aliases are set", async () => {
     const dns = atTest();
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at([{ ...SHOW, domain: OLD }]), dns }, WEBSITE_APPS));
@@ -143,15 +177,19 @@ describe("a TEST move from the simetrix.ch zone into the simplidigita.ai zone", 
     expect(planned.plan.summary).toMatch(new RegExp(`https://${OLD.replaceAll(".", "\\.")}/, https://www\\.${OLD.replaceAll(".", "\\.")}/ redirects`));
   });
 
-  it("moves website veloluck across the zones to a domain of its own, keeping its old name as its own alias", async () => {
+  it("moves website veloluck across the zones to a domain of its own, keeping its old name as its own alias and the own domain's aliases as they stand", async () => {
     const dns = crossZone();
     db.db.update(tenants).set({ ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], ownDomainAliases: [OWN, OLD] }).where(eq(tenants.id, "tnt_1")).run();
-    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: registration(NEW_OWN, [OWN, OLD], [{ ...SHOW, domain: NEW_OWN }, VELO]), dns }, WEBSITE_APPS));
+    const registrations = registration(NEW_OWN, [OWN, OLD], [{ ...SHOW, domain: NEW_OWN }, VELO]);
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
     const planned = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simplidigita.ai", aliases: [] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.recordHosts]).toEqual([
       ["test.veloluck.show.simetrix.ch"], undefined,
       ["veloluck.show.test.simplidigita.ai", "www.veloluck.show.test.simplidigita.ai", "test.veloluck.show.simetrix.ch", "www.test.veloluck.show.simetrix.ch"],
     ]);
+    const write = def.steps(planned.params).find((s) => s.name === "write-website-domain")!;
+    await write.run(ctx(params(), write.name, []));
+    expect([(await registrations.readTenant("test", GUID))?.entry.ownDomainAliases, row()]).toEqual([[OWN, OLD], [OWN, OLD]]);
   });
 });
