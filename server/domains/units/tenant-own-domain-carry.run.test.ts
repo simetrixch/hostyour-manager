@@ -110,6 +110,13 @@ describe("an own-domain move with a website on the own host", () => {
     await expect(retire.run(ctx(params(), retire.name, []))).resolves.toBeUndefined();
   });
 
+  it("never makes the new own domain an alias of itself, where the carried website held it as an alias", async () => {
+    const { def } = world({ showAliases: [NEW] });
+    const planned = await def.planStream!(MOVE, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect(planned.params.ownDomainAliases).toEqual([OLD]);
+  });
+
   it("hands an alias a carried website still holds to the own domain, which serves its redirect", async () => {
     const { def } = world({ showAliases: ["old.show.simetrix.ch"] });
     const planned = await def.planStream!(MOVE, planCtx());
@@ -127,6 +134,7 @@ describe("clearing the own domain with a website on the own host", () => {
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect(planned.params.carriedWebsites.map((w) => [w.app, w.member.sources.map((s) => s.values).find((v) => v && "site" in v)])).toEqual([["show", { site: { domain: ZONE } }]]);
     expect(planned.plan.summary).toContain(`carry website show from ${OLD} to ${ZONE}`);
+    expect(planned.plan.summary).toContain(`wait until https://${ZONE}/auth/ and https://${ZONE}/ answers`);
 
     const write = def.steps(planned.params).find((s) => s.name === "write-own-domain")!;
     const before = repo.commits.length;
@@ -151,5 +159,10 @@ describe("clearing the own domain with a website on the own host", () => {
     const retire = def.steps(planned.params).find((s) => s.name === "retire-previous-own-domain")!;
     await retire.run(ctx(params(), retire.name, []));
     expect(probe.probed).toContain(`https://${ZONE}/`);
+  });
+
+  it("PLANTED DEFECT: refuses a clear while the carried website holds an alias, which then has no own domain to redirect to", async () => {
+    const { def } = world({ showAliases: ["old.show.simetrix.ch"] });
+    await expect(def.planStream!(CLEAR, planCtx())).rejects.toThrow(/old\.show\.simetrix\.ch.*website show.*Domain and aliases/);
   });
 });

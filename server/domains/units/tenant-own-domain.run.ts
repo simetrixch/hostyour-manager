@@ -287,7 +287,13 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       for (const host of aliasHosts(asked.ownDomainAliases)) if (ownWebsites.has(host)) throw errValidation(`${host} is a host a website of tenant ${tc.guid} serves — an alias names another domain`);
       const kept = keepingPrevious(asked);
       // An alias a carried website still holds goes with it to the own domain, the one place a website on
-      // the own host keeps its old names; the website itself holds none there.
+      // the own host keeps its old names; the website itself holds none there. A clear leaves no own
+      // domain for such an alias to redirect to, and the auth chart refuses aliases without one.
+      if (asked.ownDomain === "") {
+        for (const website of onOwnHost.filter((w) => w.aliases?.length)) {
+          throw errValidation(`${website.aliases!.join(", ")}: website ${website.name} still holds these aliases, and clearing the own domain leaves them no own domain to redirect to — drop them first with Websites, ${website.name}, Domain and aliases…`);
+        }
+      }
       const carriedAliases = onOwnHost.flatMap((w) => w.aliases ?? []);
       const ownAliases = kept.ownDomainAliases.filter((a) => !ownWebsites.has(a));
       const params = { ...kept, ownDomainAliases: [...ownAliases, ...carriedAliases.filter((a) => !ownAliases.includes(a) && a !== kept.ownDomain)] };
@@ -337,7 +343,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         targetId: params.tenantId,
         summary:
           `${params.previous === params.ownDomain ? "Re-apply" : `Move tenant ${tc.guid} from ${params.previous || zone} to`} ${newHost} (${tc.domain}, ${tc.stage}): ` +
-          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row${carried}, wait until ${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/${carriedWebsites.length ? ` and https://${params.ownDomain}/` : ""} answers with a 2xx` +
+          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row${carried}, wait until ${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/${carriedWebsites.length ? ` and https://${newHost}/` : ""} answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +
