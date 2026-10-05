@@ -106,7 +106,7 @@ describe("onboard a consumer with a data part of its own", () => {
 
   it("registers a Redis of the consumer's own with its maxmemory policy, its size, its volume and its row in the quota", async () => {
     seedClusters();
-    const own = { ...MANIFEST, services: ["redis" as const], keyPatterns: ["acme:*"], redis: "standalone" as const, redisMaxmemoryPolicy: "allkeys-lru" as const };
+    const own = { ...MANIFEST, services: ["redis" as const], redis: "standalone" as const, redisMaxmemoryPolicy: "allkeys-lru" as const };
     const prt = ports({
       runner: new FakeGateRunner({ report: passReport(own) }),
       repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
@@ -121,7 +121,7 @@ describe("onboard a consumer with a data part of its own", () => {
 
   it("writes noeviction for a Redis of its own that names no policy, and no redis key for the shared server", async () => {
     seedClusters();
-    const own = { ...MANIFEST, services: ["redis" as const], keyPatterns: ["acme:*"], redis: "standalone" as const };
+    const own = { ...MANIFEST, services: ["redis" as const], redis: "standalone" as const };
     const cases: [ConsumerManifest, unknown[]][] = [[own, ["standalone", "noeviction"]], [{ ...MANIFEST, services: ["redis"], keyPatterns: ["acme:*"] }, [undefined, undefined]]];
     for (const [manifest, want] of cases) {
       const prt = ports({

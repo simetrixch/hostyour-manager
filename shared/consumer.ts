@@ -372,9 +372,11 @@ export const ConsumerManifestSchema = z.object({
   // service-provisioner, and held to this set by the unit's own admission fence — so a chart cannot
   // ask for a pattern the platform never granted it (simetrixch/hostyour-cloud#199).
   //
-  // REQUIRED FOR A REDIS CLAIM AND FAIL-CLOSED, which the ServiceClaim CRD states and this mirrors:
-  // an ACL user must be told which keys it may touch, and the answer for a claim naming none is an
-  // error rather than every key. Empty [] ⇒ this consumer claims no redis, which is most of them.
+  // REQUIRED FOR A CLAIM ON THE SHARED REDIS AND FAIL-CLOSED, which the ServiceClaim CRD states and
+  // this mirrors: an ACL user there must be told which keys it may touch, and the answer for a claim
+  // naming none is an error rather than every key. Empty [] ⇒ this consumer claims no shared redis,
+  // which is most of them. With `redis: standalone` it stays empty: that server is the consumer's
+  // alone, and its claim gets every key and channel.
   keyPatterns: z.array(z.string()).default([]),
   // The LITERAL redis Pub/Sub channel patterns this consumer's ACL user is granted, each written
   // as redis writes one after `&` (`example:notify:*`). A channel is not a key: a user granted
@@ -486,6 +488,14 @@ export const ConsumerManifestSchema = z.object({
     }
     if (m.redis === "standalone" && !m.services.includes("redis")) {
       ctx.addIssue({ code: "custom", path: ["redis"], message: "redis: standalone needs services: [redis] — the claim is what hands the application its credential" });
+    }
+    // A Redis of its own serves this consumer alone: the service-provisioner grants its claim every
+    // key and every channel, so a pattern here would claim a fence nothing holds.
+    if (m.redis === "standalone" && m.keyPatterns.length) {
+      ctx.addIssue({ code: "custom", path: ["keyPatterns"], message: "keyPatterns are for the shared Redis — with redis: standalone the server is this consumer's alone, and its claim gets every key" });
+    }
+    if (m.redis === "standalone" && m.channelPatterns.length) {
+      ctx.addIssue({ code: "custom", path: ["channelPatterns"], message: "channelPatterns are for the shared Redis — with redis: standalone the server is this consumer's alone, and its claim gets every channel" });
     }
     if (m.redisMaxmemoryPolicy !== undefined && m.redis !== "standalone") {
       ctx.addIssue({ code: "custom", path: ["redisMaxmemoryPolicy"], message: "redisMaxmemoryPolicy needs redis: standalone — the shared server's policy is the platform's" });

@@ -158,7 +158,7 @@ describe("migrate (consumer)", () => {
     seedConsumerRow(db);
     const f = makeFakes();
     const ports = consumerPorts(f);
-    await seedConsumerRegistration(ports.registrations, { redis: "standalone", databases: [], services: ["redis"], keyPatterns: ["acme:*"] });
+    await seedConsumerRegistration(ports.registrations, { redis: "standalone", databases: [], services: ["redis"] });
     // The application asks for zero replicas; the own server and its exporter keep running, which the dump needs.
     f.source.reader.setSmoke({
       namespaceExists: true, externalSecretsReady: true,
