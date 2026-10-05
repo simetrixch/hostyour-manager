@@ -105,6 +105,30 @@ export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string,
   return replaced;
 }
 
+/** The hosts of `hosts` where no record stands at all, in a zone this installation's DNS provider
+ *  manages: what a repair writes. A host carrying any record is not missing, and a host in a zone
+ *  nobody here manages is its operator's to set. */
+export async function missingRecordHosts(ports: RecordPorts, hosts: readonly string[], signal?: AbortSignal): Promise<string[]> {
+  if (!ports.dns) return [];
+  const missing: string[] = [];
+  for (const host of hosts) {
+    let cname: string | null;
+    try {
+      cname = await ports.dns.readRecordContent({ name: host, type: "CNAME", ...(signal ? { signal } : {}) });
+    } catch (e) {
+      if (e instanceof DnsZoneUnknownError) continue;
+      throw e;
+    }
+    if (cname !== null) continue;
+    let addressed = false;
+    for (const type of ADDRESS_TYPES) {
+      if ((await ports.dns.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })).length > 0) addressed = true;
+    }
+    if (!addressed) missing.push(host);
+  }
+  return missing;
+}
+
 /** The plan summary's sentence on the records the run replaces, or "" where it replaces none. The
  *  summary is what the run screen shows before the approval. */
 export function replacementSentence(replacing: readonly ReplacedRecord[]): string {

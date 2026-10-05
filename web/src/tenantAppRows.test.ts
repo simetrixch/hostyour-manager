@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listedWebsites, unknownDomainText, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, unknownDomainText, websiteDomainConfirm, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -106,5 +106,22 @@ describe("typedAliases", () => {
   it("reads the alias domains of one field, split at commas or spaces, lower-cased, empties dropped", () => {
     expect(typedAliases(" Example.DE, example.at  example.com,,")).toEqual(["example.de", "example.at", "example.com"]);
     expect(typedAliases("  ")).toEqual([]);
+  });
+});
+
+// The confirm of a website's domain dialog: a move, an alias change, or, with both left as they stand,
+// the run that writes the host records the website misses (the server refuses it where none is missing).
+
+describe("websiteDomainConfirm", () => {
+  const standing = { domain: "example.ch", aliases: ["example.de"] };
+
+  it("names a move, an alias change, and with nothing changed the repair of missing host records", () => {
+    expect(websiteDomainConfirm(standing, "example.org", ["example.de"])).toBe("Serve at example.org");
+    expect(websiteDomainConfirm(standing, "example.ch", [])).toBe("Set the aliases");
+    expect(websiteDomainConfirm(standing, "example.ch", ["example.de"])).toBe("Write the missing host records");
+  });
+
+  it("offers nothing without a domain", () => {
+    expect(websiteDomainConfirm(standing, "", ["example.de"])).toBeNull();
   });
 });

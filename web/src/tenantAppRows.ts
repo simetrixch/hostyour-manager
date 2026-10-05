@@ -98,3 +98,13 @@ export function websiteFolder(catalog: readonly TenantCatalogAppView[], websites
 export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "members">, site: string): string {
   return websiteAppName(site, new Set([...(catalog.members ?? []), ...catalog.apps.map((a) => a.name)]));
 }
+
+/** What the confirm of a website's domain dialog does, as its label: move the website, change its
+ *  aliases, or, with the domain and aliases as they stand, write the host records it misses. The
+ *  server refuses the last where no record is missing. Null where no domain is typed. */
+export function websiteDomainConfirm(standing: { domain: string; aliases: readonly string[] }, next: string, aliases: readonly string[]): string | null {
+  if (!next) return null;
+  if (next !== standing.domain) return `Serve at ${next}`;
+  if (aliases.join() !== standing.aliases.join()) return "Set the aliases";
+  return "Write the missing host records";
+}

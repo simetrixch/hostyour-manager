@@ -1,15 +1,15 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import type { Cleanup, RunDefinition, Step } from "../../executor/types.ts";
+import type { Cleanup, PlanStreamCtx, PlanStreamResult, RunDefinition, Step } from "../../executor/types.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
-import { appName, TenantMemberRecordSchema } from "../../../shared/tenant.ts";
+import { appName, TenantMemberRecordSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { aliasHosts, ownDomainEntryProblem, tenantOwnHosts } from "#unit/shared/unit-host.ts";
 import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, removeOwnDomainRecord, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
+import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, missingRecordHosts, removeOwnDomainRecord, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, tenantWebsiteHosts, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
@@ -89,7 +89,16 @@ function standsAt(entry: { domain?: string | undefined; aliases?: readonly strin
   return entry.domain === domain && held.length === aliases.length && held.every((a) => aliases.includes(a));
 }
 
+/** Whether the run leaves the website where it stands and only writes the host records it misses.
+ *  False for params carrying no domain: the boot's guard asks a def for its steps with none. */
+function isRecordRepair(p: TenantSetWebsiteDomainParams): boolean {
+  return p.domain !== undefined && p.domain === p.previous && standsAt({ domain: p.previous, aliases: p.previousAliases }, p.domain, p.aliases);
+}
+
 function websiteDomainSteps(ports: AddAppPorts, p: TenantSetWebsiteDomainParams): Step[] {
+  if (isRecordRepair(p)) {
+    return [attestTenantTargetStep(ports, p.tenantId), checkMailRecordsStep(ports, p.mailRecords), provisionWebsiteRecordsStep(ports, p.tenantId, p.app, p.recordHosts, p.replacing)];
+  }
   return [
     attestTenantTargetStep(ports, p.tenantId),
     checkMailRecordsStep(ports, p.mailRecords),
@@ -135,6 +144,48 @@ function keptAliases(domain: string, asked: readonly string[], previous: string,
   return asked.includes(previous) ? [...asked] : [...asked, previous];
 }
 
+/** A website that stands at the domain and aliases asked for: a run that writes the host records it
+ *  misses, and nothing else — no registration write, no member resolved again. A website a stage was
+ *  added with before Add stage wrote its www record has such a gap. Refused where no record is missing. */
+async function planRecordRepair(
+  ports: AddAppPorts,
+  ctx: PlanStreamCtx,
+  tc: ReturnType<typeof loadTenantCluster>,
+  registration: TenantRegistration,
+  app: string,
+  domain: string,
+  aliases: readonly string[],
+): Promise<PlanStreamResult<TenantSetWebsiteDomainParams>> {
+  const recordHosts = await missingRecordHosts(ports, websiteRecordHosts(domain, aliases, registration), ctx.signal);
+  if (recordHosts.length === 0) {
+    throw errValidation(`website ${app} is already served at ${domain}${aliases.length ? ` with the aliases ${aliases.join(", ")}` : ""}, and every host record of it stands`);
+  }
+  const member = registration.members.find((m) => m.name === app);
+  if (!member) throw errValidation(`website ${app} has no member entry in tenant ${tc.guid}'s registration`);
+  const mailRecords = await mailRecordHashes(ports, recordHosts, ctx.signal);
+  const params: TenantSetWebsiteDomainParams = {
+    tenantId: tc.tenantId, app, domain, previous: domain, aliases: [...aliases], previousAliases: [...aliases], member, previousMember: member, recordHosts, retiredHosts: [], replacing: [], mailRecords,
+  };
+  return {
+    outcome: "planned",
+    params,
+    plan: {
+      kind: "tenant-set-website-domain",
+      targetKind: "tenant",
+      targetId: tc.tenantId,
+      summary:
+        `Write the missing host record${recordHosts.length === 1 ? "" : "s"} ${recordHosts.join(", ")} of website ${app} of tenant ${tc.guid} at ${domain} (${tc.domain}, ${tc.stage}): ` +
+        `point ${recordHosts.length === 1 ? "it" : "them"} at the tenant's zone. The website stays where it stands, and its registration is not written. ` +
+        `An abort removes ${recordHosts.length === 1 ? "the record" : "the records"} again.${mailRecordSentence(mailRecords)}`,
+      steps: websiteDomainSteps(ports, params).map((s) => ({ name: s.name, title: s.title })),
+      targets: [],
+      locks: tenantLocks(ports.registrations),
+      warnings: [],
+      requiredSecrets: [],
+    },
+  };
+}
+
 export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition<TenantSetWebsiteDomainParams> {
   return {
     kind: "tenant-set-website-domain",
@@ -157,7 +208,7 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       }
       const previousAliases = entry.aliases ?? [];
       const aliases = keptAliases(req.domain, req.aliases ?? previousAliases, entry.domain, previousAliases);
-      if (standsAt(entry, req.domain, aliases)) throw errValidation(`website ${req.app} is already served at ${req.domain}${aliases.length ? ` with the aliases ${aliases.join(", ")}` : ""}`);
+      if (standsAt(entry, req.domain, aliases)) return planRecordRepair(ports, ctx, tc, current.entry, req.app, req.domain, aliases);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.domain === req.domain);
       if (serving) throw errValidation(`${req.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
       if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
@@ -240,7 +291,10 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       };
     },
     steps: (params) => websiteDomainSteps(ports, params),
-    cleanups: (params) => [removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.recordHosts, params.replacing, websiteHosts(params.previous, params.previousAliases)), restoreWebsiteDomainCleanup(ports, params)],
+    cleanups: (params) =>
+      isRecordRepair(params)
+        ? [removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.recordHosts, params.replacing)]
+        : [removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.recordHosts, params.replacing, websiteHosts(params.previous, params.previousAliases)), restoreWebsiteDomainCleanup(ports, params)],
     // Refused once a previous host's record, which this installation wrote, is gone: the website then
     // stands on its new hosts alone, and the abort would move it back onto hosts that no longer point at it.
     assertAbortable: async (params) => {

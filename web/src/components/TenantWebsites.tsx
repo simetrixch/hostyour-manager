@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { newWebsiteName, typedAliases, unknownDomainText, websiteFolder } from "../tenantAppRows.ts";
+import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder } from "../tenantAppRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
@@ -123,8 +123,8 @@ export function TenantWebsites(props: {
       {moving && (
         <ConfirmDialog
           title={`Domain and aliases of website ${moving.name}`}
-          confirmLabel={nextTyped && nextTyped !== moving.domain ? `Serve at ${nextTyped}` : "Set the aliases"}
-          confirmDisabled={!nextTyped || (nextTyped === moving.domain && aliases.join() === (moving.aliases ?? []).join())}
+          confirmLabel={websiteDomainConfirm({ domain: moving.domain, aliases: moving.aliases ?? [] }, nextTyped, aliases) ?? "Set the aliases"}
+          confirmDisabled={websiteDomainConfirm({ domain: moving.domain, aliases: moving.aliases ?? [] }, nextTyped, aliases) === null}
           onCancel={() => setMoving(null)}
           onConfirm={() => { const w = moving; setMoving(null); void act(() => setTenantWebsiteDomain(tenantId, w.name, nextTyped, aliases)); }}
         >
@@ -140,7 +140,7 @@ export function TenantWebsites(props: {
             The website keeps its name {moving.name}. Each alias and its www host redirect permanently to the domain.
             {nextTyped !== moving.domain
               ? ` From the moment the new domain is recorded, the site answers only there; ${moving.domain} stays as an alias. A domain that is an alias now cannot become the domain in the same run.`
-              : " The records of an alias you drop go once the site answers at its hosts."}
+              : " The records of an alias you drop go once the site answers at its hosts. With the domain and the aliases left as they stand, the run writes only the host records the website misses."}
           </p>
         </ConfirmDialog>
       )}

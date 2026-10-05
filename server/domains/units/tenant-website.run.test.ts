@@ -365,6 +365,40 @@ describe("tenant-set-website-domain", () => {
     await expect(def.planStream!({ ...MOVE, domain: "example.de" }, planCtx())).rejects.toThrow(/drop the alias in one run/);
   });
 
+  it("repairs a website that stands at its domain but misses a host record: writes that record alone, and records nothing", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const dns = new FakeDnsProvider();
+    // The apex stands, written for the tenant; www.example.ch was never written.
+    dns.seed("example.ch", "CNAME", "acme.example.com");
+    recordDnsWrite(db.db, { name: "example.ch", type: "CNAME", content: "acme.example.com", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_add" });
+    const prt = ports({ registrations, dns, repo: withDomain() }, WEBSITE_APPS);
+    const def = makeTenantSetWebsiteDomainDef(prt);
+    const planned = await def.planStream!({ ...MOVE, domain: "example.ch" }, planCtx());
+    if (planned.outcome !== "planned") throw new Error("not planned");
+    expect(planned.params).toMatchObject({ domain: "example.ch", previous: "example.ch", recordHosts: ["www.example.ch"], retiredHosts: [], replacing: [] });
+    expect(planned.plan.steps.map((s) => s.name)).toEqual(["attest-target", "check-mail-records", "provision-website-records"]);
+    expect(planned.plan.summary).toMatch(/^Write the missing host record www\.example\.ch of website example-ch/);
+    const before = (await registrations.readTenant("prod", GUID))!.entry;
+    for (const step of def.steps(planned.params).slice(1)) await step.run(ctx(params(), step.name, []));
+    expect([dns.record("example.ch", "CNAME"), dns.record("www.example.ch", "CNAME")]).toEqual(["acme.example.com", "acme.example.com"]);
+    expect((await registrations.readTenant("prod", GUID))!.entry).toEqual(before);
+    // The abort takes back the record it wrote, and only that one; the registration was never touched.
+    for (const cleanup of def.cleanups!(planned.params).reverse()) await cleanup.run(ctx(params(), cleanup.name, []));
+    expect([dns.record("example.ch", "CNAME"), dns.record("www.example.ch", "CNAME")]).toEqual(["acme.example.com", undefined]);
+    expect((await registrations.readTenant("prod", GUID))!.entry).toEqual(before);
+  });
+
+  it("refuses a website that stands at its domain with every host record standing, or pointing elsewhere", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const dns = new FakeDnsProvider();
+    dns.seed("example.ch", "CNAME", "acme.example.com");
+    dns.seed("www.example.ch", "A", "198.51.100.7"); // a record somebody else wrote: not missing, not this run's
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns, repo: withDomain() }, WEBSITE_APPS));
+    await expect(def.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch, and every host record of it stands/);
+  });
+
   it("refuses to start where a mail record beside its hosts changed since the plan", async () => {
     seedWebsiteTenant();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
