@@ -32,8 +32,13 @@ case "$1" in
     esac ;;
 esac
 `, { mode: 0o755 });
-  // The client reads its password from the file the job writes, never from its command line.
+  // The client reads its password from the file the job writes, never from its command line. DOWN_FOR
+  // stands for a fresh server still initialising: that many calls fail to connect before it answers.
   writeFileSync(join(bin, "mariadb"), `#!/bin/sh
+if [ -n "$DOWN_FOR" ]; then
+  n=$(cat "$W/tries" 2>/dev/null || echo 0); n=$((n + 1)); echo "$n" > "$W/tries"
+  [ "$n" -gt "$DOWN_FOR" ] || { echo "Can't connect to server on 'mariadb'" >&2; exit 1; }
+fi
 case "$1" in --defaults-extra-file=*) grep -q '^password=pw$' "\${1#--defaults-extra-file=}" || { echo "no password file" >&2; exit 1; } ;; *) echo "password on no file" >&2; exit 1 ;; esac
 case "$*" in
   *"SHOW DATABASES"*) printf '%s\\n' information_schema mysql performance_schema sys $DBS ;;
@@ -50,9 +55,9 @@ while [ $# -gt 0 ]; do case "$1" in --databases) shift; for d in "$@"; do echo "
   return { dir, box };
 }
 
-function run(w: { dir: string; box: string }, job: RelocationJob, dbs: string) {
+function run(w: { dir: string; box: string }, job: RelocationJob, dbs: string, extra: Record<string, string> = {}) {
   return spawnSync("sh", ["-ec", job.spec.script.replaceAll("/tmp/", `${w.dir}/`)], {
-    env: { ...process.env, PATH: `${join(w.dir, "bin")}:${process.env.PATH}`, BOX: w.box, W: w.dir, DBS: dbs, STORAGE_BOX_PASSWORD: "p", MARIADB_ROOT_PASSWORD: "pw" },
+    env: { ...process.env, PATH: `${join(w.dir, "bin")}:${process.env.PATH}`, BOX: w.box, W: w.dir, DBS: dbs, STORAGE_BOX_PASSWORD: "p", MARIADB_ROOT_PASSWORD: "pw", ...extra },
     encoding: "utf8",
   });
 }
@@ -72,6 +77,20 @@ describe("a consumer's own MariaDB, run by a real shell", () => {
     expect(readFileSync(join(w.dir, "replayed"), "utf8")).toBe("CREATE DATABASE shop;\nCREATE DATABASE audit;\n");
     const verified = run(w, verifyJob, "shop audit");
     expect([verified.status, verified.stdout.trim().split("\n").at(-1)]).toEqual([0, "COMPLETE mariadb"]);
+  });
+
+  it("PLANTED DEFECT: waits for the fresh server before it replays the dump", () => {
+    const w = world();
+    run(w, dumpJob, "shop");
+    const restored = run(w, restoreJob, "", { DOWN_FOR: "3" });
+    expect([restored.status, readFileSync(join(w.dir, "replayed"), "utf8")]).toEqual([0, "CREATE DATABASE shop;\n"]);
+  });
+
+  it("fails, bounded, when the fresh server never answers", () => {
+    const w = world();
+    run(w, dumpJob, "shop");
+    const restored = run(w, restoreJob, "", { DOWN_FOR: "1000" });
+    expect([restored.status === 0, restored.stdout.includes("NO SERVER")]).toEqual([false, true]);
   });
 
   it("PLANTED DEFECT: fails the verify when the target lacks a dumped database, naming it", () => {
