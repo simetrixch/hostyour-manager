@@ -192,11 +192,29 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(db.db.select().from(tenants).all()).toHaveLength(1);
   });
 
+  it("PLANTED INNOCENT: a website without aliases keeps every value, its domain stage-scoped", async () => {
+    const p = stagePorts();
+    const current = (await p.registrations.readTenant("prod", GUID))!.entry;
+    const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", databases: ["core"] }];
+    const values = { site: { domain: "company.example" }, hosts: ["other.example"], none: [], blank: {}, nested: { inner: {} } };
+    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, ...values } })) } : m);
+    const books = new FakePlatformRepo();
+    const write = tenantRegistrationWrite("prod", GUID, TenantRegistrationSchema.parse({ ...current, apps, members, quota: seedQuota("small") })); books.seed(books.booksBranch, write.path, write.content);
+    p.registrations = new TenantRegistrations(books);
+    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    if (result.outcome !== "planned") throw new Error(result.summary);
+    const source = members.find((m) => m.name === "company")!.sources[0]!.values;
+    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toEqual({ ...source, site: { domain: "test.company.example" } });
+  });
+
   it("preserves custom website composition while stage-scoping every public host, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
     const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", aliases: ["company.example.it"], databases: ["core"] }, { name: "erp", databases: ["core"] }];
-    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, site: { domain: "company.example", aliases: ["company.example.it"] }, redirect: { hosts: ["company.example.it"] } } })) } : m);
+    // Beside the alias lists, values no alias drop may touch: a list holding an alias among others,
+    // a list without one, an empty list, an empty map and a map holding one.
+    const INNOCENT = { mixed: ["company.example.it", "other.example"], plain: ["other.example"], none: [], blank: {}, nested: { inner: {} } };
+    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, ...INNOCENT, site: { domain: "company.example", aliases: ["company.example.it"] }, redirect: { hosts: ["company.example.it"] } } })) } : m);
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members, routing: "path", ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
@@ -212,6 +230,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params).not.toHaveProperty("ownDomainAliases");
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).not.toHaveProperty("redirect");
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ domain: "test.company.example" });
+    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toMatchObject(INNOCENT);
     expect(result.params.members.map((m) => m.name)).toEqual(members.map((m) => m.name));
     // Every host a website answers at gets its record, www. included, as Add website writes them; the
     // abort takes them all back.
