@@ -12,10 +12,13 @@ import type { PublicProbe } from "./adapters/http-probe/port.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
 import type { BackupTrigger, Stage } from "#core/shared/enums.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
+import { eq } from "drizzle-orm";
+import { clusters } from "#core/server/db/schema/inventory.ts";
+import type { ClusterValueFile } from "#core/shared/cluster-values.ts";
 import { findBackup, findBackupOfRun, recordBackupFinished, recordBackupStarted, type BackupUnit, type UnitBackup } from "#core/server/db/unit-backups.ts";
 import {
   boxSecretData, boxSecretName, generationFolder, generationId, generationManifest, jobReadsBoxSecret, parseSha256Lines,
-  purgeGenerationJob, verifyDumpJob, writeManifestJob, MONGO_NAMESPACE, type RelocationJob, type StorageBoxAccess,
+  purgeGenerationJob, verifyDumpJob, writeManifestJob, sharedMongoFromValues, MONGO_NAMESPACE, SHARED_MONGO_APP, type RelocationJob, type StorageBoxAccess,
 } from "./relocation-jobs.ts";
 import { loadActiveTargetCluster, type TargetCluster } from "./relocation-target.ts";
 
@@ -31,6 +34,10 @@ export interface RelocationPorts {
   dns?: DnsProvider;
   storageBox?: StorageBoxAccess;
   dbtoolsImage?: string;
+  /** The values a platform application of a cluster is rendered with (readPlatformAppValues), from
+   *  which a job reads the cluster's shared Mongo. Optional in the wiring: a job that dials the shared
+   *  Mongo fails loud without it. */
+  platformAppValues?: (app: string, domain: string, clusterStage: Stage) => Promise<ClusterValueFile[]>;
 }
 
 /** ONE unit as the relocation steps see it — the whole per-kind difference, in data and closures.
@@ -168,6 +175,7 @@ export function requireDbtoolsImage(ports: RelocationPorts, runKind: string): st
  *  onto the jobSpec, where it would also land in the pod and outlive the run by the Job's TTL — is
  *  readable by anything holding `get jobs` or `get pods` there. */
 export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clusterId: string, job: RelocationJob): Promise<string> {
+  if (job.sharedMongo) job = { ...job, spec: { ...job.spec, env: [{ name: "MONGO_HOST", value: await sharedMongoOf(ports, ctx, clusterId) }, ...(job.spec.env ?? [])] } };
   const { clusterReader } = await ports.resolver.resolve(clusterId);
   const boxSecret = jobReadsBoxSecret(job.spec) ? boxSecretName(job.spec.name) : null;
   if (boxSecret !== null) {
@@ -196,6 +204,16 @@ export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clu
     throw errValidation(`job ${job.spec.name} in ${job.namespace} did not succeed${ended}${tail ? ` — its last lines: ${tail}` : " (no log collected)"}`);
   }
   return result.logs;
+}
+
+/** The shared Mongo of the cluster a job runs on, as that cluster's service-provisioner names it:
+ *  read off the values it is rendered with at the CLUSTER's stage, so a unit of another stage on the
+ *  cluster dials the Mongo its own workloads dial. */
+async function sharedMongoOf(ports: RelocationPorts, ctx: StepCtx, clusterId: string): Promise<string> {
+  if (!ports.platformAppValues) throw errValidation(`a job on the shared Mongo needs the books reader to find that Mongo, but none is wired on this manager`);
+  const cluster = ctx.db.select({ domain: clusters.domain, stage: clusters.stage }).from(clusters).where(eq(clusters.id, clusterId)).get();
+  if (!cluster) throw errValidation(`cluster ${clusterId} is not in the inventory — its shared Mongo cannot be read`);
+  return sharedMongoFromValues(await ports.platformAppValues(SHARED_MONGO_APP, cluster.domain, cluster.stage));
 }
 
 /** The workloads still ASKING for replicas — the off measurement shared with the suspend run kinds:

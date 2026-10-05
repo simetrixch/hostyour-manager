@@ -13,6 +13,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { AppStatus, TenantStatus } from "../../../shared/enums.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { readPlatformAppValues } from "../inventory/cluster-value-chain.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter, FakeRepoCredentialWriter } from "../../adapters/kube/testing/fake.ts";
@@ -135,8 +136,19 @@ export function makeFakes(): RelocationFakes {
     probe: new FakePublicProbe(),
     buildRbac: new FakeBuildRbacWriter(),
     repoCredential: new FakeRepoCredentialWriter(),
-    platformRepo: new FakePlatformRepo(),
+    platformRepo: seededProvisionerValues(new FakePlatformRepo()),
   };
+}
+
+/** The shared Mongo every cluster's service-provisioner names, per cluster stage, as hostyour-cloud
+ *  carries it: a job reads the file of the stage of the cluster it runs on. */
+function seededProvisionerValues(repo: FakePlatformRepo): FakePlatformRepo {
+  const dir = "clusters/inventories/service-provisioner";
+  repo.seed(repo.booksBranch, `${dir}/values-common.yaml`, "controller:\n  mongo:\n    host: \"\"\n    replicaSet: rs0\n");
+  for (const stage of ["dev", "test", "prod"]) {
+    repo.seed(repo.booksBranch, `${dir}/values-${stage}.yaml`, `controller:\n  mongo:\n    host: mongodb-${stage}-headless.mongodb.svc.cluster.local\n`);
+  }
+  return repo;
 }
 
 export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { registrations: Registrations } {
@@ -150,6 +162,7 @@ export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { r
     dns: f.dns,
     storageBox: { ...BOX },
     dbtoolsImage: DBTOOLS_IMAGE,
+    platformAppValues: (app, domain, stage) => readPlatformAppValues(f.platformRepo, app, domain, stage),
     buildRbac: f.buildRbac,
     repoCredential: f.repoCredential,
   };
@@ -167,6 +180,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
     dns: f.dns,
     storageBox: { ...BOX },
     dbtoolsImage: DBTOOLS_IMAGE,
+    platformAppValues: (app, domain, stage) => readPlatformAppValues(f.platformRepo, app, domain, stage),
     deployRepoUrl: "https://github.com/acme/acme-deploy.git",
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     buildRbac: f.buildRbac,

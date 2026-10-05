@@ -12,7 +12,7 @@ import { KubeRepoCredentialWriter } from "../adapters/kube/kube-repo-credential.
 import { CloudflareR2 } from "../adapters/object-store/cloudflare-r2.ts";
 import type { DnsProvider } from "../adapters/dns/port.ts";
 import type { ClusterValueFile } from "../../shared/cluster-values.ts";
-import { readClusterValueChain } from "../domains/inventory/cluster-value-chain.ts";
+import { readClusterValueChain, readPlatformAppValues } from "../domains/inventory/cluster-value-chain.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { type Stage } from "../../shared/enums.ts";
 import { buildPlaneFqdnFromMarkings } from "../domains/inventory/cluster-marking.ts";
@@ -257,9 +257,10 @@ export function buildUnits(
   // The relocation surface both families' backup/restore/migrate defs share: the public
   // probe verify-quiesced measures with, the per-Job budget, the storage box and the dbtools image
   // pin. Box + image are optional in the WIRING — the steps that need them fail loud when absent.
-  const relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage"> = {
+  const relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage" | "platformAppValues"> = {
     probe: unit.relocation.probe,
     jobTimeoutMs: RELOCATION_JOB_TIMEOUT_MS,
+    ...(platformRepo ? { platformAppValues: (app: string, domain: string, stage: Stage) => readPlatformAppValues(platformRepo, app, domain, stage) } : {}),
     ...(unit.relocation.storageBox ? { storageBox: unit.relocation.storageBox } : {}),
     ...(unit.relocation.dbtoolsImage ? { dbtoolsImage: unit.relocation.dbtoolsImage } : {}),
   };

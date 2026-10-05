@@ -60,7 +60,8 @@ export async function startDueNightlyBackup(executor: Executor, db: Db, logger: 
       if (runId !== undefined) {
         await executor.discard(runId).catch((e: unknown) => logger.error({ runId, err: e instanceof Error ? e.message : String(e) }, "the unstarted nightly backup run could not be discarded"));
       }
-      logger.info({ kind, err: err instanceof Error ? err.message : String(err) }, "nightly backup was not started today");
+      // A warning, not an info line: tonight no generation is taken, and master's log alarm reads it.
+      logger.warn({ kind, err: err instanceof Error ? err.message : String(err) }, "nightly backup was not started today");
       return null;
     }
   }

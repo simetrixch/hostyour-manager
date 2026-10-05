@@ -44,9 +44,10 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
-  const parent = nestsUnder !== undefined ? nestsUnder : (db.select({ nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get()?.nestsUnder ?? null);
+  const self = db.select({ guid: tenants.guid, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get();
+  const parent = nestsUnder !== undefined ? nestsUnder : (self?.nestsUnder ?? null);
   const others = db
-    .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases, nestsUnder: tenants.nestsUnder })
+    .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases, nestsUnder: tenants.nestsUnder })
     .from(tenants)
     .where(and(ne(tenants.id, tenantId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .all();
@@ -58,7 +59,11 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
     (host.endsWith(`.${theirs}`) ? ` — where both tenants are one owner's, confirm in Set own domain that this tenant's domain lies under tenant ${other}` : "");
   for (const o of others) {
     const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects, o.ownDomainAliases).find(overlaps);
-    if (theirs && !confirmed(o, theirs)) return refusal("a host", o.subdomain, theirs);
+    if (!theirs || confirmed(o, theirs)) continue;
+    // The same tenant at another stage: named with its stage, and no nesting to confirm, which is
+    // between two tenants.
+    if (o.guid === self?.guid) return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} at ${o.stage} (${theirs})`;
+    return refusal("a host", o.subdomain, theirs);
   }
   for (const w of websites) {
     if (!overlaps(w.host)) continue;
