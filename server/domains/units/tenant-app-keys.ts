@@ -34,6 +34,7 @@ const KEY_KIND_TEXT: Record<TenantAppKeyKind, { keys: string; key: string; lacki
   "password-field-key": { keys: "Password field keys", key: "Password field key", lacking: "an engine without its key cannot encrypt a Password field" },
   "revalidate-secret": { keys: "Revalidate secrets", key: "revalidate secret", lacking: "a website engine without its secret does not start" },
   "form-signing-key": { keys: "Form signing keys", key: "form signing key", lacking: "a website renderer without its key does not start" },
+  "service-key": { keys: "Service keys", key: "service key", lacking: "an engine without its key gets no mail token from its identity provider" },
 };
 
 export interface TenantAppKeysOutcome {
@@ -61,6 +62,16 @@ export function tenantAppKeysLine(kind: TenantAppKeyKind, stage: Stage, guid: st
     outcome.existing.length > 0 ? `already standing for ${outcome.existing.join(", ")} and left untouched` : null,
   ].filter((p): p is string => p !== null);
   return `${KEY_KIND_TEXT[kind].keys} under ${stage}/tenants/${guid}/${kind}/: ${parts.length > 0 ? parts.join("; ") : "no app to key"}`;
+}
+
+/** Creation seeds every app's Password field key and service key before the registration starts the
+ *  engines that read them. */
+export async function seedTenantEngineKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly string[], ctx: Pick<StepCtx, "log">): Promise<{ appKeys: TenantAppKeysOutcome; serviceKeys: TenantAppKeysOutcome }> {
+  const appKeys = await seedTenantAppKeys(seeder, "password-field-key", stage, guid, apps);
+  ctx.log("meta", tenantAppKeysLine("password-field-key", stage, guid, appKeys));
+  const serviceKeys = await seedTenantAppKeys(seeder, "service-key", stage, guid, apps);
+  ctx.log("meta", tenantAppKeysLine("service-key", stage, guid, serviceKeys));
+  return { appKeys, serviceKeys };
 }
 
 /** Creation seeds the website keys before the registration starts their engines and renderers. */
@@ -92,8 +103,9 @@ export function seedTenantAppKeyStep(seeder: VaultSeeder | undefined, kind: Tena
   };
 }
 
-/** Every tenant app of every tenant that is not offboarded or purged, given its Password field key
- *  where it has none, and every website among them its revalidate secret and its form signing key.
+/** Every tenant app of every tenant that is not offboarded or purged, given its Password field key and
+ *  its service key where it has none, and every website among them its revalidate secret and its form
+ *  signing key.
  *  The forward step for the apps that joined before these keys were minted, run once at every boot.
  *  Which apps are websites is read off the tenant's registration: an apps[] entry that names a
  *  domain. Never rejects: a kind of key a tenant could not be given is named in the log, and the
@@ -131,6 +143,7 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; r
   };
   for (const { stage, guid, apps } of byTenant.values()) {
     await ensure("password-field-key", stage, guid, async () => apps);
+    await ensure("service-key", stage, guid, async () => apps);
     const websites = async (): Promise<string[]> =>
       ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name);
     await ensure("revalidate-secret", stage, guid, websites);

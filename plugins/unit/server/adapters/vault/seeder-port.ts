@@ -236,8 +236,10 @@ export interface TenantCryptoDeleteInput {
  *    renderer checks it by.
  *  - `form-signing-key`: what a website's renderer signs each record form it places with, and checks
  *    the form's post against.
+ *  - `service-key`: what an app's engine proves itself with to its tenant's identity provider, which
+ *    hands it a short-lived token for digita-post in exchange; every app has one, website or not.
  *  The tenant's members read every one through the same templated policy as the entry above it. */
-export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key"] as const;
+export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key"] as const;
 export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
 
 export interface TenantAppKeySeedInput {

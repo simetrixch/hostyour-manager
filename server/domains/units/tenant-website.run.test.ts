@@ -54,7 +54,7 @@ describe("add-app for a website", () => {
     // Its revalidate secret and its form signing key stand before the append generates the engine and
     // the renderer that read them.
     expect(names.slice(names.indexOf("seed-password-field-key"), names.indexOf("append-app") + 1))
-      .toEqual(["seed-password-field-key", "seed-revalidate-secret", "seed-form-signing-key", "append-app"]);
+      .toEqual(["seed-password-field-key", "seed-service-key", "seed-revalidate-secret", "seed-form-signing-key", "append-app"]);
     expect(names.slice(names.indexOf("watch-sync-set"))).toEqual(["watch-sync-set", "provision-website-records", "wait-website", "smoke", "record-inventory"]);
     expect(result.plan.summary).toContain("website of site main, served at example.ch, and www.example.ch redirects there");
   });
