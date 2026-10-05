@@ -15,7 +15,8 @@ let started: string[];
 let discarded: string[];
 let refuse: string | null;
 const logged: string[] = [];
-const logger = { info: (_o: unknown, m: string) => logged.push(m), error: (_o: unknown, m: string) => logged.push(m) } as unknown as Logger;
+const warned: string[] = [];
+const logger = { info: (_o: unknown, m: string) => logged.push(m), warn: (_o: unknown, m: string) => { logged.push(m); warned.push(m); }, error: (_o: unknown, m: string) => logged.push(m) } as unknown as Logger;
 const executor = {
   plan: async (kind: string) => {
     if (refuse === kind) throw new Error("requires the Hetzner Storage Box but none is wired");
@@ -31,6 +32,7 @@ beforeEach(() => {
   discarded = [];
   refuse = null;
   logged.length = 0;
+  warned.length = 0;
 });
 afterEach(() => {
   stopNightlyBackupSchedule();
@@ -65,7 +67,8 @@ describe("the nightly backup schedule", () => {
   it("says once a day why a family was not started, and moves on to the other", async () => {
     refuse = "consumer-nightly-backup";
     expect(await startDueNightlyBackup(executor, db.db, logger, at("2026-09-28T03:00:00Z"))).toBeNull();
-    expect(logged).toContain("nightly backup was not started today");
+    // A warning: tonight takes no generation of that family, and master's log alarm reads warnings.
+    expect(warned).toEqual(["nightly backup was not started today"]);
     expect(await startDueNightlyBackup(executor, db.db, logger, at("2026-09-28T03:15:00Z"))).toBe("tenant-nightly-backup");
     expect(logged.filter((m) => m === "nightly backup was not started today")).toHaveLength(1);
   });

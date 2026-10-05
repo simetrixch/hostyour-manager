@@ -22,6 +22,9 @@
 // unit's OWN namespace, for the Job's TTL beyond the run.
 import type { JobEnvVar, JobSpec } from "#core/server/adapters/kube/port.ts";
 import type { Stage } from "#core/shared/enums.ts";
+import type { ClusterValueFile } from "#core/shared/cluster-values.ts";
+import { errValidation } from "#core/server/kernel/errors.ts";
+import { parse as parseYaml } from "yaml";
 
 export interface StorageBoxAccess {
   host: string;
@@ -33,16 +36,35 @@ export interface StorageBoxAccess {
 export interface RelocationJob {
   namespace: string;
   spec: JobSpec;
+  /** The job dials the cluster's shared Mongo. runRelocationJob gives it `MONGO_HOST` from the cluster
+   *  it runs on, because a unit may stand on a cluster of another stage than its own. */
+  sharedMongo?: true;
 }
 
-/** The platform Mongo of one stage, as every in-cluster client dials it (the same coordinates the
- *  service-provisioner uses). The root credential Secret lives beside it. */
+/** The namespace of the cluster's shared Mongo and the root credential Secret beside it. */
 export const MONGO_NAMESPACE = "mongodb";
 export const MONGO_ROOT_SECRET = { name: "mongodb-credentials", key: "root-password" } as const;
-export function mongoHost(stage: Stage): string {
-  // Discover rs0 before pooling connections: the headless seed resolves to different members,
-  // and a cursor opened on one member cannot be read through another member's connection.
-  return `rs0/mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`;
+
+/** The platform application whose values name the cluster's shared Mongo: the service-provisioner
+ *  writes every workload's Mongo Secret from them, so a job reads the same host the workloads dial. */
+export const SHARED_MONGO_APP = "service-provisioner";
+
+/** The shared Mongo a cluster's service-provisioner names, as a replica-set seed: `<set>/<host>:27017`.
+ *  The last file that states `controller.mongo.host` or `.replicaSet` wins, as helm layers them.
+ *  Discovering the set first matters: the headless seed resolves to different members, and a cursor
+ *  opened on one member cannot be read through another member's connection. */
+export function sharedMongoFromValues(files: readonly ClusterValueFile[]): string {
+  let host = "";
+  let replicaSet = "";
+  for (const file of files) {
+    const mongo = (parseYaml(file.content) as { controller?: { mongo?: { host?: unknown; replicaSet?: unknown } } } | null)?.controller?.mongo;
+    if (typeof mongo?.host === "string" && mongo.host !== "") host = mongo.host;
+    if (typeof mongo?.replicaSet === "string" && mongo.replicaSet !== "") replicaSet = mongo.replicaSet;
+  }
+  if (host === "" || replicaSet === "") {
+    throw errValidation(`no controller.mongo.host and .replicaSet in the ${SHARED_MONGO_APP} values (${files.map((f) => f.path).join(", ") || "none read"}) — a job cannot dial the cluster's shared Mongo without them`);
+  }
+  return `${replicaSet}/${host}:27017`;
 }
 
 /** The UTC moment a generation is taken, as its folder names it — `YYYYMMDDTHHMMSSZ`, the form the
@@ -135,12 +157,16 @@ export const mongodumpLine = (db: string, archive: string): string =>
   rm -f /tmp/mongodump.stderr
 `;
 
-/** The coordinates every Mongo script dials: the host, and the root password off the Secret that
- *  stands beside the instance, the shared set's and a consumer's own alike. */
+/** The coordinates a script dials a consumer's own Mongo with: its host, and the root password off
+ *  the Secret that stands beside the instance. */
 export const mongoEnv = (host: string): JobEnvVar[] => [
   { name: "MONGO_HOST", value: host },
   { name: "MONGO_ROOT_PASSWORD", secretKeyRef: MONGO_ROOT_SECRET },
 ];
+
+/** The coordinates a script dials the cluster's shared Mongo with, before the host: the root password
+ *  off the Secret beside it. The job carries `sharedMongo`, and runRelocationJob adds `MONGO_HOST`. */
+export const sharedMongoEnv: readonly JobEnvVar[] = [{ name: "MONGO_ROOT_PASSWORD", secretKeyRef: MONGO_ROOT_SECRET }];
 
 /** Print the names of every database with `prefix` as `DB <name>` lines — the wire format every
  *  listing job answers through and parseDbLines reads back. mongosh writes to a file first, because

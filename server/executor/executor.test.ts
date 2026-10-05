@@ -240,7 +240,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
     expect(lines.join("\n")).toContain(runId);
   });
 
-  it("counter-probe: with the database open the SAME failure is recorded there and nothing is logged", async () => {
+  it("counter-probe: with the database open the SAME failure is recorded there, and the log says only that the run failed", async () => {
     // Without this the test above would pass just as well against a failRun that wrote nothing at all.
     const g = gates();
     const { db, executor, lines } = makeWith(blockingDef(g));
@@ -253,7 +253,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
     expect(getRun(db.db, runId)?.status).toBe("failed");
     expect(getRun(db.db, runId)?.steps.find((s) => s.name === "block")?.status).toBe("failed");
     expect(events(db).some((t) => t.includes("✗ failed: Block"))).toBe(true);
-    expect(lines).toHaveLength(0);
+    expect(lines.map((l) => (JSON.parse(l) as { msg: string }).msg)).toEqual(["run failed"]);
   });
 });
 
@@ -495,6 +495,7 @@ describe("Executor — a resume the database cannot take", () => {
     expect(getRun(db.db, runId)?.status).toBe("failed");
     const row = db.sqlite.prepare("SELECT error FROM runs WHERE id=?").get(runId) as { error: string };
     expect(row.error).toContain("validation was interrupted by a manager restart");
-    expect(lines).toHaveLength(0);
+    // The only line is the failed run's own, which the alarm reads; nothing says it could not be recorded.
+    expect(lines.map((l) => (JSON.parse(l) as { msg: string }).msg)).toEqual(["run failed"]);
   });
 });

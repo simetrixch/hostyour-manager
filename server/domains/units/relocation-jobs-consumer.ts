@@ -7,7 +7,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { MongodbMode } from "#unit/shared/unit-size.ts";
 import {
-  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, mongoHost, writeFile, quoted, relocationJobName, hashLine,
+  boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, sharedMongoEnv, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
   type RelocationJob,
 } from "#unit/server/relocation-jobs.ts";
@@ -70,8 +70,10 @@ const ownListCheck = (folder: string): string => `if grep -qx 'mongo/' /tmp/entr
 fi
 `;
 
-function consumerMongo(i: Pick<ConsumerJobInputs, "namespace" | "stage" | "mongodb">): { namespace: string; env: JobEnvVar[] } {
-  if (i.mongodb === "shared") return { namespace: MONGO_NAMESPACE, env: mongoEnv(mongoHost(i.stage)) };
+/** Where a consumer's Mongo jobs run and what they dial: the cluster's shared Mongo, whose host
+ *  runRelocationJob adds, or the instance in the consumer's own namespace. */
+function consumerMongo(i: Pick<ConsumerJobInputs, "namespace" | "mongodb">): { namespace: string; env: readonly JobEnvVar[]; sharedMongo?: true } {
+  if (i.mongodb === "shared") return { namespace: MONGO_NAMESPACE, env: sharedMongoEnv, sharedMongo: true };
   return { namespace: i.namespace, env: mongoEnv(i.mongodb === "standalone" ? "mongodb" : `rs0/mongodb-headless.${i.namespace}.svc.cluster.local:27017`) };
 }
 
@@ -190,6 +192,7 @@ export function consumerDumpJobs(i: ConsumerJobInputs & { registrationYaml: stri
     const mongo = consumerMongo(i);
     jobs.push({
       namespace: mongo.namespace,
+      ...(mongo.sharedMongo ? { sharedMongo: true as const } : {}),
       spec: {
         ...boxSpec("dump-mongo", i.name, mongo.env),
         image: i.image,
@@ -277,6 +280,7 @@ export function consumerRestoreJobs(i: ConsumerJobInputs): RelocationJob[] {
     const mongo = consumerMongo(i);
     jobs.push({
       namespace: mongo.namespace,
+      ...(mongo.sharedMongo ? { sharedMongo: true as const } : {}),
       spec: {
         ...boxSpec("restore-mongo", i.name, mongo.env),
         image: i.image,
@@ -347,6 +351,7 @@ export function consumerVerifyCompletenessJobs(i: Omit<ConsumerJobInputs, "pvcs"
     const mongo = consumerMongo(i);
     jobs.push({
       namespace: mongo.namespace,
+      ...(mongo.sharedMongo ? { sharedMongo: true as const } : {}),
       spec: {
         ...boxSpec("verify-mongo", i.name, mongo.env),
         image: i.image,
@@ -389,10 +394,11 @@ export function consumerSourceDbListJob(i: { name: string; stage: Stage; databas
   if (!i.services.includes("mongodb") || i.databases.length === 0 || i.mongodb !== "shared") return null;
   return {
     namespace: MONGO_NAMESPACE,
+    sharedMongo: true,
     spec: {
       name: relocationJobName("list-source", i.name),
       image: i.image,
-      env: mongoEnv(mongoHost(i.stage)),
+      env: [...sharedMongoEnv],
       // The listing lands in a file first: `sh -e` misses a failure inside a pipe, and a Mongo that
       // cannot be listed must fail the job, not read as databases the release destroyed.
       script: `mongosh ${MONGO_FLAGS} --quiet --eval 'db.adminCommand({listDatabases:1,nameOnly:true}).databases.forEach(function(d){print(d.name)})' > /tmp/mongo-databases
@@ -413,9 +419,10 @@ export function consumerClearSourceJobs(i: { name: string; stage: Stage; databas
   return [
     {
       namespace: MONGO_NAMESPACE,
+      sharedMongo: true,
       spec: {
         name: relocationJobName("clear-source", i.name),
-        env: mongoEnv(mongoHost(i.stage)),
+        env: [...sharedMongoEnv],
         image: i.image,
         script: `for db in ${quoted(i.databases)}; do
   mongosh ${MONGO_FLAGS} --quiet --eval "db.getSiblingDB('$db').dropDatabase()"

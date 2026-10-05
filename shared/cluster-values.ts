@@ -54,6 +54,23 @@ export type ClusterValueFile = z.infer<typeof ClusterValueFileSchema>;
 
 export const ClusterValueFilesSchema = z.array(ClusterValueFileSchema);
 
+/** The values files a platform application of a cluster is rendered with, in LAYERING order — the
+ *  list hostyour-cloud's platform-apps ApplicationSet hands helm (clusters/argocd/files/
+ *  platform-apps-appset.yaml), where `__STAGE__` is the CLUSTER's stage and a missing file is
+ *  skipped (`ignoreMissingValueFiles`). A unit placed on the cluster at another stage reaches the
+ *  cluster's services through these values, never through its own stage. */
+export function platformAppValuePaths(app: string, domain: string, clusterStage: Stage): readonly string[] {
+  return [
+    PLATFORM_VALUES_COMMON,
+    `${PLATFORM_VALUES_DIR}/values-${clusterStage}.yaml`,
+    `clusters/inventories/${app}/values-common.yaml`,
+    `clusters/inventories/${app}/values-${clusterStage}.yaml`,
+    `installation/values/${app}.yaml`,
+    `installation/values/${app}-${clusterStage}.yaml`,
+    clusterMapPath(domain),
+  ];
+}
+
 /** The chain's paths in LAYERING order for one cluster and stage — the order the files must be
  *  passed to helm, later winning. */
 export function clusterValueChainPaths(domain: string, stage: Stage): readonly string[] {

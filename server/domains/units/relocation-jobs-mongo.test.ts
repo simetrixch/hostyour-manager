@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mongoEnv, mongoHost, mongodumpLine } from "#unit/server/relocation-jobs.ts";
+import { mongodumpLine, sharedMongoFromValues } from "#unit/server/relocation-jobs.ts";
 
 const temps: string[] = [];
 afterEach(() => { for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -25,8 +25,19 @@ exit ${fail ? 7 : 0}
 }
 
 describe("mongodump failure diagnostics", () => {
-  it.each(["dev", "test", "prod"] as const)("discovers the replica set through the %s seed instead of pooling a standalone multi-address host", (stage) => {
-    expect(mongoEnv(mongoHost(stage)).find((e) => e.name === "MONGO_HOST")?.value).toBe(`rs0/mongodb-${stage}-headless.mongodb.svc.cluster.local:27017`);
+  it("discovers the replica set the cluster's service-provisioner names, the last file that states it winning", () => {
+    const files = [
+      { path: "clusters/inventories/service-provisioner/values-common.yaml", content: "controller:\n  mongo:\n    host: \"\"\n    replicaSet: rs0\n" },
+      { path: "clusters/inventories/service-provisioner/values-prod.yaml", content: "controller:\n  mongo:\n    host: mongodb-prod-headless.mongodb.svc.cluster.local\n" },
+    ];
+    expect(sharedMongoFromValues(files)).toBe("rs0/mongodb-prod-headless.mongodb.svc.cluster.local:27017");
+    const overridden = [...files, { path: "installation/values/service-provisioner-prod.yaml", content: "controller:\n  mongo:\n    host: mongo.example.internal\n" }];
+    expect(sharedMongoFromValues(overridden)).toBe("rs0/mongo.example.internal:27017");
+  });
+
+  it("refuses values that name no shared Mongo, naming the files it read", () => {
+    const files = [{ path: "clusters/inventories/service-provisioner/values-common.yaml", content: "controller:\n  mongo:\n    host: \"\"\n    replicaSet: rs0\n" }];
+    expect(() => sharedMongoFromValues(files)).toThrow(/no controller\.mongo\.host .*values-common\.yaml/);
   });
 
   it.each(["secret[.*]$", "R"])("preserves failure and prints a bounded password-free stderr tail (%s)", (password) => {

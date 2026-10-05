@@ -13,7 +13,7 @@
 //
 // Boundary: domain layer — shared/ and the git PlatformRepo port only, like channel-stages beside it.
 import { errUpstream } from "../../kernel/errors.ts";
-import { clusterValueChainPaths, type ClusterValueFile } from "../../../shared/cluster-values.ts";
+import { clusterValueChainPaths, platformAppValuePaths, type ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 
@@ -24,6 +24,20 @@ import type { PlatformRepo } from "../../adapters/git/port.ts";
  *  stands on it, a pure slave's included, because a pure slave has no branch of its own. Reading a
  *  cluster's chain off a branch named after that cluster therefore answered for the master and threw
  *  for every other cluster, which is every tenant and every app onboarded onto a slave. */
+/** Read the values one platform application of `domain` is rendered with, off the books branch, in
+ *  layering order. A file the branch does not carry is left out, as the platform-apps ApplicationSet
+ *  leaves it out (`ignoreMissingValueFiles`), so this reads exactly what the application runs with. */
+export async function readPlatformAppValues(repo: PlatformRepo, app: string, domain: string, clusterStage: Stage): Promise<ClusterValueFile[]> {
+  return repo.withBranch(repo.booksBranch, async (cluster) => {
+    const files: ClusterValueFile[] = [];
+    for (const path of platformAppValuePaths(app, domain, clusterStage)) {
+      const content = await cluster.readFile(path);
+      if (content !== null) files.push({ path, content });
+    }
+    return files;
+  });
+}
+
 export async function readClusterValueChain(repo: PlatformRepo, domain: string, stage: Stage): Promise<ClusterValueFile[]> {
   return repo.withBranch(repo.booksBranch, async (cluster) => {
     const files: ClusterValueFile[] = [];

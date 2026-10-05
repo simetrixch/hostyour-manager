@@ -18,7 +18,7 @@ import {
   consumerDumpJobs, consumerRestoreJobs, consumerVerifyCompletenessJobs, consumerClearSourceJobs, consumerSourceDbListJob, claimsIdentity, consumerExpectedDumpEntries, extractClaimLine,
 } from "./relocation-jobs-consumer.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
-import { openFixtureDb, makeFakes, consumerPorts, stepCtx, SOURCE } from "./relocation.fixture.ts";
+import { openFixtureDb, seedClusters, makeFakes, consumerPorts, stepCtx, SOURCE } from "./relocation.fixture.ts";
 
 // The credential shape of the relocation Jobs. A relocation job needs the Storage Box, and the box
 // credential is the ONE credential that does not already stand on the cluster — it comes from the
@@ -190,6 +190,8 @@ describe("runRelocationJob places and reaps the box credential", () => {
   });
 
   it("a job that needs no box credential has none placed in its namespace", async () => {
+    // The listing dials the cluster's shared Mongo, which runRelocationJob reads off that cluster's row.
+    seedClusters(db);
     const f = makeFakes();
     const ports = consumerPorts(f);
     const listing = tenantSourceDbListJob({ guid: GUID, stage: "prod", image: IMAGE });
@@ -365,11 +367,13 @@ describe("a consumer's own MongoDB", () => {
     }
   });
 
-  it("PLANTED INNOCENT: a consumer on the shared set keeps every Mongo job in the platform namespace", () => {
+  it("PLANTED INNOCENT: a consumer on the shared set keeps every Mongo job in the platform namespace, its host left to the cluster it runs on", () => {
     for (const j of mongoJobs(shared)) {
       expect(j.namespace).toBe("mongodb");
-      expect(host(j)).toBe("rs0/mongodb-prod-headless.mongodb.svc.cluster.local:27017");
+      expect(j.sharedMongo).toBe(true);
+      expect(host(j)).toBeUndefined();
     }
+    for (const j of mongoJobs(own)) expect(j.sharedMongo).toBeUndefined();
   });
 
   it("restores only once the own instance answers as a writable primary, and fails with that reason when it never does", () => {

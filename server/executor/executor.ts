@@ -458,6 +458,8 @@ export class Executor {
           stepCtx.log("stderr", `✗ ${message}`);
           ctx.emitMeta((aborted ? "✕ cancelled during: " : "✗ failed: ") + impl.title);
           writeAudit(this.deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { failedStep: row.name } });
+          // Every failed run is one error line in the process log, the line master's log alarm reads.
+          if (!aborted) this.deps.logger.error({ runId, kind: def.kind, runError: message }, "run failed");
           this.safeOnTerminal(def, runId, params, aborted ? "cancelled" : "failed");
           this.finishRun(runId, ctx, secrets);
           return;
@@ -522,6 +524,7 @@ export class Executor {
       this.appendMeta(runId, `✗ run failed: ${message}`);
       writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
+      this.deps.logger.error({ runId, kind: r?.kind, runError: message }, "run failed");
       if (r) this.safeOnTerminal(this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
       releaseLocks(this.deps.db, runId);
     } catch (err) {
