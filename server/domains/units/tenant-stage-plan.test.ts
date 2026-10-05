@@ -192,12 +192,12 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(db.db.select().from(tenants).all()).toHaveLength(1);
   });
 
-  it("preserves custom website composition while stage-scoping every public host", async () => {
+  it("preserves custom website composition while stage-scoping every public host, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", databases: ["core"] }, { name: "erp", databases: ["core"] }];
-    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, site: { domain: "company.example" } } })) } : m);
-    const entry = TenantRegistrationSchema.parse({ ...current, apps, members, routing: "path", ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], quota: seedQuota("small") });
+    const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", aliases: ["company.example.it"], databases: ["core"] }, { name: "erp", databases: ["core"] }];
+    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, site: { domain: "company.example", aliases: ["company.example.it"] }, redirect: { hosts: ["company.example.it"] } } })) } : m);
+    const entry = TenantRegistrationSchema.parse({ ...current, apps, members, routing: "path", ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
@@ -206,6 +206,11 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params.ownDomain).toBe("test.show.example");
     expect(result.params.ownDomainRedirects).toEqual(["www.test.show.example"]);
     expect(result.params.apps[0]!.domain).toBe("test.company.example");
+    // An alias is another domain of the same site, held by the stage it was given on: the new stage
+    // answers at none, of the websites or the own domain, until it is given its own.
+    expect(result.params.apps[0]).not.toHaveProperty("aliases");
+    expect(result.params).not.toHaveProperty("ownDomainAliases");
+    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).not.toHaveProperty("redirect");
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ domain: "test.company.example" });
     expect(result.params.members.map((m) => m.name)).toEqual(members.map((m) => m.name));
     // Every host a website answers at gets its record, www. included, as Add website writes them; the

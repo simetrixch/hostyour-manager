@@ -46,15 +46,24 @@ export async function planStandingStage(
   const registryHost = registryHostFromChain(clusterValueFiles);
   const ownDomain = stageHost(entry.ownDomain, source.stage, placement.stage);
   const ownDomainRedirects = entry.ownDomainRedirects.map((host) => host.startsWith("www.") ? `www.${stageHost(host.slice(4), source.stage, placement.stage)}` : stageHost(host, source.stage, placement.stage));
-  const apps = entry.apps.map((app) => ({ ...app, ...(app.domain ? { domain: stageHost(app.domain, source.stage, placement.stage) } : {}) }));
+  // A website's alias domains stay with the stage they were given on, as the own domain's do (never
+  // copied): the new stage is given its own with "Domain and aliases…".
+  const apps = entry.apps.map(({ aliases: _aliases, ...app }) => ({ ...app, ...(app.domain ? { domain: stageHost(app.domain, source.stage, placement.stage) } : {}) }));
   const domains = new Map(entry.apps.filter((app) => app.domain).map((app) => [app.domain!, apps.find((a) => a.name === app.name)!.domain!]));
+  // The members' values carry the alias list the fanout rendered from `{aliases}`: it goes with its
+  // key, and so does an object the drop leaves empty, as the fanout renders a website without aliases.
+  const aliasHosts = new Set(entry.apps.flatMap((app) => app.aliases ?? []));
+  const DROPPED = Symbol("dropped");
   const transform = (value: unknown): unknown => {
     if (typeof value === "string") return domains.get(value) ?? value;
-    if (Array.isArray(value)) return value.map(transform);
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, v]) => [key, transform(v)]));
+    if (Array.isArray(value)) return value.length > 0 && value.every((v) => typeof v === "string" && aliasHosts.has(v)) ? DROPPED : value.map(transform);
+    if (value && typeof value === "object") {
+      const entries = Object.entries(value).map(([key, v]) => [key, transform(v)] as const).filter(([, v]) => v !== DROPPED);
+      return entries.length === 0 && Object.keys(value).length > 0 ? DROPPED : Object.fromEntries(entries);
+    }
     return value;
   };
-  const members = entry.members.map((member) => ({ ...member, sources: member.sources.map((s) => ({ ...s, values: transform(s.values) as Record<string, unknown> })) }));
+  const members = entry.members.map((member) => ({ ...member, sources: member.sources.map((s) => { const values = transform(s.values); return { ...s, values: (values === DROPPED ? {} : values) as Record<string, unknown> }; }) }));
   const pins = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(placement.stage, chart), members);
   const approvedTags = Object.fromEntries(members.map((member) => [member.name, { ...entry.approvedTags[member.name], ...pins[member.name] }]));
   const channels = await ports.channelStages();
