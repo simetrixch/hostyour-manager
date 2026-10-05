@@ -1,6 +1,6 @@
 {
   "name": "hostyour-manager",
-  "version": "0.8.400",
+  "version": "0.8.401",
   "private": true,
   "type": "module",
   "engines": {
