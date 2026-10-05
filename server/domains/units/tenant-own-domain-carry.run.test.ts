@@ -12,6 +12,7 @@ import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { APP_OVERLAYS, testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
 import { WEBSITE_APPS, seedWebsiteTenant } from "./tenant-website.fixture.ts";
+import { tenantZone } from "#unit/shared/unit-host.ts";
 
 // A website on the tenant's own host has no domain of its own: the website chart serves it at the root
 // of the tenant's host, beside the apps under their paths. So when the own domain moves, such a website
@@ -48,13 +49,14 @@ function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
   dns.zones = ["simetrix.ch", "simplidigita.ai"];
   const repo = new FakePlatformRepo();
   const registrations = at(repo, opts.showAliases);
-  const urls = ["https://show.simplidigita.ai/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`];
+  const urls = ["https://show.simplidigita.ai/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`, `https://${ZONE}/auth/`, `https://${ZONE}/`];
   const answer = (status: number) => ({ reachable: true, status, detail: `HTTP ${status}` });
-  const probe = new FakePublicProbe(Object.fromEntries(urls.map((u) => [u, u === `https://${NEW}/` ? answer(opts.siteRoot ?? 200) : u.startsWith(`https://${NEW}/`) ? answer(200) : answer(301)])));
+  const probe = new FakePublicProbe(Object.fromEntries(urls.map((u) => [u, u === `https://${NEW}/` ? answer(opts.siteRoot ?? 200) : u.startsWith(`https://${NEW}/`) || u.startsWith(`https://${ZONE}/`) ? answer(200) : answer(301)])));
   const def = makeTenantSetOwnDomainDef(ports({ registrations, dns, probe, repo: withDomain() }, WEBSITE_APPS));
   return { repo, registrations, probe, def };
 }
 
+const ZONE = tenantZone("acme", "prod", "example.com");
 const MOVE = { tenantId: "tnt_1", ownDomain: NEW, ownDomainRedirects: [`www.${NEW}`], previous: OLD, previousRedirects: [`www.${OLD}`] };
 const row = () => db.db.select({ ownDomain: tenants.ownDomain, aliases: tenants.ownDomainAliases }).from(tenants).where(eq(tenants.id, "tnt_1")).get();
 
@@ -113,5 +115,41 @@ describe("an own-domain move with a website on the own host", () => {
     const planned = await def.planStream!(MOVE, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect(planned.params.ownDomainAliases).toEqual([OLD, "old.show.simetrix.ch"]);
+  });
+});
+
+describe("clearing the own domain with a website on the own host", () => {
+  const CLEAR = { tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: OLD, previousRedirects: [`www.${OLD}`] };
+
+  it("PLANTED DEFECT: carries the website to the tenant's zone with the own domain, in one commit, and an abort takes both back", async () => {
+    const { repo, registrations, def } = world();
+    const planned = await def.planStream!(CLEAR, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect(planned.params.carriedWebsites.map((w) => [w.app, w.member.sources.map((s) => s.values).find((v) => v && "site" in v)])).toEqual([["show", { site: { domain: ZONE } }]]);
+    expect(planned.plan.summary).toContain(`carry website show from ${OLD} to ${ZONE}`);
+
+    const write = def.steps(planned.params).find((s) => s.name === "write-own-domain")!;
+    const before = repo.commits.length;
+    await write.run(ctx(params(), write.name, []));
+    expect(repo.commits.length - before).toBe(1);
+    const after = (await registrations.readTenant("prod", GUID))?.entry;
+    expect([after?.ownDomain, after?.apps.find((a) => a.name === "show")?.domain, after?.apps.find((a) => a.name === "veloluck")?.domain, row()?.ownDomain]).toEqual(["", ZONE, VELO.domain, ""]);
+
+    const restore = def.cleanups!(planned.params).find((c) => c.name === "restore-own-domain")!;
+    await restore.run(ctx(params(), restore.name, []));
+    const back = (await registrations.readTenant("prod", GUID))?.entry;
+    expect([back?.ownDomain, back?.apps.find((a) => a.name === "show")?.domain, row()?.ownDomain]).toEqual([OLD, OLD, OLD]);
+    expect(back?.members.find((m) => m.name === "show")).toEqual(planned.params.carriedWebsites[0]!.previousMember);
+  });
+
+  it("waits for the website at the zone before it removes the old own domain's records", async () => {
+    const { probe, def } = world();
+    const planned = await def.planStream!(CLEAR, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    const write = def.steps(planned.params).find((s) => s.name === "write-own-domain")!;
+    await write.run(ctx(params(), write.name, []));
+    const retire = def.steps(planned.params).find((s) => s.name === "retire-previous-own-domain")!;
+    await retire.run(ctx(params(), retire.name, []));
+    expect(probe.probed).toContain(`https://${ZONE}/`);
   });
 });
