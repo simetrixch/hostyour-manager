@@ -17,6 +17,8 @@ export interface PublicDns {
   a(name: string): Promise<string[]>;
   /** The names an address reverses to (its PTR records). */
   ptr(address: string): Promise<string[]>;
+  /** The MX records at a name, each as `<priority> <host>`, the form the DNS port lists them in. */
+  mx(name: string): Promise<string[]>;
 }
 
 export interface DohResolver {
@@ -37,6 +39,7 @@ type FetchLike = typeof fetch;
 /** The record types asked, numbered as the wire (RFC 1035) and the JSON API number them. */
 const RR_A = 1;
 const RR_PTR = 12;
+const RR_MX = 15;
 const RR_TXT = 16;
 
 /** The response codes that mean "nothing of this type stands here" to a receiver — NOERROR with an
@@ -85,6 +88,10 @@ export class DohPublicDns implements PublicDns {
 
   async ptr(address: string): Promise<string[]> {
     return (await this.query(reverseName(address), RR_PTR)).map((n) => n.replace(/\.$/, ""));
+  }
+
+  async mx(name: string): Promise<string[]> {
+    return (await this.query(name, RR_MX)).map((n) => n.replace(/\.$/, ""));
   }
 
   /** The data of every answer OF THE ASKED TYPE at the name — the CNAMEs a chain passes through are

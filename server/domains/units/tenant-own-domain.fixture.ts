@@ -18,6 +18,7 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
+import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
@@ -63,6 +64,7 @@ export function useOwnDomainHarness() {
     const ownDomainRedirects = opts.ownDomainRedirects ?? [];
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const dns = new FakeDnsProvider();
+    const publicDns = new FakePublicDns();
     dns.unmanaged = opts.unmanaged ?? [];
     dns.seed(ZONE, "CNAME", CLUSTER);
     const probe = new FakePublicProbe(Object.fromEntries([
@@ -89,7 +91,7 @@ export function useOwnDomainHarness() {
         argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
       deployRepoUrl: "https://github.com/acme/acme-deploy.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
-      dns, probe, routingWaitMs: 0, routingPollMs: 0,
+      dns, publicDns, probe, routingWaitMs: 0, routingPollMs: 0,
       // This tenant runs no website, so nothing resolves a website's member here.
       repo: new FakeRepoReader({}), helm: new FakeHelmRenderer({}), resolveClusterValueFiles: async () => [],
     });
@@ -104,7 +106,7 @@ export function useOwnDomainHarness() {
     const regRedirects = async (): Promise<string[] | undefined> => (await reg.readTenant(stage, GUID))?.entry.ownDomainRedirects;
     const rowAliases = (): string[] | undefined => db.db.select({ a: tenants.ownDomainAliases }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.a;
     const regAliases = async (): Promise<string[]> => (await reg.readTenant(stage, GUID))?.entry.ownDomainAliases ?? [];
-    return { db, reg, dns, probe, executor, rowDomain, regDomain, rowRedirects, regRedirects, rowAliases, regAliases };
+    return { db, reg, dns, publicDns, probe, executor, rowDomain, regDomain, rowRedirects, regRedirects, rowAliases, regAliases };
   }
 
   /** The streamed plan the route starts, settled: its run, status and summary, and its log, which says

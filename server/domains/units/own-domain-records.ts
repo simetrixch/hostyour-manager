@@ -20,8 +20,9 @@ import { sleep } from "#unit/server/release-cycle.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 
-/** What writing and removing a record reads: the installation's DNS provider, where one is configured. */
-export type RecordPorts = Pick<TenantLifecyclePorts, "dns">;
+/** What writing and removing a record reads: the installation's DNS provider, where one is configured,
+ *  and the public resolvers, which say what a name answers before its CNAME is replaced. */
+export type RecordPorts = Pick<TenantLifecyclePorts, "dns" | "publicDns">;
 
 /** What waiting for an answer reads: the probe, how long it asks, and how long it pauses between asks. */
 export interface AnswerWaitPorts {
@@ -103,6 +104,7 @@ export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string,
     if (cname !== null && cname !== zone && !isTenantRecord(db, host, guid)) {
       const booked = findDnsWrite(db, { name: host, type: "CNAME" });
       if (booked !== null) throw errValidation(`${host} stands as CNAME ${cname}, which this installation wrote for ${booked.owner.kind} ${booked.owner.name} — it is not tenant ${guid}'s to replace`);
+      await refuseInheritedMailAnswers(ports, host, cname, signal);
       replaced.push({ name: host, type: "CNAME", content: cname });
     }
     for (const type of ADDRESS_TYPES) {
@@ -114,6 +116,24 @@ export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string,
     }
   }
   return replaced;
+}
+
+/** Refuse to replace the CNAME at `host` while `host` answers MX or TXT only through it. A name
+ *  without such records of its own answers its CNAME target's: Cloudflare flattens a CNAME at the
+ *  apex, and below the apex a CNAME hands every type to its target. The provider's API lists only
+ *  the records the zone holds, so the answers are read where receivers read them. A `www.` host is
+ *  no mail domain (mailNames), and its answers are nobody's mail. */
+async function refuseInheritedMailAnswers(ports: RecordPorts, host: string, cname: string, signal?: AbortSignal): Promise<void> {
+  if (host.startsWith("www.")) return;
+  if (!ports.publicDns) throw errValidation(`no public DNS reader is wired on this manager, so what ${host} answers through its CNAME onto ${cname} cannot be read before the CNAME is replaced`);
+  const inherited: string[] = [];
+  for (const type of ["MX", "TXT"] as const) {
+    if ((await ports.dns!.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })).length > 0) continue;
+    const answered = type === "MX" ? await ports.publicDns.mx(host) : await ports.publicDns.txt(host);
+    if (answered.length > 0) inherited.push(`${type} ${answered.join(", ")}`);
+  }
+  if (inherited.length === 0) return;
+  throw errValidation(`${host} answers ${inherited.join(" and ")} only through its CNAME onto ${cname}, which this run replaces — add them as records of ${host} first, then plan again`);
 }
 
 /** What stands at a host a website answers at: nothing, its CNAME onto the tenant's zone, a record this

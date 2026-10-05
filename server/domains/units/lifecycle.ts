@@ -16,6 +16,7 @@ import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
+import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
@@ -92,6 +93,9 @@ export interface TenantLifecyclePorts {
    *  and tenant-purge remove it, tenant-set-routing moves it. Optional but UNCONDITIONALLY needed by
    *  those steps — absent ⇒ they fail loud, never a silent skip. */
   dns?: DnsProvider;
+  /** Public resolvers: what a name answers to the rest of the world, which a record replacement
+   *  reads before it takes away a CNAME (own-domain-records.ts recordsToReplace). */
+  publicDns?: PublicDns;
   /** Deletes the tenant's argo-sync grant beside its member AppProjects. Optional and skipped when
    *  absent: the writer is what PROVISIONED the grant, so a removal running without it has none to
    *  take back — the same shape the consumer offboard's grant delete has. */
