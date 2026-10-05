@@ -48,6 +48,13 @@ export function registerSpa(app: Hono<AppEnv>, distDir: string): void {
     });
   });
 
+  // The tab icon index.html names: vite copies web/public to the bundle's root, unhashed.
+  app.get("/favicon.svg", (c) => {
+    const icon = join(root, "favicon.svg");
+    if (!existsSync(icon)) return c.notFound();
+    return new Response(readFileSync(icon), { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=3600" } });
+  });
+
   app.get("*", (c) => {
     if (c.req.path.startsWith("/api/")) return c.notFound();
     if (!existsSync(indexPath)) return c.text("The Manager UI is not built yet (run `npm run build:web`).", 503);

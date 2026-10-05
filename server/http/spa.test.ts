@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
@@ -50,6 +50,23 @@ describe("SPA static serving", () => {
   it("returns 503 when the bundle is not built (dev-safe boot)", async () => {
     const res = await app(dist(false)).request("/");
     expect(res.status).toBe(503);
+  });
+
+  it("serves the tab icon the page names, not the page in its place", async () => {
+    const dir = dist();
+    writeFileSync(join(dir, "favicon.svg"), "<svg/>");
+    const res = await app(dir).request("/favicon.svg");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/svg+xml");
+    expect(await res.text()).toBe("<svg/>");
+  });
+
+  // The icon comes from the Manager's own origin (its CSP is default-src 'self'). The file is the
+  // company's S app icon, written from the simplidigita signature's assets; that package's test
+  // goes red when the two drift.
+  it("the page names the S as its tab icon and ships it", () => {
+    expect(readFileSync(join("web", "index.html"), "utf8")).toContain('<link rel="icon" type="image/svg+xml" href="/favicon.svg" />');
+    expect(readFileSync(join("web", "public", "favicon.svg"), "utf8")).toContain('<mask id="female-upper">');
   });
 
   it("spaBytes reports index size when built, 0 when absent", () => {
