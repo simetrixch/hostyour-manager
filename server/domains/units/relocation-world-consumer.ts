@@ -8,6 +8,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
+import type { RedisMode } from "#unit/shared/unit-size.ts";
 import { consumerArgoAppName, consumerNamespace, ConsumerRegistrationSchema, type ConsumerStageRegistration } from "../../../shared/consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
@@ -69,9 +70,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
     const image = ports.dbtoolsImage ?? "";
     // The registration + PVC list are read lazily, per closure: a restore resolves this world while
     // the unit's registration is deliberately ABSENT (offboarded), and must not fail on it.
-    const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; mongodb: ConsumerStageRegistration["mongodb"]; image: string }> => {
+    const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; mongodb: ConsumerStageRegistration["mongodb"]; redis: RedisMode; image: string }> => {
       const reg = await readStageRegistration(ports, ac.stage, ac.name);
-      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, mongodb: reg.mongodb, image };
+      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, mongodb: reg.mongodb, redis: reg.redis ?? "shared", image };
     };
     const jobInputs = async (): Promise<Awaited<ReturnType<typeof registrationInputs>> & { pvcs: string[] }> => {
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
@@ -322,10 +323,15 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       // upstream exporter chart names it after the Helm release, which is this Application. An own
       // MongoDB keeps running for the same reason, as the StatefulSet `mongodb` its chart
       // (clusters/units/mongodb) renders, and only where the registration brings one: dump-mongo reads
-      // it there. Exact names, so an application workload never passes for the store.
+      // it there. An own Redis keeps running as the Deployments `redis` and `redis-exporter` its chart
+      // (clusters/units/redis) renders: dump-redis reads its snapshot. Exact names, so an application
+      // workload never passes for the store.
       workloadExempt: async () => {
-        const ownMongo = (await readStageRegistration(ports, ac.stage, ac.name)).mongodb !== "shared";
-        return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb");
+        const reg = await readStageRegistration(ports, ac.stage, ac.name);
+        const ownMongo = reg.mongodb !== "shared";
+        const ownRedis = reg.redis === "standalone";
+        return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
+          (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter"));
       },
     };
   };

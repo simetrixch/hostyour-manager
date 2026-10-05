@@ -5,7 +5,7 @@ import type { ConsumerService } from "../../../shared/consumer.ts";
 import { isOrdinalClaim, type JobEnvVar, type JobIdentity, type ClaimUser } from "../../adapters/kube/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import type { MongodbMode } from "#unit/shared/unit-size.ts";
+import type { MongodbMode, RedisMode } from "#unit/shared/unit-size.ts";
 import {
   boxSpec, BOX_REMOTE, MONGO_FLAGS, mongodumpLine, mongoEnv, mongoHost, writeFile, quoted, relocationJobName, hashLine,
   MONGO_NAMESPACE,
@@ -17,6 +17,11 @@ import {
  *  lives on (hostyour-cloud clusters/units/postgresql, `postgres-data.pvc.name`). */
 export const CONSUMER_POSTGRES = { host: "postgres", secret: "postgresql-credentials", key: "postgres-password", user: "postgres", claim: "postgres-data" } as const;
 
+/** A consumer's OWN Redis (hostyour-cloud clusters/units/redis): its Service, the Secret its password
+ *  stands in (materialized from secret/<stage>/consumer/<name>/redis), and the claim its append-only
+ *  files live on. */
+export const CONSUMER_REDIS = { host: "redis", secret: "redis-credentials", key: "redis-password", claim: "redis-data" } as const;
+
 /** The claim template of a consumer's OWN MongoDB (hostyour-cloud clusters/units/mongodb, the
  *  StatefulSet `mongodb`'s template `data`): `data-mongodb-<n>`, one per member. */
 const OWN_MONGO_CLAIM = "data-mongodb";
@@ -26,8 +31,11 @@ const OWN_MONGO_CLAIM = "data-mongodb";
  *  whole with pg_dumpall, and an own MongoDB's, whose databases dump-mongo takes with mongodump. A tar
  *  of a live data directory is no consistent copy, and extracting it would overwrite what the
  *  restore of that store loads. */
-export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services" | "mongodb">): string[] {
-  return i.pvcs.filter((claim) => !(i.services.includes("postgresql") && claim === CONSUMER_POSTGRES.claim) && !(i.mongodb !== "shared" && isOrdinalClaim(OWN_MONGO_CLAIM, claim)));
+export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services" | "mongodb" | "redis">): string[] {
+  return i.pvcs.filter((claim) =>
+    !(i.services.includes("postgresql") && claim === CONSUMER_POSTGRES.claim) &&
+    !(i.mongodb !== "shared" && isOrdinalClaim(OWN_MONGO_CLAIM, claim)) &&
+    !(i.redis === "standalone" && claim === CONSUMER_REDIS.claim));
 }
 
 /** Where a consumer's MongoDB answers, so where its Mongo jobs run and what they dial: the shared set
@@ -127,6 +135,47 @@ export function parseClaimLines(logs: string): string[] {
  *  the same one the dump and the restore dial with. */
 const consumerPostgresEnv = (): JobEnvVar[] => [{ name: "POSTGRES_PASSWORD", secretKeyRef: { name: CONSUMER_POSTGRES.secret, key: CONSUMER_POSTGRES.key } }];
 
+/** The own Redis's password, as redis-cli reads it without a flag on its command line. */
+const consumerRedisEnv = (): JobEnvVar[] => [{ name: "REDISCLI_AUTH", secretKeyRef: { name: CONSUMER_REDIS.secret, key: CONSUMER_REDIS.key } }];
+
+/** Restore an own Redis by replication, never by a file on its claim: the server persists with AOF and
+ *  loads only its AOF files at a start, so a dump placed beside them would leave it empty. The job
+ *  starts a throwaway server from the snapshot, without persistence, makes the consumer's server its
+ *  replica until the sync has ended and both stand at the same offset, and makes it a primary again
+ *  whatever the outcome. Its AOF then holds what the replication wrote. The key counts are compared
+ *  after the promotion, so a target that came up short fails the job. */
+const REDIS_RESTORE = (folder: string): string => `mkdir -p /tmp/redis
+rclone copyto "box:${folder}/redis/dump.rdb" /tmp/redis/dump.rdb
+redis-server --dir /tmp/redis --dbfilename dump.rdb --appendonly no --save "" --bind 0.0.0.0 --protected-mode no --port 6379 --requirepass "$REDISCLI_AUTH" --daemonize yes
+n=0
+until [ "$(redis-cli -h 127.0.0.1 PING 2>/dev/null)" = PONG ] && redis-cli -h 127.0.0.1 INFO persistence | grep -q '^loading:0'; do
+  n=$((n + 1))
+  [ "$n" -lt 60 ] || { echo "NO SNAPSHOT: the throwaway server did not load the snapshot within 5 minutes"; exit 1; }
+  sleep 5
+done
+want=$(redis-cli -h 127.0.0.1 DBSIZE)
+promote() { redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF NO ONE > /dev/null; redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "" > /dev/null; }
+trap promote EXIT
+redis-cli -h ${CONSUMER_REDIS.host} CONFIG SET masterauth "$REDISCLI_AUTH" > /dev/null
+redis-cli -h ${CONSUMER_REDIS.host} REPLICAOF "$(hostname -i | cut -d' ' -f1)" 6379 > /dev/null
+offset() { sed -n "s/^$1:\\([0-9]*\\).*/\\1/p" "$2"; }
+n=0
+while :; do
+  redis-cli -h ${CONSUMER_REDIS.host} INFO replication > /tmp/redis/replica
+  redis-cli -h 127.0.0.1 INFO replication > /tmp/redis/primary
+  if grep -q '^master_link_status:up' /tmp/redis/replica && grep -q '^master_sync_in_progress:0' /tmp/redis/replica &&
+    [ "$(offset slave_repl_offset /tmp/redis/replica)" = "$(offset master_repl_offset /tmp/redis/primary)" ]; then break; fi
+  n=$((n + 1))
+  [ "$n" -lt 120 ] || { echo "NO SYNC: the consumer's Redis did not finish replicating the snapshot within 10 minutes"; exit 1; }
+  sleep 5
+done
+have=$(redis-cli -h ${CONSUMER_REDIS.host} DBSIZE)
+promote
+trap - EXIT
+[ "$have" = "$want" ] || { echo "MISSING redis: the target holds $have keys of the snapshot's $want"; exit 1; }
+echo "COMPLETE redis: $have keys"
+`;
+
 
 export interface ConsumerJobInputs {
   /** The unit — the job names. */
@@ -144,6 +193,8 @@ export interface ConsumerJobInputs {
   /** Whose MongoDB the consumer uses: the stage's shared set, of which databases[] are its part, or its
    *  own instance, which is taken whole. */
   mongodb: MongodbMode;
+  /** Whose Redis the consumer uses; absent is the shared server, whose keys no consumer job dumps. */
+  redis?: RedisMode;
   /** The PVC names of the consumer namespace, listed off the cluster at step time. */
   pvcs: readonly string[];
   /** Who the PVC dump and the PVC restore run as: the user the claims' files belong to on the cluster
@@ -227,6 +278,21 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
       },
     });
   }
+  if (i.redis === "standalone") {
+    jobs.push({
+      namespace: i.namespace,
+      spec: {
+        ...boxSpec("dump-redis", i.name, consumerRedisEnv()),
+        image: i.image,
+        // A snapshot the server writes for a replica: consistent, and taken without stopping it.
+        script:
+          BOX_REMOTE +
+          `redis-cli -h ${CONSUMER_REDIS.host} --rdb /tmp/redis.rdb
+${hashLine("/tmp/redis.rdb", "redis/dump.rdb")}rclone copyto /tmp/redis.rdb "box:${i.folder}/redis/dump.rdb"
+`,
+      },
+    });
+  }
   const claims = tarredClaims(i);
   if (claims.length > 0) {
     jobs.push({
@@ -248,11 +314,12 @@ ${hashLine("/tmp/postgres-all.sql", "postgres/all.sql")}rclone copyto /tmp/postg
 }
 
 /** What a complete consumer dump leaves on the box, given its claims. */
-export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "databases" | "services" | "pvcs" | "mongodb">): string[] {
+export function consumerExpectedDumpEntries(i: Pick<ConsumerJobInputs, "databases" | "services" | "pvcs" | "mongodb" | "redis">): string[] {
   return [
     "registration.yaml",
     ...(dumpsMongo(i) ? ["mongo"] : []),
     ...(i.services.includes("postgresql") ? ["postgres"] : []),
+    ...(i.redis === "standalone" ? ["redis"] : []),
     ...(tarredClaims(i).length > 0 ? ["pvc"] : []),
   ];
 }
@@ -317,6 +384,12 @@ PGOPTIONS='-c lc_messages=C' PGPASSWORD="$POSTGRES_PASSWORD" psql -v VERBOSITY=t
 if [ -n "$(refused)" ]; then refused >&2; echo "the restore failed on the errors above, beyond the roles and database the fresh instance already holds" >&2; exit 1; fi
 `,
       },
+    });
+  }
+  if (i.redis === "standalone") {
+    jobs.push({
+      namespace: i.namespace,
+      spec: { ...boxSpec("restore-redis", i.name, consumerRedisEnv()), image: i.image, script: BOX_REMOTE + REDIS_RESTORE(i.folder) },
     });
   }
   const claims = tarredClaims(i);
