@@ -1,7 +1,7 @@
 import { z } from "zod";
 import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
 import { eq } from "drizzle-orm";
-import { UnitSizeSchema, TenantSizeSchema, TENANT_BRINGS, type UnitSize } from "#unit/shared/unit-size.ts";
+import { UnitSizeSchema, TenantSizeSchema, TENANT_BRINGS, ONBOARDING_VOLUME, PartSizesSchema, dataParts, type PartSizes, type PartVolumes, type UnitSize } from "#unit/shared/unit-size.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { errInternal, errNotFound, errValidation } from "../../kernel/errors.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
@@ -11,22 +11,52 @@ import { validateTenant } from "./validate-tenant.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { UnitComposition } from "#unit/shared/unit-size.ts";
+import type { ConsumerRegistration } from "#core/shared/consumer.ts";
+import { gateUnitSize } from "./gates/compose.ts";
 import type { Stage } from "../../../shared/enums.ts";
 
 
 /** What a consumer brings, read off its own registration — the file that states what the unit IS.
  *  A resize changes the size and nothing else, so this is never asked again at resize time. Exported
  *  because the size PICKER has to compose the same figures the run will write: an operator choosing
- *  from three sizes must see what each costs THIS unit, not what the bare table says. */
+ *  from the sizes must see what each costs THIS unit, not what the bare table says. */
 export async function consumerComposition(
   registrations: Pick<LifecyclePorts["registrations"], "readRegistration">,
   ac: { stage: Stage; name: string },
 ): Promise<UnitComposition> {
-  const reg = await registrations.readRegistration(ac.stage, ac.name);
-  const entry = reg?.entry;
+  return compositionOf((await registrations.readRegistration(ac.stage, ac.name))?.entry);
+}
+
+const compositionOf = (entry: ConsumerRegistration | undefined): UnitComposition => ({
+  postgresql: (entry?.services ?? []).includes("postgresql"),
+  mongodb: entry?.mongodb ?? "shared",
+});
+
+/** What a consumer resize writes beside the quota: the application's size, each data part's — the one
+ *  asked for, else the one it stands at (its own, else the unit's) — and each part's volume: the pin it
+ *  has, else the preset volume of the size it stands at, which is what its claim was created with. The
+ *  pin lands in the same commit as the first size change, so the appset never falls back to a new
+ *  size's preset for a claim made at an old one. Neither map for a unit with no data part. */
+export async function consumerSizing(
+  registrations: Pick<LifecyclePorts["registrations"], "readRegistration">,
+  ac: { stage: Stage; name: string },
+  size: UnitSize,
+  asked: PartSizes = {},
+): Promise<{ brings: UnitComposition; sizing: { size: UnitSize; sizes?: PartSizes; volumes?: PartVolumes }; current: UnitSize | undefined }> {
+  const entry = (await registrations.readRegistration(ac.stage, ac.name))?.entry;
+  const brings = compositionOf(entry);
+  const current = entry?.size;
+  const parts = dataParts(brings);
+  if (parts.length === 0) return { brings, sizing: { size }, current };
+  const standing = (p: (typeof parts)[number]): UnitSize => entry?.sizes?.[p] ?? entry?.size ?? size;
   return {
-    postgresql: (entry?.services ?? []).includes("postgresql"),
-    mongodb: entry?.mongodb ?? "shared",
+    brings,
+    sizing: {
+      size,
+      sizes: Object.fromEntries(parts.map((p) => [p, asked[p] ?? standing(p)])),
+      volumes: Object.fromEntries(parts.map((p) => [p, entry?.volumes?.[p] ?? ONBOARDING_VOLUME[p][standing(p)]])),
+    },
+    current,
   };
 }
 
@@ -47,7 +77,9 @@ export async function consumerComposition(
 // namespace already over the new ceiling keeps its running pods and refuses the NEXT one — Kubernetes
 // never evicts to fit a quota — so the plan says so rather than letting "resized" read as "shrunk".
 
-export const SetSizeParams = z.object({ appId: z.string().startsWith("app_"), size: UnitSizeSchema });
+// `size` is the application's; `sizes` names a data part's own, and a part it does not name keeps the
+// size it stands at.
+export const SetSizeParams = z.object({ appId: z.string().startsWith("app_"), size: UnitSizeSchema, sizes: PartSizesSchema.optional() });
 export type SetSizeParams = z.infer<typeof SetSizeParams>;
 
 export const TenantSetSizeParams = z.object({ tenantId: z.string().startsWith("tnt_"), size: TenantSizeSchema });
@@ -65,6 +97,12 @@ function summary(unit: string, where: string, size: UnitSize, scope: string, q: 
   );
 }
 
+/** The data parts' sizes and the volumes they keep, in the consumer's summary. */
+function partsSentence(sizing: { sizes?: PartSizes; volumes?: PartVolumes }): string {
+  const parts = Object.entries(sizing.sizes ?? {}).map(([p, s]) => `${p} at "${s}" on its ${sizing.volumes?.[p as keyof PartVolumes] ?? "?"} volume`);
+  return parts.length === 0 ? "" : ` Its data parts: ${parts.join(", ")}. A volume keeps the size it was created with: a resize changes CPU and memory only.`;
+}
+
 // ---- Consumer ----
 
 function setSizeSteps(ports: LifecyclePorts, p: SetSizeParams): Step[] {
@@ -77,9 +115,10 @@ function setSizeSteps(ports: LifecyclePorts, p: SetSizeParams): Step[] {
         const ac = loadAppCluster(ctx.db, p.appId);
         // What the consumer brings is read off its OWN registration, not asked again: a resize
         // changes the size, never what the unit is made of.
-        const quota = resolveUnitQuota(ctx.db, p.size, await consumerComposition(ports.registrations, ac));
-        const { commit } = await ports.registrations.setQuota(ac.stage, ac.name, quota, ctx.runId);
-        ctx.checkpoint({ commit, size: p.size, quota });
+        const { brings, sizing } = await consumerSizing(ports.registrations, ac, p.size, p.sizes);
+        const quota = resolveUnitQuota(ctx.db, p.size, brings, sizing.sizes);
+        const { commit } = await ports.registrations.setSize(ac.stage, ac.name, sizing, quota, ctx.runId);
+        ctx.checkpoint({ commit, ...sizing, quota });
         ctx.log("meta", `${ac.name} sized "${p.size}" (${commit}) — the ArgoCD on ${ac.domain} applies the new ResourceQuota on its next sync`);
       },
     },
@@ -93,13 +132,16 @@ export function makeSetSizeDef(ports: LifecyclePorts): RunDefinition<SetSizePara
     mutating: true,
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
-      const quota = resolveUnitQuota(db, params.size, await consumerComposition(ports.registrations, ac));
+      const { brings, sizing } = await consumerSizing(ports.registrations, ac, params.size, params.sizes);
+      const quota = resolveUnitQuota(db, params.size, brings, sizing.sizes);
+      const g24 = gateUnitSize({ unitName: ac.name, size: params.size, brings, quota, ...(sizing.sizes !== undefined ? { sizes: sizing.sizes } : {}) });
+      if (g24.status === "fail") throw errValidation(`G24 ${g24.reason ?? g24.found}`);
       const stepDefs = setSizeSteps(ports, params);
       return {
         kind: "consumer-set-size",
         targetKind: "app",
         targetId: params.appId,
-        summary: summary(`consumer "${ac.name}"`, `${ac.domain} (${ac.stage})`, params.size, "its namespace", quota),
+        summary: summary(`consumer "${ac.name}"`, `${ac.domain} (${ac.stage})`, params.size, "its namespace", quota) + partsSentence(sizing),
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         // The BOOKS branch, where the consumer registrations stand, plus the consumer's own cluster

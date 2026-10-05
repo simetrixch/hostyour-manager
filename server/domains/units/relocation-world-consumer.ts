@@ -254,6 +254,10 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
                     // The size travels with the unit: a move must land it on the instance it ran on,
                     // not on whatever the default happens to be at the destination.
                     size: entry.size ?? "small", mongodb: entry.mongodb ?? "shared",
+                    // Each data part's size and volume pin travel the same way: the claims the
+                    // restore creates must be the size the dump came from.
+                    ...(entry.sizes !== undefined ? { sizes: entry.sizes } : {}),
+                    ...(entry.volumes !== undefined ? { volumes: entry.volumes } : {}),
                     // The namespace ceiling travels the same way, and as the FIGURES the dump carried
                     // rather than re-resolved from the table: a move must not re-price the unit, and a
                     // restore onto an installation whose table has since changed must land the unit on

@@ -23,7 +23,7 @@
 import { ConsumerRegistrationSchema, publicFqdn, type ConsumerRegistration, type ConsumerStageRegistration, type SmtpEntry } from "#core/shared/consumer.ts";
 import { clusterMapPath, type ClusterValueFile } from "#core/shared/cluster-values.ts";
 import { readClusterValueChain } from "#core/server/domains/inventory/cluster-value-chain.ts";
-import type { UnitQuota } from "../shared/unit-size.ts";
+import type { PartSizes, PartVolumes, UnitQuota, UnitSize } from "../shared/unit-size.ts";
 import { STAGE, type Stage } from "#core/shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the detected-consumer scan
 // (consumer-detected.ts) hands these to the browser verbatim, so it is declared once in
@@ -95,7 +95,7 @@ export interface RegistrationCommit {
    *  domain the standing stage file carries is kept: setFqdn below is its writer, and a second
    *  registration of a standing stage does not take it away. Absent deploy ⇒ a build-only unit:
    *  build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
+  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; sizes?: PartSizes; volumes?: PartVolumes; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
 }
 
 export class Registrations {
@@ -382,6 +382,8 @@ export class Registrations {
           channelPatterns: deploy.channelPatterns,
           services: deploy.services,
           size: deploy.size,
+          ...(deploy.sizes !== undefined ? { sizes: deploy.sizes } : {}),
+          ...(deploy.volumes !== undefined ? { volumes: deploy.volumes } : {}),
           mongodb: deploy.mongodb,
           quota: deploy.quota,
           ...(fqdn !== undefined ? { fqdn } : {}),
@@ -418,17 +420,21 @@ export class Registrations {
     return this.flip(stage, name, { removing: true }, `removing(${name}): ${stage} ${trailer(runId)}`);
   }
 
-  /** Write the stage registration's `quota` — the six figures that bound the consumer's namespace,
-   *  resolved by the caller from the size table as it stands NOW. A FIELD write like the flips above,
-   *  not a re-registration: nothing else about the unit changes, and the appset's quota source picks
-   *  the new numbers up on its next sync.
+  /** Write the stage registration's `size`, `sizes`, `volumes` and `quota` in one commit — the words
+   *  the appset names the application's and each data part's preset by, the volumes their claims keep,
+   *  and the six figures that bound the consumer's namespace, resolved by the caller from the size table
+   *  as it stands NOW. `sizes` and `volumes` are left out, never written empty or null, for a unit
+   *  that runs no data part of its own. A FIELD write like the flips above, not a
+   *  re-registration: nothing else about the unit changes, and the appset picks the new preset and
+   *  numbers up on its next sync.
    *
    *  Idempotent by construction, and deliberately not short-circuited: writing the same figures
    *  commits nothing (the platform repo's empty-diff no-op), so a re-apply of a size whose numbers did
    *  not move costs a run and no history, while a re-apply after a table edit lands as one commit
    *  naming the unit. */
-  async setQuota(stage: Stage, name: string, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
-    return this.flip(stage, name, { quota }, `size(${name}) ${trailer(runId)}`);
+  async setSize(stage: Stage, name: string, sizing: { size: UnitSize; sizes?: PartSizes; volumes?: PartVolumes }, quota: UnitQuota, runId: string): Promise<{ commit: string }> {
+    const parts = Object.entries(sizing.sizes ?? {}).map(([p, s]) => ` ${p} ${s}`).join(",");
+    return this.flip(stage, name, { ...sizing, quota }, `size(${name}): ${sizing.size}${parts} ${trailer(runId)}`);
   }
 
   /** Write the stage registration's `fqdn` — the domain the unit answers at beside its platform host
@@ -560,7 +566,7 @@ export class Registrations {
    *  Both files move in ONE commit, from ONE read of the tree. Two commits would leave a window where
    *  the stage says paused and the build still runs, and a second fetch could decide against a tree
    *  other than the one it writes to. */
-  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; quota?: UnitQuota; fqdn?: string | undefined }, message: string): Promise<{ commit: string }> {
+  private async flip(stage: Stage, name: string, patch: { suspended?: boolean; quiesced?: boolean; removing?: boolean; leaving?: string | undefined; size?: UnitSize; sizes?: PartSizes; volumes?: PartVolumes; quota?: UnitQuota; fqdn?: string | undefined }, message: string): Promise<{ commit: string }> {
     return this.repo.withBranch(this.branch, async (books) => {
       const raw = await books.readFile(stagePath(stage, name));
       if (raw === null) throw errValidation(`consumer "${name}" is not registered at ${stage}`);

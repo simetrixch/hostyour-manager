@@ -4,7 +4,7 @@
 // authoritative contract; hostyour-cloud's tools/checks/consumer-contract.census.sh hashes them and
 // fails when this mirror drifts.
 import { z } from "zod";
-import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
+import { UnitQuotaSchema, UnitSizeSchema, MongodbModeSchema, PartSizesSchema, PartVolumesSchema, type UnitQuota, type UnitSize, type MongodbMode } from "#unit/shared/unit-size.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "./enums.ts";
 import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 
@@ -613,6 +613,12 @@ export const ConsumerRegistrationSchema = z
     // and therefore always present in a stage registration: the appset reads it bare, so an absent
     // one is a render failure rather than a silent fall back to a size nobody chose.
     size: UnitSizeSchema.optional(),
+    // Each data part's own size, and the volume its claim was created with (plugins/unit/shared/
+    // unit-size.ts PartSizes, PartVolumes): the appset names a part's preset by its own size, falling
+    // back to `size`, and sizes its claim by the pin. Written for the parts the unit runs, as maps or
+    // not at all — the appset's dig fails on null or a list.
+    sizes: PartSizesSchema.optional(),
+    volumes: PartVolumesSchema.optional(),
     // How this consumer runs MongoDB, copied VERBATIM from the manifest. The appset gates its
     // conditional MongoDB source on it, and the quota above was summed from it.
     mongodb: MongodbModeSchema.optional(),
@@ -683,6 +689,9 @@ export const ConsumerRegistrationSchema = z
       }
       if (e.smtpEntry !== undefined) {
         ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry belongs in a stage registration — build.yaml describes no serving surface" });
+      }
+      for (const k of ["sizes", "volumes"] as const) {
+        if (e[k] !== undefined) ctx.addIssue({ code: "custom", path: [k], message: `"${k}" belongs in a stage registration — build.yaml runs no data part` });
       }
       return;
     }

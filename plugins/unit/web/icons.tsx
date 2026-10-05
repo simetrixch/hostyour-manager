@@ -15,7 +15,7 @@ const stroke = {
   "aria-hidden": true,
 } as const;
 
-/** A table of rows and columns — the three sizes and their figures. */
+/** A table of rows and columns — the sizes and their figures. */
 export function SizesIcon(): JSX.Element {
   return (
     <svg {...stroke}>

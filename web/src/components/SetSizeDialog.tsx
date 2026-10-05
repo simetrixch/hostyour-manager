@@ -31,20 +31,25 @@ export function SetSizeDialog(props: {
    *  take it for the tenant's total. */
   scope: string;
   onCancel: () => void;
-  onConfirm: (size: string) => void;
+  /** `sizes` holds each data part's size, a consumer's own; empty for a tenant. */
+  onConfirm: (size: string, sizes: Record<string, string>) => void;
 }) {
   const [options, setOptions] = useState<UnitSizeOptions | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
+  // Each data part's size, once one is picked: the figures are fetched again composed with it.
+  const [partSizes, setPartSizes] = useState<Record<string, string>>({});
 
   const { kind, unitId } = props;
+  const partsKey = JSON.stringify(partSizes);
   useEffect(() => {
     let alive = true;
-    unitSizeOptions(kind, unitId)
-      .then((r) => { if (alive) { setOptions(r); setChosen((c) => c ?? r.sizes[0]?.name ?? null); } })
+    unitSizeOptions(kind, unitId, JSON.parse(partsKey) as Record<string, string>)
+      .then((r) => { if (alive) { setOptions(r); setChosen((c) => c ?? r.current ?? r.sizes[0]?.name ?? null); } })
       .catch((e: unknown) => { if (alive) setError(e instanceof Error ? e.message : String(e)); });
     return () => { alive = false; };
-  }, [kind, unitId]);
+  }, [kind, unitId, partsKey]);
+  const parts = Object.entries(options?.parts ?? {});
 
   /** What the unit brings, in the words the manifest uses — the reason two units on `medium` can be
    *  quoted different figures. */
@@ -60,7 +65,7 @@ export function SetSizeDialog(props: {
       title={`Set the size of "${props.unit}"?`}
       confirmLabel="Plan size change"
       onCancel={props.onCancel}
-      onConfirm={() => { if (chosen) props.onConfirm(chosen); }}
+      onConfirm={() => { if (chosen) props.onConfirm(chosen, Object.fromEntries(parts.map(([p, v]) => [p, v.size]))); }}
     >
       <p>
         This <strong>plans</strong> a run and opens it — nothing changes on the cluster yet. What you approve is a
@@ -75,6 +80,17 @@ export function SetSizeDialog(props: {
           below are the base rows only.
         </p>
       )}
+      {parts.map(([part, p]) => (
+        // A data part of the unit's own is sized on its own; its claim is not: the clusters cannot
+        // grow a volume, so it keeps the size it was created with.
+        <label className="field" key={part}>
+          <span>{part === "postgresql" ? "PostgreSQL" : "MongoDB"} size — its {p.volume} volume stays as it is: a resize changes CPU and memory only</span>
+          <select value={p.size} onChange={(e) => setPartSizes((s) => ({ ...s, [part]: e.target.value }))}>
+            {(p.offered.includes(p.size) ? p.offered : [p.size, ...p.offered]).map((s) => <option key={s} value={s}>{UNIT_SIZE_LETTER[s]}</option>)}
+          </select>
+        </label>
+      ))}
+      {parts.length > 0 && <p className="muted">The application's size, with the data parts at the sizes above:</p>}
       {options?.sizes.map((s) => (
         <label className="field field--row" key={s.name}>
           <input type="radio" name="unit-size" value={s.name} checked={chosen === s.name} onChange={() => setChosen(s.name)} />

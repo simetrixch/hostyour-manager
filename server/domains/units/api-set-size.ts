@@ -4,9 +4,9 @@ import type { Hono } from "hono";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import { errValidation, errNotConfigured } from "../../kernel/errors.ts";
-import { TENANT_SIZE, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
-import { explainUnitQuota, offeredSizes } from "#unit/server/unit-size.ts";
-import { SetSizeParams, TenantSetSizeParams, consumerComposition } from "./set-size.run.ts";
+import { TENANT_SIZE, TENANT_BRINGS, UNIT_SIZE, DEFAULT_UNIT_SIZE, PartSizesSchema, type DataPart, type UnitSize } from "#unit/shared/unit-size.ts";
+import { explainUnitQuota, listUnitSizes, offeredSizes } from "#unit/server/unit-size.ts";
+import { SetSizeParams, TenantSetSizeParams, consumerSizing } from "./set-size.run.ts";
 import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
 import { loadAppCluster } from "./lifecycle.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
@@ -41,12 +41,28 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
     // No registrations ⇒ consumer onboarding is unwired and the registration cannot be read. The unit's
     // composition is unknown, so the honest answer is the base rows and a word saying why: guessing
     // "brings nothing" would quote a customer a ceiling that is too small.
-    const brings = registrations ? await consumerComposition(registrations, ac) : { postgresql: false, mongodb: "shared" as const };
+    //
+    // Each data part the unit runs is sized on its own: the query names the size asked for a part
+    // (?postgresql=large), a part it does not name stands at its size, and every application size is
+    // composed with the parts at those. A part is offered the sizes it has rows for above the frugal
+    // default, which G24 refuses a database of its own.
+    const asked = PartSizesSchema.safeParse({ postgresql: c.req.query("postgresql"), mongodb: c.req.query("mongodb") });
+    if (!asked.success) throw errValidation(`invalid part size: ${asked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    const { brings, sizing, current } = registrations
+      ? await consumerSizing(registrations, ac, DEFAULT_UNIT_SIZE, asked.data)
+      : { brings: { postgresql: false, mongodb: "shared" as const }, sizing: {}, current: undefined };
+    const rows = listUnitSizes(db);
+    const parts = Object.fromEntries(Object.entries(sizing.sizes ?? {}).map(([part, size]) => [part, {
+      size, volume: sizing.volumes?.[part as DataPart],
+      offered: UNIT_SIZE.filter((s) => UNIT_SIZE.indexOf(s) > UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE) && rows.some((r) => r.component === part && r.name === s)),
+    }]));
     return c.json({
       unit: ac.name,
       brings,
       composed: registrations !== undefined,
-      sizes: offeredSizes(db, brings).map((name) => ({ name, ...explainUnitQuota(db, name, brings) })),
+      current,
+      parts,
+      sizes: offeredSizes(db, brings, sizing.sizes).map((name: UnitSize) => ({ name, ...explainUnitQuota(db, name, brings, sizing.sizes) })),
     });
   });
 
@@ -76,8 +92,8 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
 
   app.post("/api/consumers/:appId/size", async (c) => {
     if (!onboardingEnabled || !executor) throw errNotConfigured("onboarding is not configured on this manager");
-    const body = (await c.req.json().catch(() => ({}))) as { size?: unknown };
-    const parsed = SetSizeParams.safeParse({ appId: c.req.param("appId"), size: body.size });
+    const body = (await c.req.json().catch(() => ({}))) as { size?: unknown; sizes?: unknown };
+    const parsed = SetSizeParams.safeParse({ appId: c.req.param("appId"), size: body.size, sizes: body.sizes });
     if (!parsed.success) throw errValidation(`invalid size request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     return c.json(await executor.plan("consumer-set-size", parsed.data), 201);
   });

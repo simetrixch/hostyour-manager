@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { UNIT_SIZE, UNIT_SIZE_LETTER, TENANT_SIZE, UNIT_SIZE_SEED, MONGODB_MEMBERS, composeQuota, seedQuota, seededSizes, DEFAULT_UNIT_SIZE } from "./unit-size.ts";
+import { UNIT_SIZE, UNIT_SIZE_LETTER, TENANT_SIZE, UNIT_SIZE_SEED, MONGODB_MEMBERS, ONBOARDING_VOLUME, composeQuota, seedQuota, seededSizes, partSizing, DEFAULT_UNIT_SIZE } from "./unit-size.ts";
 
-// A unit has ONE size, and what that size costs depends on what the unit brings with it. These
+// A unit has a size, each data part of its own may have its own, and what they cost depends on what the unit brings. These
 // assertions hold the two halves of that sentence apart: the size never changes with the composition,
 // and the FIGURES always do.
 
@@ -15,7 +15,7 @@ describe("composeQuota", () => {
   it("adds the PostgreSQL row once, at the unit's OWN size", () => {
     const { quota, parts } = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "shared" });
     expect(parts.map((p) => `${p.component}x${p.members}`)).toEqual(["basex1", "postgresqlx1"]);
-    // 400m + 50m, 1Gi + 512Mi — the database is sized by the unit's word, never by a second one.
+    // 400m + 50m, 1Gi + 512Mi — a database with no size of its own runs at the unit's.
     expect(quota.requestsCpu).toBe("450m");
     expect(quota.requestsMemory).toBe("1536Mi");
     expect(quota.pods).toBe(UNIT_SIZE_SEED.base.small.pods + UNIT_SIZE_SEED.postgresql.small.pods);
@@ -48,6 +48,13 @@ describe("composeQuota", () => {
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "standalone" }).quota).toMatchObject({ requestsCpu: "515m", requestsMemory: "1584Mi", limitsCpu: "2600m", limitsMemory: "4224Mi" });
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "replicaset" }).quota).toMatchObject({ requestsCpu: "715m", requestsMemory: "2608Mi" });
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "shared" }).parts.map((p) => p.component)).toEqual(["base", "postgresql"]);
+  });
+
+  it("sums each data part at its OWN size when one is given, the application at the unit's", () => {
+    const { quota, parts } = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "standalone" }, { postgresql: "large" });
+    expect(parts.map((p) => p.each)).toEqual([UNIT_SIZE_SEED.base.small, UNIT_SIZE_SEED.postgresql.large, UNIT_SIZE_SEED.mongodb.small, expect.anything()]);
+    // 400m + 300m + 100m + the exporter's 15m.
+    expect(quota.requestsCpu).toBe("815m");
   });
 
   it("keeps the WORD and the FIGURES apart: the same size costs more when the unit brings more", () => {
@@ -98,8 +105,36 @@ describe("the vocabulary", () => {
     });
   });
 
-  it("PLANTED INNOCENT: a consumer's components keep their three sizes, no row invented for the new ids", () => {
-    for (const c of ["base", "postgresql", "mongodb"] as const) expect(seededSizes(c)).toEqual(["small", "medium", "large"]);
+  it("seeds a consumer's components at all six sizes, the new ones at the decided figures", () => {
+    for (const c of ["base", "postgresql", "mongodb"] as const) expect(seededSizes(c)).toEqual([...UNIT_SIZE]);
+    const figures = (c: "base" | "postgresql" | "mongodb") => ["xsmall", "xlarge", "xxlarge"].map((s) => UNIT_SIZE_SEED[c][s as "xsmall"]);
+    expect(figures("base")).toEqual([
+      { requestsCpu: "200m", requestsMemory: "512Mi", limitsCpu: "750m", limitsMemory: "1Gi", pods: 8, persistentVolumeClaims: 1 },
+      { requestsCpu: "2400m", requestsMemory: "6Gi", limitsCpu: "9", limitsMemory: "12Gi", pods: 48, persistentVolumeClaims: 6 },
+      { requestsCpu: "3200m", requestsMemory: "8Gi", limitsCpu: "12", limitsMemory: "16Gi", pods: 64, persistentVolumeClaims: 8 },
+    ]);
+    expect(figures("postgresql").map((q) => [q.requestsCpu, q.requestsMemory, q.limitsCpu, q.limitsMemory])).toEqual([
+      ["25m", "256Mi", "400m", "512Mi"], ["450m", "3584Mi", "3200m", "6656Mi"], ["600m", "4608Mi", "4200m", "8704Mi"],
+    ]);
+    expect(figures("mongodb").map((q) => [q.requestsCpu, q.requestsMemory, q.limitsCpu, q.limitsMemory])).toEqual([
+      ["50m", "256Mi", "500m", "1Gi"], ["750m", "3Gi", "6", "12Gi"], ["1", "4Gi", "8", "16Gi"],
+    ]);
+  });
+
+  it("gives each data part the volume of its size, the three old ones the presets' own", () => {
+    expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.postgresql[s])).toEqual(["2Gi", "5Gi", "20Gi", "50Gi", "100Gi", "200Gi"]);
+    expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.mongodb[s])).toEqual(["5Gi", "10Gi", "40Gi", "100Gi", "200Gi", "400Gi"]);
+  });
+});
+
+describe("partSizing", () => {
+  it("sizes and pins only the data parts a unit runs", () => {
+    expect(partSizing("xlarge", { postgresql: true, mongodb: "replicaset" })).toEqual({ sizes: { postgresql: "xlarge", mongodb: "xlarge" }, volumes: { postgresql: "100Gi", mongodb: "200Gi" } });
+    expect(partSizing("medium", { postgresql: false, mongodb: "standalone" })).toEqual({ sizes: { mongodb: "medium" }, volumes: { mongodb: "40Gi" } });
+  });
+
+  it("writes neither key for a unit with no data part of its own: the appset's dig fails on null or a list", () => {
+    expect(partSizing("small", { postgresql: false, mongodb: "shared" })).toEqual({});
   });
 });
 
@@ -111,6 +146,7 @@ describe("composeQuota for a tenant member", () => {
   });
 
   it("refuses a size the table holds no row for, naming the component and the size", () => {
-    expect(() => composeQuota(UNIT_SIZE_SEED, "xsmall", { postgresql: false, mongodb: "shared" })).toThrow(/"base".*"xsmall"|"xsmall".*"base"/);
+    const table = { ...UNIT_SIZE_SEED, base: { small: UNIT_SIZE_SEED.base.small } };
+    expect(() => composeQuota(table, "xsmall", { postgresql: false, mongodb: "shared" })).toThrow(/"base".*"xsmall"|"xsmall".*"base"/);
   });
 });

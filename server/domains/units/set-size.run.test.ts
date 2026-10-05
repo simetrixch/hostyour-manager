@@ -81,13 +81,13 @@ function seedCluster(): void {
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
-async function seedConsumer(reg: Registrations): Promise<void> {
+async function seedConsumer(reg: Registrations, over: { services?: ("postgresql")[]; mongodb?: "shared" | "standalone" } = {}): Promise<void> {
   seedCluster();
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
-    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: over.services ?? [], size: "small", mongodb: over.mongodb ?? "shared", quota: seedQuota("small") },
     runId: "run_onb",
   });
 }
@@ -108,13 +108,63 @@ async function seedTenant(reg: TenantRegistrations): Promise<void> {
 }
 
 describe("set-size run (consumer)", () => {
-  it("writes the named size's figures into the registration", async () => {
+  it("writes the named size's word and figures into the registration, so the database presets move with the quota", async () => {
     const reg = new Registrations(new FakePlatformRepo());
     await seedConsumer(reg);
     const params = { appId: "app_1", size: "large" as const };
     await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
 
-    expect((await reg.readRegistration("prod", "acme"))?.entry.quota).toEqual(seedQuota("large"));
+    const entry = (await reg.readRegistration("prod", "acme"))?.entry;
+    expect(entry?.quota).toEqual(seedQuota("large"));
+    expect(entry?.size).toBe("large");
+  });
+
+  it("sizes a data part on its own: the part's word moves, its volume stays at the size it was created with", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new Registrations(repo);
+    // Written before parts had sizes: the one word sized PostgreSQL too, and its volume is that
+    // preset's.
+    await seedConsumer(reg, { services: ["postgresql"] });
+    const params = { appId: "app_1", size: "small" as const, sizes: { postgresql: "medium" as const } };
+    await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
+
+    const entry = (await reg.readRegistration("prod", "acme"))?.entry;
+    expect(entry?.size).toBe("small");
+    expect(entry?.sizes).toEqual({ postgresql: "medium" });
+    expect(entry?.volumes).toEqual({ postgresql: "5Gi" });
+    expect(entry?.quota).toEqual(seedQuota("small", { postgresql: true, mongodb: "shared" }, { postgresql: "medium" }));
+
+    const again = { appId: "app_1", size: "medium" as const, sizes: { postgresql: "large" as const } };
+    await runAll(makeSetSizeDef(consumerPorts(reg)).steps(again), again);
+    const after = (await reg.readRegistration("prod", "acme"))?.entry;
+    expect([after?.size, after?.sizes, after?.volumes]).toEqual(["medium", { postgresql: "large" }, { postgresql: "5Gi" }]);
+  });
+
+  it("keeps a part's size when only the application's is asked for", async () => {
+    const reg = new Registrations(new FakePlatformRepo());
+    await seedConsumer(reg, { services: ["postgresql"] });
+    const params = { appId: "app_1", size: "large" as const };
+    await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
+    const entry = (await reg.readRegistration("prod", "acme"))?.entry;
+    expect([entry?.size, entry?.sizes, entry?.volumes]).toEqual(["large", { postgresql: "small" }, { postgresql: "5Gi" }]);
+  });
+
+  it("writes no sizes or volumes key for a consumer with no data part of its own, never null or a list", async () => {
+    const repo = new FakePlatformRepo();
+    const reg = new Registrations(repo);
+    await seedConsumer(reg);
+    const params = { appId: "app_1", size: "medium" as const };
+    await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
+    const raw = repo.read(repo.booksBranch, "registrations/acme/prod.yaml")!;
+    expect(raw).toMatch(/^size: "?medium"?$/m);
+    expect(raw).not.toMatch(/^\s*(sizes|volumes):/m);
+  });
+
+  it("refuses to plan a data part at or below the frugal default (G24, per part)", async () => {
+    const reg = new Registrations(new FakePlatformRepo());
+    await seedConsumer(reg, { services: ["postgresql"] });
+    await expect(makeSetSizeDef(consumerPorts(reg)).plan({ appId: "app_1", size: "large", sizes: { postgresql: "xsmall" } }, { db: db.db })).rejects.toThrow(/G24|frugal/);
+    await expect(makeSetSizeDef(consumerPorts(reg)).plan({ appId: "app_1", size: "large", sizes: { postgresql: "medium" } }, { db: db.db })).resolves.toMatchObject({ kind: "consumer-set-size" });
   });
 
   it("RE-APPLIES the table: asking for the size it already has writes the table's CURRENT figures", async () => {

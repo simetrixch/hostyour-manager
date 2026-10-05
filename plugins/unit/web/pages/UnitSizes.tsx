@@ -4,8 +4,8 @@ import { TENANT_SIZE, UNIT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "../../s
 
 /** The size table: what each size (XS to XXL) MEANS on this installation.
  *
- *  A UNIT HAS ONE SIZE, AND THE TABLE HAS A ROW PER SIZE AND COMPONENT. A consumer is sold `small`,
- *  `medium` or `large`, a tenant XS to L; what a size COSTS depends on what the unit brings with it. So the figures
+ *  THE TABLE HAS A ROW PER SIZE AND COMPONENT. A consumer is sold XS to XXL, each data part of its own
+ *  at its own size, a tenant XS to L; what a size COSTS depends on what the unit brings with it. So the figures
  *  are kept per component — `base` is the application itself, `postgresql` is a PostgreSQL instance of
  *  its own, `mongodb` is ONE member of a MongoDB of its own — and a unit's ceiling is the base row plus
  *  the rows for what it brings, the MongoDB row times its member count (one for a standalone, three for

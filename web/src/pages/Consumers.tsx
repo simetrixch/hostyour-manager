@@ -453,7 +453,7 @@ export function Consumers() {
           kind="consumer" unitId={sizeFor.id}
           scope="its namespace"
           onCancel={() => setSizeFor(null)}
-          onConfirm={(size) => { const c = sizeFor; setSizeFor(null); void act((id) => setConsumerSize(id, size), c.id); }}
+          onConfirm={(size, sizes) => { const c = sizeFor; setSizeFor(null); void act((id) => setConsumerSize(id, size, sizes), c.id); }}
         />
       )}
 

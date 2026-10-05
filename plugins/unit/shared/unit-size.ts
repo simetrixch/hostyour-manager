@@ -25,11 +25,12 @@ import { addCpu, addMemory, timesCpu, timesMemory } from "./quantity.ts";
 
 /** The size names, smallest first. `small`, `medium` and `large` are the words the PostgreSQL presets
  *  use (hostyour-cloud/apps/postgresql/values-size-<size>.yaml) and the ids every registration written
- *  before the other three existed stores, so they keep their spelling. A unit has exactly ONE size:
- *  its application and its databases are all sized by it. "A medium application with a large
- *  database" is deliberately not expressible — one size governs the whole unit, which is the only
- *  shape in which the ceiling stays something an operator can reason about. Not every size has a row
- *  for every component (see UNIT_SIZE_SEED): a size a unit's parts have no row for is not offered to it. */
+ *  before the other three existed stores, so they keep their spelling. A unit has ONE size for its
+ *  application, and each data part of its own (PostgreSQL, MongoDB) has its own size, which starts as
+ *  the unit's at onboarding and moves only when Set size names it: a small application with a large
+ *  database is a real customer. The quota stays one sum the operator can read back part by part
+ *  (composeQuota's parts). Not every size has a row for every component (see UNIT_SIZE_SEED): a size
+ *  a unit's parts have no row for is not offered to it. */
 export const UNIT_SIZE = ["xsmall", "small", "medium", "large", "xlarge", "xxlarge"] as const;
 export type UnitSize = (typeof UNIT_SIZE)[number];
 export const UnitSizeSchema = z.enum(UNIT_SIZE);
@@ -88,10 +89,10 @@ export type UnitQuota = z.infer<typeof UnitQuotaSchema>;
  *
  * Read it as four tables, which is what the Sizes screen shows:
  *
- *   base         what a consumer's own application gets (small, medium, large)
- *   postgresql   what ONE PostgreSQL instance gets, when the unit brings its own (small, medium, large)
+ *   base         what a consumer's own application gets (all six sizes)
+ *   postgresql   what ONE PostgreSQL instance gets, when the unit brings its own (all six sizes)
  *   mongodb      what ONE MongoDB MEMBER gets — multiplied by 1 for a standalone, 3 for a replica set
- *                (small, medium, large)
+ *                (all six sizes)
  *   member       what ONE member namespace of a tenant gets (all six sizes)
  *
  * A consumer is offered only the sizes its parts have rows for; the extra consumer sizes wait for
@@ -141,19 +142,31 @@ const withSolver = (q: UnitQuota): UnitQuota => ({
 
 export const UNIT_SIZE_SEED = {
   base: {
+    // xsmall is half of small, xlarge 1.5 x large and xxlarge 2 x large: the member rows' steps.
+    xsmall: { requestsCpu: "200m", requestsMemory: "512Mi", limitsCpu: "750m", limitsMemory: "1Gi", pods: 8, persistentVolumeClaims: 1 },
     small:  { requestsCpu: "400m", requestsMemory: "1Gi", limitsCpu: "1500m", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 },
     medium: { requestsCpu: "800m", requestsMemory: "2Gi", limitsCpu: "3", limitsMemory: "4Gi", pods: 16, persistentVolumeClaims: 2 },
     large:  { requestsCpu: "1600m", requestsMemory: "4Gi", limitsCpu: "6", limitsMemory: "8Gi", pods: 32, persistentVolumeClaims: 4 },
+    xlarge: { requestsCpu: "2400m", requestsMemory: "6Gi", limitsCpu: "9", limitsMemory: "12Gi", pods: 48, persistentVolumeClaims: 6 },
+    xxlarge: { requestsCpu: "3200m", requestsMemory: "8Gi", limitsCpu: "12", limitsMemory: "16Gi", pods: 64, persistentVolumeClaims: 8 },
   },
+  // The data rows of the three new sizes are the cloud's presets (hostyour-cloud apps/postgresql and
+  // apps/mongodb values-size-<size>.yaml), PostgreSQL's with its exporter, rounded up as above.
   postgresql: {
+    xsmall: { requestsCpu: "25m", requestsMemory: "256Mi", limitsCpu: "400m", limitsMemory: "512Mi", pods: 2, persistentVolumeClaims: 1 },
     small:  { requestsCpu: "50m", requestsMemory: "512Mi", limitsCpu: "600m", limitsMemory: "1Gi", pods: 2, persistentVolumeClaims: 1 },
     medium: { requestsCpu: "150m", requestsMemory: "1536Mi", limitsCpu: "1200m", limitsMemory: "2560Mi", pods: 2, persistentVolumeClaims: 1 },
     large:  { requestsCpu: "300m", requestsMemory: "2560Mi", limitsCpu: "2200m", limitsMemory: "4608Mi", pods: 2, persistentVolumeClaims: 1 },
+    xlarge: { requestsCpu: "450m", requestsMemory: "3584Mi", limitsCpu: "3200m", limitsMemory: "6656Mi", pods: 2, persistentVolumeClaims: 1 },
+    xxlarge: { requestsCpu: "600m", requestsMemory: "4608Mi", limitsCpu: "4200m", limitsMemory: "8704Mi", pods: 2, persistentVolumeClaims: 1 },
   },
   mongodb: {
+    xsmall: { requestsCpu: "50m", requestsMemory: "256Mi", limitsCpu: "500m", limitsMemory: "1Gi", pods: 1, persistentVolumeClaims: 1 },
     small:  { requestsCpu: "100m", requestsMemory: "512Mi", limitsCpu: "1", limitsMemory: "2Gi", pods: 1, persistentVolumeClaims: 1 },
     medium: { requestsCpu: "250m", requestsMemory: "1Gi", limitsCpu: "2", limitsMemory: "4Gi", pods: 1, persistentVolumeClaims: 1 },
     large:  { requestsCpu: "500m", requestsMemory: "2Gi", limitsCpu: "4", limitsMemory: "8Gi", pods: 1, persistentVolumeClaims: 1 },
+    xlarge: { requestsCpu: "750m", requestsMemory: "3Gi", limitsCpu: "6", limitsMemory: "12Gi", pods: 1, persistentVolumeClaims: 1 },
+    xxlarge: { requestsCpu: "1", requestsMemory: "4Gi", limitsCpu: "8", limitsMemory: "16Gi", pods: 1, persistentVolumeClaims: 1 },
   },
   member: {
     xsmall: withSolver({ requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 }),
@@ -187,9 +200,9 @@ export function quotaParts(brings: UnitComposition): { component: SizeComponent;
 export const missingRow = (component: SizeComponent, size: UnitSize): string =>
   `the size table holds no "${component}" row for size "${size}" — that size is not offered for what this unit brings`;
 
-/** What a unit BRINGS, which is what decides how much of the table applies to it. Not a second size:
- *  the databases run at the unit's own size, so this says only whether they are there and, for
- *  MongoDB, how many members it takes. */
+/** What a unit BRINGS, which is what decides how much of the table applies to it. Not a size: it
+ *  says only whether its databases are there and, for MongoDB, how many members it takes. What size
+ *  each runs at is PartSizes. */
 /** A size table: component -> size -> figures, holding only the rows that exist. */
 export type SizeTable = Record<SizeComponent, Partial<Record<UnitSize, UnitQuota>>>;
 
@@ -203,6 +216,49 @@ export interface UnitComposition {
 /** A tenant brings no database of its own: its members claim the cluster's shared MongoDB replica set
  *  and no tenant runs a PostgreSQL, so each member namespace's quota is the member row alone. */
 export const TENANT_BRINGS: UnitComposition = { app: "member", postgresql: false, mongodb: "shared" };
+
+/** The data parts a unit may run of its own, each with a size and a volume of its own. */
+export const DATA_PART = ["postgresql", "mongodb"] as const;
+export type DataPart = (typeof DATA_PART)[number];
+
+/** Each data part's size, beside the unit's `size` (the application's). The consumers ApplicationSet
+ *  reads `dig "sizes" "<part>" .size`, so a part without one runs at the unit's size, and the key is a
+ *  map or absent: its dig fails on null or a list, and stops the whole set. */
+export const PartSizesSchema = z.object({ postgresql: UnitSizeSchema.optional(), mongodb: UnitSizeSchema.optional() });
+export type PartSizes = z.infer<typeof PartSizesSchema>;
+
+/** Each data part's volume, as the quantity its claim was created with — for MongoDB, each member's.
+ *  A claim cannot grow on these clusters (microk8s-hostpath expands nothing) and its spec is immutable,
+ *  so it is written once and no resize touches it: Set size changes CPU and memory only. */
+export const PartVolumesSchema = z.object({ postgresql: z.string().regex(/^[0-9]+[MGT]i$/).optional(), mongodb: z.string().regex(/^[0-9]+[MGT]i$/).optional() });
+export type PartVolumes = z.infer<typeof PartVolumesSchema>;
+
+/** The volume a data part is created with, per size. The three old sizes' are the presets' own, which
+ *  is what every claim written before the pin was created from; the new sizes have no preset volume
+ *  for the appset to fall back to, so their pin is the only thing that sizes the claim. */
+export const ONBOARDING_VOLUME: Record<DataPart, Record<UnitSize, string>> = {
+  postgresql: { xsmall: "2Gi", small: "5Gi", medium: "20Gi", large: "50Gi", xlarge: "100Gi", xxlarge: "200Gi" },
+  mongodb: { xsmall: "5Gi", small: "10Gi", medium: "40Gi", large: "100Gi", xlarge: "200Gi", xxlarge: "400Gi" },
+};
+
+/** The size a component of a unit runs at: a data part its own when it has one, all else the unit's. */
+export const sizeOf = (component: SizeComponent, size: UnitSize, sizes: PartSizes = {}): UnitSize =>
+  component === "postgresql" || component === "mongodb" ? sizes[component] ?? size : size;
+
+/** The data parts a unit runs of its own. */
+export const dataParts = (brings: UnitComposition): DataPart[] =>
+  DATA_PART.filter((p) => (p === "postgresql" ? brings.postgresql : MONGODB_MEMBERS[brings.mongodb] > 0));
+
+/** What an onboarding writes beside `size`: every part it runs at that one size, each pinned to that
+ *  size's volume. Neither key for a unit with no data part of its own. */
+export function partSizing(size: UnitSize, brings: UnitComposition): { sizes?: PartSizes; volumes?: PartVolumes } {
+  const parts = dataParts(brings);
+  if (parts.length === 0) return {};
+  return {
+    sizes: Object.fromEntries(parts.map((p) => [p, size])),
+    volumes: Object.fromEntries(parts.map((p) => [p, ONBOARDING_VOLUME[p][size]])),
+  };
+}
 
 /** The metrics exporter a MongoDB of the unit's own runs beside its members: ONE pod per instance,
  *  whatever the member count, so it is no row of the per-member `mongodb` table. Its figures are the
@@ -218,10 +274,12 @@ export function composeQuota(
   table: SizeTable,
   size: UnitSize,
   brings: UnitComposition,
+  sizes: PartSizes = {},
 ): { quota: UnitQuota; parts: { component: SizeComponent | "mongodb-exporter"; members: number; each: UnitQuota }[] } {
   const parts: { component: SizeComponent | "mongodb-exporter"; members: number; each: UnitQuota }[] = quotaParts(brings).map((p) => {
-    const each = table[p.component][size];
-    if (!each) throw new Error(missingRow(p.component, size));
+    const at = sizeOf(p.component, size, sizes);
+    const each = table[p.component][at];
+    if (!each) throw new Error(missingRow(p.component, at));
     return { ...p, each };
   });
   if (MONGODB_MEMBERS[brings.mongodb] > 0) parts.push({ component: "mongodb-exporter", members: 1, each: MONGODB_EXPORTER });
@@ -239,8 +297,8 @@ export function composeQuota(
 /** The quota a unit of this size gets out of the SEED table for what it brings — what a fresh
  *  installation resolves before anyone edits the table, and the one value a fixture needs. Defaults to
  *  a unit that brings no database of its own, which is most of them. */
-export function seedQuota(size: UnitSize, brings: UnitComposition = { postgresql: false, mongodb: "shared" }): UnitQuota {
-  return composeQuota(UNIT_SIZE_SEED, size, brings).quota;
+export function seedQuota(size: UnitSize, brings: UnitComposition = { postgresql: false, mongodb: "shared" }, sizes: PartSizes = {}): UnitQuota {
+  return composeQuota(UNIT_SIZE_SEED, size, brings, sizes).quota;
 }
 
 /** The size a unit gets when nobody named one. `small` for the same reason the PostgreSQL chart

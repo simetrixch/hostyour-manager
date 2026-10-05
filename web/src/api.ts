@@ -382,14 +382,17 @@ export interface UnitSizeOptions {
   /** false ⇒ what the unit brings could not be read (consumer onboarding unwired), so the figures are
    *  the base rows only and the dialog says so. */
   composed: boolean;
+  /** A consumer's: the application's size it stands at, and each data part it runs with the size it
+   *  stands at (or was asked at), the volume its claim keeps and the sizes it may be put on. */
+  current?: UnitSize; parts?: Partial<Record<"postgresql" | "mongodb", { size: UnitSize; volume: string; offered: UnitSize[] }>>;
   sizes: Array<{
     name: UnitSize;
     quota: Omit<UnitSizeView, "name" | "component">;
     parts: Array<{ component: UnitSizeView["component"] | "mongodb-exporter"; members: number; each: Omit<UnitSizeView, "name" | "component"> }>;
   }>;
 }
-export const unitSizeOptions = (kind: "consumer" | "tenant", id: string): Promise<UnitSizeOptions> =>
-  req<UnitSizeOptions>(kind === "consumer" ? `/api/consumers/${id}/sizes` : `/api/tenants/${id}/sizes`);
+export const unitSizeOptions = (kind: "consumer" | "tenant", id: string, parts: Record<string, string> = {}): Promise<UnitSizeOptions> =>
+  req<UnitSizeOptions>(kind === "consumer" ? `/api/consumers/${id}/sizes${Object.keys(parts).length > 0 ? `?${new URLSearchParams(parts).toString()}` : ""}` : `/api/tenants/${id}/sizes`);
 /** Change what one size MEANS. It reaches no running unit: a registration carries the figures it was
  *  written with, so an already-deployed unit moves only when setConsumerSize/setTenantSize rewrites
  *  it. Two acts on purpose — re-pricing a table and re-sizing a customer are not the same thing. */
@@ -415,8 +418,7 @@ export const setConsumerRelease = (appId: string, tag: string): Promise<{ runId:
 /** Plan consumer-set-domain: the domain the consumer answers at, at its stage ("" clears it). */
 export const setConsumerDomain = (name: string, stage: string, fqdn: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/consumers/${name}/stages/${stage}/fqdn`, { fqdn });
-export const setConsumerSize = (appId: string, size: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/consumers/${appId}/size`, { size });
+export const setConsumerSize = (appId: string, size: string, sizes: Record<string, string> = {}): Promise<{ runId: string }> => post<{ runId: string }>(`/api/consumers/${appId}/size`, { size, sizes });
 /** Backup: close access, dump every store into a new generation on the Storage Box, verify it,
  *  reopen — the generation stays and the consumer keeps running where it is. */
 export const backupConsumer = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/backup`);

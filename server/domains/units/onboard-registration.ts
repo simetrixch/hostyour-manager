@@ -4,6 +4,7 @@
 // writer of registrations/**.
 import type { Step } from "../../executor/types.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
+import { partSizing } from "#unit/shared/unit-size.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { deployableOnboardCleanups } from "./onboard-abort.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -75,9 +76,11 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
           keyPatterns: p.keyPatterns, // literal redis key patterns — the grant the unit's fence holds its claim to
           channelPatterns: p.channelPatterns, // literal redis channel patterns — the same grant for Pub/Sub
           services: p.services, // claimed services, copied verbatim — a chart source gates on this
-          // The unit's one size, and what it brings — the appset names the database presets from
-          // the first and gates its conditional sources on the second.
+          // The unit's size, and what it brings — the appset names the presets from the first and
+          // gates its conditional sources on the second. Each data part starts at that size, its
+          // volume pinned to the size's: the claim keeps it whatever the part is resized to later.
           size: p.size,
+          ...partSizing(p.size, { postgresql: p.services.includes("postgresql"), mongodb: p.mongodb }),
           mongodb: p.mongodb,
           // The namespace ceiling, RESOLVED here rather than carried in the plan: the size table is
           // editable while the platform runs, so the figures a unit is onboarded with must be the ones

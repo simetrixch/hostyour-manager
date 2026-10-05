@@ -30,16 +30,16 @@ function walk(node: ReactNode, out: Handlers[]): void {
 
 describe("SizeTables", () => {
   it("shows a tenant table and a consumer table, each figure once, in the operator's words", () => {
-    expect(rows).toHaveLength(15);
+    expect(rows).toHaveLength(24);
     const html = render(rows);
     expect(html.match(/<table/g)).toHaveLength(2);
     expect([...html.matchAll(/<h2>([^<]*)<\/h2>/g)].map((m) => m[1])).toEqual(["Tenant (per app)", "Consumer"]);
     const [tenant, consumer] = html.split("<table").slice(1);
     expect(tenant!.match(/<tbody>.*<\/tbody>/)![0].match(/<tr/g)).toHaveLength(6);
-    expect(consumer!.match(/<tbody>.*<\/tbody>/)![0].match(/<tr/g)).toHaveLength(3);
-    // Six inputs per row and part: 6 tenant rows, 3 consumer rows of three parts each.
-    expect(html.match(/<input/g)).toHaveLength(6 * 6 + 3 * 3 * 6);
-    expect(html.match(/>Save</g)).toHaveLength(6 + 9);
+    expect(consumer!.match(/<tbody>.*<\/tbody>/)![0].match(/<tr/g)).toHaveLength(6);
+    // Six inputs per row and part: 6 tenant rows, 6 consumer rows of three parts each.
+    expect(html.match(/<input/g)).toHaveLength(6 * 6 + 6 * 3 * 6);
+    expect(html.match(/>Save</g)).toHaveLength(6 + 18);
     expect(html).toContain("XL (not offered)");
     expect(html).not.toMatch(/>(base|member|postgresql|mongodb)</);
   });
@@ -55,8 +55,8 @@ describe("SizeTables", () => {
       expect(p.label).toBe(`${UNIT_SIZE_LETTER[name as UnitSizeView["name"]]} ${PART[component!]} ${FIGURE[field!]}`);
     }
     for (const p of handlers.filter((h) => h.onClick)) p.onClick!();
-    expect(new Set(edits).size).toBe(90);
-    expect(edits).toHaveLength(90);
+    expect(new Set(edits).size).toBe(144);
+    expect(edits).toHaveLength(144);
     expect([...saves].sort()).toEqual(rows.map((s) => `${s.component}/${s.name}`).sort());
   });
 });

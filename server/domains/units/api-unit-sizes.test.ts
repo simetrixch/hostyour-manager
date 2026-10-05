@@ -64,18 +64,14 @@ async function make(registrations?: Registrations): Promise<{ app: Hono<AppEnv>;
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
 
 describe("the size table", () => {
-  // Fifteen since tenants got their own component: base, postgresql and mongodb at the three consumer
-  // sizes, and member at all six.
-  it("serves FIFTEEN rows — the consumer components at three sizes, the member component at six", async () => {
+  // Twenty-four: base, postgresql, mongodb and member, each at all six sizes.
+  it("serves TWENTY-FOUR rows — every component at six sizes", async () => {
     const { app, cookie } = await make();
     const body = (await (await app.request("/api/unit/sizes", authed(cookie))).json()) as { sizes: Array<{ component: string; name: string }> };
-    expect(body.sizes).toHaveLength(15);
-    expect(body.sizes.map((s) => `${s.component}/${s.name}`)).toEqual([
-      "base/small", "base/medium", "base/large",
-      "postgresql/small", "postgresql/medium", "postgresql/large",
-      "mongodb/small", "mongodb/medium", "mongodb/large",
-      "member/xsmall", "member/small", "member/medium", "member/large", "member/xlarge", "member/xxlarge",
-    ]);
+    expect(body.sizes).toHaveLength(24);
+    expect(body.sizes.map((s) => `${s.component}/${s.name}`)).toEqual(
+      ["base", "postgresql", "mongodb", "member"].flatMap((c) => ["xsmall", "small", "medium", "large", "xlarge", "xxlarge"].map((n) => `${c}/${n}`)),
+    );
   });
 
   it("edits ONE row, addressed by component AND size — the other components' rows are untouched", async () => {
@@ -116,7 +112,7 @@ describe("the size table", () => {
   });
 });
 
-describe("what the three sizes cost ONE unit", () => {
+describe("what the sizes cost ONE unit", () => {
   it("composes a consumer's figures from what its registration says it brings", async () => {
     const registrations = new Registrations(new FakePlatformRepo());
     await seedConsumer(registrations, { postgresql: true, mongodb: "replicaset" });
@@ -131,10 +127,11 @@ describe("what the three sizes cost ONE unit", () => {
     expect(body.unit).toBe("acme");
     expect(body.composed).toBe(true);
     expect(body.brings).toEqual({ postgresql: true, mongodb: "replicaset" });
-    // Three sizes, and each one is the SUM the run will write — base + postgresql + mongodb x3 + its one exporter.
-    expect(body.sizes.map((s) => s.name)).toEqual(["small", "medium", "large"]);
-    expect(body.sizes[1]?.parts.map((p) => `${p.component}x${p.members}`)).toEqual(["basex1", "postgresqlx1", "mongodbx3", "mongodb-exporterx1"]);
-    expect(body.sizes[1]?.quota.requestsCpu).toBe(seedQuota("medium", { postgresql: true, mongodb: "replicaset" }).requestsCpu);
+    // Six application sizes, and each one is the SUM the run will write — base + postgresql + mongodb x3
+    // + its one exporter, the data parts at the size they stand at (small, the unit's when onboarded).
+    expect(body.sizes.map((s) => s.name)).toEqual(["xsmall", "small", "medium", "large", "xlarge", "xxlarge"]);
+    expect(body.sizes[2]?.parts.map((p) => `${p.component}x${p.members}`)).toEqual(["basex1", "postgresqlx1", "mongodbx3", "mongodb-exporterx1"]);
+    expect(body.sizes[2]?.quota.requestsCpu).toBe(seedQuota("medium", { postgresql: true, mongodb: "replicaset" }, { postgresql: "small", mongodb: "small" }).requestsCpu);
   });
 
   it("says so rather than guessing when the registration cannot be read", async () => {
@@ -147,7 +144,7 @@ describe("what the three sizes cost ONE unit", () => {
 
     const body = (await (await app.request("/api/consumers/app_1/sizes", authed(cookie))).json()) as { composed: boolean; sizes: Array<{ quota: { requestsCpu: string } }> };
     expect(body.composed).toBe(false);
-    expect(body.sizes[0]?.quota.requestsCpu).toBe(UNIT_SIZE_SEED.base.small.requestsCpu);
+    expect(body.sizes[0]?.quota.requestsCpu).toBe(UNIT_SIZE_SEED.base.xsmall.requestsCpu);
   });
 
   it("refuses an app id this manager does not know", async () => {

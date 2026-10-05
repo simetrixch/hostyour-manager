@@ -15,7 +15,7 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // into each unit's registration when it writes one, and ArgoCD delivers the resolved figures. Nothing
 // on a cluster reads this table; a cluster reads registrations.
 //
-// The key is (component, name): base, postgresql and mongodb at three sizes, member at six. A consumer's
+// The key is (component, name): base, postgresql, mongodb and member, each at six sizes. A consumer's
 // quota is base + postgresql + mongodb x members and a tenant member's the member row, so what a size
 // means depends on WHICH part is being asked for — and the operator adjusts each part once instead of
 // every combination of them.

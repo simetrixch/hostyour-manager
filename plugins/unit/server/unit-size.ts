@@ -3,8 +3,8 @@ import type { Db } from "#core/server/db/client.ts";
 import { unitSizes } from "./schema.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import {
-  UNIT_SIZE, SIZE_COMPONENT, composeQuota, quotaParts, missingRow, seededSizes, UNIT_SIZE_SEED,
-  type SizeTable, type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition,
+  UNIT_SIZE, SIZE_COMPONENT, composeQuota, quotaParts, missingRow, seededSizes, sizeOf, UNIT_SIZE_SEED,
+  type SizeTable, type UnitQuota, type UnitSize, type SizeComponent, type UnitComposition, type PartSizes,
 } from "../shared/unit-size.ts";
 
 // The size table's two operations: fill it on a fresh database, and work out the ONE quota a unit
@@ -62,30 +62,34 @@ export function seedUnitSizes(db: Db): string[] {
  * ones while the UI showed the new.
  *
  * `brings` is what the unit actually has — its own PostgreSQL, its own MongoDB and with how many
- * members — because the quota is base + postgresql + mongodb x members. It is NOT a second size: the
- * databases run at the unit's own size.
+ * members — because the quota is base + postgresql + mongodb x members. It is not a size: `sizes`
+ * is, each data part's own, and a part without one runs at the unit's.
  *
  * Refuses, naming the row, when one is missing. There is no fall back to `small`: a unit whose size cannot be resolved
  * has no ceiling anyone chose, and writing a registration with a guessed one is how a customer
  * silently gets a different product than they were sold.
  */
-export function resolveUnitQuota(db: Db, size: UnitSize, brings: UnitComposition): UnitQuota {
-  return explainUnitQuota(db, size, brings).quota;
+export function resolveUnitQuota(db: Db, size: UnitSize, brings: UnitComposition, sizes: PartSizes = {}): UnitQuota {
+  return explainUnitQuota(db, size, brings, sizes).quota;
 }
 
 /** The same resolve, with the PARTS it was summed from — what a screen shows so the one number can be
  *  read back to where it came from. */
-export function explainUnitQuota(db: Db, size: UnitSize, brings: UnitComposition): ReturnType<typeof composeQuota> {
+export function explainUnitQuota(db: Db, size: UnitSize, brings: UnitComposition, sizes: PartSizes = {}): ReturnType<typeof composeQuota> {
   const table = readTable(db);
-  for (const p of quotaParts(brings)) if (!table[p.component][size]) throw errValidation(missingRow(p.component, size));
-  return composeQuota(table, size, brings);
+  for (const p of quotaParts(brings)) {
+    const at = sizeOf(p.component, size, sizes);
+    if (!table[p.component][at]) throw errValidation(missingRow(p.component, at));
+  }
+  return composeQuota(table, size, brings, sizes);
 }
 
-/** The sizes a unit that brings this can be put on: those every one of its parts has a row for,
- *  smallest first. What a size picker offers, so it never offers a size the resolve would refuse. */
-export function offeredSizes(db: Db, brings: UnitComposition): UnitSize[] {
+/** The sizes a unit that brings this can be put on: those every one of its parts has a row for at the
+ *  size it would run at, smallest first. What a size picker offers, so it never offers a size the
+ *  resolve would refuse. */
+export function offeredSizes(db: Db, brings: UnitComposition, sizes: PartSizes = {}): UnitSize[] {
   const table = readTable(db);
-  return UNIT_SIZE.filter((s) => quotaParts(brings).every((p) => table[p.component][s] !== undefined));
+  return UNIT_SIZE.filter((s) => quotaParts(brings).every((p) => table[p.component][sizeOf(p.component, s, sizes)] !== undefined));
 }
 
 /** The whole table, in the declared component and size order rather than the table's row order — the

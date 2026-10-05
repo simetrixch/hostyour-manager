@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { composeReport, gateBuildNameUniqueness, gateRepoAccess, gateBuildDeclaration, gateManifestInput, gateUnitName, gateUnitSize, MANIFEST_FED_GATE_IDS, PLATFORM_NAMESPACES } from "./compose.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
-import { DEFAULT_UNIT_SIZE, seedQuota, seededSizes, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, UNIT_SIZE, seedQuota, seededSizes, type MongodbMode, type UnitSize } from "#unit/shared/unit-size.ts";
 import { mapBuildsToChartPins } from "../builds.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
 import { hardGatesPass, type GateReport, type GateResult } from "../../../../shared/gates.ts";
@@ -299,15 +299,22 @@ describe("G24 unit size (hard)", () => {
   }
 
   it("passes the SAME compositions once the operator assigns a larger size", () => {
-    for (const s of seededSizes("base").filter((x) => x !== DEFAULT_UNIT_SIZE)) {
+    for (const s of seededSizes("base").filter((x) => UNIT_SIZE.indexOf(x) > UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE))) {
       expect(size(s, true, "replicaset").status, s).toBe("pass");
     }
   });
 
   it(`REFUSES a unit that brings its own database at a size BELOW "${DEFAULT_UNIT_SIZE}": the sizes compare by rank`, () => {
-    // No consumer row exists for xsmall today, so the quota handed in is a stand-in: the gate reads the word.
-    const g = gateUnitSize({ unitName: "acme", size: "xsmall", brings: { postgresql: true, mongodb: "shared" }, quota: seedQuota("small", { postgresql: true, mongodb: "shared" }) });
+    const g = gateUnitSize({ unitName: "acme", size: "xsmall", brings: { postgresql: true, mongodb: "shared" }, quota: seedQuota("xsmall", { postgresql: true, mongodb: "shared" }) });
     expect(g.status).toBe("fail");
+  });
+
+  it("holds each data part at its OWN size: a large unit with its PostgreSQL resized to small is refused, naming the part", () => {
+    const brings = { postgresql: true, mongodb: "standalone" } as const;
+    const g = gateUnitSize({ unitName: "acme", size: "large", brings, sizes: { postgresql: "small", mongodb: "large" }, quota: seedQuota("large", brings, { postgresql: "small" }) });
+    expect(g.status).toBe("fail");
+    expect(g.reason).toContain('postgresql "small"');
+    expect(gateUnitSize({ unitName: "acme", size: "small", brings, sizes: { postgresql: "medium", mongodb: "xlarge" }, quota: seedQuota("small", brings, { postgresql: "medium", mongodb: "xlarge" }) }).status).toBe("pass");
   });
 
   it("REPORTS the six figures on a pass — the operator approves a number, not a word", () => {

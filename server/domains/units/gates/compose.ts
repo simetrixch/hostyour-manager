@@ -29,7 +29,7 @@ import type { ChartPinMapping } from "../builds.ts";
 import { BUILD_NAMESPACE_SUFFIX } from "#unit/server/build-rbac.ts";
 import { capGateText } from "#unit/server/unit-host-gate.ts";
 import { RESERVED_PROJECT_NAMES } from "../../../adapters/kube/port.ts";
-import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, UNIT_SIZE, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
+import { DEFAULT_UNIT_SIZE, MONGODB_MEMBERS, UNIT_SIZE, dataParts, sizeOf, type PartSizes, type UnitComposition, type UnitQuota, type UnitSize } from "#unit/shared/unit-size.ts";
 
 /** One build name another unit has already attested in its `registrations/<unit>/build.yaml`. */
 export interface ForeignBuild {
@@ -377,8 +377,10 @@ export function gateUnitSize(input: {
   brings: UnitComposition | null;
   /** The six figures the size table resolves for (size, brings) — null exactly when brings is. */
   quota: UnitQuota | null;
+  /** Each data part's own size, where it has one: the rule holds for each part at its own size. */
+  sizes?: PartSizes;
 }): GateResult {
-  const { unitName, size, brings, quota } = input;
+  const { unitName, size, brings, quota, sizes } = input;
   const expected =
     "a unit that brings database units of its own — postgresql among its services, or a mongodb mode other than shared — " +
     `is assigned a size above the frugal default "${DEFAULT_UNIT_SIZE}", and its namespace quota is the size table's sum for what it brings`;
@@ -396,24 +398,27 @@ export function gateUnitSize(input: {
     `requests ${quota.requestsCpu}/${quota.requestsMemory}, limits ${quota.limitsCpu}/${quota.limitsMemory}, ` +
     `${quota.pods} pod(s), ${quota.persistentVolumeClaims} PVC(s)`;
   const composition = owned.length > 0 ? owned.join(" and ") : "no database units of its own — it uses the cluster's shared MongoDB and no PostgreSQL";
-  // By rank, not by word: a size below the default is no more room than the default itself.
-  const ok = owned.length === 0 || UNIT_SIZE.indexOf(size) > UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE);
+  // By rank, not by word: a size below the default is no more room than the default itself. Each data
+  // part at its own size: a PostgreSQL resized on its own to xsmall is the frugal preset all the same.
+  const frugal = dataParts(brings).filter((p) => UNIT_SIZE.indexOf(sizeOf(p, size, sizes)) <= UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE));
+  const ok = frugal.length === 0;
+  const at = frugal.length > 0 && sizes !== undefined ? frugal.map((p) => `${p} "${sizeOf(p, size, sizes)}"`).join(", ") : `"${size}"`;
   return {
     id: "G24",
     title: "unit size",
     severity: "hard",
     status: ok ? "pass" : "fail",
     expected,
-    found: capGateText(`"${unitName}" is assigned size "${size}" and brings ${composition}; its namespace quota resolves to ${figures}`),
+    found: capGateText(`"${unitName}" is assigned size "${size}"${sizes !== undefined && Object.keys(sizes).length > 0 ? ` (${Object.entries(sizes).map(([p, s]) => `${p} "${s}"`).join(", ")})` : ""} and brings ${composition}; its namespace quota resolves to ${figures}`),
     reason: ok
       ? null
       : capGateText(
-        `"${unitName}" brings ${composition}, and "${DEFAULT_UNIT_SIZE}" is the frugal preset a unit lands on when nobody names a size — ` +
+        `"${unitName}" brings ${composition} at ${at}, and "${DEFAULT_UNIT_SIZE}" or below is the frugal preset a unit lands on when nobody names a size — ` +
         `its figures are derived from an application alone, and its mongodb row gives one member less than this platform gives the members of its own shared replica set. ` +
         "Either ask the operator to onboard this unit at a larger size, or declare no database units of its own in the manifest: " +
         "drop postgresql from services and use the cluster's shared MongoDB (mongodb: shared).",
       ),
-    detail: ok ? `size ${size} covers what the unit brings` : `size ${size} is the frugal default and the unit brings database units of its own`,
+    detail: ok ? `size ${size} covers what the unit brings` : `${at} is the frugal default or below, for a database unit of its own`,
     evidence: [
       { source: "manager" as const, name: unitName, fieldPath: "size", value: size },
       { source: "manager" as const, name: unitName, fieldPath: "quota", value: figures.slice(0, 256) },
