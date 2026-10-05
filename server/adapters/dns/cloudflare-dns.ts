@@ -6,7 +6,7 @@
 //  - a 429 is retried with a short bounded backoff (this client makes 2-4 calls per run step, far
 //    below the API's rate limit, so a few retries always suffice);
 //  - the zone is resolved by a label-walk: ask for the exact name as a zone, and strip the leftmost
-//    label until one matches — `erp.simetrix.example.com` finds the `example.com` zone with no
+//    label until one matches — `erp.acme.example.com` finds the `example.com` zone with no
 //    hardcoding, whatever registrable domain the unit apex sits under.
 // The token rides ONLY in the Authorization header and is never logged.
 import type { DnsProvider, DnsRecordType } from "./port.ts";

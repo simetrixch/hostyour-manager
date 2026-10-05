@@ -7,14 +7,14 @@ import { mergeAppsManifest, readTemplateTree } from "./tenant-apps-tree.ts";
 // copies `apps/<app>/` of the chosen apps and `webs/<site>/` of the served sites, and the apps.yaml
 // entry lists them.
 
-const TEMPLATE_APPS = "# The catalog.\napps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [digitaplatform, simetrix, show]\n";
+const TEMPLATE_APPS = "# The catalog.\napps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [digitaplatform, company, show]\n";
 const TEMPLATE = {
   "apps.yaml": TEMPLATE_APPS,
   "apps/web/package.json": "{}\n",
   "apps/web/content/entities/webPage.entity.json": "{}\n",
   "apps/erp/package.json": "{}\n",
   "webs/digitaplatform/website.json": "{}\n",
-  "webs/simetrix/website.json": "{}\n",
+  "webs/company/website.json": "{}\n",
   "webs/show/website.json": "{}\n",
   "webs/show/webpages.json": "[]\n",
   // A site no entry lists: no tenant carries it.
@@ -40,7 +40,7 @@ describe("readTemplateTree — the apps a tenant chose and the sites a run serve
 
   it("PLANTED INNOCENT: a website folder the run names no sites for carries every site its entry lists, and no other", async () => {
     const paths = await tree(["web"], {});
-    expect(paths.filter((p) => p.startsWith("webs/"))).toEqual(["webs/digitaplatform/website.json", "webs/show/webpages.json", "webs/show/website.json", "webs/simetrix/website.json"]);
+    expect(paths.filter((p) => p.startsWith("webs/"))).toEqual(["webs/company/website.json", "webs/digitaplatform/website.json", "webs/show/webpages.json", "webs/show/website.json"]);
     expect(await tree(["erp", "web"], { web: ["show"] })).toContain("apps/erp/package.json");
   });
 });
@@ -86,15 +86,15 @@ describe("mergeAppsManifest — the sites an entry lists", () => {
 
   it("appends a site served now to an entry that stands, and removes none", () => {
     const current = mergeAppsManifest(TEMPLATE_APPS, null, ["web"], { web: ["show"] }).content;
-    const second = mergeAppsManifest(TEMPLATE_APPS, current, ["web"], { web: ["simetrix"] });
+    const second = mergeAppsManifest(TEMPLATE_APPS, current, ["web"], { web: ["company"] });
     expect(second.added).toEqual([]);
-    expect(second.sitesAdded).toEqual(["web/simetrix"]);
-    expect(sitesOf(second.content, "web")).toEqual(["show", "simetrix"]);
+    expect(second.sitesAdded).toEqual(["web/company"]);
+    expect(sitesOf(second.content, "web")).toEqual(["show", "company"]);
     // Served again: nothing to add, the file is left as it stands.
     expect(mergeAppsManifest(TEMPLATE_APPS, second.content, ["web"], { web: ["show"] }).sitesAdded).toEqual([]);
   });
 
   it("PLANTED INNOCENT: an entry the run names no sites for keeps the template's list, as before", () => {
-    expect(sitesOf(mergeAppsManifest(TEMPLATE_APPS, null, ["web"]).content, "web")).toEqual(["digitaplatform", "simetrix", "show"]);
+    expect(sitesOf(mergeAppsManifest(TEMPLATE_APPS, null, ["web"]).content, "web")).toEqual(["digitaplatform", "company", "show"]);
   });
 });
