@@ -275,7 +275,11 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
       const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
       const nesting = resolveNesting(db, params, websites);
-      for (const host of hostsOf(params)) {
+      // Only a host the move claims: one the tenant does not hold already. The previous domain a move
+      // keeps as an alias stood as this tenant's; judged again, an old-shape name under the tenant's
+      // own host at another stage would refuse the very move that retires it.
+      const held = new Set(previousHostsOf(params));
+      for (const host of hostsOf(params).filter((h) => !held.has(h))) {
         const problem = customerHostProblem(db, params.tenantId, host, apex, websites, nesting?.tenantId ?? null);
         if (problem !== null) throw errValidation(problem);
       }
