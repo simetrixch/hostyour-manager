@@ -18,13 +18,18 @@ const MASTER = "m1.example.com";
 const SLAVE = "s1.example.com";
 
 /** The map template of the sibling checkout — the OTHER writer of this file. Named at module scope
- *  because the map-writer contract case reads it and FULL_MAP below is held against it.
+ *  because the map-writer contract case reads it and FULL_MAP below is held against it. A worktree
+ *  finds it through the neighbour link beside it, as the main checkout finds it beside itself.
  *
- *  Absent beside a WORKTREE, which stands one directory deeper than the main checkout the siblings
- *  are laid out beside, so that case skips there. It is ONE of the three skips this repository's
- *  suite is allowed to carry, and the refusal in serve-fixture.ts is what keeps a fourth from
- *  appearing that nobody notices (#111). */
+ *  ABSENT, THE CASE FAILS, naming the path it looked for: a skip reads exactly like a pass, and a run
+ *  that checked nothing here was reported green. Only a run that says so may go without it — the
+ *  public CI, which checks out no neighbour — and then the case is skipped with a NOT RUN line. */
 const mapTpl = fileURLToPath(new URL("../../../../hostyour-deploy/ansiwise/templates/cluster-map.tpl", import.meta.url));
+/** The variable a run sets to be let through without the hostyour-deploy checkout. */
+const DEPLOY_CHECKOUT_MAY_BE_ABSENT = "HOSTYOUR_DEPLOY_CHECKOUT_MAY_BE_ABSENT";
+const mapTplNotRun = !existsSync(mapTpl) && process.env[DEPLOY_CHECKOUT_MAY_BE_ABSENT] !== undefined;
+// eslint-disable-next-line no-console -- the skip must be loud, not silent: a skip reads as a pass
+if (mapTplNotRun) console.warn(`NOT RUN: the map-writer contract case, because ${mapTpl} is absent and ${DEPLOY_CHECKOUT_MAY_BE_ABSENT} is set`);
 
 /** The keys a map file states under `global:`, read off the TEXT — the block where both writers of
  *  this file actually drifted, and the one the guard on the top block cannot reach.
@@ -335,7 +340,11 @@ describe("map-writer contract", () => {
   // SCHEMA, which is strict there; the `global:` block is held against the map this suite proves a
   // rewrite on, because the schema cannot hold it — `global` is `.passthrough()`, so every key the
   // template could emit is one the schema accepts, and no probe can make a schema comparison fail.
-  it.skipIf(!existsSync(mapTpl))("every key the map template writes is declared in the schema, and every key it writes under `global:` is one the rewrite is proven on", () => {
+  it.skipIf(mapTplNotRun)("every key the map template writes is declared in the schema, and every key it writes under `global:` is one the rewrite is proven on", () => {
+    expect(
+      existsSync(mapTpl),
+      `the map template is not at ${mapTpl}: check out hostyour-deploy beside this checkout, or set ${DEPLOY_CHECKOUT_MAY_BE_ABSENT} where none can stand`,
+    ).toBe(true);
     const text = readFileSync(mapTpl, "utf8");
 
     // A template line is `key: <slot>` at column 0; comment lines start with '#' and never match.

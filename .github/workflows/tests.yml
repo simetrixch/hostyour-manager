@@ -13,6 +13,7 @@ jobs:
     timeout-minutes: 20
     env:
       ANSIWISE_TESTS_MAY_SKIP: '1'
+      HOSTYOUR_DEPLOY_CHECKOUT_MAY_BE_ABSENT: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -25,4 +26,5 @@ jobs:
       - name: Run test suites
         run: |
           echo 'NOT RUN: ansiwise real-serve suites need the ansiwise binary pair.'
+          echo 'NOT RUN: the cluster-map contract case needs the hostyour-deploy checkout beside this one.'
           npx vitest run

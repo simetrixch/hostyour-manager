@@ -66,7 +66,8 @@ export const NO_BINARY =
  *  `npx vitest run` typed by hand is how those two red tests were finally found, and a guard living
  *  in the hook leaves that command reporting green. It is also why nothing here names a FILE or a
  *  vitest project — every real-serve suite asks this one function for its binaries and the three
- *  legitimate skips (two `process.platform === "win32"`, one absent sibling checkout) never do, so
+ *  legitimate skips (two `process.platform === "win32"`, one absent hostyour-deploy checkout where
+ *  the run sets HOSTYOUR_DEPLOY_CHECKOUT_MAY_BE_ABSENT) never do, so
  *  having asked IS the rule, and a real-serve file added tomorrow is covered by asking. */
 export function ansiwiseBinaries(): { tool: string; rest: string } | undefined {
   const tool = binaryNamed("ANSIWISE_BIN", "ansiwise");
