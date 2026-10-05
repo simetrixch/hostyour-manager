@@ -303,13 +303,18 @@ done < /tmp/archives
         // instance meets the roles and the database the fresh instance's chart already created
         // ("already exists", harmless: the content goes into them), and any other error fails the job.
         // ON_ERROR_STOP cannot replace this: every pg_dumpall, the generations already on the box
-        // among them, re-creates the bootstrap role, which exists on every instance.
+        // among them, re-creates the bootstrap role, which exists on every instance. The messages are
+        // pinned to English and one line each (terse, no context) so the allowlist reads them, and of a
+        // refused line only its place and severity are printed: a message can quote row data.
         script:
           BOX_REMOTE +
           `rclone copyto "box:${i.folder}/postgres/all.sql" /tmp/postgres-all.sql
-PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -d postgres -f /tmp/postgres-all.sql 2> /tmp/psql.err || { s=$?; cat /tmp/psql.err >&2; exit "$s"; }
-cat /tmp/psql.err >&2
-if grep -E '(ERROR|FATAL|error):' /tmp/psql.err | grep -vE 'ERROR:  (role|database) "[^"]+" already exists$'; then echo "the restore failed on the errors above, beyond the roles and database the fresh instance already holds" >&2; exit 1; fi
+refused() {
+  grep -E '(ERROR|FATAL|error):' /tmp/psql.err | grep -vE '^psql:[^:]*:[0-9]+: ERROR:  (role|database) "[^"]+" already exists$' |
+    sed -E -e 's/^(psql:[^:]*:[0-9]+:|psql:) *(ERROR|FATAL|error):.*$/\\1 \\2/' -e t -e 's/.*/an error line of another shape/'
+}
+PGOPTIONS='-c lc_messages=C' PGPASSWORD="$POSTGRES_PASSWORD" psql -v VERBOSITY=terse -v SHOW_CONTEXT=never -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -d postgres -f /tmp/postgres-all.sql 2> /tmp/psql.err || { s=$?; refused >&2; echo "psql exited $s" >&2; exit "$s"; }
+if [ -n "$(refused)" ]; then refused >&2; echo "the restore failed on the errors above, beyond the roles and database the fresh instance already holds" >&2; exit 1; fi
 `,
       },
     });

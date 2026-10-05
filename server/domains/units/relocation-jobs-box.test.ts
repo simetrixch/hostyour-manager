@@ -31,7 +31,7 @@ function box(entries: Record<string, string>): string {
  *  fails, or `size` where every count fails, or `count` where rclone answers without a count. The
  *  script's /tmp is a directory of this run's own, so a parallel run elsewhere on the machine never
  *  reads its files. */
-function run(job: RelocationJob, root: string, opts: { failOn?: string; databases?: string[]; failMongo?: boolean; dropCopy?: boolean; psqlErrors?: string[] } = {}): string {
+function run(job: RelocationJob, root: string, opts: { failOn?: string; databases?: string[]; failMongo?: boolean; dropCopy?: boolean; psqlErrors?: string[]; psqlExit?: number } = {}): string {
   const bin = temp("bin-");
   const scratch = temp("tmp-");
   const stub = (name: string, body: string): void => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
@@ -65,9 +65,10 @@ esac`);
   stub("mongosh", `[ -z "$FAIL_MONGO" ] || { echo "MongoNetworkError: connect ECONNREFUSED" >&2; exit 1; }
 case "$*" in *dropDatabase*) echo "$*" >> "$BOX_ROOT/dropped" ;; *) for d in $DATABASES; do echo "$d"; done ;; esac`);
   stub("mongorestore", `echo "$*" >> "$BOX_ROOT/restored"`);
-  // psql as it replays a file: it prints each statement's error and exits 0 all the same.
-  stub("psql", `printf '%s' "$PSQL_ERRORS" >&2; echo "$*" >> "$BOX_ROOT/restored"`);
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: root, FAIL_ON: opts.failOn ?? "", DATABASES: (opts.databases ?? []).join(" "), FAIL_MONGO: opts.failMongo ? "1" : "", DROP_COPY: opts.dropCopy ? "1" : "", PSQL_ERRORS: (opts.psqlErrors ?? []).map((e) => `psql:/tmp/postgres-all.sql:14: ${e}\n`).join(""), STORAGE_BOX_PASSWORD: "x" };
+  // psql as it replays a file: it prints each statement's error and exits 0 all the same, or
+  // PSQL_EXIT where it lost its connection.
+  stub("psql", `printf '%s' "$PSQL_ERRORS" >&2; echo "PGOPTIONS=$PGOPTIONS $*" >> "$BOX_ROOT/restored"; exit "\${PSQL_EXIT:-0}"`);
+  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, BOX_ROOT: root, FAIL_ON: opts.failOn ?? "", DATABASES: (opts.databases ?? []).join(" "), FAIL_MONGO: opts.failMongo ? "1" : "", DROP_COPY: opts.dropCopy ? "1" : "", PSQL_EXIT: String(opts.psqlExit ?? 0), PSQL_ERRORS: (opts.psqlErrors ?? []).map((e) => `psql:/tmp/postgres-all.sql:14: ${e}\n`).join(""), STORAGE_BOX_PASSWORD: "x" };
   return execFileSync("sh", ["-ec", job.spec.script.replaceAll("/tmp/", `${scratch}/`)], { env, stdio: "pipe" }).toString();
 }
 
@@ -252,16 +253,38 @@ describe("the PostgreSQL restore", () => {
   const consumer = { name: "acme", namespace: "acme-prod", folder: "gen", stage: "prod" as const, databases: [], services: ["postgresql" as const], mongodb: "shared" as const, pvcs: [], image: "dbtools" };
   const job = consumerRestoreJobs(consumer).find((j) => j.spec.name.startsWith("reloc-restore-pg"))!;
   const PRESENT = ['ERROR:  role "postgres" already exists', 'ERROR:  role "sp_acme_prod_postgresql" already exists', 'ERROR:  database "acme" already exists'];
+  /** The job's failure output, or null where it succeeded. */
+  const failure = (opts: { psqlErrors?: string[]; psqlExit?: number }): string | null => {
+    try { run(job, box({ "postgres/all.sql": "--" }), opts); return null; } catch (e) { const x = e as { stdout: Buffer; stderr: Buffer }; return `${x.stdout}${x.stderr}`; }
+  };
 
-  it("PLANTED INNOCENT: replays a dump into a fresh instance whose chart already made its roles and database", () => {
+  it("PLANTED INNOCENT: replays a dump into a fresh instance whose chart already made its roles and database, in English and one line per message", () => {
     const root = box({ "postgres/all.sql": "--" });
     run(job, root, { psqlErrors: PRESENT });
-    expect(readFileSync(join(root, "restored"), "utf8")).toContain("-d postgres -f");
+    const call = readFileSync(join(root, "restored"), "utf8");
+    expect(call).toContain("PGOPTIONS=-c lc_messages=C -v VERBOSITY=terse -v SHOW_CONTEXT=never");
+    expect(call).toContain("-d postgres -f");
   });
 
-  it("fails the restore on any other error psql prints, though psql exits 0", () => {
-    for (const error of ['ERROR:  relation "invoices" already exists', "ERROR:  extension \"pgcrypto\" is not available", 'ERROR:  role "acme" already exists, and more']) {
-      expect(() => run(job, box({ "postgres/all.sql": "--" }), { psqlErrors: [...PRESENT, error] }), error).toThrow(/the restore failed/);
+  it("fails the restore on any other error psql prints, though psql exits 0, a FATAL alone too", () => {
+    for (const error of ['ERROR:  relation "invoices" already exists', 'ERROR:  extension "pgcrypto" is not available', 'ERROR:  role "acme" already exists, and more', "FATAL:  terminating connection due to administrator command"]) {
+      expect(failure({ psqlErrors: [...PRESENT, error] }), error).toMatch(/the restore failed/);
     }
+  });
+
+  it("refuses an error whose text carries an allowed line after its own start", () => {
+    // A value in a failed statement's message can spell the allowed line; only a line that STARTS as one passes.
+    expect(failure({ psqlErrors: ['ERROR:  invalid input syntax for type integer: "x", ERROR:  role "postgres" already exists'] })).toMatch(/the restore failed/);
+  });
+
+  it("prints of a refused line only its place and severity, never the message a row's data can stand in", () => {
+    const out = failure({ psqlErrors: [...PRESENT, 'ERROR:  duplicate key value violates unique constraint, Key (email)=(someone@example.com)'] })!;
+    expect(out).toContain("psql:/tmp/postgres-all.sql:14: ERROR");
+    expect(out).not.toContain("someone@example.com");
+    expect(out).not.toContain("duplicate key");
+  });
+
+  it("fails the restore where psql exits non-zero, as on a lost connection", () => {
+    expect(failure({ psqlExit: 2, psqlErrors: ["error: connection to server lost"] })).toMatch(/psql exited 2/);
   });
 });
