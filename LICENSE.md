@@ -1,7 +1,7 @@
 # License
 
 hostyour-manager is licensed under the **Elastic License 2.0**, reproduced in full below. The licensor
-is Simetrix GmbH.
+is simplidigita AI GmbH.
 
 **Run it, change it, onboard your own consumers and tenants with it.** Use, copy, distribution and
 derivative works are all granted, with no fee and no permission to ask for.
@@ -9,7 +9,7 @@ derivative works are all granted, with no fee and no permission to ask for.
 **What you may not do is resell it as a service.** You may not provide this software to third parties
 as a hosted or managed service where the service gives them access to any substantial set of its
 features. Onboarding into your own installation is the point; running onboarding as a service for
-other people is what needs a separate license from Simetrix GmbH — open an issue titled `Commercial licence`.
+other people is what needs a separate license from simplidigita AI GmbH — open an issue titled `Commercial licence`.
 
 The two paragraphs above say what the license means in practice. Where they and the license text
 disagree, the license text is what binds.

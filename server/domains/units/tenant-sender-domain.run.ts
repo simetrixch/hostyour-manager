@@ -17,8 +17,8 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 
-// `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as
-// (hostyour-manager#290). A customer sends from its own domain (simetrix from simetrix.ch) instead of
+// `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as.
+// A customer sends from its own domain (the company tenant from simetrix.ch) instead of
 // the platform's.
 //
 // THE CONTRACT WITH THE PRODUCT. The tenants ApplicationSet hands every member tenant.senderDomain, and

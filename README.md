@@ -37,7 +37,7 @@ is on the machine; without it they skip, and the script names each suite it did 
 ## License
 
 **Elastic License 2.0.** Run it, change it, onboard your own consumers and tenants with it. What
-needs a separate license from Simetrix GmbH is running onboarding as a service for third parties.
+needs a separate license from simplidigita AI GmbH is running onboarding as a service for third parties.
 
 See [LICENSE.md](LICENSE.md).
 
