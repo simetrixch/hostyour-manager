@@ -90,7 +90,7 @@ describe("the host checks of a move at test, the same tenant standing at prod", 
     const dns = twoStages("show.test.simetrix.ch", "show.simetrix.ch");
     const registrations = at("show.test.simetrix.ch", [{ ...SHOW, domain: "show.test.simetrix.ch" }, { ...VELO, domain: "veloluck.show.test.simetrix.ch" }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
-    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "x.show.simetrix.ch", aliases: [] }, planCtx())).rejects.toThrow(/x\.show\.simetrix\.ch overlaps a host of tenant acme \(show\.simetrix\.ch\)/);
+    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "x.show.simetrix.ch", aliases: [] }, planCtx())).rejects.toThrow(/^x\.show\.simetrix\.ch overlaps a host of tenant acme at prod \(show\.simetrix\.ch\)$/);
   });
 
   it("PLANTED INNOCENT: still refuses a host typed now that overlaps another tenant's, as a domain and as an alias", async () => {
