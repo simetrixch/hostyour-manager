@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { and, eq, ne, notInArray } from "drizzle-orm";
 import type { Step, StepCtx } from "../../executor/types.ts";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { Db } from "../../db/client.ts";
@@ -15,7 +15,7 @@ import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import type { TenantCluster, TenantLifecyclePorts } from "./lifecycle.ts";
 import { isTenantRecord, removeBookedRecord, tenantZone } from "#unit/server/unit-dns.ts";
-import { tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
+import { prodHostOf, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
@@ -44,7 +44,7 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
-  const self = db.select({ guid: tenants.guid, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get();
+  const self = db.select({ guid: tenants.guid, stage: tenants.stage, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get();
   const parent = nestsUnder !== undefined ? nestsUnder : (self?.nestsUnder ?? null);
   const others = db
     .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases, nestsUnder: tenants.nestsUnder })
@@ -60,9 +60,15 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
   for (const o of others) {
     const theirs = ownHosts(o.ownDomain, o.ownDomainRedirects, o.ownDomainAliases).find(overlaps);
     if (!theirs || confirmed(o, theirs)) continue;
-    // The same tenant at another stage: named with its stage, and no nesting to confirm, which is
-    // between two tenants.
-    if (o.guid === self?.guid) return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} at ${o.stage} (${theirs})`;
+    // The same tenant at another stage. The stage rule puts its dev or test hosts at
+    // <x>.<stage>.<zone>, under the zone's apex (stageHostProblem), so that nest is the rule's own
+    // and no overlap. Any other is refused, named with its stage, and with no nesting to confirm,
+    // which is between two tenants.
+    if (o.guid === self?.guid) {
+      const stageNested = (inner: string, stage: Stage, outer: string): boolean => stage !== "prod" && prodHostOf(inner, outer, stage) !== null;
+      if (stageNested(theirs, o.stage, host) || stageNested(host, self.stage, theirs)) continue;
+      return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} at ${o.stage} (${theirs})`;
+    }
     return refusal("a host", o.subdomain, theirs);
   }
   for (const w of websites) {
