@@ -399,6 +399,31 @@ describe("tenant-set-website-domain", () => {
     await expect(def.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch, and every host record of it stands/);
   });
 
+  it("names in the repair plan the hosts it leaves alone, where a record somebody else wrote stands", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch", aliases: ["example.de"] }]);
+    const dns = new FakeDnsProvider();
+    dns.seed("example.ch", "CNAME", "acme.example.com");
+    dns.seed("www.example.ch", "CNAME", "acme.example.com");
+    dns.seed("example.de", "A", "198.51.100.7"); // not this installation's: left alone
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns, repo: withDomain() }, WEBSITE_APPS));
+    const planned = await def.planStream!({ ...MOVE, domain: "example.ch", aliases: ["example.de"] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error("not planned");
+    expect(planned.params.recordHosts).toEqual(["www.example.de"]);
+    expect(planned.plan.summary).toContain("It leaves example.de alone: a record this installation did not write stands there.");
+  });
+
+  it("says why it cannot repair where no DNS provider is configured, or the website's zone is managed elsewhere", async () => {
+    seedWebsiteTenant();
+    const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
+    const without = makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, WEBSITE_APPS));
+    await expect(without.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch; no DNS provider is configured on this manager, so its host records are set at the provider of each host/);
+    const dns = new FakeDnsProvider();
+    dns.unmanaged.push("example.ch");
+    const elsewhere = makeTenantSetWebsiteDomainDef(ports({ registrations, dns, repo: withDomain() }, WEBSITE_APPS));
+    await expect(elsewhere.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch; the DNS zone of example\.ch, www\.example\.ch is not managed here, so its records are set at its provider/);
+  });
+
   it("refuses to start where a mail record beside its hosts changed since the plan", async () => {
     seedWebsiteTenant();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);

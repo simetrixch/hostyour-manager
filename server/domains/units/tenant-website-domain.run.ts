@@ -5,11 +5,11 @@ import { tenants } from "../../db/schema/inventory.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { appName, TenantMemberRecordSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
-import { aliasHosts, ownDomainEntryProblem, tenantOwnHosts } from "#unit/shared/unit-host.ts";
+import { aliasHosts, ownDomainEntryProblem, tenantOwnHosts, tenantZone } from "#unit/shared/unit-host.ts";
 import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
-import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, missingRecordHosts, removeOwnDomainRecord, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
+import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, hostRecordStates, removeOwnDomainRecord, type HostRecordState, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, tenantWebsiteHosts, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
@@ -156,9 +156,20 @@ async function planRecordRepair(
   domain: string,
   aliases: readonly string[],
 ): Promise<PlanStreamResult<TenantSetWebsiteDomainParams>> {
-  const recordHosts = await missingRecordHosts(ports, websiteRecordHosts(domain, aliases, registration), ctx.signal);
+  const served = `website ${app} is already served at ${domain}${aliases.length ? ` with the aliases ${aliases.join(", ")}` : ""}`;
+  const hosts = websiteRecordHosts(domain, aliases, registration);
+  if (hosts.length === 0) throw errValidation(`${served}, at hosts of the tenant's own domain, whose records Set own domain holds`);
+  const states = await hostRecordStates(ports, hosts, tenantZone(tc.subdomain, tc.stage, await ports.resolveUnitApex(tc.domain, tc.stage)), ctx.signal);
+  if (states === null) throw errValidation(`${served}; no DNS provider is configured on this manager, so its host records are set at the provider of each host`);
+  const hostsIn = (state: HostRecordState): string[] => hosts.filter((h) => states.get(h) === state);
+  const recordHosts = hostsIn("missing");
+  const foreign = hostsIn("foreign");
+  const unmanaged = hostsIn("unmanaged");
+  const foreignSentence = foreign.length === 0 ? "" : ` It leaves ${foreign.join(", ")} alone: ${foreign.length === 1 ? "a record this installation did not write stands there" : "records this installation did not write stand there"}.`;
+  const unmanagedSentence = unmanaged.length === 0 ? "" : ` The DNS zone of ${unmanaged.join(", ")} is not managed here, so ${unmanaged.length === 1 ? "its record is" : "their records are"} set at its provider.`;
   if (recordHosts.length === 0) {
-    throw errValidation(`website ${app} is already served at ${domain}${aliases.length ? ` with the aliases ${aliases.join(", ")}` : ""}, and every host record of it stands`);
+    if (unmanaged.length === hosts.length) throw errValidation(`${served}; the DNS zone of ${unmanaged.join(", ")} is not managed here, so its records are set at its provider`);
+    throw errValidation(`${served}, and every host record of it stands.${foreignSentence}${unmanagedSentence}`);
   }
   const member = registration.members.find((m) => m.name === app);
   if (!member) throw errValidation(`website ${app} has no member entry in tenant ${tc.guid}'s registration`);
@@ -176,7 +187,7 @@ async function planRecordRepair(
       summary:
         `Write the missing host record${recordHosts.length === 1 ? "" : "s"} ${recordHosts.join(", ")} of website ${app} of tenant ${tc.guid} at ${domain} (${tc.domain}, ${tc.stage}): ` +
         `point ${recordHosts.length === 1 ? "it" : "them"} at the tenant's zone. The website stays where it stands, and its registration is not written. ` +
-        `An abort removes ${recordHosts.length === 1 ? "the record" : "the records"} again.${mailRecordSentence(mailRecords)}`,
+        `An abort removes ${recordHosts.length === 1 ? "the record" : "the records"} again.${foreignSentence}${unmanagedSentence}${mailRecordSentence(mailRecords)}`,
       steps: websiteDomainSteps(ports, params).map((s) => ({ name: s.name, title: s.title })),
       targets: [],
       locks: tenantLocks(ports.registrations),

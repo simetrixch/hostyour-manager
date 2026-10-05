@@ -105,28 +105,37 @@ export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string,
   return replaced;
 }
 
-/** The hosts of `hosts` where no record stands at all, in a zone this installation's DNS provider
- *  manages: what a repair writes. A host carrying any record is not missing, and a host in a zone
- *  nobody here manages is its operator's to set. */
-export async function missingRecordHosts(ports: RecordPorts, hosts: readonly string[], signal?: AbortSignal): Promise<string[]> {
-  if (!ports.dns) return [];
-  const missing: string[] = [];
+/** What stands at a host a website answers at: nothing, its CNAME onto the tenant's zone, a record this
+ *  installation did not write for it, or a zone nobody here manages. */
+export type HostRecordState = "missing" | "pointed" | "foreign" | "unmanaged";
+
+/** The state of each host of `hosts` against the tenant's `zone`, or null where no DNS provider is
+ *  configured on this manager and nothing can be read. */
+export async function hostRecordStates(ports: RecordPorts, hosts: readonly string[], zone: string, signal?: AbortSignal): Promise<Map<string, HostRecordState> | null> {
+  if (!ports.dns) return null;
+  const states = new Map<string, HostRecordState>();
   for (const host of hosts) {
     let cname: string | null;
     try {
       cname = await ports.dns.readRecordContent({ name: host, type: "CNAME", ...(signal ? { signal } : {}) });
     } catch (e) {
-      if (e instanceof DnsZoneUnknownError) continue;
+      if (e instanceof DnsZoneUnknownError) {
+        states.set(host, "unmanaged");
+        continue;
+      }
       throw e;
     }
-    if (cname !== null) continue;
+    if (cname !== null) {
+      states.set(host, cname === zone ? "pointed" : "foreign");
+      continue;
+    }
     let addressed = false;
     for (const type of ADDRESS_TYPES) {
       if ((await ports.dns.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })).length > 0) addressed = true;
     }
-    if (!addressed) missing.push(host);
+    states.set(host, addressed ? "foreign" : "missing");
   }
-  return missing;
+  return states;
 }
 
 /** The plan summary's sentence on the records the run replaces, or "" where it replaces none. The
