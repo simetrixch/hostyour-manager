@@ -7,6 +7,7 @@ import { makeRedeployDef } from "./defs/redeploy.ts";
 import { makeRedeploySlavesDef } from "./defs/redeploy-slaves.ts";
 import { makeMailDnsPublishDef } from "./defs/mail-dns-publish.ts";
 import { makeMailEnvelopeSpfPublishDef } from "./defs/mail-envelope-spf-publish.ts";
+import { makeMailDkimPublishDef } from "./defs/mail-dkim-publish.ts";
 import { makeDnsRemoveDef } from "#unit/server/dns/dns-remove.ts";
 import { makeMailDnsUnpublishDef } from "./defs/mail-dns-unpublish.ts";
 import type { DnsRecordPorts } from "#unit/server/dns/dns-record.kit.ts";
@@ -68,6 +69,7 @@ export function buildRunDefinitions(ports: RunDefinitionsPorts, extra: AnyRunDef
   // The SPF of the name the platform's MTA sends its envelope from, by the same route: the platform
   // domain's own records are its mail service's, and this is the one record of the platform there.
   register(runDefinitions, makeMailEnvelopeSpfPublishDef(ports));
+  register(runDefinitions, makeMailDkimPublishDef(ports));
   // The two run kinds that take a record BACK out of the zone: one record the DNS inventory names
   // as this installation's, or the three mail records of one sender domain. Registered
   // unconditionally like every other cluster run kind — a manager with no DNS provider and no

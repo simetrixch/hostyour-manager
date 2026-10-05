@@ -87,13 +87,17 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   const { domain, stage, egress, egressName, dkimPublicKey, envelopeDomain, ownMailService } = need;
   const noEgress = noEgressNote(egressName);
   const publish = { note: "publish" };
-  // A red row of a domain whose mail runs on its own mail service points at no run here: its apex SPF
-  // and DMARC are that service's, and the key under the platform's selector is published by no run any
-  // more (mail-dns-publish is refused for the domain).
+  // A red row of a domain whose mail runs on its own mail service points at no run here for its apex SPF
+  // and DMARC, which are that service's. The key under the platform's selector has a run of its own
+  // (mail-dkim-publish), which publishes the key the stage's mail sender signs with; where no unit sends,
+  // nothing here holds a key to publish.
   const serviceNote = { note: `${domain}'s own mail service keeps this record` };
   const serviceKeeps = (row: MailDnsRow): MailDnsRow => (row.note === undefined ? row : { ...row, ...serviceNote });
   // A doubled key keeps its act, a removal by hand at the provider: no run here chooses between two keys.
-  const keyUnpublished = (row: MailDnsRow): MailDnsRow => (row.note === undefined || row.note.startsWith("remove ") ? row : { ...row, note: `no run here publishes this key: mail-dns-publish is refused for ${domain}` });
+  const platformKey = (row: MailDnsRow): MailDnsRow =>
+    row.note === undefined || row.note.startsWith("remove ")
+      ? row
+      : { ...row, note: dkimPublicKey === null ? `no run here publishes this key: no unit signs ${domain}'s mail with a key of its own` : row.note.replace(/^publish/, "publish the DKIM key") };
 
   const names = mailRecordNames(domain, stage);
   const apexSpf = (await dns.txt(names.spf)).filter(MAIL_RECORD_TAG.spf);
@@ -162,7 +166,7 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
     ...(egress === null ? noEgress : mailName === null ? { note: `set the reverse DNS of ${egress} to the mail name at the hosting provider` } : {}),
   };
 
-  return [spf, ...envelope, aRow, ownMailService ? keyUnpublished(dkimRow) : dkimRow, ownMailService ? serviceKeeps(dmarcRow) : dmarcRow, ptrRow];
+  return [spf, ...envelope, aRow, ownMailService ? platformKey(dkimRow) : dkimRow, ownMailService ? serviceKeeps(dmarcRow) : dmarcRow, ptrRow];
 }
 
 export interface MailDnsDeps {

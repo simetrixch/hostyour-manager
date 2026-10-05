@@ -79,6 +79,14 @@ export interface MailEnvelopeSpfPublishInput {
   serverId: string;
 }
 
+/** POST /api/runs {kind: "mail-dkim-publish"} — the DKIM key the stage's mail sender signs the platform
+ *  domain with, published under the stage as its selector from the master by the programs checkout's
+ *  publish-mail-dkim program. The domain is the master map's; the key is the sender's. */
+export interface MailDkimPublishInput {
+  serverId: string;
+  stage: Stage;
+}
+
 /** The name the platform's mail transfer agent sends its envelope from (MAIL FROM
  *  bounces@mail.<platform domain>): the MTA's own name, whose address record and reverse DNS are set
  *  where the egress address is rented. Receivers check SPF here, not at the platform domain's apex. */
@@ -93,7 +101,7 @@ export function platformDomainRefusal(domain: string): string {
   return (
     `${domain} is the platform domain: its mail runs on its own mail service, which controls its apex SPF, its MX, ` +
     "the DKIM selectors that service signs with and its DMARC policy, so the runs that write and delete the apex SPF and the DMARC policy are refused for it. " +
-    `The SPF of ${envelopeDomainOf(domain)}, the name the platform's mail transfer agent sends its envelope from, is the platform's own and has its own run`
+    `The SPF of ${envelopeDomainOf(domain)}, the name the platform's mail transfer agent sends its envelope from, and the DKIM key that agent signs ${domain} with are the platform's own and have runs of their own`
   );
 }
 

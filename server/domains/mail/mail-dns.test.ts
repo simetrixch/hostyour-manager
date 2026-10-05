@@ -132,14 +132,16 @@ describe("mailDnsRows", () => {
     expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "remove 1 of the 2 records under this selector by hand" });
   });
 
-  it("PLANTED DEFECT: a red row of the platform domain points at no refused run: the service keeps its records, and no run publishes the platform's key", async () => {
+  it("PLANTED DEFECT: a red row of the platform domain points at no refused run: the service keeps its records, and the platform's key has its own publish", async () => {
     const dns = published();
     dns.seedTxt("example.com", "v=spf1 include:spf.protection.outlook.com -all", `v=spf1 ip4:${EGRESS} -all`);
     dns.seedTxt("prod._domainkey.example.com");
     dns.seedTxt("_dmarc.example.com");
     const rows = await mailDnsRows(platformNeed(), dns);
     for (const record of ["spf", "dmarc"] as const) expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, note: "example.com's own mail service keeps this record" });
-    expect(rows.find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "no run here publishes this key: mail-dns-publish is refused for example.com" });
+    expect(rows.find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "publish the DKIM key" });
+    // Where no unit sends, nothing here holds the key, and the row says so rather than point at a run that refuses.
+    expect((await mailDnsRows(platformNeed({ dkimPublicKey: null }), dns)).find((r) => r.record === "dkim")).toMatchObject({ ok: false, note: "no run here publishes this key: no unit signs example.com's mail with a key of its own" });
     // The envelope sender's SPF is the platform's own, so its act stays the envelope publish.
     expect(rows.find((r) => r.record === "envelope-spf")?.note).toBe("publish the envelope SPF");
     expect(rows.find((r) => r.record === "a")?.note).toBeUndefined();

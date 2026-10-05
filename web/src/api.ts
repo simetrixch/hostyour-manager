@@ -19,7 +19,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
 import type { LineMoveView } from "../../shared/api-types-line-move.ts";
-import type { MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
+import type { MailDkimPublishInput, MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
 import type { AppsManifest, TenantAppCatalogView } from "../../shared/apps-manifest.ts";
@@ -170,6 +170,9 @@ export const unpublishMailDns = (domain: string): Promise<{ runId: string }> => 
 /** The SPF of the name the platform's mail transfer agent sends its envelope from, published from the master. */
 export const publishEnvelopeSpf = (input: MailEnvelopeSpfPublishInput): Promise<{ runId: string }> =>
   planRun("mail-envelope-spf-publish", input as unknown as Record<string, unknown>);
+/** The DKIM key the stage's mail sender signs the platform domain with, published from the master. */
+export const publishPlatformDkim = (input: MailDkimPublishInput): Promise<{ runId: string }> =>
+  planRun("mail-dkim-publish", input as unknown as Record<string, unknown>);
 /** Every record this installation is responsible for at the DNS provider, read there now (the DNS page). */
 export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 /** The book of the records a run of this Manager actually wrote, each read at the provider now. */

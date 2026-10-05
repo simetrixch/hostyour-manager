@@ -1,8 +1,8 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
-import { DMARC_POLICY, type DmarcPolicy } from "../../../shared/enums.ts";
+import { DMARC_POLICY, STAGE, type DmarcPolicy, type Stage } from "../../../shared/enums.ts";
 import type { MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
-import { getMailDns, publishEnvelopeSpf, publishMailDns, unpublishMailDns } from "../api.ts";
+import { getMailDns, publishEnvelopeSpf, publishMailDns, publishPlatformDkim, unpublishMailDns } from "../api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -29,9 +29,10 @@ function RecordRow({ row }: { row: MailDnsRow }) {
   );
 }
 
-function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; masterId: string; onError: (m: string | null) => void }) {
+function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDomainView; masterId: string; masterStage: Stage; onError: (m: string | null) => void }) {
   const nav = useNavigate();
   const [policy, setPolicy] = useState<DmarcPolicy>("none");
+  const [dkimStage, setDkimStage] = useState<Stage>(masterStage);
   const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.rows));
   const [busy, setBusy] = useState(false);
   const green = view.rows.filter((r) => r.ok).length;
@@ -57,6 +58,22 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
     onError(null);
     try {
       const { runId } = await publishEnvelopeSpf({ serverId: masterId });
+      nav(`/runs/${runId}`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** The DKIM key a stage's mail sender signs the platform domain with, the one other record of the
+   *  platform under a domain whose mail runs on its own mail service. The stage is the selector: the
+   *  sender of another stage signs under its own. */
+  async function publishDkim(): Promise<void> {
+    setBusy(true);
+    onError(null);
+    try {
+      const { runId } = await publishPlatformDkim({ serverId: masterId, stage: dkimStage });
       nav(`/runs/${runId}`);
     } catch (err) {
       onError(msg(err));
@@ -105,6 +122,18 @@ function DomainCard({ view, masterId, onError }: { view: MailDnsDomainView; mast
             {busy ? "Planning…" : `Publish the SPF of ${envelope.name}`}
           </button>
           <span className="field__hint">Writes the one v=spf1 record of {envelope.name}, the name the platform&apos;s mail transfer agent sends its envelope from, and nothing else.</span>
+        </div>
+      )}
+      {view.publishRefusal !== null && (
+        <div className="field">
+          <span className="field__label">DKIM key of the stage&apos;s mail sender</span>
+          <select value={dkimStage} onChange={(e: ChangeEvent<HTMLSelectElement>) => setDkimStage(e.target.value as Stage)}>
+            {STAGE.map((s) => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void publishDkim()}>
+            {busy ? "Planning…" : `Publish the DKIM key under ${dkimStage}._domainkey.${view.domain}`}
+          </button>
+          <span className="field__hint">Writes the one DKIM record the mail sender of that stage signs {view.domain} with, and nothing of the domain&apos;s own mail service.</span>
         </div>
       )}
       {view.publishRefusal !== null ? (
@@ -176,7 +205,7 @@ export function Mail() {
               <span className="muted"> · measured {new Date(data.measuredAt).toLocaleTimeString()}</span>
             </p>
           </section>
-          {data.domains.map((d) => <DomainCard key={d.domain} view={d} masterId={data.master.serverId} onError={setError} />)}
+          {data.domains.map((d) => <DomainCard key={d.domain} view={d} masterId={data.master.serverId} masterStage={data.master.stage} onError={setError} />)}
         </>
       )}
     </section>
