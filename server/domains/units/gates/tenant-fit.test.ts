@@ -35,9 +35,12 @@ describe("T5 size fit (hard)", () => {
     expect(g.reason).toContain("requests 110m/640Mi, limits 2100m/2112Mi, 9 pod(s)");
   });
 
-  it("REFUSES the XS shapes while the init container declares nothing: counted at the default, the requests no longer fit", () => {
+  it("REFUSES the XS shapes while the init container declares nothing, naming the workload and the container", () => {
     const undeclaredInit = member(atXs.docs.map((d) => (d.name === "digita-engine" ? workload("Deployment", "digita-engine", { replicas: 1 }, [container("engine", { requests: { cpu: "25m", memory: "160Mi" }, limits: { cpu: "500m", memory: "640Mi" } })], [container("app-fetch", {})]) : d)));
-    expect(gateT5Fit([undeclaredInit], XS).reason).toContain("needs requests 150m/576Mi");
+    const g = gateT5Fit([undeclaredInit], XS);
+    expect(g.status).toBe("fail");
+    expect(g.reason).toContain(`member "website": Deployment digita-engine init container app-fetch declares no requestsCpu, requestsMemory, limitsCpu, limitsMemory`);
+    expect(g.reason).not.toContain("needs requests");
   });
 
   it("passes the same member at its XS shapes", () => {
@@ -60,10 +63,16 @@ describe("T5 size fit (hard)", () => {
     expect(g.reason).toContain(`member "website": Deployment digita-web container web declares no requestsCpu, requestsMemory`);
   });
 
-  it("counts an undeclared init container at the LimitRange default, and names it", () => {
-    const g = gateT5Fit([today], UNIT_SIZE_SEED.member.large);
-    expect(g.status).toBe("pass");
-    expect(g.found).toContain("Deployment digita-engine init container app-fetch counted at the LimitRange default for requestsCpu, requestsMemory, limitsCpu, limitsMemory");
+  it("REFUSES an undeclared init container at any size, as it refuses a main one: the LimitRange default is no size anyone chose", () => {
+    const g = gateT5Fit([today], UNIT_SIZE_SEED.member.xxlarge);
+    expect(g.status).toBe("fail");
+    expect(g.reason).toContain(`member "website": Deployment digita-engine init container app-fetch declares no requestsCpu, requestsMemory, limitsCpu, limitsMemory`);
+    expect(g.found).not.toContain("LimitRange default");
+  });
+
+  it("REFUSES an init container that declares only part of its shape, naming what it leaves out", () => {
+    const partial = member([workload("Deployment", "digita-web", { replicas: 1 }, [container("web", { requests: { cpu: "25m", memory: "128Mi" }, limits: { cpu: "500m", memory: "256Mi" } })], [container("translations-fetch", { requests: { cpu: "10m", memory: "32Mi" } })])]);
+    expect(gateT5Fit([partial], XS).reason).toContain("Deployment digita-web init container translations-fetch declares no limitsCpu, limitsMemory");
   });
 
   it("takes the larger of the main containers' sum and the largest init container, per figure", () => {

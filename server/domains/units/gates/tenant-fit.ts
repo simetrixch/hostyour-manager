@@ -4,22 +4,17 @@
 // is counted on top: it stands in the namespace while a certificate is issued or renewed.
 //
 // What a pod costs is what the quota admits it at: per resource, the larger of its main containers' sum
-// and its largest init container (init containers run one at a time, before the main ones). A main
-// container that does not declare its requests and limits fails the gate: the quota would admit it at
-// the LimitRange default, which is no size anyone chose. An init container that does not is counted at
-// that default and named, until the charts declare them too.
+// and its largest init container (init containers run one at a time, before the main ones). A container,
+// main or init, that does not declare its requests and limits fails the gate: the quota would admit it
+// at the namespace's LimitRange default, which is no size anyone chose.
 import type { GateResult } from "../../../../shared/gates.ts";
 import { CERT_SOLVER, type UnitQuota } from "#unit/shared/unit-size.ts";
 import { addCpu, addMemory, cpuMillis, memoryBytes } from "#unit/shared/quantity.ts";
 import { capGateText } from "#unit/server/unit-host-gate.ts";
 import type { MemberDocs } from "./tenant-gates.ts";
 
-/** The member namespaces' LimitRange (hostyour-cloud apps/unit-quota): what a container that declares
- *  nothing is admitted at. */
-export const LIMIT_RANGE_DEFAULT = { requestsCpu: "50m", requestsMemory: "64Mi", limitsCpu: "200m", limitsMemory: "128Mi" } as const;
-
-type Figure = keyof typeof LIMIT_RANGE_DEFAULT;
-const FIGURES: Figure[] = ["requestsCpu", "requestsMemory", "limitsCpu", "limitsMemory"];
+const FIGURES = ["requestsCpu", "requestsMemory", "limitsCpu", "limitsMemory"] as const;
+type Figure = (typeof FIGURES)[number];
 const isCpu = (f: Figure): boolean => f === "requestsCpu" || f === "limitsCpu";
 const amount = (f: Figure, v: string): number => (isCpu(f) ? cpuMillis(v) : memoryBytes(v));
 type Cost = Record<Figure, number>;
@@ -54,10 +49,10 @@ function widest(kind: string, spec: Record<string, unknown>): number {
   return replicas + (pct ? Math.ceil((replicas * Number(pct[1])) / 100) : Number(surge) || 0);
 }
 
-interface MemberFit { member: string; pods: number; sum: Cost; problems: string[]; notes: string[] }
+interface MemberFit { member: string; pods: number; sum: Cost; problems: string[] }
 
 function fitOf(m: MemberDocs): MemberFit {
-  const fit: MemberFit = { member: m.member, pods: 0, sum: { ...ZERO }, problems: [], notes: [] };
+  const fit: MemberFit = { member: m.member, pods: 0, sum: { ...ZERO }, problems: [] };
   const docs = m.docs.flatMap((d) => (d.kind === "List" ? list(rec(d.raw).items).map((raw) => ({ kind: String(raw.kind), name: String(rec(raw.metadata).name), raw })) : [d]));
   for (const d of docs) {
     if (d.kind !== "Deployment" && d.kind !== "StatefulSet") continue;
@@ -74,8 +69,8 @@ function fitOf(m: MemberDocs): MemberFit {
     for (const c of list(pod.initContainers)) {
       const have = declared(c);
       const missing = FIGURES.filter((f) => have[f] === undefined);
-      if (missing.length > 0) fit.notes.push(`${d.kind} ${d.name} init container ${String(c.name)} counted at the LimitRange default for ${missing.join(", ")}`);
-      for (const f of FIGURES) init[f] = Math.max(init[f], amount(f, have[f] ?? LIMIT_RANGE_DEFAULT[f]));
+      if (missing.length > 0) fit.problems.push(`${d.kind} ${d.name} init container ${String(c.name)} declares no ${missing.join(", ")}`);
+      for (const f of FIGURES) init[f] = Math.max(init[f], have[f] === undefined ? 0 : amount(f, have[f]));
     }
     const pods = widest(d.kind, spec);
     fit.pods += pods;
@@ -96,7 +91,7 @@ export function gateT5Fit(docsByMember: readonly MemberDocs[], quota: UnitQuota)
     `every member namespace's pods fit its quota (${quotaText}) with a rolling update's surge on top: each Deployment at its replicas ` +
     `plus maxSurge, each StatefulSet at its replicas, each pod at the larger of its containers' sum and its largest init container, ` +
     `and one cert-manager solver pod; ` +
-    `every main container declares its requests and limits`;
+    `every container, init containers too, declares its requests and limits`;
   const fits = docsByMember.map(fitOf);
   const solver = Object.fromEntries(FIGURES.map((f) => [f, amount(f, CERT_SOLVER[f])])) as Cost;
   const failures = fits.flatMap((f) => {
@@ -107,7 +102,7 @@ export function gateT5Fit(docsByMember: readonly MemberDocs[], quota: UnitQuota)
       ...(over.length > 0 ? [`member "${f.member}" needs ${figures(f.sum, f.pods)} and one cert-manager solver pod (${figures(solver, CERT_SOLVER.pods)}), above the quota in ${over.join(", ")}`] : []),
     ];
   });
-  const found = capGateText(fits.map((f) => `${f.member}: ${figures(f.sum, f.pods)}${f.notes.length > 0 ? ` (${f.notes.join("; ")})` : ""}`).join("; ") || "no member renders a workload");
+  const found = capGateText(fits.map((f) => `${f.member}: ${figures(f.sum, f.pods)}`).join("; ") || "no member renders a workload");
   return failures.length === 0
     ? { id: "T5", title: "size fit", severity: "hard", status: "pass", expected, found, reason: null, detail: "every member fits its quota twice" }
     : {
