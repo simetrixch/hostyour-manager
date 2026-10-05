@@ -11,7 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
-import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
+import { tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { FakePlatformRepo, FakeRepoReader, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
@@ -20,6 +20,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
+import { WEBSITE_APPS, seedWebsiteTenant, tenantWith } from "./tenant-website.fixture.ts";
 
 // A website of a live tenant, added, moved and removed: named after its site, running the bundle's
 // folder `web`, served at <domain> with www.<domain> redirecting there, its hosts pointed at the
@@ -27,22 +28,9 @@ import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters
 
 useMemoryDb();
 
-/** The template's catalog with a website folder: `web` carries the sites main and shop. */
-const WEBSITE_APPS = {
-  "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n    sites: [main, shop]\n",
-  "webs/main/website.json": "{}\n",
-  "webs/shop/website.json": "{}\n",
-};
 const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch" };
 const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
-
-/** The live tenant of the fixture, on path routing: a website's hosts point at its zone, which has a
- *  record of its own only there. */
-function seedWebsiteTenant(): void {
-  seedClusters();
-  db.db.update(tenants).set({ routing: "path" }).where(eq(tenants.id, "tnt_1")).run();
-}
 
 /** A second live tenant's registration on the same books branch, serving a website at `domain`. */
 function seedOtherTenantWebsite(repo: FakePlatformRepo, domain: string): void {
@@ -50,18 +38,6 @@ function seedOtherTenantWebsite(repo: FakePlatformRepo, domain: string): void {
   const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "other", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
   const w = tenantRegistrationWrite("prod", "b2b2b2b2b2b2", registration);
   repo.seed(repo.booksBranch, w.path, w.content);
-}
-
-/** A live tenant whose registration carries `apps` beside erp, and optionally an own domain. */
-function tenantWith(apps: readonly { name: string; [field: string]: string | string[] }[], own: { ownDomain: string; ownDomainRedirects: string[] } = { ownDomain: "", ownDomainRedirects: [] }, repo = new FakePlatformRepo()): TenantRegistrations {
-  const all = [{ name: "erp" }, ...apps];
-  const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,
-    ...(own.ownDomain ? { routing: "path", ...own } : {}),
-  });
-  const w = tenantRegistrationWrite("prod", GUID, registration);
-  repo.seed(repo.booksBranch, w.path, w.content);
-  return new TenantRegistrations(repo);
 }
 
 describe("add-app for a website", () => {

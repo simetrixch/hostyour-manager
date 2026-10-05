@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, unknownDomainText, websiteDomainConfirm, websiteFolder } from "./tenantAppRows.ts";
+import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteConfirm } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -123,5 +123,17 @@ describe("websiteDomainConfirm", () => {
 
   it("offers nothing without a domain", () => {
     expect(websiteDomainConfirm(standing, "", ["example.de"])).toBeNull();
+  });
+});
+
+describe("websiteSiteConfirm", () => {
+  it("names the move to another site on a bundle release", () => {
+    expect(websiteSiteConfirm("main", "renamed", "0.1.1-stable-20260201000000-def5678")).toBe("Serve site renamed on 0.1.1-stable-20260201000000-def5678");
+  });
+
+  it("offers nothing without a site, for the site it serves, or without a bundle release", () => {
+    expect(websiteSiteConfirm("main", "", "0.1.1-stable-20260201000000-def5678")).toBeNull();
+    expect(websiteSiteConfirm("main", "main", "0.1.1-stable-20260201000000-def5678")).toBeNull();
+    expect(websiteSiteConfirm("main", "renamed", "")).toBeNull();
   });
 });

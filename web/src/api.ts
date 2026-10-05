@@ -66,7 +66,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-const post = <T>(path: string, body: Record<string, unknown> = {}): Promise<T> =>
+export const post = <T>(path: string, body: Record<string, unknown> = {}): Promise<T> =>
   req<T>(path, { method: "POST", body: JSON.stringify(body) });
 /** PUT — a full replacement of one addressed thing, where POST creates or triggers. The size table's
  *  update is the one caller: a size is read and written as a whole (all six figures at once), so a
@@ -714,11 +714,6 @@ export const setTenantVersions = (tenantId: string, versions: Record<string, str
  *  and www.<domain> and each alias domain redirect there ("" returns it to its zone). */
 export const setTenantOwnDomain = (tenantId: string, domain: string, nestsUnder = "", aliases: readonly string[] = []): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/own-domain`, { domain, aliases, ...(nestsUnder ? { nestsUnder } : {}) });
-/** Plan add-app for a website: named after its site (websiteAppName), running the bundle's website folder. */
-export const addTenantWebsite = (tenantId: string, website: { app: string; domain: string; site: string; folder: string }): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/apps`, website);
-/** Plan tenant-set-website-domain: the website moves to another domain, or gets other alias domains. */
-export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string, aliases: readonly string[]): Promise<{ runId: string }> => post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain, aliases });
 
 /** The invite-mail delivery outcome — a zod-free mirror of the server's ConsumerActivationMail, kept
  *  out of the web bundle deliberately (same rule as api-types.ts). */

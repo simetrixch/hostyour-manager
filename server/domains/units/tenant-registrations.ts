@@ -377,6 +377,21 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, apps, members }, `website-domain(${guid}): ${app} ${[domain, ...aliases].join(", ")} ${trailer(runId)}`);
   }
 
+  /** Move one website to another site and the tenant's bundle to a release that carries that site:
+   *  the website's apps[] entry, its member entry resolved again with the site, and appsImageTag in ONE
+   *  commit. The website's engine and renderer boot with the site only beside a bundle that holds its
+   *  folder, and every member of the tenant mounts that bundle. tenant-set-website-site. */
+  async setWebsiteSite(stage: Stage, guid: string, app: string, site: string, member: TenantMemberRecord, appsImageTag: string, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    const entry = current.entry.apps.find((a) => a.name === app);
+    if (!entry?.site) throw errValidation(`app "${app}" of tenant "${guid}" is no website — it names no site`);
+    if (member.name !== app) throw errValidation(`the member entry is "${member.name}"'s, not website "${app}"'s`);
+    const apps = current.entry.apps.map((a) => (a.name === app ? { ...a, site } : a));
+    const members = current.entry.members.map((m) => (m.name === app ? member : m));
+    return this.write(stage, guid, { ...current.entry, apps, members, appsImageTag }, `website-site(${guid}): ${app} ${site} on ${appsImageTag} ${trailer(runId)}`);
+  }
+
   /** Write the tenant's member entries whole, as resolved again off the product's manifest. The member
    *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries each
    *  app's database list as its catalog entry declares it now. Only that list is taken: every other

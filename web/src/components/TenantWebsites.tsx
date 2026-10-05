@@ -1,14 +1,14 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
-import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder } from "../tenantAppRows.ts";
-import { addTenantWebsite, setTenantWebsiteDomain } from "../api.ts";
+import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteConfirm } from "../tenantAppRows.ts";
+import { addTenantWebsite, setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its address and
- *  its site, the form that adds one, and the dialog that moves one to another domain or gives it alias
- *  domains. A website is typed without `www.`: it is served at `<domain>`, and `www.<domain>` and each
+ *  its site, the form that adds one, the dialog that moves one to another domain or gives it alias
+ *  domains, and the dialog that moves one to another site of the tenant's bundle. A website is typed without `www.`: it is served at `<domain>`, and `www.<domain>` and each
  *  alias with its `www.` redirect there. It is named
  *  after its site when it is added. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
@@ -33,6 +33,11 @@ export function TenantWebsites(props: {
   const [next, setNext] = useState("");
   const [aliasText, setAliasText] = useState("");
   const aliases = typedAliases(aliasText);
+  const [resiting, setResiting] = useState<{ name: string; site: string } | null>(null);
+  const [nextSite, setNextSite] = useState("");
+  const [bundleTag, setBundleTag] = useState("");
+  const siteTyped = nextSite.trim().toLowerCase();
+  const tagTyped = bundleTag.trim().toLowerCase();
   const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
   const named = catalog && site ? newWebsiteName(catalog, site) : "";
@@ -67,6 +72,9 @@ export function TenantWebsites(props: {
                       Domain and aliases…
                     </button>
                   )}
+                  <button type="button" className="btn" disabled={busy} onClick={() => { setNextSite(""); setBundleTag(""); setResiting({ name: w.name, site: w.site }); }}>
+                    Site…
+                  </button>
                   <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
                     Remove
                   </button>
@@ -141,6 +149,29 @@ export function TenantWebsites(props: {
             {nextTyped !== moving.domain
               ? ` From the moment the new domain is recorded, the site answers only there; ${moving.domain} stays as an alias. A domain that is an alias now cannot become the domain in the same run.`
               : " The records of an alias you drop go once the site answers at its hosts. With the domain and the aliases left as they stand, the run writes only the host records the website misses."}
+          </p>
+        </ConfirmDialog>
+      )}
+      {resiting && (
+        <ConfirmDialog
+          title={`Site of website ${resiting.name}`}
+          confirmLabel={websiteSiteConfirm(resiting.site, siteTyped, tagTyped) ?? "Move to the site"}
+          confirmDisabled={websiteSiteConfirm(resiting.site, siteTyped, tagTyped) === null}
+          onCancel={() => setResiting(null)}
+          onConfirm={() => { const w = resiting; setResiting(null); void act(() => setTenantWebsiteSite(tenantId, w.name, siteTyped, tagTyped)); }}
+        >
+          <label className="field">
+            <span className="field__label">Site, as the bundle's apps.yaml lists it</span>
+            <input className="input" value={nextSite} onChange={(e) => setNextSite(e.target.value)} placeholder={resiting.site} />
+          </label>
+          <label className="field">
+            <span className="field__label">Bundle release that carries the site, as its image tag</span>
+            <input className="input" value={bundleTag} onChange={(e) => setBundleTag(e.target.value)} placeholder="0.4.015-stable-20261005150000-abc1234" />
+          </label>
+          <p>
+            The website keeps its name {resiting.name}, its domain and its data. The site and the bundle release are recorded in one commit, and every
+            member of the tenant moves onto that release. The release's migration renames the website's records at its first boot, so no abort moves
+            it back.
           </p>
         </ConfirmDialog>
       )}

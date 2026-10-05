@@ -102,6 +102,13 @@ export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "mem
 /** What the confirm of a website's domain dialog does, as its label: move the website, change its
  *  aliases, or, with the domain and aliases as they stand, write the host records it misses. The
  *  server refuses the last where no record is missing. Null where no domain is typed. */
+/** The confirm label of a website's move to another site on the bundle release `appsImageTag`, or
+ *  null where nothing would move: no site typed, the site it serves, or no release named. */
+export function websiteSiteConfirm(standing: string, next: string, appsImageTag: string): string | null {
+  if (!next || next === standing || !appsImageTag) return null;
+  return `Serve site ${next} on ${appsImageTag}`;
+}
+
 export function websiteDomainConfirm(standing: { domain: string; aliases: readonly string[] }, next: string, aliases: readonly string[]): string | null {
   if (!next) return null;
   if (next !== standing.domain) return `Serve at ${next}`;
