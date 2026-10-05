@@ -299,10 +299,17 @@ done < /tmp/archives
       spec: {
         ...boxSpec("restore-pg", i.name, consumerPostgresEnv()),
         image: i.image,
+        // psql exits 0 after a failed statement, so its errors are read: the replay of a whole
+        // instance meets the roles and the database the fresh instance's chart already created
+        // ("already exists", harmless: the content goes into them), and any other error fails the job.
+        // ON_ERROR_STOP cannot replace this: every pg_dumpall, the generations already on the box
+        // among them, re-creates the bootstrap role, which exists on every instance.
         script:
           BOX_REMOTE +
           `rclone copyto "box:${i.folder}/postgres/all.sql" /tmp/postgres-all.sql
-PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -d postgres -f /tmp/postgres-all.sql
+PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_POSTGRES.user} -d postgres -f /tmp/postgres-all.sql 2> /tmp/psql.err || { s=$?; cat /tmp/psql.err >&2; exit "$s"; }
+cat /tmp/psql.err >&2
+if grep -E '(ERROR|FATAL|error):' /tmp/psql.err | grep -vE 'ERROR:  (role|database) "[^"]+" already exists$'; then echo "the restore failed on the errors above, beyond the roles and database the fresh instance already holds" >&2; exit 1; fi
 `,
       },
     });
@@ -327,7 +334,8 @@ PGPASSWORD="$POSTGRES_PASSWORD" psql -h ${CONSUMER_POSTGRES.host} -U ${CONSUMER_
 
 /** Completeness on the TARGET for a consumer — every dumped Mongo archive has its database, and the
  *  bucket matches the box copy's object count. PostgreSQL and PVCs are proven by their restore jobs
- *  themselves (psql/tar fail non-zero on a broken restore). */
+ *  themselves (tar fails non-zero on a broken restore, and the PostgreSQL restore on any psql error
+ *  but the roles and database a fresh instance already holds). */
 export function consumerVerifyCompletenessJobs(i: Omit<ConsumerJobInputs, "pvcs">): RelocationJob[] {
   const jobs: RelocationJob[] = [];
   if (dumpsMongo(i)) {
