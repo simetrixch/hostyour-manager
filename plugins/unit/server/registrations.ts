@@ -95,7 +95,7 @@ export interface RegistrationCommit {
    *  domain the standing stage file carries is kept: setFqdn below is its writer, and a second
    *  registration of a standing stage does not take it away. Absent deploy ⇒ a build-only unit:
    *  build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; sizes?: PartSizes; volumes?: PartVolumes; mongodb: ConsumerStageRegistration["mongodb"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
+  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; sizes?: PartSizes; volumes?: PartVolumes; mongodb: ConsumerStageRegistration["mongodb"]; redis?: ConsumerRegistration["redis"]; redisMaxmemoryPolicy?: ConsumerRegistration["redisMaxmemoryPolicy"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
 }
 
 export class Registrations {
@@ -385,6 +385,8 @@ export class Registrations {
           ...(deploy.sizes !== undefined ? { sizes: deploy.sizes } : {}),
           ...(deploy.volumes !== undefined ? { volumes: deploy.volumes } : {}),
           mongodb: deploy.mongodb,
+          ...(deploy.redis !== undefined ? { redis: deploy.redis } : {}),
+          ...(deploy.redisMaxmemoryPolicy !== undefined ? { redisMaxmemoryPolicy: deploy.redisMaxmemoryPolicy } : {}),
           quota: deploy.quota,
           ...(fqdn !== undefined ? { fqdn } : {}),
           ...(deploy.smtpEntry !== undefined ? { smtpEntry: deploy.smtpEntry } : {}),

@@ -9,13 +9,18 @@
 #                           (listDatabases) and drops them at clear-source
 #                           (dropDatabase); the dump tools can do neither
 #   postgresql-client       pg_dumpall / psql
+#   redis-tools             redis-cli — the snapshot of a unit's own Redis (--rdb) and
+#                           the replication its restore drives
+#   redis-server            the throwaway server a Redis restore starts from the
+#                           snapshot: an AOF-persisting target loads no dump file, so
+#                           it replicates the snapshot from this server instead
 #   rclone                  the object-store client (S3-compatible copy in/out)
 #   openssh-client          ssh / sftp to the Hetzner Storage Box staging area
 #
 # VERSION COUPLING: the database clients are installed per
 # hostyour-cloud/platform/versions.yaml — the MongoDB apt-repo series is that
 # file's mongodb pin cut to its series, the PostgreSQL client major its
-# postgres pin cut to the major, both stamped into the ARG defaults below by
+# postgres pin cut to the major, the Redis series its redis pin, all stamped into the ARG defaults below by
 # the sync-versions program. The client literals here are therefore WRITTEN,
 # never decided: raising a database version and rebuilding the dump tools are
 # ONE change, stamped and committed together.
@@ -24,15 +29,17 @@
 # builds only (deb/rpm — no musl build exists), so the official per-series apt
 # repo is the one install path that both provides mongosh and stays coupled to
 # .images.mongodb. The PostgreSQL client comes from the PGDG apt repo for the
-# same reason: Debian's own archive carries a single frozen major.
+# same reason: Debian's own archive carries a single frozen major, and Redis
+# from Redis's own apt repo, whose versions an apt pin holds to the series.
 
 FROM docker.io/library/debian:12-slim
 
 # Stamped by the sync-versions program out of hostyour-cloud/platform/versions.yaml:
 # MONGO_SERIES is the mongodb pin cut to <major>.<minor>, PG_MAJOR the postgres
-# pin cut to <major>. Edit them there, never here.
+# pin cut to <major>, REDIS_SERIES the redis pin. Edit them there, never here.
 ARG MONGO_SERIES=8.0
 ARG PG_MAJOR=18
+ARG REDIS_SERIES=8.8
 
 # The apt suite is read from the base image itself (/etc/os-release), so the
 # FROM tag above is the only place the Debian release is stated.
@@ -48,11 +55,19 @@ RUN set -eu \
       | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" \
       > /etc/apt/sources.list.d/pgdg.list \
+ && curl -fsSL "https://packages.redis.io/gpg" \
+      | gpg --dearmor -o /usr/share/keyrings/redis-archive-keyring.gpg \
+ && echo "deb [signed-by=/usr/share/keyrings/redis-archive-keyring.gpg] https://packages.redis.io/deb ${VERSION_CODENAME} main" \
+      > /etc/apt/sources.list.d/redis.list \
+ && printf 'Package: redis-server redis-tools\nPin: version 6:%s.*\nPin-Priority: 1001\n' "${REDIS_SERIES}" \
+      > /etc/apt/preferences.d/redis \
  && apt-get update \
  && apt-get install -y --no-install-recommends \
       mongodb-database-tools \
       mongodb-mongosh \
       "postgresql-client-${PG_MAJOR}" \
+      redis-server \
+      redis-tools \
       rclone \
       openssh-client \
  && apt-get purge -y --auto-remove curl gnupg \

@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { UNIT_SIZE_LETTER } from "#unit/shared/unit-size.ts";
+import { UNIT_SIZE_LETTER, type DataPart } from "#unit/shared/unit-size.ts";
 import { unitSizeOptions, type UnitSizeOptions } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
+
+/** A data part as the dialog names it. */
+const PART_NAME: Record<DataPart, string> = { postgresql: "PostgreSQL", mongodb: "MongoDB", redis: "Redis" };
 
 /** Pick a size for one unit — a consumer, or a tenant (whose members each get the chosen ceiling).
  *
@@ -58,6 +61,7 @@ export function SetSizeDialog(props: {
     : [
         options.brings.postgresql ? "its own PostgreSQL" : null,
         options.brings.mongodb === "shared" ? "the cluster's shared MongoDB" : `its own MongoDB (${options.brings.mongodb})`,
+        options.brings.redis === "standalone" ? "its own Redis" : null,
       ].filter((x) => x !== null).join(" and ");
 
   return (
@@ -84,7 +88,7 @@ export function SetSizeDialog(props: {
         // A data part of the unit's own is sized on its own; its claim is not: the clusters cannot
         // grow a volume, so it keeps the size it was created with.
         <label className="field" key={part}>
-          <span>{part === "postgresql" ? "PostgreSQL" : "MongoDB"} size — its {p.volume} volume stays as it is: a resize changes CPU and memory only</span>
+          <span>{PART_NAME[part as DataPart]} size — its {p.volume} volume stays as it is: a resize changes CPU and memory only</span>
           <select value={p.size} onChange={(e) => setPartSizes((s) => ({ ...s, [part]: e.target.value }))}>
             {(p.offered.includes(p.size) ? p.offered : [p.size, ...p.offered]).map((s) => <option key={s} value={s}>{UNIT_SIZE_LETTER[s]}</option>)}
           </select>

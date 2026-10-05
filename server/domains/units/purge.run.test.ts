@@ -363,7 +363,8 @@ describe("purge run definition", () => {
     // tolerance lives in the seeder, asserted in vault-self-seeder.test.ts.
     expect(seeder.deletedPostgres).toEqual([{ stage: "prod", consumerName: "acme" }]);
     expect(seeder.deletedMongodb).toEqual([{ stage: "prod", consumerName: "acme" }]);
-    expect(logs.some((l) => l.includes("secret/prod/consumer/acme/{postgres,mongodb}"))).toBe(true);
+    expect(seeder.deletedRedis).toEqual([{ stage: "prod", consumerName: "acme" }]);
+    expect(logs.some((l) => l.includes("secret/prod/consumer/acme/{postgres,mongodb,redis}"))).toBe(true);
   });
 
   it("is idempotent + fail-soft on a RE-RUN: a full purge twice over reaps once and never throws", async () => {

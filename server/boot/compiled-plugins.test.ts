@@ -70,7 +70,7 @@ describe("the plugins this product compiles", () => {
 
     expect(c.db.select().from(unitSizes).all()).toEqual([]);
     await wiring.onBoot?.({ executor: {} as Executor });
-    expect(c.db.select().from(unitSizes).all()).toHaveLength(24);
+    expect(c.db.select().from(unitSizes).all()).toHaveLength(30);
   });
 
   it("serves the size table under /api/unit, where the core mounts the unit plugin's routes", async () => {
@@ -81,7 +81,7 @@ describe("the plugins this product compiles", () => {
     registerPluginRoutes(app, active, { executor: {} as Executor });
     const sizes = await app.request("/api/unit/sizes");
     expect(sizes.status).toBe(200);
-    expect(((await sizes.json()) as { sizes: unknown[] }).sizes).toHaveLength(24);
+    expect(((await sizes.json()) as { sizes: unknown[] }).sizes).toHaveLength(30);
     expect((await app.request("/api/unit-sizes")).status).toBe(404);
     expect(((await (await app.request("/api/plugins")).json()) as { active: string[] }).active).toEqual(["unit"]);
   });

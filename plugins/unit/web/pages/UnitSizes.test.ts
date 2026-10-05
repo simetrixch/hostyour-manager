@@ -15,7 +15,7 @@ const draft = (of: readonly UnitSizeView[]): Record<string, SizeDraft> => Object
   requestsCpu: s.requestsCpu, requestsMemory: s.requestsMemory, limitsCpu: s.limitsCpu, limitsMemory: s.limitsMemory, pods: String(s.pods), persistentVolumeClaims: String(s.persistentVolumeClaims),
 }]));
 const render = (of: readonly UnitSizeView[]) => renderToStaticMarkup(createElement(SizeTables, { rows: of, draft: draft(of), saving: null, saved: null, onEdit: () => undefined, onSave: () => undefined }));
-const PART: Record<string, string> = { member: "tenant app", base: "Application", postgresql: "+ own PostgreSQL", mongodb: "+ own MongoDB, per member" };
+const PART: Record<string, string> = { member: "tenant app", base: "Application", postgresql: "+ own PostgreSQL", mongodb: "+ own MongoDB, per member", redis: "+ own Redis" };
 const FIGURE: Record<string, string> = { requestsCpu: "requests.cpu", requestsMemory: "requests.memory", limitsCpu: "limits.cpu", limitsMemory: "limits.memory", pods: "pods", persistentVolumeClaims: "PVCs" };
 type Handlers = { label?: string; onChange?: (v: string) => void; onClick?: () => void };
 
@@ -30,18 +30,18 @@ function walk(node: ReactNode, out: Handlers[]): void {
 
 describe("SizeTables", () => {
   it("shows a tenant table and a consumer table, each figure once, in the operator's words", () => {
-    expect(rows).toHaveLength(24);
+    expect(rows).toHaveLength(30);
     const html = render(rows);
     expect(html.match(/<table/g)).toHaveLength(2);
     expect([...html.matchAll(/<h2>([^<]*)<\/h2>/g)].map((m) => m[1])).toEqual(["Tenant (per app)", "Consumer"]);
     const [tenant, consumer] = html.split("<table").slice(1);
     expect(tenant!.match(/<tbody>.*<\/tbody>/)![0].match(/<tr/g)).toHaveLength(6);
     expect(consumer!.match(/<tbody>.*<\/tbody>/)![0].match(/<tr/g)).toHaveLength(6);
-    // Six inputs per row and part: 6 tenant rows, 6 consumer rows of three parts each.
-    expect(html.match(/<input/g)).toHaveLength(6 * 6 + 6 * 3 * 6);
-    expect(html.match(/>Save</g)).toHaveLength(6 + 18);
+    // Six inputs per row and part: 6 tenant rows, 6 consumer rows of four parts each.
+    expect(html.match(/<input/g)).toHaveLength(6 * 6 + 6 * 4 * 6);
+    expect(html.match(/>Save</g)).toHaveLength(6 + 24);
     expect(html).toContain("XL (not offered)");
-    expect(html).not.toMatch(/>(base|member|postgresql|mongodb)</);
+    expect(html).not.toMatch(/>(base|member|postgresql|mongodb|redis)</);
   });
 
   it("wires each input to its own component, size and figure, and each Save to its own row", () => {
@@ -55,8 +55,8 @@ describe("SizeTables", () => {
       expect(p.label).toBe(`${UNIT_SIZE_LETTER[name as UnitSizeView["name"]]} ${PART[component!]} ${FIGURE[field!]}`);
     }
     for (const p of handlers.filter((h) => h.onClick)) p.onClick!();
-    expect(new Set(edits).size).toBe(144);
-    expect(edits).toHaveLength(144);
+    expect(new Set(edits).size).toBe(180);
+    expect(edits).toHaveLength(180);
     expect([...saves].sort()).toEqual(rows.map((s) => `${s.component}/${s.name}`).sort());
   });
 });

@@ -33,7 +33,7 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
 import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
-import type { SizeComponent, UnitComposition, UnitSize } from "#unit/shared/unit-size.ts";
+import type { DataPart, SizeComponent, UnitComposition, UnitSize } from "#unit/shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
@@ -357,8 +357,8 @@ export const resumeConsumer = (appId: string): Promise<{ runId: string }> => pos
 export const restartConsumerWorkloads = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/restart-workloads`);
 
 /** One row of the size table — what a size means on THIS installation, for ONE component of a unit.
- *  A consumer's ceiling is `base` plus, when it brings them, `postgresql` and `mongodb` times its
- *  member count, all read at the unit's one size; a tenant member's is the `member` row. */
+ *  A consumer's ceiling is `base` plus, when it brings them, `postgresql`, `mongodb` times its
+ *  member count and `redis`, each data part at its own size; a tenant member's is the `member` row. */
 export interface UnitSizeView {
   component: SizeComponent; name: UnitSize;
   requestsCpu: string;
@@ -381,7 +381,7 @@ export interface UnitSizeOptions {
   composed: boolean;
   /** A consumer's: the application's size it stands at, and each data part it runs with the size it
    *  stands at (or was asked at), the volume its claim keeps and the sizes it may be put on. */
-  current?: UnitSize; parts?: Partial<Record<"postgresql" | "mongodb", { size: UnitSize; volume: string; offered: UnitSize[] }>>;
+  current?: UnitSize; parts?: Partial<Record<DataPart, { size: UnitSize; volume: string; offered: UnitSize[] }>>;
   sizes: Array<{
     name: UnitSize;
     quota: Omit<UnitSizeView, "name" | "component">;

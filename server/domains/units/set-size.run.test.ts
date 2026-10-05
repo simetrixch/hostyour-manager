@@ -81,13 +81,13 @@ function seedCluster(): void {
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 }
 
-async function seedConsumer(reg: Registrations, over: { services?: ("postgresql")[]; mongodb?: "shared" | "standalone" } = {}): Promise<void> {
+async function seedConsumer(reg: Registrations, over: { services?: ("postgresql" | "redis")[]; mongodb?: "shared" | "standalone"; redis?: "standalone" } = {}): Promise<void> {
   seedCluster();
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
   await reg.commitRegistration({
     unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
     builds: [],
-    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: over.services ?? [], size: "small", mongodb: over.mongodb ?? "shared", quota: seedQuota("small") },
+    deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: over.services ?? [], size: "small", mongodb: over.mongodb ?? "shared", ...(over.redis ? { redis: over.redis, redisMaxmemoryPolicy: "noeviction" as const } : {}), quota: seedQuota("small") },
     runId: "run_onb",
   });
 }
@@ -117,6 +117,16 @@ describe("set-size run (consumer)", () => {
     const entry = (await reg.readRegistration("prod", "acme"))?.entry;
     expect(entry?.quota).toEqual(seedQuota("large"));
     expect(entry?.size).toBe("large");
+  });
+
+  it("sizes a Redis of the consumer's own on its own, and keeps its mode and policy", async () => {
+    const reg = new Registrations(new FakePlatformRepo());
+    await seedConsumer(reg, { services: ["redis"], redis: "standalone" });
+    const params = { appId: "app_1", size: "small" as const, sizes: { redis: "large" as const } };
+    await runAll(makeSetSizeDef(consumerPorts(reg)).steps(params), params);
+    const entry = (await reg.readRegistration("prod", "acme"))?.entry;
+    expect([entry?.sizes, entry?.volumes, entry?.redis, entry?.redisMaxmemoryPolicy]).toEqual([{ redis: "large" }, { redis: "2Gi" }, "standalone", "noeviction"]);
+    expect(entry?.quota).toEqual(seedQuota("small", { postgresql: false, mongodb: "shared", redis: "standalone" }, { redis: "large" }));
   });
 
   it("sizes a data part on its own: the part's word moves, its volume stays at the size it was created with", async () => {

@@ -156,6 +156,22 @@ export interface MongodbSecretDeleteInput {
   consumerName: string;
 }
 
+/** The password a per-consumer Redis instance boots with (`--requirepass`), written create-only to
+ *  secret/<stage>/consumer/<consumerName>/redis. Write-only: the redis server and ESO are its readers. */
+export interface RedisSeedInput {
+  stage: Stage;
+  consumerName: string;
+  /** The minted 32-byte-hex password (mintRedisPassword). */
+  password: string;
+}
+
+/** The offboard inverse of `seedRedis`: metadata-delete of `<stage>/consumer/<consumerName>/redis`
+ *  (ALL versions), unconditional and 404-tolerant for the reasons MongodbSecretDeleteInput states. */
+export interface RedisSecretDeleteInput {
+  stage: Stage;
+  consumerName: string;
+}
+
 /** What the create-only seed actually did. Value-FREE: the seeder never learns, and never reports,
  *  a stored secret — only whether this run was the one that created the entry. */
 export interface VaultSeedOutcome {
@@ -238,6 +254,10 @@ export interface VaultSeeder {
    *  (`created: false`), so a re-onboard onto a surviving data volume re-uses the same root
    *  password instead of locking the platform out of it. */
   seedMongodb(input: MongodbSeedInput): Promise<VaultSeedOutcome>;
+  /** Create the per-consumer Redis instance password — ONCE (cas=0). Written iff the manifest asks for
+   *  a Redis of the consumer's own; an existing entry is never overwritten (`created: false`), so a
+   *  re-onboard onto a surviving data volume boots with the password its clients hold. */
+  seedRedis(input: RedisSeedInput): Promise<VaultSeedOutcome>;
   /** Write the unit's build repo PAT to secret/build/<name>/repo-pat — ONCE (cas=0). An existing
    *  entry is ATTESTED, never overwritten (`created: false`): the seven hand-seeded platform units
    *  re-run the onboard run kind over a path that already stands, and the cas conflict is exactly the
@@ -270,6 +290,8 @@ export interface VaultSeeder {
    *  reason deletePostgres is: those runs cannot know what the manifest asked for, so a consumer
    *  that ran on the shared replica set simply 404s. */
   deleteMongodb(input: MongodbSecretDeleteInput): Promise<void>;
+  /** Metadata-delete the per-consumer Redis instance password (RedisSecretDeleteInput). */
+  deleteRedis(input: RedisSecretDeleteInput): Promise<void>;
   /** Create the tenant's crypto entry — ONCE (cas=0). An existing entry is never overwritten
    *  (`created: false`), which is what makes a re-run of create-tenant safe: the values are re-minted
    *  on every run (the mint is unconditional), so a blind overwrite would rotate a LIVE tenant's

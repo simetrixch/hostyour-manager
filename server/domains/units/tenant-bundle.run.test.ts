@@ -98,8 +98,8 @@ function passReport(): TenantValidationReport {
 function fakeTenantSeeder(): VaultSeeder {
   const no = () => Promise.reject(new Error("a tenant run never seeds a consumer entry"));
   return {
-    seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no,
-    deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {},
+    seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedRedis: no, seedBuildRepoPat: no, refreshBuildRepoPat: no,
+    deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {},
     seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {},
   };
 }

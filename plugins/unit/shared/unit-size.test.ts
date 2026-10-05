@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { UNIT_SIZE, UNIT_SIZE_LETTER, TENANT_SIZE, UNIT_SIZE_SEED, MONGODB_MEMBERS, ONBOARDING_VOLUME, composeQuota, seedQuota, seededSizes, partSizing, DEFAULT_UNIT_SIZE } from "./unit-size.ts";
+import { UNIT_SIZE, UNIT_SIZE_LETTER, TENANT_SIZE, UNIT_SIZE_SEED, MONGODB_MEMBERS, ONBOARDING_VOLUME, composeQuota, seedQuota, seededSizes, partSizing, sizeOf, DEFAULT_UNIT_SIZE } from "./unit-size.ts";
 
 // A unit has a size, each data part of its own may have its own, and what they cost depends on what the unit brings. These
 // assertions hold the two halves of that sentence apart: the size never changes with the composition,
@@ -48,6 +48,16 @@ describe("composeQuota", () => {
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "standalone" }).quota).toMatchObject({ requestsCpu: "515m", requestsMemory: "1584Mi", limitsCpu: "2600m", limitsMemory: "4224Mi" });
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "replicaset" }).quota).toMatchObject({ requestsCpu: "715m", requestsMemory: "2608Mi" });
     expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "shared" }).parts.map((p) => p.component)).toEqual(["base", "postgresql"]);
+  });
+
+  it("adds the Redis row once for a Redis of its own, at its own size, and nothing for the shared one", () => {
+    const own = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "shared", redis: "standalone" }, { redis: "large" });
+    expect(own.parts.map((p) => [p.component, p.members])).toEqual([["base", 1], ["redis", 1]]);
+    expect(own.parts.find((p) => p.component === "redis")?.each).toEqual(UNIT_SIZE_SEED.redis.large);
+    expect(own.quota).toMatchObject({ requestsCpu: "600m", requestsMemory: "2Gi", limitsCpu: "3500m", limitsMemory: "6Gi", pods: 10, persistentVolumeClaims: 2 });
+    for (const redis of ["shared", undefined] as const) {
+      expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "shared", ...(redis ? { redis } : {}) }).parts.map((p) => p.component)).toEqual(["base"]);
+    }
   });
 
   it("sums each data part at its OWN size when one is given, the application at the unit's", () => {
@@ -105,8 +115,20 @@ describe("the vocabulary", () => {
     });
   });
 
+  it("seeds the redis rows at the owner's figures: the exporter included, one server pod and one exporter pod, one claim", () => {
+    const row = (requestsCpu: string, requestsMemory: string, limitsCpu: string, limitsMemory: string) => ({ requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods: 2, persistentVolumeClaims: 1 });
+    expect(UNIT_SIZE_SEED.redis).toEqual({
+      xsmall: row("25m", "128Mi", "250m", "512Mi"),
+      small: row("50m", "256Mi", "500m", "1Gi"),
+      medium: row("100m", "512Mi", "1", "2Gi"),
+      large: row("200m", "1Gi", "2", "4Gi"),
+      xlarge: row("300m", "2Gi", "2", "8Gi"),
+      xxlarge: row("400m", "3Gi", "2", "12Gi"),
+    });
+  });
+
   it("seeds a consumer's components at all six sizes, the new ones at the decided figures", () => {
-    for (const c of ["base", "postgresql", "mongodb"] as const) expect(seededSizes(c)).toEqual([...UNIT_SIZE]);
+    for (const c of ["base", "postgresql", "mongodb", "redis"] as const) expect(seededSizes(c)).toEqual([...UNIT_SIZE]);
     const figures = (c: "base" | "postgresql" | "mongodb") => ["xsmall", "xlarge", "xxlarge"].map((s) => UNIT_SIZE_SEED[c][s as "xsmall"]);
     expect(figures("base")).toEqual([
       { requestsCpu: "200m", requestsMemory: "512Mi", limitsCpu: "750m", limitsMemory: "1Gi", pods: 8, persistentVolumeClaims: 1 },
@@ -124,6 +146,8 @@ describe("the vocabulary", () => {
   it("gives each data part the volume of its size, the three old ones the presets' own", () => {
     expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.postgresql[s])).toEqual(["2Gi", "5Gi", "20Gi", "50Gi", "100Gi", "200Gi"]);
     expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.mongodb[s])).toEqual(["5Gi", "10Gi", "40Gi", "100Gi", "200Gi", "400Gi"]);
+    // About four times the size's maxmemory: room for the append-only file, its rewrite and one dump.
+    expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.redis[s])).toEqual(["1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "24Gi"]);
   });
 });
 
@@ -131,10 +155,17 @@ describe("partSizing", () => {
   it("sizes and pins only the data parts a unit runs", () => {
     expect(partSizing("xlarge", { postgresql: true, mongodb: "replicaset" })).toEqual({ sizes: { postgresql: "xlarge", mongodb: "xlarge" }, volumes: { postgresql: "100Gi", mongodb: "200Gi" } });
     expect(partSizing("medium", { postgresql: false, mongodb: "standalone" })).toEqual({ sizes: { mongodb: "medium" }, volumes: { mongodb: "40Gi" } });
+    expect(partSizing("small", { postgresql: false, mongodb: "shared", redis: "standalone" })).toEqual({ sizes: { redis: "small" }, volumes: { redis: "2Gi" } });
+  });
+
+  it("runs a Redis of its own at its own size, the shared one at none", () => {
+    expect(sizeOf("redis", "small", { redis: "xlarge" })).toBe("xlarge");
+    expect(sizeOf("redis", "small", {})).toBe("small");
   });
 
   it("writes neither key for a unit with no data part of its own: the appset's dig fails on null or a list", () => {
     expect(partSizing("small", { postgresql: false, mongodb: "shared" })).toEqual({});
+    expect(partSizing("small", { postgresql: false, mongodb: "shared", redis: "shared" })).toEqual({});
   });
 });
 

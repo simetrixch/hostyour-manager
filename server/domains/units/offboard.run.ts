@@ -387,7 +387,12 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
           stage: ac.stage,
           consumerName: ac.name,
         });
-        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${ac.stage}/consumer/${ac.name}/{postgres,mongodb} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
+        // And the Redis instance password, under the same argument.
+        await ports.seeder.deleteRedis({
+          stage: ac.stage,
+          consumerName: ac.name,
+        });
+        ctx.log("meta", `database instance credentials removed — ${KV_MOUNT}/${ac.stage}/consumer/${ac.name}/{postgres,mongodb,redis} deleted (all versions); a re-onboard mints fresh ones instead of inheriting them`);
       },
     },
     {

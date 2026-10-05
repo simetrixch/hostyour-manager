@@ -46,7 +46,7 @@ export function registerSetSizeRoutes(app: Hono<AppEnv>, deps: SetSizeApiDeps): 
     // (?postgresql=large), a part it does not name stands at its size, and every application size is
     // composed with the parts at those. A part is offered the sizes it has rows for above the frugal
     // default, which G24 refuses a database of its own.
-    const asked = PartSizesSchema.safeParse({ postgresql: c.req.query("postgresql"), mongodb: c.req.query("mongodb") });
+    const asked = PartSizesSchema.safeParse({ postgresql: c.req.query("postgresql"), mongodb: c.req.query("mongodb"), redis: c.req.query("redis") });
     if (!asked.success) throw errValidation(`invalid part size: ${asked.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     const { brings, sizing, current } = registrations
       ? await consumerSizing(registrations, ac, DEFAULT_UNIT_SIZE, asked.data)

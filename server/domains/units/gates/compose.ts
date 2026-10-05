@@ -382,7 +382,7 @@ export function gateUnitSize(input: {
 }): GateResult {
   const { unitName, size, brings, quota, sizes } = input;
   const expected =
-    "a unit that brings database units of its own — postgresql among its services, or a mongodb mode other than shared — " +
+    "a unit that brings database units of its own — postgresql among its services, a mongodb mode other than shared, or redis: standalone — " +
     `is assigned a size above the frugal default "${DEFAULT_UNIT_SIZE}", and its namespace quota is the size table's sum for what it brings`;
   if (brings === null || quota === null) {
     return {
@@ -394,10 +394,11 @@ export function gateUnitSize(input: {
   const owned: string[] = [];
   if (brings.postgresql) owned.push("its own PostgreSQL (services declares postgresql)");
   if (brings.mongodb !== "shared") owned.push(`its own MongoDB (mongodb: ${brings.mongodb}, ${MONGODB_MEMBERS[brings.mongodb]} member(s))`);
+  if (brings.redis === "standalone") owned.push("its own Redis (redis: standalone)");
   const figures =
     `requests ${quota.requestsCpu}/${quota.requestsMemory}, limits ${quota.limitsCpu}/${quota.limitsMemory}, ` +
     `${quota.pods} pod(s), ${quota.persistentVolumeClaims} PVC(s)`;
-  const composition = owned.length > 0 ? owned.join(" and ") : "no database units of its own — it uses the cluster's shared MongoDB and no PostgreSQL";
+  const composition = owned.length > 0 ? owned.join(" and ") : "no database units of its own — it uses the cluster's shared MongoDB and Redis and no PostgreSQL";
   // By rank, not by word: a size below the default is no more room than the default itself. Each data
   // part at its own size: a PostgreSQL resized on its own to xsmall is the frugal preset all the same.
   const frugal = dataParts(brings).filter((p) => UNIT_SIZE.indexOf(sizeOf(p, size, sizes)) <= UNIT_SIZE.indexOf(DEFAULT_UNIT_SIZE));
@@ -416,7 +417,7 @@ export function gateUnitSize(input: {
         `"${unitName}" brings ${composition} at ${at}, and "${DEFAULT_UNIT_SIZE}" or below is the frugal preset a unit lands on when nobody names a size — ` +
         `its figures are derived from an application alone, and its mongodb row gives one member less than this platform gives the members of its own shared replica set. ` +
         "Either ask the operator to onboard this unit at a larger size, or declare no database units of its own in the manifest: " +
-        "drop postgresql from services and use the cluster's shared MongoDB (mongodb: shared).",
+        "drop postgresql from services and use the cluster's shared MongoDB (mongodb: shared) and shared Redis (redis: shared).",
       ),
     detail: ok ? `size ${size} covers what the unit brings` : `${at} is the frugal default or below, for a database unit of its own`,
     evidence: [

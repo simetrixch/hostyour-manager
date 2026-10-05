@@ -79,12 +79,14 @@ class FakeSeeder implements VaultSeeder {
   async patchApp(i: VaultSeedInput): Promise<void> { this.patched.push(i); }
   async seedPostgres(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedMongodb(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedBuildRepoPat(): Promise<VaultSeedOutcome> { return { created: true }; }
   async refreshBuildRepoPat(): Promise<void> {}
   async deleteBuildRepoPat(): Promise<void> {}
   async deleteApp(): Promise<void> {}
   async deletePostgres(): Promise<void> {}
   async deleteMongodb(): Promise<void> {}
+  async deleteRedis(): Promise<void> {}
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
@@ -268,7 +270,7 @@ describe("onboard post-onboard activation step", () => {
 
   it("planStream freezes the activation into params, appends the activate step, and surfaces requiredInputs (NOT requiredSecrets)", async () => {
     seedClusters();
-    const manifest = { mongodb: "shared" as const,
+    const manifest = { mongodb: "shared" as const, redis: "shared" as const,
       apiVersion: "hostyour.cloud/v1" as const, kind: "ConsumerManifest" as const,
       name: "acme", owner: "team-acme", envs: ["prod" as const], chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], builds: BUILDS,
       secrets: [{ key: "AUTH_BOOTSTRAP_TOKEN", required: true, generate: "hex32" as const }], activation: AUTH_ACTIVATION,

@@ -194,7 +194,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
  *  passes its own `services`/`databases`. */
 export async function seedConsumerRegistration(
   registrations: Registrations,
-  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[]; mongodb?: MongodbMode } = {},
+  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[]; mongodb?: MongodbMode; redis?: "standalone" } = {},
 ): Promise<void> {
   await registrations.commitRegistration({
     unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: over.quiesced ?? false },
@@ -208,6 +208,7 @@ export async function seedConsumerRegistration(
       databases: over.databases ?? ["acme_db"],
       services: over.services ?? ["mongodb"],
       size: "small", mongodb: over.mongodb ?? "shared", quota: seedQuota("small"),
+      ...(over.redis ? { redis: over.redis, redisMaxmemoryPolicy: "noeviction" as const } : {}),
     },
     runId: "run_onb",
   });

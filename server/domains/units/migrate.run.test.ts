@@ -151,6 +151,32 @@ describe("migrate (consumer)", () => {
     expect(atClear).toEqual({ restored: true, sourceStanding: true });
     expect(f.source.reader.deletedNamespaces).toContain(`${CONSUMER}-prod`);
   });
+
+  it("journey: a consumer with its own Redis moves whole — snapshot dumped while it runs, restored on the target by replication", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { redis: "standalone", databases: [], services: ["redis"] });
+    // The application asks for zero replicas; the own server and its exporter keep running, which the dump needs.
+    f.source.reader.setSmoke({
+      namespaceExists: true, externalSecretsReady: true,
+      workloads: [
+        { kind: "Deployment", name: `${CONSUMER}-api`, available: true, desired: 0, ready: 0 },
+        { kind: "Deployment", name: "redis", available: true, desired: 1, ready: 1 },
+        { kind: "Deployment", name: "redis-exporter", available: true, desired: 1, ready: 1 },
+      ],
+    });
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
+    await driveSteps(db, f, makeMigrateDef(ports).steps(params), params, [], {
+      "verify-source-released": async () => { f.source.argo.setStatus(missing); },
+    });
+    const dump = f.source.reader.jobs.find((j) => j.spec.name === `reloc-dump-redis-${CONSUMER}`);
+    expect([dump?.namespace, dump?.spec.script.includes("--rdb")]).toEqual([`${CONSUMER}-prod`, true]);
+    const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-redis-${CONSUMER}`);
+    expect([restore?.namespace, restore?.spec.script.includes("REPLICAOF")]).toEqual([`${CONSUMER}-prod`, true]);
+  });
 });
 
 describe("verify-quiesced (consumer)", () => {

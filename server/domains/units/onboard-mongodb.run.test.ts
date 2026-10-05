@@ -30,7 +30,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 
 const MANIFEST: ConsumerManifest = {
-  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared",
+  apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared", redis: "shared",
   name: "acme", owner: "team-acme", envs: ["prod"],
   chart: { path: "deploy/chart" }, services: [], databases: [], keyPatterns: [], channelPatterns: [], secrets: [],
   builds: [{ name: "acme-api", containerfile: "Containerfile" }],
@@ -69,6 +69,7 @@ function platformRepo(): FakePlatformRepo {
 class RecordingSeeder {
   seeded: MongodbSeedInput[] = [];
   async seedMongodb(i: MongodbSeedInput): Promise<VaultSeedOutcome> { this.seeded.push(i); return { created: true }; }
+  async seedRedis(): Promise<VaultSeedOutcome> { return { created: true }; }
 }
 
 function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
