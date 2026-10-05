@@ -8,6 +8,7 @@ import { clusters, tenants } from "../../db/schema/inventory.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
+import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
@@ -97,5 +98,60 @@ describe("a website moving onto the tenant's own domain", () => {
     const planned = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simetrix.ch", aliases: [] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect([planned.params.aliases, planned.params.ownDomainAliases]).toEqual([["test.veloluck.show.simetrix.ch"], undefined]);
+  });
+});
+
+// The TEST move of 2026-10-05 from the simetrix.ch zone into simplidigita.ai, both zones on the
+// installation's provider: the own domain first, then each website, every old name a redirect.
+describe("a TEST move from the simetrix.ch zone into the simplidigita.ai zone", () => {
+  const NEW_OWN = "show.test.simplidigita.ai";
+  const registration = (own: string, ownDomainAliases: string[], apps: Parameters<typeof at>[0]): TenantRegistrations => {
+    const repo = new FakePlatformRepo();
+    const all = [{ name: "erp" }, ...apps.map((a) => ({ folder: "web", ...a }))];
+    const parsed = TenantRegistrationSchema.parse({
+      cluster: "s1", subdomain: "acme", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,
+      routing: "path", ownDomain: own, ownDomainRedirects: [`www.${own}`], ...(ownDomainAliases.length ? { ownDomainAliases } : {}),
+    });
+    const w = tenantRegistrationWrite("test", GUID, parsed);
+    repo.seed(repo.booksBranch, w.path, w.content);
+    return new TenantRegistrations(repo);
+  };
+  const crossZone = (): FakeDnsProvider => {
+    const dns = atTest();
+    dns.zones = ["simetrix.ch", "simplidigita.ai"];
+    return dns;
+  };
+  const VELO = { name: "veloluck", site: "shop", domain: "test.veloluck.show.simetrix.ch" };
+
+  it("moves the own domain across the zones and keeps the old one as its alias", async () => {
+    const dns = crossZone();
+    const def = makeTenantSetOwnDomainDef(ports({ registrations: registration(OWN, [], [{ ...SHOW, domain: OLD }, VELO]), dns }));
+    const planned = await def.planStream!({ tenantId: "tnt_1", ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], previous: OWN, previousRedirects: [`www.${OWN}`] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect(planned.params.ownDomainAliases).toEqual([OWN]);
+    expect(planned.plan.summary).toContain(`https://${OWN}/, https://www.${OWN}/ with a redirect`);
+  });
+
+  it("moves website show onto the new own domain, its old name joining the own domain's aliases beside the old own domain", async () => {
+    const dns = crossZone();
+    db.db.update(tenants).set({ ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], ownDomainAliases: [OWN] }).where(eq(tenants.id, "tnt_1")).run();
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: registration(NEW_OWN, [OWN], [{ ...SHOW, domain: OLD }, VELO]), dns }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: NEW_OWN, aliases: [] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.retiredHosts]).toEqual([[], [OWN, OLD], []]);
+    // The wait asks each old name for its redirect.
+    expect(planned.plan.summary).toMatch(new RegExp(`https://${OLD.replaceAll(".", "\\.")}/, https://www\\.${OLD.replaceAll(".", "\\.")}/ redirects`));
+  });
+
+  it("moves website veloluck across the zones to a domain of its own, keeping its old name as its own alias", async () => {
+    const dns = crossZone();
+    db.db.update(tenants).set({ ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], ownDomainAliases: [OWN, OLD] }).where(eq(tenants.id, "tnt_1")).run();
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: registration(NEW_OWN, [OWN, OLD], [{ ...SHOW, domain: NEW_OWN }, VELO]), dns }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simplidigita.ai", aliases: [] }, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.recordHosts]).toEqual([
+      ["test.veloluck.show.simetrix.ch"], undefined,
+      ["veloluck.show.test.simplidigita.ai", "www.veloluck.show.test.simplidigita.ai", "test.veloluck.show.simetrix.ch", "www.test.veloluck.show.simetrix.ch"],
+    ]);
   });
 });
