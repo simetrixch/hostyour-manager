@@ -43,6 +43,9 @@ export interface AnswerWaitPorts {
  *  stands in for the recorded value while tenant-set-own-domain plans a new one. */
 export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, websites: readonly { host: string; subdomain: string; guid: string }[] = [], nestsUnder?: string | null): string | null {
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
+  // The one mail name a host can be spelled as (a DKIM selector carries an underscore, which no host
+  // does): its CNAME is the domain's mail record (mailNames), and a website's CNAME would replace it.
+  if (host.startsWith("autodiscover.")) return `${host} is the autodiscover name of ${host.slice("autodiscover.".length)}'s mail, a mail record — no website or own domain takes it`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
   const self = db.select({ guid: tenants.guid, stage: tenants.stage, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get();

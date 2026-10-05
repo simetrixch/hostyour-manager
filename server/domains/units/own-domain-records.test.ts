@@ -5,6 +5,7 @@ import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { customerHostProblem, recordsToReplace } from "./own-domain-records.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
+import { DohPublicDns } from "../../adapters/dns/public-dns.ts";
 
 // One host serves one tenant, and a host of a tenant never lies under or above another tenant's host,
 // except where the operator confirmed that one tenant's hosts lie under the other's.
@@ -49,6 +50,13 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
     nest("tnt_show", "tnt_sim", "show.digitaplatform.com");
     expect(customerHostProblem(db.db, "tnt_sim", "digitaplatform.com", APEX)).toBeNull();
     expect(customerHostProblem(db.db, "tnt_sim", "www.digitaplatform.com", APEX)).toBeNull();
+  });
+
+  it("refuses the autodiscover name of a mail domain as a host: it is a mail record, never a web host", () => {
+    expect(customerHostProblem(db.db, "tnt_other", "autodiscover.customer.example", APEX)).toBe(
+      "autodiscover.customer.example is the autodiscover name of customer.example's mail, a mail record — no website or own domain takes it",
+    );
+    expect(customerHostProblem(db.db, "tnt_other", "discover.customer.example", APEX)).toBeNull();
   });
 
   it("PLANTED DEFECT: refuses the exact same host even when confirmed, a host under a third tenant, and a host above a tenant that nests under nobody", () => {
@@ -112,6 +120,21 @@ describe("recordsToReplace — the mail answers a replaced CNAME carries", () =>
       { name: "www.easy.example", type: "CNAME", content: "mail.example" },
       { name: "addr.example", type: "A", content: "192.0.2.7" },
     ]);
+  });
+
+  it("through the real reader: a SERVFAIL from the first service asks the second, and SERVFAIL from both fails the plan", async () => {
+    dns.seed("easy.example", "CNAME", "mail.example");
+    const services = [{ name: "first", url: "https://first.invalid/dns-query" }, { name: "second", url: "https://second.invalid/resolve" }];
+    const answering = (second: unknown): typeof fetch => (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      const body = url.hostname === "first.invalid" ? { Status: 2 } : url.searchParams.get("type") === "15" ? second : { Status: 0 };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }) as typeof fetch;
+    const reader = (second: unknown) => new DohPublicDns({ resolvers: services, fetchImpl: answering(second) });
+    await expect(recordsToReplace(db.db, { dns, publicDns: reader({ Status: 0, Answer: [{ name: "easy.example", type: 15, data: "0 mx.mail.example." }] }) }, GUID, ZONE, ["easy.example"]))
+      .rejects.toThrow(/easy.example answers MX 0 mx.mail.example only through its CNAME onto mail.example/);
+    await expect(recordsToReplace(db.db, { dns, publicDns: reader({ Status: 2 }) }, GUID, ZONE, ["easy.example"]))
+      .rejects.toThrow(/no public resolver could answer for easy.example: first: SERVFAIL; second: SERVFAIL/);
   });
 
   it("refuses to replace a CNAME where no public DNS reader is wired, because its mail answers cannot be read", async () => {

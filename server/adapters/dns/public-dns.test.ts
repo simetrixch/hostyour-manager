@@ -61,6 +61,16 @@ describe("DohPublicDns — the JSON DNS API over 443", () => {
     expect(calls[1]?.url.searchParams.get("type")).toBe("12");
   });
 
+  it("PLANTED DEFECT: a SERVFAIL says nothing, so the next service is asked, and the question fails when every service answers SERVFAIL", async () => {
+    const { fetchImpl } = scripted({
+      "first.invalid": () => json({ Status: 2 }),
+      "second.invalid": () => json({ Status: 0, Answer: [{ name: "easy.example", type: 15, data: "0 mx.example." }] }),
+    });
+    await expect(dns(fetchImpl).mx("easy.example")).resolves.toEqual(["0 mx.example"]);
+    const both = scripted({ "first.invalid": () => json({ Status: 2 }), "second.invalid": () => json({ Status: 2 }) }).fetchImpl;
+    await expect(dns(both).mx("easy.example")).rejects.toThrow(/no public resolver could answer for easy.example: first: SERVFAIL; second: SERVFAIL/);
+  });
+
   it("MX answers `<priority> <host>` without the trailing dot, and only the MX of a chain through a CNAME", async () => {
     const { fetchImpl, calls } = scripted({
       "first.invalid": () => json({ Status: 0, Answer: [
@@ -72,10 +82,9 @@ describe("DohPublicDns — the JSON DNS API over 443", () => {
     expect(calls[0]?.url.searchParams.get("type")).toBe("15");
   });
 
-  it("NXDOMAIN, SERVFAIL and an empty answer are the empty list; a refusal throws", async () => {
+  it("NXDOMAIN and an empty answer are the empty list; a refusal throws", async () => {
     const rcode = (n: number) => scripted({ "first.invalid": () => json({ Status: n }) }).fetchImpl;
     await expect(dns(rcode(3)).txt("nothing.example.com")).resolves.toEqual([]);
-    await expect(dns(rcode(2)).txt("broken.example.com")).resolves.toEqual([]);
     await expect(dns(rcode(0)).a("empty.example.com")).resolves.toEqual([]);
     await expect(dns(rcode(5)).txt("refused.example.com")).rejects.toThrow(/first refused the query for refused.example.com \(rcode 5\)/);
   });
@@ -95,6 +104,6 @@ describe("DohPublicDns — the JSON DNS API over 443", () => {
     await expect(dns(gateway.fetchImpl).a("example.com")).resolves.toEqual(["203.0.113.7"]);
 
     const dark = scripted({ "first.invalid": () => new Error("fetch failed"), "second.invalid": () => json({}, 503) });
-    await expect(dns(dark.fetchImpl).txt("example.com")).rejects.toThrow(/no public resolver could be reached for example.com: first: fetch failed; second: HTTP 503/);
+    await expect(dns(dark.fetchImpl).txt("example.com")).rejects.toThrow(/no public resolver could answer for example.com: first: fetch failed; second: HTTP 503/);
   });
 });

@@ -42,9 +42,10 @@ const RR_PTR = 12;
 const RR_MX = 15;
 const RR_TXT = 16;
 
-/** The response codes that mean "nothing of this type stands here" to a receiver — NOERROR with an
- *  empty answer, NXDOMAIN, and SERVFAIL, which the node:dns Resolver this replaces also read as
- *  nothing (ESERVFAIL). */
+/** The response codes that answer the question: NOERROR, with or without records of the type, and
+ *  NXDOMAIN, which means nothing stands here. SERVFAIL answers nothing — the service could not
+ *  resolve the name, a broken DNSSEC chain or a lame server — so the next service is asked, and a
+ *  name no service resolves throws instead of reading as empty. */
 const RCODE_NOERROR = 0;
 const RCODE_SERVFAIL = 2;
 const RCODE_NXDOMAIN = 3;
@@ -97,7 +98,7 @@ export class DohPublicDns implements PublicDns {
   /** The data of every answer OF THE ASKED TYPE at the name — the CNAMEs a chain passes through are
    *  answers too, and not records of the name. The services are asked one after the other: one that
    *  cannot be reached or does not answer HTTP 200 says nothing about the record, so the next is
-   *  asked; the first that answers decides. */
+   *  asked; the first that answers decides. A SERVFAIL is no answer either. */
   private async query(name: string, type: number): Promise<string[]> {
     const failures: string[] = [];
     for (const r of this.resolvers) {
@@ -116,10 +117,14 @@ export class DohPublicDns implements PublicDns {
         continue;
       }
       const body = (await res.json()) as DohEnvelope;
-      if (body.Status === RCODE_NXDOMAIN || body.Status === RCODE_SERVFAIL) return [];
+      if (body.Status === RCODE_SERVFAIL) {
+        failures.push(`${r.name}: SERVFAIL`);
+        continue;
+      }
+      if (body.Status === RCODE_NXDOMAIN) return [];
       if (body.Status !== RCODE_NOERROR) throw new Error(`${r.name} refused the query for ${name} (rcode ${body.Status})`);
       return (body.Answer ?? []).filter((a) => a.type === type).map((a) => a.data);
     }
-    throw new Error(`no public resolver could be reached for ${name}: ${failures.join("; ")}`);
+    throw new Error(`no public resolver could answer for ${name}: ${failures.join("; ")}`);
   }
 }
