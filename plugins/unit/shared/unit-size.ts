@@ -125,8 +125,20 @@ export type UnitQuota = z.infer<typeof UnitQuotaSchema>;
  *     and its limits are the owner's. The same factor of two holds: the pods' shapes per size are the
  *     product's, and the Manager refuses a size whose rendered pods do not fit it twice. 8 pods,
  *     because the quota counts terminated pods too, and two leftovers must not block the next
- *     rollout's surge pod. 1 claim, the schema's minimum; tenant members claim none.
+ *     rollout's surge pod. 1 claim, the schema's minimum; tenant members claim none. On top of all
+ *     that, each member row holds one CERT_SOLVER: cert-manager runs it in the member's namespace while
+ *     a certificate of the member is issued or renewed, and a rollout must not wait for it to end.
  */
+/** The pod cert-manager starts in a member namespace for an HTTP-01 challenge, at the figures it sets
+ *  on it. It stands until the challenge passes, and every renewal starts one again. */
+export const CERT_SOLVER: UnitQuota = { requestsCpu: "10m", requestsMemory: "64Mi", limitsCpu: "100m", limitsMemory: "64Mi", pods: 1, persistentVolumeClaims: 0 };
+
+const withSolver = (q: UnitQuota): UnitQuota => ({
+  requestsCpu: addCpu(q.requestsCpu, CERT_SOLVER.requestsCpu), requestsMemory: addMemory(q.requestsMemory, CERT_SOLVER.requestsMemory),
+  limitsCpu: addCpu(q.limitsCpu, CERT_SOLVER.limitsCpu), limitsMemory: addMemory(q.limitsMemory, CERT_SOLVER.limitsMemory),
+  pods: q.pods + CERT_SOLVER.pods, persistentVolumeClaims: q.persistentVolumeClaims,
+});
+
 export const UNIT_SIZE_SEED = {
   base: {
     small:  { requestsCpu: "400m", requestsMemory: "1Gi", limitsCpu: "1500m", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 },
@@ -144,12 +156,12 @@ export const UNIT_SIZE_SEED = {
     large:  { requestsCpu: "500m", requestsMemory: "2Gi", limitsCpu: "4", limitsMemory: "8Gi", pods: 1, persistentVolumeClaims: 1 },
   },
   member: {
-    xsmall:  { requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 },
-    small:   { requestsCpu: "200m", requestsMemory: "1152Mi", limitsCpu: "4", limitsMemory: "4Gi", pods: 8, persistentVolumeClaims: 1 },
-    medium:  { requestsCpu: "400m", requestsMemory: "2304Mi", limitsCpu: "6", limitsMemory: "6Gi", pods: 8, persistentVolumeClaims: 1 },
-    large:   { requestsCpu: "800m", requestsMemory: "4608Mi", limitsCpu: "8", limitsMemory: "10Gi", pods: 8, persistentVolumeClaims: 1 },
-    xlarge:  { requestsCpu: "1200m", requestsMemory: "6912Mi", limitsCpu: "8", limitsMemory: "15Gi", pods: 8, persistentVolumeClaims: 1 },
-    xxlarge: { requestsCpu: "1600m", requestsMemory: "9216Mi", limitsCpu: "8", limitsMemory: "20Gi", pods: 8, persistentVolumeClaims: 1 },
+    xsmall: withSolver({ requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 }),
+    small: withSolver({ requestsCpu: "200m", requestsMemory: "1152Mi", limitsCpu: "4", limitsMemory: "4Gi", pods: 8, persistentVolumeClaims: 1 }),
+    medium: withSolver({ requestsCpu: "400m", requestsMemory: "2304Mi", limitsCpu: "6", limitsMemory: "6Gi", pods: 8, persistentVolumeClaims: 1 }),
+    large: withSolver({ requestsCpu: "800m", requestsMemory: "4608Mi", limitsCpu: "8", limitsMemory: "10Gi", pods: 8, persistentVolumeClaims: 1 }),
+    xlarge: withSolver({ requestsCpu: "1200m", requestsMemory: "6912Mi", limitsCpu: "8", limitsMemory: "15Gi", pods: 8, persistentVolumeClaims: 1 }),
+    xxlarge: withSolver({ requestsCpu: "1600m", requestsMemory: "9216Mi", limitsCpu: "8", limitsMemory: "20Gi", pods: 8, persistentVolumeClaims: 1 }),
   },
 } satisfies SizeTable;
 

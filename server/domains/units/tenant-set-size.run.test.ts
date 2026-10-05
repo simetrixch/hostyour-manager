@@ -37,7 +37,7 @@ describe("tenant-set-size plans through the members' render", () => {
     if (result.outcome !== "rejected") return;
     expect(result.summary).toContain("T5");
     const t5 = (result.planJson as { gates: { id: string; reason: string | null }[] }).gates.find((g) => g.id === "T5");
-    expect(t5?.reason).toContain("needs requests 200m/512Mi, limits 2/2Gi, 2 pod(s), above the quota in requests cpu");
+    expect(t5?.reason).toContain("needs requests 200m/512Mi, limits 2/2Gi, 2 pod(s) and one cert-manager solver pod (requests 10m/64Mi, limits 100m/64Mi, 1 pod(s)), above the quota in requests cpu");
   });
 
   it("plans the same member at a size whose quota holds it", async () => {

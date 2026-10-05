@@ -85,16 +85,16 @@ describe("the vocabulary", () => {
     expect(seededSizes("member")).toEqual([...UNIT_SIZE]);
   });
 
-  it("seeds the member rows from the measured use and the owner's limits, 8 pods and 1 claim each", () => {
+  it("seeds the member rows from the measured use and the owner's limits plus one cert-manager solver, 9 pods and 1 claim each", () => {
     const row = (requestsCpu: string, requestsMemory: string, limitsCpu: string, limitsMemory: string) =>
-      ({ requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods: 8, persistentVolumeClaims: 1 });
+      ({ requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods: 9, persistentVolumeClaims: 1 });
     expect(UNIT_SIZE_SEED.member).toEqual({
-      xsmall: row("100m", "576Mi", "2", "2Gi"),
-      small: row("200m", "1152Mi", "4", "4Gi"),
-      medium: row("400m", "2304Mi", "6", "6Gi"),
-      large: row("800m", "4608Mi", "8", "10Gi"),
-      xlarge: row("1200m", "6912Mi", "8", "15Gi"),
-      xxlarge: row("1600m", "9216Mi", "8", "20Gi"),
+      xsmall: row("110m", "640Mi", "2100m", "2112Mi"),
+      small: row("210m", "1216Mi", "4100m", "4160Mi"),
+      medium: row("410m", "2368Mi", "6100m", "6208Mi"),
+      large: row("810m", "4672Mi", "8100m", "10304Mi"),
+      xlarge: row("1210m", "6976Mi", "8100m", "15424Mi"),
+      xxlarge: row("1610m", "9280Mi", "8100m", "20544Mi"),
     });
   });
 
