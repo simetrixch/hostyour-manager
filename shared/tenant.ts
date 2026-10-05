@@ -12,7 +12,7 @@ import { UnitQuotaSchema, UnitSizeSchema } from "#unit/shared/unit-size.ts";
 import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
 import { ConsumerManifestSchema, publicFqdn } from "./consumer.ts";
-import { HOST_LABEL_RE, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
+import { HOST_LABEL_RE, PLATFORM_HOST_LABEL, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
 import { MEMBER_ROUTING } from "./enums.ts";
 
@@ -202,7 +202,8 @@ export const TenantAppSchema = z
 export const subdomain = z
   .string()
   .regex(HOST_LABEL_RE, "a subdomain is one DNS label: lower-case letters, digits and hyphens, at most 63 characters, no dot")
-  .refine((s) => !RESERVED_HOST_LABELS.includes(s), { message: "a stage word cannot be a subdomain — the stage words are the zones, so the tenant would take a whole stage's zone" });
+  .refine((s) => !RESERVED_HOST_LABELS.includes(s), { message: "a stage word cannot be a subdomain — the stage words are the zones, so the tenant would take a whole stage's zone" })
+  .refine((s) => !PLATFORM_HOST_LABEL.test(s), { message: "a platform host cannot be a subdomain — the platform's own hosts stand under the apex beside the tenant zones" });
 
 /** THE TENANT'S OWN APPS BUNDLE — the three facts of its `<bundle>-<subdomain>` repository, a Build-only
  *  unit of this installation: the repository the bundle is rebuilt from, the flat build name its

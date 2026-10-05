@@ -127,6 +127,15 @@ describe("subdomain — one DNS label, never a stage word", () => {
     }
     expect(RESERVED_HOST_LABELS).toEqual(["dev", "test", "prod"]);
   });
+
+  it("refuses the platform's own hosts — a tenant zone stands directly under the apex beside them", () => {
+    for (const word of ["www", "show", "mail", "autodiscover", "master1", "apps8", "srv2", "enterprise-x"]) {
+      const refused = subdomain.safeParse(word);
+      expect(refused.success, word).toBe(false);
+      expect(refused.error?.issues[0]?.message).toMatch(/platform host/);
+    }
+    expect(subdomain.safeParse("simetrix").success).toBe(true);
+  });
 });
 
 describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml body", () => {

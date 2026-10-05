@@ -105,5 +105,10 @@ export function ownDomainEntryProblem(domain: string): string | null {
  *  consumer labelled `dev` at prod would stand on the dev zone's apex. */
 export const RESERVED_HOST_LABELS: readonly string[] = STAGE;
 
+/** The labels the platform and the website stand on directly under the apex, beside the prod units:
+ *  the website's hosts, the mail records and the machines (`master*`, `apps*`, `srv*`, and the
+ *  `enterprise*` records of the mail service). A unit on one of them would take the platform's name. */
+export const PLATFORM_HOST_LABEL = /^(www|show|mail|autodiscover)$|^(master|apps|srv|enterprise)/;
+
 /** One DNS label, lower-case, at most 63 characters, neither starting nor ending in a hyphen. */
 export const HOST_LABEL_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;

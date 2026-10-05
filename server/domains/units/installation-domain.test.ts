@@ -65,18 +65,63 @@ describe("installation domain unit phase", () => {
     expect(preview.records.filter(r => r.type === "TXT")).toHaveLength(3);
     expect(preview.tenants.find(t => t.stage === "test")?.cookieOverrides[0]).toMatchObject({ before: `.shop.${FROM}`, after: `.shop.${TO}` });
     expect(preview.tenants.find(t => t.stage === "prod")?.cookieAfter).toBe(tenantZone("shop", "prod", TO));
-    expect(preview.blockers.join("\n")).toContain("session handoff");
+    expect(preview.blockers.join("\n")).not.toContain("session");
+    expect(preview.coverage.sessions).toMatch(/signs in once/);
     expect(preview.records.every(r => r.sourceBook?.runId === "run_seed" && r.targetBook === null)).toBe(true);
     expect(cloud.commits).toHaveLength(0); expect(deploy.commits).toHaveLength(0); expect(dns.upserts).toHaveLength(0); expect(dns.creates).toHaveLength(0); expect(dns.deletes).toHaveLength(0);
     expect(listDnsWrites(db.db)).toEqual(beforeBooks);
   });
-  it("blocks a target record occupied by another type and machine phase not yet completed", async () => {
+  it("blocks a target record occupied by another type", async () => {
     seed("prod"); dns.seed(`post.${TO}`, "A", "192.0.2.9");
     const first = await readInstallationDomain(db.db, ports(), FROM, TO);
     expect(first.blockers.join("\n")).toContain("target has a A record");
+  });
+  it("moves the units ahead of the machines: the new records point at the machine where it stands", async () => {
     db.db.update(clusters).set({ domain: OLD_HOST }).where(eq(clusters.id, "cls_1")).run();
-    cloud.seed(cloud.booksBranch, clusterMapPath(OLD_HOST), `global:\n  domain: ${OLD_HOST}\n  clusterName: s1\n  unitApex: ${FROM}\n`);
-    expect((await readInstallationDomain(db.db, ports(), FROM, TO)).blockers.join("\n")).toContain("machine/control-plane phase");
+    const oldMap = clusterMapPath(OLD_HOST);
+    cloud.seed(cloud.booksBranch, oldMap, `global:\n  domain: ${OLD_HOST}\n  clusterName: s1\n  unitApex: ${FROM}\n`);
+    seed("prod");
+    const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
+    expect(snapshot.blockers).toEqual([]);
+    expect(snapshot.records.filter(r => r.type === "CNAME").map(r => [r.targetName, r.after])).toEqual([[`post.${TO}`, OLD_HOST], [`*.shop.${TO}`, OLD_HOST]]);
+    await applyInstallationDomain(ctx(), ports(), snapshot, false, "run_move");
+    expect(dns.record(`post.${TO}`, "CNAME")).toBe(OLD_HOST); expect(dns.record(`post.${FROM}`, "CNAME")).toBe(OLD_HOST);
+    const map = parseDocument(cloud.read(cloud.booksBranch, oldMap)!);
+    expect([map.getIn(["global", "domain"]), map.getIn(["global", "unitApex"])]).toEqual([OLD_HOST, TO]);
+  });
+  it("repoints the tenant's alias domains and its websites' aliases onto the new zone", async () => {
+    seed("prod");
+    const tenant = (await tenantRegistrations.readTenant("prod", GUID))!.entry, zone = tenantZone("shop", "prod", FROM);
+    const write = tenantRegistrationWrite("prod", GUID, { ...tenant, ownDomain: "company.example", ownDomainRedirects: ["www.company.example"], ownDomainAliases: ["company-alias.example"],
+      apps: [{ ...tenant.apps[0]!, domain: "site.example", aliases: ["site-alias.example"] }] });
+    deploy.seed(deploy.booksBranch, write.path, write.content);
+    const hosts = ["company.example", "www.company.example", "company-alias.example", "www.company-alias.example", "site.example", "www.site.example", "site-alias.example", "www.site-alias.example"];
+    for (const host of hosts) {
+      dns.seed(host, "CNAME", zone);
+      recordDnsWrite(db.db, { name: host, type: "CNAME", content: zone, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });
+    }
+    const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
+    for (const host of hosts) expect(snapshot.records.find(r => r.name === host), host).toMatchObject({ targetName: host, before: zone, after: tenantZone("shop", "prod", TO) });
+    expect(snapshot.retainedBooks.filter(b => hosts.includes(b.name))).toEqual([]);
+  });
+  it("writes the previous apex beside the new one in the same commit, and the rollback removes it", async () => {
+    seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
+    await applyInstallationDomain(ctx(), ports(), snapshot, false, "run_move");
+    const moved = cloud.commits.filter(c => c.write?.some(w => w.path === mapPath));
+    expect(moved).toHaveLength(1);
+    const written = parseDocument(moved[0]!.write!.find(w => w.path === mapPath)!.content);
+    expect([written.getIn(["global", "unitApex"]), written.getIn(["global", "previousUnitApex"])]).toEqual([TO, FROM]);
+    await applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move");
+    const restored = parseDocument(cloud.read(cloud.booksBranch, mapPath)!);
+    expect(restored.getIn(["global", "unitApex"])).toBe(FROM);
+    expect(restored.hasIn(["global", "previousUnitApex"])).toBe(false);
+    expect(restored.getIn(["global", "unrelated"])).toBe("keep");
+  });
+  it("refuses a standing unit whose label is a platform host at the new apex", async () => {
+    seed("prod");
+    const raw = JSON.parse(cloud.read(cloud.booksBranch, "registrations/post/prod.yaml")!) as Record<string, unknown>;
+    cloud.seed(cloud.booksBranch, "registrations/mail/prod.yaml", JSON.stringify({ ...raw, name: "mail", host: "mail" }));
+    await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow(/platform host cannot be a host label/);
   });
   it("permits TXT beside only a same-name book-owned CNAME with its recorded baseline", async () => {
     seed("prod"); const name = "company.example", before = `shop.${FROM}`;
@@ -173,6 +218,7 @@ describe("installation domain unit phase", () => {
     const result = await def.planStream!({ fromDomain: FROM, toDomain: TO, dryRun: true, snapshot: { ...snapshot, records: [] } }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
     expect(result.outcome).toBe("planned");
     if (result.outcome === "planned") expect(result.params.snapshot?.records).toHaveLength(3);
+    if (result.outcome === "planned") expect(result.plan.warnings.join("\n")).toMatch(/everyone signs in once/i);
     const rollback = makeInstallationDomainRollbackDef(undefined);
     await expect(rollback.planStream!({ sourceRunId: "run_missing", dryRun: true }, { db: db.db, log: () => undefined, signal: new AbortController().signal })).rejects.toThrow(/stopped installation domain move/);
   });
@@ -193,7 +239,7 @@ describe("installation domain unit phase", () => {
     await expect(rollback.steps(planned.params)[0]!.run(ctx("run_rollback"))).rejects.toThrow(/no longer stopped/);
   });
   it("dry-run step cannot reach the writer and apply approval refuses cutover blockers", async () => {
-    seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
+    seed("prod"); dns.seed(`post.${TO}`, "A", "192.0.2.9"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     let writes = 0;
     const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => { writes++; } });
     const params = { fromDomain: FROM, toDomain: TO, dryRun: true, snapshot };

@@ -25,7 +25,7 @@ function plan(kind: string, snapshot: InstallationDomainSnapshot, dryRun: boolea
     summary: `${dryRun ? "Dry run" : "Unit domain phase"}: ${snapshot.fromDomain} → ${snapshot.toDomain}; ${snapshot.records.length} records, ${snapshot.registrations.length} registrations, ${snapshot.tenants.length} tenant issuer/cookie effects. Old records retained. External store and session coverage is stated in the preview.`,
     steps: [{ name: "attest-target", title: dryRun ? "Read and report the frozen domain preview" : "Check the frozen domain plan before any write" }, ...(dryRun ? [] : [{ name: "move-unit-domains", title: "Move only the recorded unit records and domain fields" }])],
     targets: [], locks: [{ resource: "git-branch", key: snapshot.booksBranch }, { resource: "master-kube", key: "m" }, ...[...new Set(snapshot.clusters.map(c => c.serverId))].map(key => ({ resource: "server" as const, key }))],
-    requiredSecrets: [], warnings: [...snapshot.blockers, "No machine rename, old-record retirement, mail change or external store/session migration is performed."] };
+    requiredSecrets: [], warnings: [...snapshot.blockers, "Everyone signs in once on the new hosts: no session is carried over.", "No machine rename, old-record retirement or mail change is performed; each old unit host redirects to its new one."] };
 }
 
 function compensation(value: InstallationDomainActions | undefined, snapshot: InstallationDomainSnapshot): Cleanup {
