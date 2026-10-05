@@ -20,7 +20,7 @@ export class FakeDnsProvider implements DnsProvider {
    *  DnsZoneUnknownError, as the provider does for a domain it holds no zone for. */
   unmanaged: string[] = [];
 
-  private key(name: string, type: DnsRecordType): string {
+  private key(name: string, type: DnsRecordType | "MX"): string {
     return `${type} ${name}`;
   }
 
@@ -32,7 +32,7 @@ export class FakeDnsProvider implements DnsProvider {
 
   /** Seed the records that pre-exist the run under one name. Several contents seed several records
    *  of that name and type. */
-  seed(name: string, type: DnsRecordType, ...contents: string[]): void {
+  seed(name: string, type: DnsRecordType | "MX", ...contents: string[]): void {
     this.records.set(this.key(name, type), contents);
   }
 
@@ -84,7 +84,7 @@ export class FakeDnsProvider implements DnsProvider {
     return (await this.listRecordContents(input))[0] ?? null;
   }
 
-  async listRecordContents(input: { name: string; type: DnsRecordType }): Promise<string[]> {
+  async listRecordContents(input: { name: string; type: DnsRecordType | "MX" }): Promise<string[]> {
     if (this.failWith) throw this.failWith;
     this.zoneOf(input.name);
     return this.records.get(this.key(input.name, input.type)) ?? [];

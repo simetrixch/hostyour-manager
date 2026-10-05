@@ -158,7 +158,7 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  has one place. Imported everywhere the apps element is validated.
  *
  *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs, the
- *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` redirects to). It is
+ *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` and its aliases redirect to). It is
  *  named after its site when it is added, and numbered where that name is taken (websiteAppName), so
  *  one folder serves as many websites as there are domains. An entry without a folder runs the folder
  *  of its own name. */
@@ -168,6 +168,9 @@ export const TenantAppSchema = z
     folder: appName.optional(),
     site: siteId.optional(),
     domain: publicFqdn.optional(),
+    // A website's alias domains, each typed without `www.`: `<alias>` and `www.<alias>` answer with a
+    // redirect to `<domain>`. A move of the website keeps the domain it leaves here.
+    aliases: z.array(publicFqdn).optional(),
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
@@ -179,11 +182,12 @@ export const TenantAppSchema = z
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, folder, site, domain, seedReference, seedDemo, seed, databases, selections }) => ({
+  .transform(({ name, folder, site, domain, aliases, seedReference, seedDemo, seed, databases, selections }) => ({
     name,
     ...(folder === undefined ? {} : { folder }),
     ...(site === undefined ? {} : { site }),
     ...(domain === undefined ? {} : { domain }),
+    ...(aliases?.length ? { aliases } : {}),
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
     selections,
@@ -286,6 +290,10 @@ export const TenantRegistrationSchema = z
     // named by the operator in tenant-set-own-domain; empty where there is none and always empty
     // without an own domain. Defaulted to [] for every file written before the field existed.
     ownDomainRedirects: z.array(publicFqdn).default([]),
+    // The own domain's ALIAS domains, each typed without `www.`: `<alias>` and `www.<alias>` answer with
+    // a permanent redirect to the own domain, where a redirect host's is temporary. A move of the own
+    // domain keeps the one it leaves here. Absent where there is none.
+    ownDomainAliases: z.array(publicFqdn).optional(),
     // The image tags approved for this tenant alone, per app and build: `<app> -> <build> -> <tag>`.
     // The app key is the name every member chart receives as tenant.appName (the app for a per-app
     // member, the member name for a standing one). A build with no approval follows the stage pin;

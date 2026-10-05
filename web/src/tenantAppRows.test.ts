@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listedWebsites, unknownDomainText, newWebsiteName, removedWebsites, tenantAppRows, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
+import { listedWebsites, unknownDomainText, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, websiteFolder } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -64,13 +64,13 @@ describe("undeployedApps", () => {
     const live = { ...row("veloluck"), site: "veloluck" };
     const unnamed = { ...row("show"), site: "show" };
     const gone = { ...row("old", "offboarded"), site: "old" };
-    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }]);
+    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch", aliases: [] }]);
     // A live website the catalog's list leaves out stays on the page, by name and site, without the
     // domain only the registration knows, beside the ones the catalog names.
-    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live, unnamed])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }, { name: "show", site: "show", domain: null }]);
+    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live, unnamed])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch", aliases: [] }, { name: "show", site: "show", domain: null, aliases: [] }]);
     // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
-    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
-    expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null }]);
+    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null, aliases: [] }]);
+    expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null, aliases: [] }]);
   });
 
   it("says why a website's domain is unknown only as far as the page knows it", () => {
@@ -99,5 +99,12 @@ describe("undeployedApps", () => {
     expect(websiteFolder([web], [{ site: "show" }])?.sites).toEqual(["veloluck"]);
     expect(websiteFolder([web], [{ site: "show" }, { site: "veloluck" }])).toBeNull();
     expect(websiteFolder([web], [])?.sites).toEqual(["show", "veloluck"]);
+  });
+});
+
+describe("typedAliases", () => {
+  it("reads the alias domains of one field, split at commas or spaces, lower-cased, empties dropped", () => {
+    expect(typedAliases(" Example.DE, example.at  example.com,,")).toEqual(["example.de", "example.at", "example.com"]);
+    expect(typedAliases("  ")).toEqual([]);
   });
 });

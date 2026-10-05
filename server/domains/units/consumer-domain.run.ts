@@ -83,11 +83,11 @@ function assertStanding(db: Db, appId: string, ac: AppCluster): void {
  *  own other stages included, because one domain carries one record. */
 async function heldHosts(db: Db, ports: ConsumerSetDomainPorts, ac: AppCluster): Promise<HeldHost[]> {
   const held: HeldHost[] = db
-    .select({ subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects })
+    .select({ subdomain: tenants.subdomain, ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases })
     .from(tenants)
     .where(and(ne(tenants.ownDomain, ""), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .all()
-    .flatMap((t) => tenantOwnHosts(t.ownDomain, t.ownDomainRedirects).map((host) => ({ host, holder: `tenant ${t.subdomain}` })));
+    .flatMap((t) => tenantOwnHosts(t.ownDomain, t.ownDomainRedirects, t.ownDomainAliases).map((host) => ({ host, holder: `tenant ${t.subdomain}` })));
   for (const d of await ports.registrations.listAttestedFqdns({ unit: ac.name, stage: ac.stage })) held.push({ host: d.fqdn, holder: `consumer ${d.unit} at ${d.stage}` });
   return held;
 }

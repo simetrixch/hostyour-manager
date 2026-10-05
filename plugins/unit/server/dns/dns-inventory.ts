@@ -50,7 +50,7 @@ export interface DnsInventoryDeps {
   consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string; fqdn: string }[]>;
   /** Every tenant registered at one stage, with its subdomain, the routing its record is named by
    *  (the wildcard or the zone) and the short name of the cluster it stands on. */
-  tenants?: (stage: Stage) => Promise<{ subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; cluster: string }[]>;
+  tenants?: (stage: Stage) => Promise<{ subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[]>;
   /** The public apex a cluster's units serve under at one stage (`global.unitApex` off its values
    *  chain) — the same resolution the tenant surface makes. */
   unitApex?: (domain: string, stage: Stage) => Promise<string>;
@@ -125,7 +125,7 @@ async function unitRowsOf(
   deps: Required<Pick<DnsInventoryDeps, "dns" | "consumers" | "unitApex">>,
   cluster: { domain: string; name: string },
   stage: Stage,
-  tenants: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; cluster: string }[],
+  tenants: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[],
 ): Promise<DnsRecordRow[]> {
   const { domain } = cluster;
   const apex = await deps.unitApex(domain, stage);
@@ -138,12 +138,12 @@ async function unitRowsOf(
     // installation's provider manages the domain's zone.
     if (consumer.fqdn !== "") rows.push(...(await managedRow(() => unitRow(deps.dns, owner, consumer.fqdn, host))));
   }
-  for (const { subdomain, routing, ownDomain, ownDomainRedirects } of tenants.filter((t) => t.cluster === cluster.name)) {
+  for (const { subdomain, routing, ownDomain, ownDomainRedirects, ownDomainAliases } of tenants.filter((t) => t.cluster === cluster.name)) {
     rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, tenantRecordName(routing, subdomain, stage, apex), domain));
     // The own domain's and its redirect hosts' records point at the tenant's zone, not at the cluster.
     // Listed only where this installation's provider manages their zone: a record in a customer's zone
     // is not ours to show.
-    for (const host of tenantOwnHosts(ownDomain, ownDomainRedirects)) {
+    for (const host of tenantOwnHosts(ownDomain, ownDomainRedirects, ownDomainAliases)) {
       rows.push(...(await managedRow(() => unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, host, tenantZone(subdomain, stage, apex)))));
     }
   }
@@ -192,7 +192,7 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
   if (dns && consumers && tenants && unitApex) {
     const clusterRows = deps.db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).all();
     for (const stage of STAGE) {
-      let tenantsAt: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; cluster: string }[] = [];
+      let tenantsAt: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[] = [];
       try {
         tenantsAt = await tenants(stage);
       } catch (e) {

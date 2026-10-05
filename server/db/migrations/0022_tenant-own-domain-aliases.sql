@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `own_domain_aliases` text DEFAULT '[]' NOT NULL;

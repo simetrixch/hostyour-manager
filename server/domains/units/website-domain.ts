@@ -1,14 +1,14 @@
 // A website's own domain, as the runs that add, move and remove a website handle it.
 //
 // A website of a tenant answers at `<domain>`, and `www.<domain>` redirects there, the way the tenant's
-// own domain does (ownDomainHosts). Each host gets a CNAME onto the tenant's zone, written and booked
+// own domain does (ownDomainHosts), as does each alias domain and its `www.`. Each host gets a CNAME onto the tenant's zone, written and booked
 // by the same helpers tenant-set-own-domain uses, so a record in a zone the customer manages never has
 // to change when the tenant moves. The hosts the tenant's own domain already holds belong to
 // tenant-set-own-domain: a website served there writes and removes no record of its own.
 import type { Cleanup, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
-import { ownDomainHosts, tenantOwnHosts, tenantZone } from "#unit/shared/unit-host.ts";
+import { aliasHosts, ownDomainHosts, tenantOwnHosts, tenantZone } from "#unit/shared/unit-host.ts";
 import {
   provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord, restoreReplacedRecords, waitForAnswer,
   type AnswerWaitPorts, type RecordPorts, type ReplacedRecord,
@@ -18,26 +18,27 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { STAGE } from "../../../shared/enums.ts";
 
 /** What the website steps read: the DNS provider, the zone's apex, and the probe with its wait. */
-export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex"> & AnswerWaitPorts;
+export type WebsiteDomainPorts = RecordPorts & Pick<TenantLifecyclePorts, "resolveUnitApex" | "registrations"> & AnswerWaitPorts;
 
-/** The hosts a website answers at: `<domain>`, then `www.<domain>`, which redirects there. */
-export function websiteHosts(domain: string): string[] {
+/** The hosts a website answers at: `<domain>`, then `www.<domain>` and each alias domain with its
+ *  `www.`, which redirect there. */
+export function websiteHosts(domain: string, aliases: readonly string[] = []): string[] {
   const { ownDomain, ownDomainRedirects } = ownDomainHosts(domain);
-  return [ownDomain, ...ownDomainRedirects];
+  return [ownDomain, ...ownDomainRedirects, ...aliasHosts(aliases)];
 }
 
 /** The hosts of a website whose records a run writes and removes: every host the tenant's own domain
  *  does not already hold. */
-export function websiteRecordHosts(domain: string, tenant: { ownDomain: string; ownDomainRedirects: readonly string[] }): string[] {
-  const held = new Set(tenantOwnHosts(tenant.ownDomain, tenant.ownDomainRedirects));
-  return websiteHosts(domain).filter((h) => !held.has(h));
+export function websiteRecordHosts(domain: string, aliases: readonly string[], tenant: { ownDomain: string; ownDomainRedirects: readonly string[]; ownDomainAliases?: readonly string[] | undefined }): string[] {
+  const held = new Set(tenantOwnHosts(tenant.ownDomain, tenant.ownDomainRedirects, tenant.ownDomainAliases));
+  return websiteHosts(domain, aliases).filter((h) => !held.has(h));
 }
 
 /** Every host a website of this tenant answers at, off its registration: what a move of the tenant's own
  *  domain must leave standing. */
 export async function tenantWebsiteHosts(registrations: Pick<TenantRegistrations, "readTenant">, tenant: { stage: Parameters<TenantRegistrations["readTenant"]>[0]; guid: string }): Promise<Set<string>> {
   const read = await registrations.readTenant(tenant.stage, tenant.guid);
-  return new Set((read?.entry.apps ?? []).flatMap((a) => (a.domain ? websiteHosts(a.domain) : [])));
+  return new Set((read?.entry.apps ?? []).flatMap((a) => (a.domain ? websiteHosts(a.domain, a.aliases) : [])));
 }
 
 /** Every host a website of ANOTHER tenant answers at, at every stage, off the registrations: a domain is
@@ -47,7 +48,7 @@ export async function otherTenantsWebsiteHosts(registrations: Pick<TenantRegistr
   for (const stage of STAGE) {
     for (const t of (await registrations.listTenantPointers(stage)).pointers) {
       if (t.guid === guid) continue;
-      for (const a of t.apps) if (a.domain) hosts.push(...websiteHosts(a.domain).map((host) => ({ host, subdomain: t.subdomain, guid: t.guid })));
+      for (const a of t.apps) if (a.domain) hosts.push(...websiteHosts(a.domain, a.aliases).map((host) => ({ host, subdomain: t.subdomain, guid: t.guid })));
     }
   }
   return hosts;
@@ -61,22 +62,28 @@ export async function websiteRecordsToReplace(db: Db, ports: WebsiteDomainPorts,
 }
 
 /** On abort: remove the records of `hosts`, where this installation wrote them for the tenant, and write
- *  back the records the run replaced there. */
-export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Cleanup {
+ *  back the records the run replaced there — except at a host the tenant still serves: its own domain's,
+ *  another website's, or one of `spare` that website `app` stands at again once the other cleanups ran
+ *  (a move keeps the previous domain's records, which the restored website answers at). The run's own
+ *  website counts for no other host: an aborted add-app may still find it in the registration. */
+export function removeWebsiteRecordsCleanup(ports: WebsiteDomainPorts, tenantId: string, app: string, hosts: readonly string[], replacing: readonly ReplacedRecord[], spare: readonly string[] = []): Cleanup {
   return {
     name: "remove-website-records",
     title: `Remove the DNS records of ${hosts.join(", ") || "no host"}${replacing.length ? ", and write back the records they replaced" : ""}`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, tenantId);
-      for (const host of hosts) await removeOwnDomainRecord(ctx, ports, tc, host);
-      await restoreReplacedRecords(ctx, ports, replacing);
+      const apps = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.apps ?? [];
+      const sites = apps.flatMap((a) => (a.domain ? websiteHosts(a.domain, a.aliases).filter((h) => a.name !== app || spare.includes(h)) : []));
+      const used = new Set([...tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects, tc.ownDomainAliases), ...sites]);
+      for (const host of hosts) if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
+      await restoreReplacedRecords(ctx, ports, replacing.filter((r) => !used.has(r.name)));
     },
   };
 }
 
 /** Point every host of `hosts` at the tenant's zone, replacing the records the plan froze in `replacing`.
  *  An abort removes them again and writes the replaced records back. */
-export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, hosts: readonly string[], replacing: readonly ReplacedRecord[]): Step {
+export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId: string, app: string, hosts: readonly string[], replacing: readonly ReplacedRecord[], spare: readonly string[] = []): Step {
   return {
     name: "provision-website-records",
     title: "Point the website's hosts at the tenant's zone",
@@ -86,18 +93,18 @@ export function provisionWebsiteRecordsStep(ports: WebsiteDomainPorts, tenantId:
         return;
       }
       const tc = loadTenantCluster(ctx.db, tenantId);
-      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, hosts, replacing));
+      ctx.registerCleanup(removeWebsiteRecordsCleanup(ports, tenantId, app, hosts, replacing, spare));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       for (const host of hosts) await provisionOwnDomainRecord(ctx, ports, tc, apex, host, replacing);
     },
   };
 }
 
-/** Wait until the website answers at `https://<domain>/`, and `https://www.<domain>/` redirects. The
+/** Wait until the website answers at `https://<domain>/`, and its `www.` and alias hosts redirect. The
  *  probe does not follow a redirect, so the site's own root may answer with one too (a language
  *  redirect), and anything below 400 is an answer. */
-export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string): Promise<void> {
-  const [site, ...redirects] = websiteHosts(domain);
+export async function waitForWebsite(ctx: Parameters<typeof waitForAnswer>[0], ports: WebsiteDomainPorts, domain: string, next: string, aliases: readonly string[] = []): Promise<void> {
+  const [site, ...redirects] = websiteHosts(domain, aliases);
   const seen = await waitForAnswer(ctx, ports, `https://${site}/`, "an answer below 400", (s) => s >= 200 && s < 400, next);
   ctx.log("meta", `https://${site}/ answers (${seen})`);
   for (const host of redirects) {

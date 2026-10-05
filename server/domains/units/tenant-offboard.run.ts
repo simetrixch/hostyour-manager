@@ -131,7 +131,7 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         // The own domain's and its redirect hosts' records, where this installation wrote them; one in a
         // zone nobody here manages is the operator's to remove, which is decided before the book forgets
         // what it removes.
-        const unbooked = tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects).filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
+        const unbooked = tenantOwnHosts(tc.ownDomain, tc.ownDomainRedirects, tc.ownDomainAliases).filter((host) => !isTenantRecord(ctx.db, host, tc.guid));
         await removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, except: [recordName] });
         // The identity provider's mark goes with the tenant: left behind, it would keep the product's
         // mail service trusting whatever serves that host next.

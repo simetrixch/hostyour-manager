@@ -40,8 +40,10 @@ export interface DnsProvider {
    *  SPF and the first record answers about the wrong one — the book of DNS writes picks the record
    *  by its version tag (shared/mail.ts MAIL_RECORD_TAG) and judges its rows against the whole list.
    *  A TXT content is answered as the ONE text the record is, however the provider stores it, and
-   *  `deleteRecord` compares a content against the same text. */
-  listRecordContents(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string[]>;
+   *  `deleteRecord` compares a content against the same text. An MX is read only, never written: a run
+   *  that writes beside a mail domain proves its MX untouched (own-domain-records.ts mailRecordHashes),
+   *  answered as `<priority> <host>`. */
+  listRecordContents(input: { name: string; type: DnsRecordType | "MX"; signal?: AbortSignal }): Promise<string[]>;
   /** Create ONE record beside any others of that name and type — what an abort writes back where a
    *  run deleted several address records of a customer's host. Never proxied, as upsertRecord. */
   createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void>;

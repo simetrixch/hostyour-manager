@@ -73,8 +73,9 @@ export interface ScannedTenant {
   routing: MemberRouting;
   /** The tenant's own domain, or "" — the inventory lists its record beside the zone's. */
   ownDomain: string;
-  /** The hosts that redirect to the own domain — the inventory lists their records too. */
+  /** The hosts that redirect to the own domain, and its alias domains — the inventory lists their records too. */
   ownDomainRedirects: string[];
+  ownDomainAliases: string[];
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -172,7 +173,7 @@ export class TenantRegistrations {
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
     if (!r.success) return { status: "unreadable", reason: `${path} failed its schema: ${schemaWhy(r.error)}` };
-    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), routing: r.data.routing, ownDomain: r.data.ownDomain, ownDomainRedirects: r.data.ownDomainRedirects } };
+    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), routing: r.data.routing, ownDomain: r.data.ownDomain, ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [] } };
   }
 
   /** The ONE scan of the registrations at a stage: scanTenantDir over every guid directory, bucketed
@@ -350,25 +351,30 @@ export class TenantRegistrations {
   /** Write the tenant's own domain ("" = none, the tenant is reached at its zone) and the hosts that
    *  redirect to it. Two fields of one file, like the flips above; writing what it already has commits
    *  nothing. tenant-set-own-domain moves the DNS records around this write. */
-  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], runId: string): Promise<{ commit: string }> {
+  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[], runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const hosts = [ownDomain, ...ownDomainRedirects].filter(Boolean).join(", ");
-    return this.write(stage, guid, { ...current.entry, ownDomain, ownDomainRedirects: [...ownDomainRedirects] }, `own-domain(${guid}): ${hosts || "none"} ${trailer(runId)}`);
+    const hosts = [ownDomain, ...ownDomainRedirects, ...ownDomainAliases].filter(Boolean).join(", ");
+    const { ownDomainAliases: _held, ...entry } = current.entry;
+    return this.write(stage, guid, { ...entry, ownDomain, ownDomainRedirects: [...ownDomainRedirects], ...(ownDomainAliases.length ? { ownDomainAliases: [...ownDomainAliases] } : {}) }, `own-domain(${guid}): ${hosts || "none"} ${trailer(runId)}`);
   }
 
-  /** Move one website to another domain: its apps[] entry's domain and its member entry, resolved again
-   *  with that domain, in one commit, because the member's values carry the domain the chart serves.
+  /** Move one website to another domain, or give it other alias domains: its apps[] entry's domain and
+   *  aliases and its member entry, resolved again with them, in one commit, because the member's values carry the domain the chart serves.
    *  tenant-set-website-domain moves the DNS records around this write. */
-  async setWebsiteDomain(stage: Stage, guid: string, app: string, domain: string, member: TenantMemberRecord, runId: string): Promise<{ commit: string }> {
+  async setWebsiteDomain(stage: Stage, guid: string, app: string, domain: string, aliases: readonly string[], member: TenantMemberRecord, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const entry = current.entry.apps.find((a) => a.name === app);
     if (!entry?.domain) throw errValidation(`app "${app}" of tenant "${guid}" is no website — it names no domain`);
     if (member.name !== app) throw errValidation(`the member entry is "${member.name}"'s, not website "${app}"'s`);
-    const apps = current.entry.apps.map((a) => (a.name === app ? { ...a, domain } : a));
+    const apps = current.entry.apps.map((a) => {
+      if (a.name !== app) return a;
+      const { aliases: _held, ...rest } = a;
+      return { ...rest, domain, ...(aliases.length ? { aliases: [...aliases] } : {}) };
+    });
     const members = current.entry.members.map((m) => (m.name === app ? member : m));
-    return this.write(stage, guid, { ...current.entry, apps, members }, `website-domain(${guid}): ${app} ${domain} ${trailer(runId)}`);
+    return this.write(stage, guid, { ...current.entry, apps, members }, `website-domain(${guid}): ${app} ${[domain, ...aliases].join(", ")} ${trailer(runId)}`);
   }
 
   /** Write the tenant's member entries whole, as resolved again off the product's manifest. The member

@@ -337,7 +337,7 @@ function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   const website = p.website;
   if (!website) return [];
   return [
-    provisionWebsiteRecordsStep(ports, p.tenantId, p.websiteRecordHosts, p.websiteReplacing),
+    provisionWebsiteRecordsStep(ports, p.tenantId, p.app, p.websiteRecordHosts, p.websiteReplacing),
     { name: "wait-website", title: `Wait until the website answers at ${websiteHosts(website.domain)[0]}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
   ];
 }
@@ -483,8 +483,8 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         seedUsers: current.entry.seedUsers,
         demo: current.entry.demo === true,
         ...(website ? { website } : {}),
-        websiteRecordHosts: website ? websiteRecordHosts(website.domain, current.entry) : [],
-        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, current.entry), ctx.signal) : [],
+        websiteRecordHosts: website ? websiteRecordHosts(website.domain, [], current.entry) : [],
+        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, [], current.entry), ctx.signal) : [],
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {
@@ -501,7 +501,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
-    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.websiteRecordHosts, params.websiteReplacing)],
+    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.websiteRecordHosts, params.websiteReplacing)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.
     assertAbortable: (params, deps) => assertAddAppAbortable(ports, params, deps.db),
