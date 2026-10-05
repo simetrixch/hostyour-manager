@@ -286,7 +286,7 @@ describe("G24 unit size (hard)", () => {
     expect(g.reason).toContain("its own PostgreSQL");
     // The failure text has to be actionable by somebody working in the CONSUMER's repository, who
     // never opens the platform's source: it names the manifest change AND the operator's.
-    expect(g.reason).toContain("drop postgresql from services");
+    expect(g.reason).toContain("drop postgresql and mariadb from services");
     expect(g.reason).toContain("larger size");
   });
 

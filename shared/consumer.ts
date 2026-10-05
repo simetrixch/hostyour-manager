@@ -35,7 +35,7 @@ export const hostLabel = z
 /** The backing services a consumer may request in its manifest (contract v1.3). THIS list is the
  *  vocabulary's one owner: the published schema restates it for the reader, and hostyour-cloud's
  *  consumer-contract census holds the two against each other in both directions. */
-export const CONSUMER_SERVICE = ["mongodb", "postgresql", "redis", "registry-pull", "forwardauth", "postfix", "smtp-ops"] as const;
+export const CONSUMER_SERVICE = ["mongodb", "postgresql", "redis", "mariadb", "registry-pull", "forwardauth", "postfix", "smtp-ops"] as const;
 export const ConsumerServiceSchema = z.enum(CONSUMER_SERVICE);
 export type ConsumerService = (typeof CONSUMER_SERVICE)[number];
 
@@ -483,6 +483,11 @@ export const ConsumerManifestSchema = z.object({
     // chart, so a self-contained chart alongside a tenant: block is a contradiction.
     if (m.tenant && m.chart) {
       ctx.addIssue({ code: "custom", path: ["tenant"], message: "a manifest that declares a tenant: fan-out block must not also declare its own chart — the fan-out repo deploys others, never itself as one chart" });
+    }
+    // A MariaDB of the consumer's own serves the databases its claim creates; with none, the claim
+    // would hand out a user that owns nothing.
+    if (m.services.includes("mariadb") && m.databases.length === 0) {
+      ctx.addIssue({ code: "custom", path: ["databases"], message: "services: [mariadb] needs at least one database in databases[] — the claim creates them in the consumer's own MariaDB" });
     }
     if (m.redis === "standalone" && !m.services.includes("redis")) {
       ctx.addIssue({ code: "custom", path: ["redis"], message: "redis: standalone needs services: [redis] — the claim is what hands the application its credential" });

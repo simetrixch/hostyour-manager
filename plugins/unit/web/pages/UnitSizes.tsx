@@ -11,7 +11,7 @@ import { TENANT_SIZE, UNIT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "../../s
  *  the rows for what it brings, the MongoDB row times its member count (one for a standalone, three for
  *  a replica set). A consumer on the cluster's shared MongoDB adds nothing. A tenant member namespace
  *  is bounded by the `member` row alone. The page shows that as TWO tables, a tenant's rows and a
- *  consumer's with its four parts side by side, so each figure stands once (SizeTables).
+ *  consumer's with its five parts side by side, so each figure stands once (SizeTables).
  *
  *  WHAT AN EDIT HERE REACHES, and what it does not. It changes the words, for every unit registered
  *  from that moment on. It reaches no running unit — a unit's registration carries the figures it was
@@ -40,6 +40,7 @@ const CONSUMER_PARTS: Array<{ component: Exclude<UnitSizeView["component"], "mem
   { component: "postgresql", title: "+ own PostgreSQL" },
   { component: "mongodb", title: "+ own MongoDB, per member" },
   { component: "redis", title: "+ own Redis" },
+  { component: "mariadb", title: "+ own MariaDB" },
 ];
 
 const FIELDS: Array<{ key: keyof SizeDraft; label: string }> = [

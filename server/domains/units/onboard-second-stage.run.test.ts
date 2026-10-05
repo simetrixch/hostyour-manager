@@ -119,6 +119,21 @@ describe("onboard a consumer with a data part of its own", () => {
     expect(entry?.quota).toEqual(seedQuota("medium", { postgresql: false, mongodb: "shared", redis: "standalone" }));
   });
 
+  it("registers a MariaDB of the consumer's own with its size, its volume and its row in the quota", async () => {
+    seedClusters();
+    const own = { ...MANIFEST, services: ["mariadb" as const], databases: ["shop"] };
+    const prt = ports({
+      runner: new FakeGateRunner({ report: passReport(own) }),
+      repo: new FakeRepoReader({ resolvedSha: SHA, files: { "deploy/chart/values-prod.yaml": CHART_PINS } }),
+    });
+    const plan = await makeOnboardDef(prt).planStream!(request({ stage: "prod", clusterId: "cls_1", size: "medium" }), planCtx());
+    if (plan.outcome !== "planned") throw new Error(plan.summary);
+    await makeOnboardDef(prt).steps(plan.params).find((s) => s.name === "write-registration")!.run(ctx(plan.params, "write-registration"));
+    const entry = (await prt.registrations.readRegistration("prod", "acme"))?.entry;
+    expect([entry?.services, entry?.sizes, entry?.volumes]).toEqual([["mariadb"], { mariadb: "medium" }, { mariadb: "20Gi" }]);
+    expect(entry?.quota).toEqual(seedQuota("medium", { postgresql: false, mongodb: "shared", mariadb: true }));
+  });
+
   it("writes noeviction for a Redis of its own that names no policy, and no redis key for the shared server", async () => {
     seedClusters();
     const own = { ...MANIFEST, services: ["redis" as const], keyPatterns: ["acme:*"], redis: "standalone" as const };

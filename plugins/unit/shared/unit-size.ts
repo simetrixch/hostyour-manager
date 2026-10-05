@@ -48,14 +48,14 @@ export const TenantSizeSchema = z.enum(TENANT_SIZE);
  *  them, its own databases — and each weighs differently, so each has its own row per size. The
  *  quota a unit gets is their SUM, worked out from what it actually brings:
  *
- *      quota = app(size) + postgresql(size)? + mongodb(size) x members + redis(size)?
+ *      quota = app(size) + postgresql(size)? + mongodb(size) x members + redis(size)? + mariadb(size)?
  *
  *  where `app` is `base` for a consumer's own application and `member` for one member namespace of a
  *  tenant, whose pods are the product's and were measured as such. A handful of rows per component the
  *  operator adjusts — against hundreds if every combination were its own row, which is a table nobody
  *  maintains. The parts stay visible in the UI, so the one number a unit gets can be read back to
  *  where it came from. */
-export const SIZE_COMPONENT = ["base", "postgresql", "mongodb", "redis", "member"] as const;
+export const SIZE_COMPONENT = ["base", "postgresql", "mongodb", "redis", "mariadb", "member"] as const;
 export type SizeComponent = (typeof SIZE_COMPONENT)[number];
 export const SizeComponentSchema = z.enum(SIZE_COMPONENT);
 
@@ -101,6 +101,7 @@ export type UnitQuota = z.infer<typeof UnitQuotaSchema>;
  *   mongodb      what ONE MongoDB MEMBER gets — multiplied by 1 for a standalone, 3 for a replica set
  *                (all six sizes)
  *   redis        what ONE Redis of the unit's own gets, its exporter included (all six sizes)
+ *   mariadb      what ONE MariaDB of the unit's own gets, its exporter included (all six sizes)
  *   member       what ONE member namespace of a tenant gets (all six sizes)
  *
  * A consumer is offered only the sizes its parts have rows for; the extra consumer sizes wait for
@@ -148,6 +149,17 @@ const withSolver = (q: UnitQuota): UnitQuota => ({
   pods: q.pods + CERT_SOLVER.pods, persistentVolumeClaims: q.persistentVolumeClaims,
 });
 
+/** One relational database instance of a unit's own with its exporter: the postgresql rows, which a
+ *  MariaDB takes too. */
+const DATABASE_ROWS = {
+  xsmall: { requestsCpu: "25m", requestsMemory: "256Mi", limitsCpu: "400m", limitsMemory: "512Mi", pods: 2, persistentVolumeClaims: 1 },
+  small:  { requestsCpu: "50m", requestsMemory: "512Mi", limitsCpu: "600m", limitsMemory: "1Gi", pods: 2, persistentVolumeClaims: 1 },
+  medium: { requestsCpu: "150m", requestsMemory: "1536Mi", limitsCpu: "1200m", limitsMemory: "2560Mi", pods: 2, persistentVolumeClaims: 1 },
+  large:  { requestsCpu: "300m", requestsMemory: "2560Mi", limitsCpu: "2200m", limitsMemory: "4608Mi", pods: 2, persistentVolumeClaims: 1 },
+  xlarge: { requestsCpu: "450m", requestsMemory: "3584Mi", limitsCpu: "3200m", limitsMemory: "6656Mi", pods: 2, persistentVolumeClaims: 1 },
+  xxlarge: { requestsCpu: "600m", requestsMemory: "4608Mi", limitsCpu: "4200m", limitsMemory: "8704Mi", pods: 2, persistentVolumeClaims: 1 },
+} satisfies Partial<Record<UnitSize, UnitQuota>>;
+
 export const UNIT_SIZE_SEED = {
   base: {
     // xsmall is half of small, xlarge 1.5 x large and xxlarge 2 x large: the member rows' steps.
@@ -160,14 +172,7 @@ export const UNIT_SIZE_SEED = {
   },
   // The data rows of the three new sizes are the cloud's presets (hostyour-cloud apps/postgresql and
   // apps/mongodb values-size-<size>.yaml), PostgreSQL's with its exporter, rounded up as above.
-  postgresql: {
-    xsmall: { requestsCpu: "25m", requestsMemory: "256Mi", limitsCpu: "400m", limitsMemory: "512Mi", pods: 2, persistentVolumeClaims: 1 },
-    small:  { requestsCpu: "50m", requestsMemory: "512Mi", limitsCpu: "600m", limitsMemory: "1Gi", pods: 2, persistentVolumeClaims: 1 },
-    medium: { requestsCpu: "150m", requestsMemory: "1536Mi", limitsCpu: "1200m", limitsMemory: "2560Mi", pods: 2, persistentVolumeClaims: 1 },
-    large:  { requestsCpu: "300m", requestsMemory: "2560Mi", limitsCpu: "2200m", limitsMemory: "4608Mi", pods: 2, persistentVolumeClaims: 1 },
-    xlarge: { requestsCpu: "450m", requestsMemory: "3584Mi", limitsCpu: "3200m", limitsMemory: "6656Mi", pods: 2, persistentVolumeClaims: 1 },
-    xxlarge: { requestsCpu: "600m", requestsMemory: "4608Mi", limitsCpu: "4200m", limitsMemory: "8704Mi", pods: 2, persistentVolumeClaims: 1 },
-  },
+  postgresql: DATABASE_ROWS,
   mongodb: {
     xsmall: { requestsCpu: "50m", requestsMemory: "256Mi", limitsCpu: "500m", limitsMemory: "1Gi", pods: 1, persistentVolumeClaims: 1 },
     small:  { requestsCpu: "100m", requestsMemory: "512Mi", limitsCpu: "1", limitsMemory: "2Gi", pods: 1, persistentVolumeClaims: 1 },
@@ -188,6 +193,9 @@ export const UNIT_SIZE_SEED = {
     xlarge: { requestsCpu: "300m", requestsMemory: "2Gi", limitsCpu: "2", limitsMemory: "8Gi", pods: 2, persistentVolumeClaims: 1 },
     xxlarge: { requestsCpu: "400m", requestsMemory: "3Gi", limitsCpu: "2", limitsMemory: "12Gi", pods: 2, persistentVolumeClaims: 1 },
   },
+  // A MariaDB of the unit's own weighs as its own PostgreSQL does: one process with one buffer cache
+  // and its exporter, so its rows are the postgresql rows, figure for figure.
+  mariadb: DATABASE_ROWS,
   member: {
     xsmall: withSolver({ requestsCpu: "100m", requestsMemory: "576Mi", limitsCpu: "2", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 }),
     small: withSolver({ requestsCpu: "200m", requestsMemory: "1152Mi", limitsCpu: "4", limitsMemory: "4Gi", pods: 8, persistentVolumeClaims: 1 }),
@@ -214,6 +222,7 @@ export function quotaParts(brings: UnitComposition): { component: SizeComponent;
     ...(brings.postgresql ? [{ component: "postgresql" as const, members: 1 }] : []),
     ...(members > 0 ? [{ component: "mongodb" as const, members }] : []),
     ...(brings.redis === "standalone" ? [{ component: "redis" as const, members: 1 }] : []),
+    ...(brings.mariadb ? [{ component: "mariadb" as const, members: 1 }] : []),
   ];
 }
 
@@ -234,6 +243,8 @@ export interface UnitComposition {
   mongodb: MongodbMode;
   /** How the unit runs Redis; a unit without the key runs on the shared server. */
   redis?: RedisMode;
+  /** Whether the unit runs a MariaDB of its own (services declares mariadb). */
+  mariadb?: boolean;
 }
 
 /** A tenant brings no database of its own: its members claim the cluster's shared MongoDB replica set
@@ -241,20 +252,20 @@ export interface UnitComposition {
 export const TENANT_BRINGS: UnitComposition = { app: "member", postgresql: false, mongodb: "shared" };
 
 /** The data parts a unit may run of its own, each with a size and a volume of its own. */
-export const DATA_PART = ["postgresql", "mongodb", "redis"] as const;
+export const DATA_PART = ["postgresql", "mongodb", "redis", "mariadb"] as const;
 export type DataPart = (typeof DATA_PART)[number];
 
 /** Each data part's size, beside the unit's `size` (the application's). The consumers ApplicationSet
  *  reads `dig "sizes" "<part>" .size`, so a part without one runs at the unit's size, and the key is a
  *  map or absent: its dig fails on null or a list, and stops the whole set. */
-export const PartSizesSchema = z.object({ postgresql: UnitSizeSchema.optional(), mongodb: UnitSizeSchema.optional(), redis: UnitSizeSchema.optional() });
+export const PartSizesSchema = z.object({ postgresql: UnitSizeSchema.optional(), mongodb: UnitSizeSchema.optional(), redis: UnitSizeSchema.optional(), mariadb: UnitSizeSchema.optional() });
 export type PartSizes = z.infer<typeof PartSizesSchema>;
 
 /** Each data part's volume, as the quantity its claim was created with — for MongoDB, each member's.
  *  A claim cannot grow on these clusters (microk8s-hostpath expands nothing) and its spec is immutable,
  *  so it is written once and no resize touches it: Set size changes CPU and memory only. */
 const VolumeSchema = z.string().regex(/^[0-9]+[MGT]i$/);
-export const PartVolumesSchema = z.object({ postgresql: VolumeSchema.optional(), mongodb: VolumeSchema.optional(), redis: VolumeSchema.optional() });
+export const PartVolumesSchema = z.object({ postgresql: VolumeSchema.optional(), mongodb: VolumeSchema.optional(), redis: VolumeSchema.optional(), mariadb: VolumeSchema.optional() });
 export type PartVolumes = z.infer<typeof PartVolumesSchema>;
 
 /** The volume a data part is created with, per size. The three old sizes' are the presets' own, which
@@ -265,6 +276,8 @@ export const ONBOARDING_VOLUME: Record<DataPart, Record<UnitSize, string>> = {
   mongodb: { xsmall: "5Gi", small: "10Gi", medium: "40Gi", large: "100Gi", xlarge: "200Gi", xxlarge: "400Gi" },
   // About four times the size's maxmemory: the append-only file, its rewrite and one dump.
   redis: { xsmall: "1Gi", small: "2Gi", medium: "4Gi", large: "8Gi", xlarge: "16Gi", xxlarge: "24Gi" },
+  // The postgresql volumes, the owner's choice for a store of the same weight.
+  mariadb: { xsmall: "2Gi", small: "5Gi", medium: "20Gi", large: "50Gi", xlarge: "100Gi", xxlarge: "200Gi" },
 };
 
 /** The size a component of a unit runs at: a data part its own when it has one, all else the unit's. */
@@ -273,7 +286,7 @@ export const sizeOf = (component: SizeComponent, size: UnitSize, sizes: PartSize
 
 /** The data parts a unit runs of its own. */
 export const dataParts = (brings: UnitComposition): DataPart[] =>
-  DATA_PART.filter((p) => (p === "postgresql" ? brings.postgresql : p === "mongodb" ? MONGODB_MEMBERS[brings.mongodb] > 0 : brings.redis === "standalone"));
+  DATA_PART.filter((p) => ({ postgresql: brings.postgresql, mongodb: MONGODB_MEMBERS[brings.mongodb] > 0, redis: brings.redis === "standalone", mariadb: brings.mariadb === true })[p]);
 
 /** What an onboarding writes beside `size`: every part it runs at that one size, each pinned to that
  *  size's volume. Neither key for a unit with no data part of its own. */

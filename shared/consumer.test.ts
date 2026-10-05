@@ -433,3 +433,19 @@ describe("redis (how a consumer runs Redis) and redisMaxmemoryPolicy", () => {
     expect([issue(build, "redis"), issue(build, "redisMaxmemoryPolicy")].every((m) => m !== undefined && /stage registration/.test(m))).toBe(true);
   });
 });
+
+describe("services: [mariadb] (a MariaDB of the consumer's own)", () => {
+  const manifest = {
+    apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, redis: "shared" as const, name: "acme", owner: "team-acme",
+    envs: ["prod"], chart: { path: "deploy/chart" },
+  } as const;
+
+  it("is a service word of the contract", () => {
+    expect(ConsumerManifestSchema.parse({ ...manifest, services: ["mariadb"], databases: ["shop"] }).services).toEqual(["mariadb"]);
+  });
+
+  it("needs at least one database, the one its claim creates", () => {
+    const r = ConsumerManifestSchema.safeParse({ ...manifest, services: ["mariadb"] });
+    expect(r.error?.issues.find((i) => i.path.join(".") === "databases")?.message).toMatch(/mariadb/);
+  });
+});

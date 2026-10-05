@@ -80,7 +80,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
           // gates its conditional sources on the second. Each data part starts at that size, its
           // volume pinned to the size's: the claim keeps it whatever the part is resized to later.
           size: p.size,
-          ...partSizing(p.size, { postgresql: p.services.includes("postgresql"), mongodb: p.mongodb, redis: p.redis }),
+          ...partSizing(p.size, { postgresql: p.services.includes("postgresql"), mongodb: p.mongodb, redis: p.redis, mariadb: p.services.includes("mariadb") }),
           mongodb: p.mongodb,
           // A Redis of its own, with the policy its server boots with stated as a literal; nothing for
           // the shared server, which an absent key reads as.
@@ -96,6 +96,7 @@ export function writeRegistrationStep(ports: OnboardPorts, p: DeployableOnboardP
             postgresql: p.services.includes("postgresql"),
             mongodb: p.mongodb,
             redis: p.redis,
+            mariadb: p.services.includes("mariadb"),
           }),
           // the ATTEST of the manifest's SMTP entry (G29-checked, plan-frozen): from this commit on
           // the unit is its stage's mail sender

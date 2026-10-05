@@ -31,6 +31,7 @@ const compositionOf = (entry: ConsumerRegistration | undefined): UnitComposition
   postgresql: (entry?.services ?? []).includes("postgresql"),
   mongodb: entry?.mongodb ?? "shared",
   redis: entry?.redis ?? "shared",
+  mariadb: (entry?.services ?? []).includes("mariadb"),
 });
 
 /** What a consumer resize writes beside the quota: the application's size, each data part's — the one

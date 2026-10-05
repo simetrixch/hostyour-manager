@@ -60,6 +60,13 @@ describe("composeQuota", () => {
     }
   });
 
+  it("adds the MariaDB row once for a MariaDB of its own, at its own size", () => {
+    const own = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "shared", mariadb: true }, { mariadb: "medium" });
+    expect(own.parts.map((p) => [p.component, p.members])).toEqual([["base", 1], ["mariadb", 1]]);
+    expect(own.parts.find((p) => p.component === "mariadb")?.each).toEqual(UNIT_SIZE_SEED.mariadb.medium);
+    expect(composeQuota(UNIT_SIZE_SEED, "small", { postgresql: false, mongodb: "shared" }).parts.map((p) => p.component)).toEqual(["base"]);
+  });
+
   it("sums each data part at its OWN size when one is given, the application at the unit's", () => {
     const { quota, parts } = composeQuota(UNIT_SIZE_SEED, "small", { postgresql: true, mongodb: "standalone" }, { postgresql: "large" });
     expect(parts.map((p) => p.each)).toEqual([UNIT_SIZE_SEED.base.small, UNIT_SIZE_SEED.postgresql.large, UNIT_SIZE_SEED.mongodb.small, expect.anything()]);
@@ -115,6 +122,10 @@ describe("the vocabulary", () => {
     });
   });
 
+  it("seeds the mariadb rows as the postgresql rows, figure for figure, its exporter included", () => {
+    expect(UNIT_SIZE_SEED.mariadb).toEqual(UNIT_SIZE_SEED.postgresql);
+  });
+
   it("seeds the redis rows at the owner's figures: the exporter included, one server pod and one exporter pod, one claim", () => {
     const row = (requestsCpu: string, requestsMemory: string, limitsCpu: string, limitsMemory: string) => ({ requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods: 2, persistentVolumeClaims: 1 });
     expect(UNIT_SIZE_SEED.redis).toEqual({
@@ -128,7 +139,7 @@ describe("the vocabulary", () => {
   });
 
   it("seeds a consumer's components at all six sizes, the new ones at the decided figures", () => {
-    for (const c of ["base", "postgresql", "mongodb", "redis"] as const) expect(seededSizes(c)).toEqual([...UNIT_SIZE]);
+    for (const c of ["base", "postgresql", "mongodb", "redis", "mariadb"] as const) expect(seededSizes(c)).toEqual([...UNIT_SIZE]);
     const figures = (c: "base" | "postgresql" | "mongodb") => ["xsmall", "xlarge", "xxlarge"].map((s) => UNIT_SIZE_SEED[c][s as "xsmall"]);
     expect(figures("base")).toEqual([
       { requestsCpu: "200m", requestsMemory: "512Mi", limitsCpu: "750m", limitsMemory: "1Gi", pods: 8, persistentVolumeClaims: 1 },
@@ -148,6 +159,7 @@ describe("the vocabulary", () => {
     expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.mongodb[s])).toEqual(["5Gi", "10Gi", "40Gi", "100Gi", "200Gi", "400Gi"]);
     // About four times the size's maxmemory: room for the append-only file, its rewrite and one dump.
     expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.redis[s])).toEqual(["1Gi", "2Gi", "4Gi", "8Gi", "16Gi", "24Gi"]);
+    expect(UNIT_SIZE.map((s) => ONBOARDING_VOLUME.mariadb[s])).toEqual(["2Gi", "5Gi", "20Gi", "50Gi", "100Gi", "200Gi"]);
   });
 });
 
@@ -156,6 +168,7 @@ describe("partSizing", () => {
     expect(partSizing("xlarge", { postgresql: true, mongodb: "replicaset" })).toEqual({ sizes: { postgresql: "xlarge", mongodb: "xlarge" }, volumes: { postgresql: "100Gi", mongodb: "200Gi" } });
     expect(partSizing("medium", { postgresql: false, mongodb: "standalone" })).toEqual({ sizes: { mongodb: "medium" }, volumes: { mongodb: "40Gi" } });
     expect(partSizing("small", { postgresql: false, mongodb: "shared", redis: "standalone" })).toEqual({ sizes: { redis: "small" }, volumes: { redis: "2Gi" } });
+    expect(partSizing("large", { postgresql: false, mongodb: "shared", mariadb: true })).toEqual({ sizes: { mariadb: "large" }, volumes: { mariadb: "50Gi" } });
   });
 
   it("runs a Redis of its own at its own size, the shared one at none", () => {

@@ -271,7 +271,7 @@ export async function validateOnboard(req: OnboardRequest, target: OnboardTarget
     const brings: UnitComposition | null =
       target.chartPath === undefined
         ? null
-        : { postgresql: manifest.services.includes("postgresql"), mongodb: manifest.mongodb, redis: manifest.redis };
+        : { postgresql: manifest.services.includes("postgresql"), mongodb: manifest.mongodb, redis: manifest.redis, mariadb: manifest.services.includes("mariadb") };
 
     const foreignBuilds = await deps.registrations.listAttestedBuildNames(req.consumerName);
 

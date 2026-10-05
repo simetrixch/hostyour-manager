@@ -5,7 +5,7 @@ import { unitSizeOptions, type UnitSizeOptions } from "../api.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 
 /** A data part as the dialog names it. */
-const PART_NAME: Record<DataPart, string> = { postgresql: "PostgreSQL", mongodb: "MongoDB", redis: "Redis" };
+const PART_NAME: Record<DataPart, string> = { postgresql: "PostgreSQL", mongodb: "MongoDB", redis: "Redis", mariadb: "MariaDB" };
 
 /** Pick a size for one unit — a consumer, or a tenant (whose members each get the chosen ceiling).
  *
@@ -62,6 +62,7 @@ export function SetSizeDialog(props: {
         options.brings.postgresql ? "its own PostgreSQL" : null,
         options.brings.mongodb === "shared" ? "the cluster's shared MongoDB" : `its own MongoDB (${options.brings.mongodb})`,
         options.brings.redis === "standalone" ? "its own Redis" : null,
+        options.brings.mariadb ? "its own MariaDB" : null,
       ].filter((x) => x !== null).join(" and ");
 
   return (
