@@ -18,7 +18,7 @@ import {
   checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord,
   replacementSentence, restoreReplacedRecords, waitForAnswer, MailRecordHash, ReplacedRecord,
 } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, tenantWebsiteHosts, websiteHosts } from "./website-domain.ts";
+import { otherTenantsWebsiteHosts, tenantWebsiteHosts, waitForWebsiteRoot, websiteHosts } from "./website-domain.ts";
 import { resolveWebsiteMember, type WebsiteMemberPorts } from "./website-member.ts";
 
 /** What a failed wait tells the operator to do next. */
@@ -224,10 +224,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         const url = `${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
         const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
-        if (p.carriedWebsites.length) {
-          const site = await waitForAnswer(ctx, ports, `https://${p.ownDomain}/`, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
-          ctx.log("meta", `https://${p.ownDomain}/ answers (${site}) — website ${p.carriedWebsites.map((w) => w.app).join(", ")} is served there`);
-        }
+        if (p.carriedWebsites.length) await waitForWebsiteRoot(ctx, ports, p.ownDomain, OWN_DOMAIN_NEXT);
         // The probe does not follow a redirect, so a redirect host answers with the 3xx itself.
         for (const host of [...p.ownDomainRedirects, ...aliasHosts(p.ownDomainAliases)]) {
           const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400, OWN_DOMAIN_NEXT);
@@ -286,7 +283,11 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       for (const website of onOwnHost) for (const host of websiteHosts(asked.previous, website.aliases)) ownWebsites.delete(host);
       for (const host of aliasHosts(asked.ownDomainAliases)) if (ownWebsites.has(host)) throw errValidation(`${host} is a host a website of tenant ${tc.guid} serves — an alias names another domain`);
       const kept = keepingPrevious(asked);
-      const params = { ...kept, ownDomainAliases: kept.ownDomainAliases.filter((a) => !ownWebsites.has(a)) };
+      // An alias a carried website still holds goes with it to the own domain, the one place a website on
+      // the own host keeps its old names; the website itself holds none there.
+      const carriedAliases = onOwnHost.flatMap((w) => w.aliases ?? []);
+      const ownAliases = kept.ownDomainAliases.filter((a) => !ownWebsites.has(a));
+      const params = { ...kept, ownDomainAliases: [...ownAliases, ...carriedAliases.filter((a) => !ownAliases.includes(a) && a !== kept.ownDomain)] };
       const row = db.select({ suspended: tenants.suspended, status: tenants.status, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no domain to set`);

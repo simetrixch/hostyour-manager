@@ -24,8 +24,8 @@ const OLD = "show.simetrix.ch";
 const NEW = "show.simplidigita.ai";
 const VELO = { name: "veloluck", site: "shop", domain: "veloluck.show.simetrix.ch" };
 
-function at(repo: FakePlatformRepo): TenantRegistrations {
-  const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD }, VELO].map((a) => ({ folder: "web", ...a }))];
+function at(repo: FakePlatformRepo, showAliases: string[] = []): TenantRegistrations {
+  const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD, ...(showAliases.length ? { aliases: showAliases } : {}) }, VELO].map((a) => ({ folder: "web", ...a }))];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE,
     routing: "path", ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`],
@@ -41,15 +41,16 @@ const withDomain = () => new FakeRepoReader({
   files: { [TENANT_MANIFEST_PATH]: MANIFEST_YAML.replace("override: { web: { chart: charts/example-web } }", 'override: { web: { chart: charts/example-web, values: { site: { domain: "{domain}", aliases: "{aliases}" } } } }'), ...APP_OVERLAYS },
 });
 
-function world() {
+function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
   seedWebsiteTenant();
   db.db.update(tenants).set({ ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
   dns.zones = ["simetrix.ch", "simplidigita.ai"];
   const repo = new FakePlatformRepo();
-  const registrations = at(repo);
+  const registrations = at(repo, opts.showAliases);
   const urls = ["https://show.simplidigita.ai/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`];
-  const probe = new FakePublicProbe(Object.fromEntries(urls.map((u) => [u, u.startsWith(`https://${NEW}/`) ? { reachable: true, status: 200, detail: "HTTP 200" } : { reachable: true, status: 301, detail: "HTTP 301" }])));
+  const answer = (status: number) => ({ reachable: true, status, detail: `HTTP ${status}` });
+  const probe = new FakePublicProbe(Object.fromEntries(urls.map((u) => [u, u === `https://${NEW}/` ? answer(opts.siteRoot ?? 200) : u.startsWith(`https://${NEW}/`) ? answer(200) : answer(301)])));
   const def = makeTenantSetOwnDomainDef(ports({ registrations, dns, probe, repo: withDomain() }, WEBSITE_APPS));
   return { repo, registrations, probe, def };
 }
@@ -97,5 +98,20 @@ describe("an own-domain move with a website on the own host", () => {
     await retire.run(ctx(params(), retire.name, []));
     expect(probe.probed).toEqual(expect.arrayContaining([`https://${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`]));
     expect(probe.probed.indexOf(`https://${NEW}/`)).toBeGreaterThan(-1);
+  });
+
+  it("takes a website root that answers with a language redirect as served, as the website run does", async () => {
+    const { def } = world({ siteRoot: 302 });
+    const planned = await def.planStream!(MOVE, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    const retire = def.steps(planned.params).find((s) => s.name === "retire-previous-own-domain")!;
+    await expect(retire.run(ctx(params(), retire.name, []))).resolves.toBeUndefined();
+  });
+
+  it("hands an alias a carried website still holds to the own domain, which serves its redirect", async () => {
+    const { def } = world({ showAliases: ["old.show.simetrix.ch"] });
+    const planned = await def.planStream!(MOVE, planCtx());
+    if (planned.outcome !== "planned") throw new Error(planned.summary);
+    expect(planned.params.ownDomainAliases).toEqual([OLD, "old.show.simetrix.ch"]);
   });
 });
