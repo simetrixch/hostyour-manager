@@ -34,7 +34,7 @@ describe("CONSUMER_RUN_KINDS", () => {
 
 describe("TENANT_RUN_KINDS", () => {
   it("is exactly the tenant lifecycle kinds (create + add/remove-app + the apps repository + suspend/resume/offboard + purge + backup/restore/migrate + the nightly backup + the administrator check)", () => {
-    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-line-move", "tenant-migrate", "tenant-nightly-backup", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-demo", "tenant-set-display-name", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-set-website-site", "tenant-suspend"]);
+    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-delete-app-record", "tenant-line-move", "tenant-migrate", "tenant-nightly-backup", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-demo", "tenant-set-display-name", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-set-website-site", "tenant-suspend"]);
   });
 
   it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {
@@ -48,7 +48,7 @@ describe("TENANT_RUN_KINDS", () => {
   });
 
   it("keeps every tenant lifecycle run kind", () => {
-    for (const k of ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-suspend", "tenant-resume", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-offboard", "tenant-purge", "tenant-backup", "tenant-restore", "tenant-migrate"] as const) {
+    for (const k of ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-delete-app-record", "tenant-suspend", "tenant-resume", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-offboard", "tenant-purge", "tenant-backup", "tenant-restore", "tenant-migrate"] as const) {
       expect(TENANT_RUN_KINDS.has(k)).toBe(true);
     }
   });

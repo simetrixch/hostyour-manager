@@ -335,4 +335,8 @@ export interface VaultSeeder {
    *  under it, so the key of an app this manager no longer knows goes too. Answers what it removed,
    *  each as <kind>/<app>. */
   deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }>;
+  /** The keys one tenant app still has, of every kind, each as <kind>/<app>, found by listing the key
+   *  names under the tenant: names, never a value. A deletion of an offboarded app's record asks it,
+   *  because a key standing means something of the app is not gone. */
+  listTenantAppKeys(input: TenantCryptoDeleteInput & { app: string }): Promise<string[]>;
 }

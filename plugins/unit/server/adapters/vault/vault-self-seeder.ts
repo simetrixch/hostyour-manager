@@ -314,6 +314,24 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
+  async listTenantAppKeys(input: TenantCryptoDeleteInput & { app: string }): Promise<string[]> {
+    const { addr, token } = await this.login();
+    try {
+      const found: string[] = [];
+      for (const kind of TENANT_APP_KEY_KINDS) {
+        const folder = `${input.stage}/tenants/${input.guid}/${kind}`;
+        const listed = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}?list=true`, { headers: { "x-vault-token": token } });
+        if (listed.status === 404) continue;
+        if (!listed.ok) throw new VaultError(`vault tenant app key list failed for ${KV_MOUNT}/${folder} (${listed.status})`, listed.status);
+        const keys = ((await listed.json()) as { data?: { keys?: string[] } }).data?.keys ?? [];
+        if (keys.includes(input.app)) found.push(`${kind}/${input.app}`);
+      }
+      return found;
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
   /** The Manager's OWN kubernetes-auth login against ITS Vault — the identity of every write
    *  here. Fail-closed when the Manager carries no Vault login. */
   private async login(): Promise<{ addr: string; token: string }> {

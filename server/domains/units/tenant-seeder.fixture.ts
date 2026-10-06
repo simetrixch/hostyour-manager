@@ -20,6 +20,7 @@ export function fakeTenantSeeder(): VaultSeeder {
     deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
     seedTenantCrypto: async () => ({ created: true }),
     seedTenantAppKey: async () => ({ created: true }),
+    listTenantAppKeys: async () => [],
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
   };

@@ -32,7 +32,7 @@ import { clusterMapPath } from "../../../shared/cluster-values.ts";
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
-const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedMariadb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
+const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedMariadb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {} };
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
@@ -234,6 +234,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
   async deleteMariadb(): Promise<void> {}
       async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
       async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
+      async listTenantAppKeys(): Promise<string[]> { return []; }
       async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
       async deleteTenantCrypto(): Promise<void> {}
     }

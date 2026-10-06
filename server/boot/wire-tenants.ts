@@ -59,6 +59,7 @@ import { makeTenantSetDisplayNameDef } from "../domains/units/tenant-display-nam
 import { makeTenantSetDemoDef } from "../domains/units/tenant-demo.run.ts";
 import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
+import { makeDeleteAppRecordDef } from "../domains/units/tenant-delete-app-record.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
 import { makeTenantPurgeDef } from "../domains/units/tenant-purge.run.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
@@ -373,6 +374,7 @@ export function buildTenantOnboarding(
     // create-tenant does.
     makeTenantAppsRepoDef(onboardPorts),
     makeRemoveAppDef(lifecyclePorts),
+    makeDeleteAppRecordDef(lifecyclePorts),
     makeSuspendTenantDef(lifecyclePorts),
     makeResumeTenantDef(lifecyclePorts),
     // The tenant twin of the consumer restart run kind: same act, walked over the tenant's member
