@@ -12,7 +12,7 @@ const claim = (over: Partial<SharedDataClaim> = {}): SharedDataClaim => ({ servi
 function books(standing: { name: string; stage: Stage; claim: SharedDataClaim; cluster?: string }[]) {
   return {
     async listConsumerRegistrations(cluster: string, stage: Stage) {
-      return { registrations: standing.filter((s) => s.stage === stage && (s.cluster ?? "s1") === cluster).map((s) => ({ name: s.name, entry: s.claim as unknown as ConsumerStageRegistration })) };
+      return { registrations: standing.filter((s) => s.stage === stage && (s.cluster ?? "s1") === cluster).map((s) => ({ name: s.name, entry: s.claim as unknown as ConsumerStageRegistration })), skipped: [] };
     },
   };
 }
@@ -36,6 +36,21 @@ describe("sharedDataRefusal", () => {
     const redis = (keyPatterns: string[]): SharedDataClaim => ({ services: ["redis"], databases: [], mongodb: "shared", redis: "shared", keyPatterns });
     expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: redis(["shop:*"]) }]), "s1", "test", "shop", redis(["shop:*"])))
       .toMatch(/shop at test would be granted the Redis keys shop:\* on s1's shared Redis, which meet the keys shop:\* of shop at prod/);
+  });
+
+  it("PLANTED: refuses meeting channel patterns on the shared Redis, where no key pattern meets", async () => {
+    const channels = (channelPatterns: string[]): SharedDataClaim => ({ services: ["redis"], databases: [], mongodb: "shared", redis: "shared", keyPatterns: [], channelPatterns });
+    expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: channels(["notify:*"]) }]), "s1", "prod", "blog", channels(["notify:*"])))
+      .toMatch(/blog at prod would be granted the Redis channels notify:\* on s1's shared Redis, which meet the channels notify:\* of shop at prod — the two would receive one another's messages/);
+    expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: channels(["shop:*"]) }]), "s1", "prod", "blog", channels(["blog:*"]))).toBeNull();
+  });
+
+  it("PLANTED: refuses while a registration file of the cluster's books cannot be read", async () => {
+    const unread = { async listConsumerRegistrations(_cluster: string, stage: Stage) {
+      return { registrations: [], skipped: stage === "dev" ? [{ reason: "registrations/shop/dev.yaml failed its schema: cluster missing" }] : [] };
+    } };
+    expect(await sharedDataRefusal(unread, "s1", "test", "digita-post", claim()))
+      .toMatch(/digita-post at test cannot be checked against the data of the registrations on s1: registrations\/shop\/dev.yaml failed its schema/);
   });
 
   it("admits the same consumer's TEST beside its PROD: their served names differ by the stage", async () => {
