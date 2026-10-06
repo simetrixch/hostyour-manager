@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { isDeepStrictEqual } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { DbHandle } from "../../db/client.ts";
@@ -228,16 +229,20 @@ describe("the restore re-commits the unit's Redis mode", () => {
  *  `leaving`), and `builds`, which belongs in build.yaml and never in a stage registration. */
 const LEFT_BEHIND = ["removing", "leaving", "builds"];
 
-/** The schema keys a restored registration does not carry, other than those left behind on purpose. */
-const unpassed = (keys: readonly string[], restored: Readonly<Record<string, unknown>>): string[] =>
-  keys.filter((k) => !LEFT_BEHIND.includes(k) && restored[k] === undefined);
+/** The schema keys whose restored value is not the dumped one, other than those left behind on purpose
+ *  and those the restore `sets` on purpose. Compared by value, not by presence: a key the schema
+ *  defaults, or the restore fills with a fallback, is always present, so only its value can show it
+ *  was dropped. */
+const differing = (keys: readonly string[], dumped: Readonly<Record<string, unknown>>, restored: Readonly<Record<string, unknown>>, sets: Readonly<Record<string, unknown>> = {}): string[] =>
+  keys.filter((k) => !LEFT_BEHIND.includes(k) && !isDeepStrictEqual(restored[k], k in sets ? sets[k] : dumped[k]));
 
 describe("the restore carries every field of the registration", () => {
-  it("PLANTED: a key of the schema that the restored registration does not carry is named", () => {
-    expect(unpassed(["name", "removing", "planted"], { name: "acme" })).toEqual(["planted"]);
+  it("PLANTED: a key whose restored value is missing, or is a default instead of the dumped value, is named", () => {
+    const dumped = { name: "acme", removing: true, suspended: true, planted: "x", cluster: "s1" };
+    expect(differing(Object.keys(dumped), dumped, { name: "acme", suspended: false, cluster: "s2" }, { cluster: "s2" })).toEqual(["suspended", "planted"]);
   });
 
-  it("every key of the registration schema is carried by the restore or left behind on purpose", async () => {
+  it("every key of the registration schema comes back with its dumped value, but what the restore sets or leaves behind on purpose", async () => {
     seedClusters(db);
     seedConsumerRow(db);
     // Two installations: the one the dump was taken on, and the one restored into, whose books hold no
@@ -254,12 +259,14 @@ describe("the restore carries every field of the registration", () => {
     };
     const ports = booksWithMaps();
     await ports.registrations.commitRegistration({
+      // Every value is off its default and off the restore's fallback, so a field the restore drops
+      // or replaces cannot come back looking the same.
       unit: { name: CONSUMER, repoURL: `https://github.com/x/${CONSUMER}.git`, owner: "platform", onboardedAt: "2026-10-06T00:00:00Z", suspended: true, quiesced: false },
       builds: [],
       deploy: {
-        stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: SOURCE.cluster, databases: ["acme_db"], keyPatterns: ["acme:*"], channelPatterns: [],
-        services: ["mongodb", "redis", "postgresql"], size: "small", mongodb: "shared", redis: "standalone", redisMaxmemoryPolicy: "noeviction",
-        sizes: { postgresql: "medium" }, volumes: { postgresql: "20Gi" }, quota: seedQuota("small"), fqdn: "acme.example.org",
+        stage: "prod", host: "shop", chartPath: "deploy/chart", cluster: SOURCE.cluster, databases: ["acme_db"], keyPatterns: ["acme:*"], channelPatterns: ["acme.events"],
+        services: ["mongodb", "redis", "postgresql"], size: "medium", mongodb: "standalone", redis: "standalone", redisMaxmemoryPolicy: "allkeys-lru",
+        sizes: { postgresql: "large" }, volumes: { postgresql: "20Gi" }, quota: seedQuota("medium"), fqdn: "acme.example.org",
         smtpEntry: { service: "acme-mta", port: 2525 },
       },
       runId: "run_onb",
@@ -267,11 +274,13 @@ describe("the restore carries every field of the registration", () => {
     const keys = Object.keys(ConsumerRegistrationSchema.shape);
     const dumped = (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
     // The dump itself must carry every key, or the census below proves nothing.
-    expect(unpassed(keys, dumped)).toEqual([]);
+    expect(keys.filter((k) => !LEFT_BEHIND.includes(k) && dumped[k as keyof typeof dumped] === undefined)).toEqual([]);
     const restoredInto = booksWithMaps();
     const ctx = stepCtx(db, "restore", {}, []);
     await (await consumerWorld(restoredInto, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET);
-    expect(unpassed(keys, (await restoredInto.registrations.readRegistration("prod", CONSUMER))!.entry)).toEqual([]);
+    const restored = (await restoredInto.registrations.readRegistration("prod", CONSUMER))!.entry;
+    // The restore lands the unit on the target cluster, closed until its data is back.
+    expect(differing(keys, dumped, restored, { cluster: TARGET.cluster, quiesced: true })).toEqual([]);
   });
 });
 
