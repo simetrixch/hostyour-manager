@@ -9,6 +9,10 @@ import { makeMigrateDef } from "./migrate.run.ts";
 import { repointStep } from "#unit/server/relocation-migrate.ts";
 import { consumerWorld } from "./relocation-world-consumer.ts";
 import { consumerRestoreJobs } from "./relocation-jobs-consumer.ts";
+import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
+import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { SLAVE_FQDN, SLAVE_MARKING_YAML } from "../runs/cluster-maps.fixture.ts";
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedConsumerRegistration, makeFakes, consumerPorts, stepCtx, CONSUMER, SOURCE, TARGET,
 } from "./relocation.fixture.ts";
@@ -217,6 +221,57 @@ describe("the restore re-commits the unit's Redis mode", () => {
   it("a restored shared-Redis unit stays without either field", async () => {
     const back = await restoredRedis({});
     expect([back.cluster, back.redis, back.redisMaxmemoryPolicy]).toEqual([TARGET.cluster, undefined, undefined]);
+  });
+});
+
+/** What the restore leaves behind ON PURPOSE: the run states of the unit's departure (`removing`,
+ *  `leaving`), and `builds`, which belongs in build.yaml and never in a stage registration. */
+const LEFT_BEHIND = ["removing", "leaving", "builds"];
+
+/** The schema keys a restored registration does not carry, other than those left behind on purpose. */
+const unpassed = (keys: readonly string[], restored: Readonly<Record<string, unknown>>): string[] =>
+  keys.filter((k) => !LEFT_BEHIND.includes(k) && restored[k] === undefined);
+
+describe("the restore carries every field of the registration", () => {
+  it("PLANTED: a key of the schema that the restored registration does not carry is named", () => {
+    expect(unpassed(["name", "removing", "planted"], { name: "acme" })).toEqual(["planted"]);
+  });
+
+  it("every key of the registration schema is carried by the restore or left behind on purpose", async () => {
+    seedClusters(db);
+    seedConsumerRow(db);
+    // Two installations: the one the dump was taken on, and the one restored into, whose books hold no
+    // registration of the unit, as after an offboard. Restoring into the same books would let
+    // commitRegistration keep a field from the file already standing and hide a field left out.
+    const booksWithMaps = () => {
+      const f = makeFakes();
+      // The mail sender's relay target follows it onto each cluster's tailnet address, read off its map.
+      for (const [c, address] of [[SOURCE, "100.64.0.11"], [TARGET, "100.64.0.12"]] as const) {
+        f.platformRepo.seed(f.platformRepo.booksBranch, clusterMapPath(c.domain), SLAVE_MARKING_YAML.replace(`domain: ${SLAVE_FQDN}`, `domain: ${c.domain}`)
+          .replace("clusterName: s1", `clusterName: ${c.cluster}`).replace("apiHost: 100.64.0.11", `apiHost: ${address}`));
+      }
+      return consumerPorts(f);
+    };
+    const ports = booksWithMaps();
+    await ports.registrations.commitRegistration({
+      unit: { name: CONSUMER, repoURL: `https://github.com/x/${CONSUMER}.git`, owner: "platform", onboardedAt: "2026-10-06T00:00:00Z", suspended: true, quiesced: false },
+      builds: [],
+      deploy: {
+        stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: SOURCE.cluster, databases: ["acme_db"], keyPatterns: ["acme:*"], channelPatterns: [],
+        services: ["mongodb", "redis", "postgresql"], size: "small", mongodb: "shared", redis: "standalone", redisMaxmemoryPolicy: "noeviction",
+        sizes: { postgresql: "medium" }, volumes: { postgresql: "20Gi" }, quota: seedQuota("small"), fqdn: "acme.example.org",
+        smtpEntry: { service: "acme-mta", port: 2525 },
+      },
+      runId: "run_onb",
+    });
+    const keys = Object.keys(ConsumerRegistrationSchema.shape);
+    const dumped = (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
+    // The dump itself must carry every key, or the census below proves nothing.
+    expect(unpassed(keys, dumped)).toEqual([]);
+    const restoredInto = booksWithMaps();
+    const ctx = stepCtx(db, "restore", {}, []);
+    await (await consumerWorld(restoredInto, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET);
+    expect(unpassed(keys, (await restoredInto.registrations.readRegistration("prod", CONSUMER))!.entry)).toEqual([]);
   });
 });
 
