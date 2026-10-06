@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { parseDocument } from "yaml";
 import { mergeAppsManifest, readTemplateTree } from "./tenant-apps-tree.ts";
 
 // A tenant's apps repository carries the apps it chose and the sites it serves, and no other: the tree
@@ -96,5 +97,47 @@ describe("mergeAppsManifest — the sites an entry lists", () => {
 
   it("PLANTED INNOCENT: an entry the run names no sites for keeps the template's list, as before", () => {
     expect(sitesOf(mergeAppsManifest(TEMPLATE_APPS, null, ["web"]).content, "web")).toEqual(["digitaplatform", "simetrix", "show"]);
+  });
+});
+
+// An app's entry names its industry, whose labels stand once in the file's `industries`; the tenant's
+// catalog build refuses an app whose industry the file does not label.
+describe("mergeAppsManifest — the industries an added app names", () => {
+  const TEMPLATE_LISTED = [
+    "industries:",
+    "  bike-workshops: { de: Velowerkstätten, en: Bike workshops }",
+    "  bakeries: { de: Bäckereien, en: Bakeries }",
+    "apps:",
+    "  - name: workshop",
+    "    industry: bike-workshops",
+    "  - name: bakery",
+    "    industry: bakeries",
+    "  - name: web",
+    "",
+  ].join("\n");
+  const industriesOf = (content: string) => (parseDocument(content).toJSON() as { industries?: Record<string, Record<string, string>> }).industries;
+
+  it("PLANTED DEFECT: brings the labels of an added app's industry the copy lacks, and no other", () => {
+    const current = "industries:\n  bike-workshops: { de: Velowerkstätten, en: Bike workshops }\napps:\n  - name: workshop\n    industry: bike-workshops\n";
+    const { content, added } = mergeAppsManifest(TEMPLATE_LISTED, current, ["workshop", "bakery"]);
+    expect(added).toEqual(["bakery"]);
+    expect(industriesOf(content)).toEqual({ "bike-workshops": { de: "Velowerkstätten", en: "Bike workshops" }, bakeries: { de: "Bäckereien", en: "Bakeries" } });
+  });
+
+  it("keeps the labels the copy gives an industry it already lists", () => {
+    const current = "industries:\n  bakeries: { de: Backstuben, en: Bakeries }\napps:\n  - name: workshop\n    industry: bike-workshops\n";
+    expect(industriesOf(mergeAppsManifest(TEMPLATE_LISTED, current, ["bakery"]).content)?.bakeries).toEqual({ de: "Backstuben", en: "Bakeries" });
+  });
+
+  it("gives a copy without industries the map with the added app's industry", () => {
+    const current = "apps:\n  - name: web\n";
+    expect(industriesOf(mergeAppsManifest(TEMPLATE_LISTED, current, ["bakery"]).content)).toEqual({ bakeries: { de: "Bäckereien", en: "Bakeries" } });
+  });
+
+  it("PLANTED INNOCENT: an added app without an industry, or one the template does not label, brings none", () => {
+    const current = "apps:\n  - name: workshop\n";
+    expect(industriesOf(mergeAppsManifest(TEMPLATE_LISTED, current, ["web"]).content)).toBeUndefined();
+    const unlabelled = TEMPLATE_LISTED.replace("    industry: bakeries", "    industry: cafes");
+    expect(industriesOf(mergeAppsManifest(unlabelled, current, ["bakery"]).content)).toBeUndefined();
   });
 });
