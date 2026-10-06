@@ -196,3 +196,27 @@ describe("moving or restoring onto a cluster where another registration holds th
     await expect(makeMigrateDef(ports).plan({ appId: "app_1", targetClusterId: TARGET.clusterId }, { db: db.db })).resolves.toMatchObject({ kind: "consumer-migrate" });
   });
 });
+
+describe("the restore re-commits the unit's Redis mode", () => {
+  async function restoredRedis(over: { redis?: "standalone" }) {
+    seedClusters(db);
+    seedConsumerRow(db);
+    const ports = consumerPorts(makeFakes());
+    await seedConsumerRegistration(ports.registrations, { services: ["redis"], databases: [], ...over });
+    const dumped = (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
+    const ctx = stepCtx(db, "restore", {}, []);
+    await (await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET);
+    return (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
+  }
+
+  it("PLANTED: a restored own-Redis unit keeps redis: standalone and its maxmemory policy", async () => {
+    const back = await restoredRedis({ redis: "standalone" });
+    expect([back.cluster, back.redis, back.redisMaxmemoryPolicy]).toEqual([TARGET.cluster, "standalone", "noeviction"]);
+  });
+
+  it("a restored shared-Redis unit stays without either field", async () => {
+    const back = await restoredRedis({});
+    expect([back.cluster, back.redis, back.redisMaxmemoryPolicy]).toEqual([TARGET.cluster, undefined, undefined]);
+  });
+});
+

@@ -279,6 +279,10 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
                     // The size travels with the unit: a move must land it on the instance it ran on,
                     // not on whatever the default happens to be at the destination.
                     size: entry.size ?? "small", mongodb: entry.mongodb ?? "shared",
+                    // The Redis mode travels the same way: dropped here, an own-Redis unit would come
+                    // back on the shared server, and the restore of its own snapshot would be skipped.
+                    ...(entry.redis !== undefined ? { redis: entry.redis } : {}),
+                    ...(entry.redisMaxmemoryPolicy !== undefined ? { redisMaxmemoryPolicy: entry.redisMaxmemoryPolicy } : {}),
                     // Each data part's size and volume pin travel the same way: the claims the
                     // restore creates must be the size the dump came from.
                     ...(entry.sizes !== undefined ? { sizes: entry.sizes } : {}),
