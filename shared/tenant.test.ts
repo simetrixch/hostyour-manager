@@ -458,6 +458,10 @@ describe("tenantDisplayName", () => {
     }
   });
 
+  it("stores a name typed decomposed in its composed form", () => {
+    expect(tenantDisplayName.parse("Mu\u0308ller")).toBe("Müller");
+  });
+
   it("defaults a registration written before the field existed to the empty name", () => {
     const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.displayName).toBe("");

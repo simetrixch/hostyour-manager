@@ -256,8 +256,10 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  `(`, `)`, `@`, `<`, `>` or `\`; no leading or trailing space, at most 64 characters. "" names no one. */
 export const tenantDisplayName = z
   .string()
-  .max(64, "at most 64 characters")
-  .regex(/^(?:[\p{L}\p{N}.&'-](?:[\p{L}\p{N} .&'-]*[\p{L}\p{N}.&'-])?)?$/u, "letters, digits, spaces and . - & ' only, with no space at either end");
+  // A name typed decomposed (macOS writes "ü" as u + U+0308) is stored composed, the form the rule reads.
+  .transform((name) => name.normalize("NFC"))
+  .pipe(z.string().max(64, "at most 64 characters")
+  .regex(/^(?:[\p{L}\p{N}.&'-](?:[\p{L}\p{N} .&'-]*[\p{L}\p{N}.&'-])?)?$/u, "letters, digits, spaces and . - & ' only, with no space at either end"));
 
 export const TenantRegistrationSchema = z
   .object({

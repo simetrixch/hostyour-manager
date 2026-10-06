@@ -693,7 +693,6 @@ export const migrateTenant = (tenant: Pick<TenantView, "id" | "stage" | "cluster
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
 
-
 export const setTenantDemo = (tenantId: string, demo: boolean): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/demo`, { demo });
 

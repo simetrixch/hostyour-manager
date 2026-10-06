@@ -7,7 +7,7 @@ import { SetDisplayNameAction } from "./SetDisplayNameAction.tsx";
 
 /** The tenant's domain actions, beside each other on its page: the domain it is SERVED at (its own
  *  domain, offered on a path-routed tenant), the domain its mail is SENT as, and the name it is shown
- *  under in that mail. Both only plan a run;
+ *  under in that mail. Each only plans a run;
  *  `act` is the page's hand-off to the Run screen. */
 export function TenantDomainActions(props: { t: TenantDetailView; busy: boolean; act: (fn: () => Promise<{ runId: string }>) => Promise<void> }): ReactNode {
   const { t, busy, act } = props;

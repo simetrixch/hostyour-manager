@@ -51,7 +51,7 @@ describe("tenant-set-display-name through the Executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { displayName?: string; renders?: string; suspended?: boolean } = {}) {
+  async function make(opts: { displayName?: string; renders?: string; suspended?: boolean; status?: "provisioning" | "active" | "offboarded" | "purged" } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-displayname-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
@@ -62,7 +62,7 @@ describe("tenant-set-display-name through the Executor", () => {
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod",
-      members: MEMBERS, identityProvider: "auth", displayName, suspended: opts.suspended ?? false, status: "active",
+      members: MEMBERS, identityProvider: "auth", displayName, suspended: opts.suspended ?? false, status: opts.status ?? "active",
     }).run();
     await reg.commitTenant({
       stage: "prod", guid: GUID, runId: "run_crt",
@@ -86,7 +86,7 @@ describe("tenant-set-display-name through the Executor", () => {
     });
     const row = () => db.db.select({ n: tenants.displayName }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.n;
     const registered = async () => (await reg.readTenant("prod", GUID))?.entry.displayName;
-    return { db, executor, row, registered };
+    return { db, executor, reg, row, registered };
   }
 
   async function set(h: Awaited<ReturnType<typeof make>>, displayName: string, previous = ""): Promise<string> {
@@ -129,6 +129,38 @@ describe("tenant-set-display-name through the Executor", () => {
     for (const name of ["A, B", "A <b>", 'A "B"', "x".repeat(65)]) {
       await expect(h.executor.plan("tenant-set-display-name", { tenantId: "tnt_1", displayName: name, previous: "" })).rejects.toThrow(/displayName/);
     }
+  });
+
+  it("PLANTED: an abort leaves a name another writer set since, on the registration and the row", async () => {
+    // This run fails at its wait and stands with its name written.
+    const h = await make({ renders: "" });
+    const runId = await set(h, NAME);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    // Another writer names the tenant since.
+    await h.reg.setDisplayName("prod", GUID, "Other", "run_other");
+    h.db.db.update(tenants).set({ displayName: "Other" }).where(eq(tenants.id, "tnt_1")).run();
+    await h.executor.abortWithCleanup(runId);
+    await h.executor.settle(runId);
+    expect(h.row()).toBe("Other");
+    expect(await h.registered()).toBe("Other");
+  });
+
+  it("PLANTED: the write step refuses a row that carries neither the planned previous name nor the new one", async () => {
+    const h = await make({ renders: NAME });
+    const { runId } = await h.executor.plan("tenant-set-display-name", { tenantId: "tnt_1", displayName: NAME, previous: "" });
+    h.db.db.update(tenants).set({ displayName: "Other" }).where(eq(tenants.id, "tnt_1")).run();
+    await h.executor.approve(runId);
+    await h.executor.settle(runId);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect(h.row()).toBe("Other");
+    expect(await h.registered()).toBe("");
+  });
+
+  it("refuses a tenant still provisioning, and one offboarded or purged", async () => {
+    const plan = (h: Awaited<ReturnType<typeof make>>) => h.executor.plan("tenant-set-display-name", { tenantId: "tnt_1", displayName: NAME, previous: "" });
+    await expect(plan(await make({ status: "provisioning" }))).rejects.toThrow(/still provisioning/);
+    await expect(plan(await make({ status: "offboarded" }))).rejects.toThrow(/is offboarded/);
+    await expect(plan(await make({ status: "purged" }))).rejects.toThrow(/is purged/);
   });
 
   it("refuses a request whose previous name moved, and a suspended tenant", async () => {
