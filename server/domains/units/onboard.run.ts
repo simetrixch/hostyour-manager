@@ -49,6 +49,7 @@ import { resolveMasterCluster } from "../inventory/read.ts";
 import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
+import { sharedDataRefusal } from "./shared-data-guard.ts";
 
 // The "consumer-onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
 // knows TWO forms of ONE step chain, and BOTH take the unit's STAGE as an input, held against the
@@ -517,6 +518,13 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       }
       const mismatch = formMismatch(outcome, true, req.consumerName);
       if (mismatch) return mismatch;
+      // No two registrations on one cluster share a database or keys on its shared servers: one stage
+      // would read, and act on, another's data (shared-data-guard.ts).
+      const manifest = outcome.report.manifest;
+      const sharing = manifest
+        ? await sharedDataRefusal(ports.registrations, r.cluster, r.target.stage, req.consumerName, manifest)
+        : null;
+      if (sharing) return { outcome: "rejected", summary: `Onboarding "${req.consumerName}" was rejected — ${sharing}`, planJson: outcome.report };
       // The step needs the FULL specs (a `generate` key is minted at seed, never operator-supplied),
       // while requiredSecrets — what approve() demands from the operator — carries ONLY the
       // required non-generate keys. Specs hold key/required/generate, never a secret value, so
