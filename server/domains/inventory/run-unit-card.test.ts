@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { DbHandle } from "../../db/client.ts";
 import { runUnitCard } from "./run-unit-card.ts";
-import { openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, CONSUMER, GUID, SUBDOMAIN } from "./relocation.fixture.ts";
+import { openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, CONSUMER, GUID, SUBDOMAIN } from "../units/relocation.fixture.ts";
 
 let db: DbHandle;
 beforeEach(() => { db = openFixtureDb(); });
@@ -13,10 +13,10 @@ describe("runUnitCard", () => {
     expect(runUnitCard(db.db, { targetKind: "app", targetId: "app_1" })).toEqual({ page: "consumers", key: CONSUMER, label: CONSUMER, stage: "test" });
   });
 
-  it("a run on a tenant stage names the tenant's card by its guid, labelled by its subdomain", () => {
+  it("PLANTED: a run on a tenant's TEST stage names the tenant's card at TEST, by its guid, labelled by its subdomain", () => {
     seedClusters(db);
-    seedTenantRows(db);
-    expect(runUnitCard(db.db, { targetKind: "tenant", targetId: "tnt_1" })).toEqual({ page: "tenants", key: GUID, label: SUBDOMAIN, stage: "prod" });
+    seedTenantRows(db, "active", "test");
+    expect(runUnitCard(db.db, { targetKind: "tenant", targetId: "tnt_1" })).toEqual({ page: "tenants", key: GUID, label: SUBDOMAIN, stage: "test" });
   });
 
   it("a run on anything else, or on a unit whose row is gone, has no card", () => {

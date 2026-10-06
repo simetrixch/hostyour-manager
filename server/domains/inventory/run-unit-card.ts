@@ -1,13 +1,9 @@
 // The card a run's unit stands on, for the run page's way back: the Consumers or the Tenants page,
 // opened on the stage the run acted on. The executor knows no domain, so the run's target is resolved
-// to its unit here.
-import type { Hono } from "hono";
+// to its unit here; the runs API serves it (GET /api/runs/:id/unit-card).
 import { eq } from "drizzle-orm";
-import type { AppEnv } from "../../http/app-env.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, tenants } from "../../db/schema/inventory.ts";
-import { getRun } from "../../executor/read.ts";
-import { errNotFound } from "../../kernel/errors.ts";
 import type { RunUnitCardView } from "../../../shared/api-types.ts";
 
 /** The card of the unit a run acts on, or null: a run on a consumer or a tenant stage names it by its
@@ -22,13 +18,4 @@ export function runUnitCard(db: Db, run: { targetKind: string; targetId: string 
     return t ? { page: "tenants", key: t.guid, label: t.subdomain, stage: t.stage } : null;
   }
   return null;
-}
-
-export function registerRunUnitCardRoute(app: Hono<AppEnv>, db: Db): void {
-  app.get("/api/runs/:runId/unit-card", (c) => {
-    const runId = c.req.param("runId");
-    const run = getRun(db, runId);
-    if (!run) throw errNotFound(`run ${runId}`);
-    return c.json(runUnitCard(db, run));
-  });
 }

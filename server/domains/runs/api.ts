@@ -9,6 +9,7 @@ import { listRuns, getRun, readEvents } from "../../executor/read.ts";
 import { isTerminalRun } from "../../executor/transitions.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import type { RunEventView } from "../../../shared/api-types.ts";
+import { runUnitCard } from "../inventory/run-unit-card.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 export interface RunApiDeps {
@@ -46,6 +47,13 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
     const run = getRun(db, c.req.param("id"));
     if (!run) throw errNotFound(`run ${c.req.param("id")}`);
     return c.json(run);
+  });
+
+  // The card of the unit a run acts on, for the run page's way back to it on the run's stage.
+  app.get("/api/runs/:id/unit-card", (c) => {
+    const run = getRun(db, c.req.param("id"));
+    if (!run) throw errNotFound(`run ${c.req.param("id")}`);
+    return c.json(runUnitCard(db, run));
   });
 
   app.get("/api/runs/:id/events", (c) => {

@@ -950,6 +950,15 @@ export interface RunTenantRowView {
  *  skipped. Back when the browser kept its own copy of this union it did not even learn of "not-deployed":
  *  the unknown state fell into the last arm, that arm read `row` off a state that carries none, and the
  *  TypeError unmounted the whole Run screen. */
+export type RunTenantStateView =
+  | { state: "none"; reason: string }
+  | { state: "not-deployed"; target: PurgeTenantTarget }
+  | { state: "orphan"; target: PurgeTenantTarget }
+  | { state: "unfinished"; target: PurgeTenantTarget; row: RunTenantRowView }
+  | { state: "live"; target: PurgeTenantTarget; row: RunTenantRowView }
+  | { state: "offboarded"; target: PurgeTenantTarget; row: RunTenantRowView }
+  | { state: "purged"; target: PurgeTenantTarget; row: RunTenantRowView };
+
 /** The card of the unit a run acts on, which the run page links back to: the Consumers or the Tenants
  *  page, opened on the stage the run acted on (the page's `env.<key>` parameter). `key` is what the page
  *  groups a unit's stages by — a consumer's name, a tenant's guid; `label` is what its card shows. */
@@ -959,12 +968,3 @@ export interface RunUnitCardView {
   label: string;
   stage: Stage;
 }
-
-export type RunTenantStateView =
-  | { state: "none"; reason: string }
-  | { state: "not-deployed"; target: PurgeTenantTarget }
-  | { state: "orphan"; target: PurgeTenantTarget }
-  | { state: "unfinished"; target: PurgeTenantTarget; row: RunTenantRowView }
-  | { state: "live"; target: PurgeTenantTarget; row: RunTenantRowView }
-  | { state: "offboarded"; target: PurgeTenantTarget; row: RunTenantRowView }
-  | { state: "purged"; target: PurgeTenantTarget; row: RunTenantRowView };

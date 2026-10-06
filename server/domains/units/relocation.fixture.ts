@@ -65,8 +65,8 @@ export function seedConsumerRow(db: DbHandle, status: AppStatus = "active", stag
   db.db.insert(apps).values({ id: "app_1", clusterId: SOURCE.clusterId, name: CONSUMER, stage, host: CONSUMER, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status }).run();
 }
 
-export function seedTenantRows(db: DbHandle, status: TenantStatus = "active"): void {
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: SOURCE.clusterId, guid: GUID, subdomain: SUBDOMAIN, stage: "prod", members: TENANT_MEMBERS, identityProvider: TENANT_IDP, status }).run();
+export function seedTenantRows(db: DbHandle, status: TenantStatus = "active", stage: Stage = "prod"): void {
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: SOURCE.clusterId, guid: GUID, subdomain: SUBDOMAIN, stage, members: TENANT_MEMBERS, identityProvider: TENANT_IDP, status }).run();
   db.db.insert(tenantApps).values({ id: "tna_web", tenantId: "tnt_1", name: "web", status }).run();
 }
 
