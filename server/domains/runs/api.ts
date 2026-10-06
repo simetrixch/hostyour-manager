@@ -38,6 +38,10 @@ function secretsFrom(raw: unknown): Record<string, Buffer> | undefined {
  * (kernel/actor.ts, bound by the chokepoint middleware), so runs.started_by and the run
  * audit rows name the human, not op_system.
  */
+/** How long a run's event stream may stay silent before it sends a comment line. A run's gates can
+ *  write nothing for half a minute, and a proxy on the way may close a connection idle that long. */
+export const RUN_STREAM_IDLE_MS = 15_000;
+
 export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
   const { executor, db, bus } = deps;
 
@@ -64,11 +68,14 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
 
     return streamSSE(c, async (stream) => {
       const send = (e: RunEventView): Promise<void> => stream.writeSSE({ id: String(e.seq), event: e.stream, data: JSON.stringify(e) });
+      // The close is announced, because a browser reports a hop's dropped connection exactly as it
+      // reports this one, and only the dropped one is to be reopened (web/src/runLogFollow.ts).
+      const end = (): Promise<void> => stream.writeSSE({ event: "end", data: "" });
 
       for (const e of readEvents(db, id, after)) await send(e);
       const start = getRun(db, id);
       // Terminal or soft-deleted → nothing more will come — replay the backlog and close.
-      if (!start || isTerminalRun(start.status) || start.deletedAt !== null) return;
+      if (!start || isTerminalRun(start.status) || start.deletedAt !== null) return end();
 
       const queue: RunEventView[] = [];
       let wake: (() => void) | null = null;
@@ -87,12 +94,18 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
           const now = getRun(db, id);
           if (!now || isTerminalRun(now.status) || now.deletedAt !== null) {
             while (queue.length > 0) await send(queue.shift() as RunEventView);
+            await end();
             break;
           }
-          await new Promise<void>((resolve) => {
-            wake = resolve;
+          let idle: ReturnType<typeof setTimeout> | undefined;
+          const woken = await new Promise<boolean>((resolve) => {
+            wake = () => resolve(true);
+            idle = setTimeout(() => resolve(false), RUN_STREAM_IDLE_MS);
           });
+          clearTimeout(idle);
           wake = null;
+          // A comment line, which EventSource ignores: a hop that closes a silent connection sees none.
+          if (!woken && !stream.aborted) await stream.write(": idle\n\n");
         }
       } finally {
         unsub();

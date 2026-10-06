@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,7 +12,7 @@ import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
-import { registerRunRoutes } from "./api.ts";
+import { registerRunRoutes, RUN_STREAM_IDLE_MS } from "./api.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { runActor } from "../../kernel/actor.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -131,6 +131,29 @@ describe("runs API + SSE", () => {
     const body = await res.text();
     for (let i = 1; i <= 5; i++) expect(body).toContain(`demo line ${i}`);
     expect(body).toContain("event: stdout");
+    // The close is the server's own, and says so, so a browser can tell it from a dropped connection.
+    expect(body.trimEnd().endsWith("event: end\ndata:")).toBe(true);
+  });
+
+  it("PLANTED: a run that stays silent keeps its stream alive with a comment line, and ends no stream it did not finish", async () => {
+    const { app, cookie } = await make();
+    const { runId } = (await (await post(app, "/api/runs", cookie, { kind: "noop" })).json()) as { runId: string };
+    // A planned run is not terminal: its stream replays its planning lines, then stays open on the bus.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const decoder = new TextDecoder();
+    const res = await app.request(`/api/runs/${runId}/events`, authed(cookie));
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    try {
+      // Whatever the run wrote while it was planned, then nothing: the next thing on the wire is the comment.
+      await vi.advanceTimersByTimeAsync(RUN_STREAM_IDLE_MS);
+      let chunk = "";
+      while (!chunk.endsWith("\n\n") || !chunk.includes(": idle")) chunk += decoder.decode((await reader.read()).value);
+      expect(chunk.endsWith(": idle\n\n")).toBe(true);
+      expect(chunk).not.toContain("event: end");
+    } finally {
+      vi.useRealTimers();
+      await reader.cancel();
+    }
   });
 
   it("attributes plan + approve to the signed-in operator — never op_system", async () => {
@@ -194,6 +217,7 @@ describe("runs API + SSE", () => {
     const res = await app.request(`/api/runs/${runId}/events`, authed(cookie));
     const body = await res.text();
     for (let i = 1; i <= 5; i++) expect(body).toContain(`demo line ${i}`); // full log retained
+    expect(body).toContain("event: end");
   });
 
   it("DELETE soft-deletes a succeeded run — 200, hidden from the list, by-id still resolves", async () => {

@@ -4,6 +4,7 @@ import type { RunView, RunEventView, RunTenantStateView } from "../../../shared/
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
 import { getRun, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
 import { coalesced, RUN_REFRESH_WINDOW_MS } from "../coalesce.ts";
+import { followRunLog } from "../runLogFollow.ts";
 import { abortOffer, recoverable, runOnScreen } from "../runScreen.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
@@ -18,7 +19,6 @@ import { AnsiText, stripAnsi } from "../components/AnsiText.tsx";
 
 // "ephemeral" is the live-only stream: the server publishes it to this SSE stream and never writes
 // an events row, so such a line (the activate_url) exists only while this screen stays open.
-const STREAMS = ["stdout", "stderr", "meta", "ephemeral"];
 
 /** Presentation only: meta lines from the executor are prefixed ▶/✓/✗ (✕ when cancelled) —
  *  colour them like a real terminal would. */
@@ -74,7 +74,6 @@ export function RunDetail() {
     // `run` is derived from the id, so a stale one cannot render (runScreen.ts).
     setLines([]);
     refresh();
-    const es = new EventSource(`/api/runs/${runId}/events`);
     // ONE READ FOR A BURST OF REASONS. A meta line means the run's status has likely moved, which is
     // true while a run is happening and misleading the moment this screen opens: the stream REPLAYS
     // from the first line, so a run that wrote 1734 meta lines would ask for the run 1734 times in
@@ -82,14 +81,14 @@ export function RunDetail() {
     // the screen then renders "Failed to fetch" over a run whose every byte is readable — which is
     // how the first slave deployment became the one run in the list that could not be opened.
     const reread = coalesced(refresh, RUN_REFRESH_WINDOW_MS);
-    const onEvent = (e: Event) => {
-      const ev = JSON.parse((e as MessageEvent).data as string) as RunEventView;
-      setLines((prev) => [...prev, ev]);
-      if (ev.stream === "meta") reread.call();
-    };
-    for (const s of STREAMS) es.addEventListener(s, onEvent);
-    es.onerror = () => es.close(); // the server closes the stream once the run is terminal
-    return () => { reread.cancel(); es.close(); };
+    const stop = followRunLog((after) => new EventSource(`/api/runs/${runId}/events?after=${after}`), {
+      line: (ev) => {
+        setLines((prev) => [...prev, ev]);
+        if (ev.stream === "meta") reread.call();
+      },
+      ended: refresh,
+    });
+    return () => { reread.cancel(); stop(); };
   }, [runId]);
 
   useEffect(() => {
