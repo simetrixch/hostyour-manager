@@ -3,9 +3,11 @@
 # The Manager image. Multi-stage, rootless.
 #
 # The server runs under tsx (no JS emit — one source of truth, no build/runtime skew), so the
-# runtime image ships the TypeScript source + tsconfig + the full node_modules (tsx is a
-# dev-tier dependency that IS needed at run). Migrations resolve source-relative
-# (import.meta.url), so COPY server/ carries them.
+# runtime image ships the TypeScript source + tsconfig + the production node_modules, tsx among
+# them as a runtime dependency. The build stage keeps the full install the SPA build needs, but
+# its node_modules never reaches the runtime: that comes from the prod-deps stage's
+# `npm ci --omit=dev`, so no test or build tool is a package of the running image. Migrations
+# resolve source-relative (import.meta.url), so COPY server/ carries them.
 #
 # DATA_DIR is the mounted data volume; it holds manager.db. The admin socket stands OUTSIDE it, at
 # ADMIN_SOCKET_PATH, on a directory the deployment mounts: DATA_DIR is a claim whose place on the
@@ -19,6 +21,13 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
 RUN npm run build:web
+
+# The production-only install, the one node_modules the runtime takes. better-sqlite3 and ssh2 are
+# native, so they are built here, on the base image the build stage uses.
+FROM node:24 AS prod-deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
 # helm — the tenant validation engine shells `helm template` over a cloned
 # deploy repository workdir (server/adapters/helm/helm.ts). The release binary is statically linked (Go,
@@ -49,7 +58,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 # node:24-slim ships a non-root `node` user (uid 1000).
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY --from=build /app/web/dist ./web/dist
 COPY --from=build /app/server ./server
 COPY --from=build /app/shared ./shared
