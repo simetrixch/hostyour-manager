@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import type { ConsumerView } from "../api.ts";
 import { addStageHref } from "../consumerAddStage.ts";
-import type { UnitEnvironments } from "../tenantRows.ts";
+import { cardEnvironment, chooseEnvironment, type UnitEnvironments } from "../tenantRows.ts";
 import { EnvironmentBar } from "./EnvironmentBar.tsx";
 
 const StatusBadge = ({ row }: { row: ConsumerView }) => <span className={`badge badge--${row.status}`}>{row.status}</span>;
@@ -31,4 +32,19 @@ export function ConsumerCardHead({ group, selected, onSelect }: {
       </div>
     </>
   );
+}
+
+/** A consumer's card on the Consumers page: the stage the page URL names (cardEnvironment), handed to the
+ *  card body with the head that switches it, which writes the choice back into the URL in place, as the
+ *  Tenants page does. Kept in page state, the card snapped back to PROD whenever the page mounted again,
+ *  so an operator coming back from a TEST run found PROD's actions. */
+export function ChosenConsumerEnvironment({ group, search, setSearch, children }: {
+  group: UnitEnvironments<ConsumerView>;
+  search: URLSearchParams;
+  setSearch: (next: URLSearchParams, options: { replace: true }) => void;
+  children: (c: ConsumerView, head: ReactNode) => ReactNode;
+}) {
+  const c = cardEnvironment(group, search);
+  if (!c) return null;
+  return children(c, <ConsumerCardHead group={group} selected={c} onSelect={(row) => setSearch(chooseEnvironment(search, group.key, row.stage), { replace: true })} />);
 }

@@ -1,7 +1,7 @@
 import { CheckChip } from "../components/CheckChip.tsx";
 import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import type { DetectedConsumerView, DetectedScanView, RunView } from "../../../shared/api-types.ts";
 import {
   listConsumers, getConsumerLive, offboardConsumer, purgeConsumer, getConsumerVersions, setConsumerRelease,
@@ -23,8 +23,8 @@ import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
-import { ConsumerCardHead } from "../components/ConsumerCardHead.tsx";
-import { defaultEnvironment, groupEnvironments, tenantRowOffer } from "../tenantRows.ts";
+import { ChosenConsumerEnvironment } from "../components/ConsumerCardHead.tsx";
+import { groupEnvironments } from "../tenantRows.ts";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -87,8 +87,9 @@ export function Consumers() {
   const [rows, setRows] = useState<ConsumerView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"live" | "runs">("live");
-  // The environment each consumer's card shows, by name; a card nobody switched opens on defaultEnvironment.
-  const [chosen, setChosen] = useState<Record<string, string>>({});
+  // The environment each consumer's card shows lives in the URL (ChosenConsumerEnvironment), so Back, a
+  // reload and coming back from a run keep it.
+  const [search, setSearch] = useSearchParams();
   const [confirmTarget, setConfirmTarget] = useState<ConsumerView | null>(null);
   const [lifecycle, setLifecycle] = useState<{ c: ConsumerView; action: LifecycleAction } | null>(null);
   // The size dialog's target (null = closed). Its own state and not part of `lifecycle`, because it
@@ -292,12 +293,10 @@ export function Consumers() {
             {/* One card per CONSUMER: each stage is a unit of its own (namespace, registration, release
                 pin), grouped here for display only. The bar picks the row the rest of the card acts on, and
                 "+ add" onboards the consumer at a stage it does not stand at. */}
-            {groupEnvironments(rows ?? [], (row) => row.name).map((group) => {
-              const c = Object.values(group.byStage).find((r) => r.id === chosen[group.key] && !tenantRowOffer(r.status).settled) ?? defaultEnvironment(group);
-              if (!c) return null;
-              return (
+            {groupEnvironments(rows ?? [], (row) => row.name).map((group) => (
+              <ChosenConsumerEnvironment key={group.key} group={group} search={search} setSearch={setSearch}>{(c, head) => (
               <li key={group.key} className="card servercard">
-                <ConsumerCardHead group={group} selected={c} onSelect={(row) => setChosen((cur) => ({ ...cur, [group.key]: row.id }))} />
+                {head}
                 {/* Row facts only. The unit's public address is NOT one of them — it is
                     <label>.<stage apex>, and the apex comes off the target cluster's values chain — so
                     it arrives with the live payload below. */}
@@ -331,8 +330,8 @@ export function Consumers() {
                   onOffboard={() => setConfirmTarget(c)}
                 />
               </li>
-              );
-            })}
+              )}</ChosenConsumerEnvironment>
+            ))}
           </ul>
         )}
 
