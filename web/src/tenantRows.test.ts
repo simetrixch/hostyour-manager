@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { appRecordDeletable, cardEnvironment, chooseEnvironment, defaultEnvironment, groupTenantEnvironments, movableEnvironments, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
+import { appPurgeable, cardEnvironment, chooseEnvironment, defaultEnvironment, groupTenantEnvironments, movableEnvironments, splitTenantRows, tenantRowOffer, tenantConfirmTitle, typedConfirmation } from "./tenantRows.ts";
 import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums.ts";
 
 // The tenant screens' one status rule: which surface a tenants row gets, and whether a purge may be
@@ -8,9 +8,9 @@ import { TENANT_STATUS, type Stage, type TenantStatus } from "../../shared/enums
 
 const row = (id: string, status: TenantStatus): { id: string; status: TenantStatus } => ({ id, status });
 
-describe("appRecordDeletable", () => {
-  it("PLANTED DEFECT: offers the deletion of an app's record on an offboarded app only, never on a live one", () => {
-    expect((["provisioning", "active", "suspended", "offboarded", "purged"] as const).filter(appRecordDeletable)).toEqual(["offboarded"]);
+describe("appPurgeable", () => {
+  it("PLANTED DEFECT: offers the purge of an app on an offboarded app only, never on a live one", () => {
+    expect((["provisioning", "active", "suspended", "offboarded", "purged"] as const).filter(appPurgeable)).toEqual(["offboarded"]);
   });
 });
 
@@ -130,7 +130,7 @@ describe("tenantConfirmTitle", () => {
   const t = { subdomain: "simetrix", stage: "test" as const, domain: "apps1.digitacloud.app" };
   it("names the environment and its machine in every changing or destructive confirmation", () => {
     expect(tenantConfirmTitle.removeApp(t, "erp")).toBe('Remove app "erp" from "simetrix" · test on apps1.digitacloud.app?');
-    expect(tenantConfirmTitle.deleteAppRecord(t, "erp")).toBe('Delete the record of app "erp" of "simetrix" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.purgeApp(t, "erp")).toBe('Purge app "erp" of "simetrix" · test on apps1.digitacloud.app?');
     expect(tenantConfirmTitle.backup(t)).toBe('Back up tenant "simetrix" · test on apps1.digitacloud.app?');
     expect(tenantConfirmTitle.restore(t)).toBe('Restore tenant "simetrix" · test, now on apps1.digitacloud.app, from its backup?');
     expect(tenantConfirmTitle.offboard(t)).toBe('Offboard tenant "simetrix" · test on apps1.digitacloud.app?');

@@ -288,7 +288,7 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
-  async deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> {
+  async deleteTenantAppKeys(input: TenantCryptoDeleteInput & { app?: string }): Promise<{ deleted: string[] }> {
     // LISTED, not taken from the inventory: an app removed from the tenant keeps its key (its data
     // and backups may still hold values encrypted with it), so the manager's rows no longer name
     // every key that stands. Listing answers names and no value. METADATA delete for the reason
@@ -302,7 +302,7 @@ export class VaultSelfSeeder implements VaultSeeder {
         if (listed.status === 404) continue;
         if (!listed.ok) throw new VaultError(`vault tenant app key list failed for ${KV_MOUNT}/${folder} (${listed.status})`, listed.status);
         const keys = ((await listed.json()) as { data?: { keys?: string[] } }).data?.keys ?? [];
-        for (const key of keys) {
+        for (const key of keys.filter((k) => input.app === undefined || k === input.app)) {
           const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${folder}/${key}`, { method: "DELETE", headers: { "x-vault-token": token } });
           if (!res.ok && res.status !== 404) throw new VaultError(`vault tenant app key delete failed for ${KV_MOUNT}/${folder}/${key} (${res.status})`, res.status);
           deleted.push(`${kind}/${key}`);

@@ -3,15 +3,15 @@ import { Link } from "react-router";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import { planRun, type TenantDetailView } from "../api.ts";
 import { tenantAppRows } from "../tenantAppRows.ts";
-import { appRecordDeletable, tenantConfirmTitle, tenantRowOffer } from "../tenantRows.ts";
+import { appPurgeable, tenantConfirmTitle, tenantRowOffer } from "../tenantRows.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { TenantStatusBadge } from "./TenantStatusBadge.tsx";
 
 /** The Apps list of the tenant page: the bundle's apps lead, deployed or not, and an inventory row the
  *  bundle no longer names follows. While the catalog is unreadable the list is the inventory alone.
  *  A standing app row offers its removal (`onRemove`, whose confirm the page shares with its
- *  websites); an offboarded one offers the deletion of its record, which plans a run that first reads
- *  that nothing of the app remains. `editable` is false on a settled or unfinished tenant. */
+ *  websites); an offboarded one offers its purge, whose plan names what of the app it deletes.
+ *  `editable` is false on a settled or unfinished tenant. */
 export function TenantAppList(props: {
   tenant: TenantDetailView;
   catalog: TenantAppCatalogView | null;
@@ -21,7 +21,7 @@ export function TenantAppList(props: {
   onRemove: (app: string) => void;
 }) {
   const { tenant: t, catalog, editable, busy, act, onRemove } = props;
-  const [deleteRecord, setDeleteRecord] = useState<string | null>(null);
+  const [purging, setPurging] = useState<string | null>(null);
   const rows = tenantAppRows(catalog?.apps ?? [], t.apps, catalog?.websites);
   return (
     <>
@@ -51,9 +51,9 @@ export function TenantAppList(props: {
                       Remove
                     </button>
                   )}
-                  {r.row && editable && appRecordDeletable(r.row.status) && (
-                    <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setDeleteRecord(r.name)}>
-                      Delete record
+                  {r.row && editable && appPurgeable(r.row.status) && (
+                    <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setPurging(r.name)}>
+                      Purge
                     </button>
                   )}
                 </span>
@@ -63,19 +63,19 @@ export function TenantAppList(props: {
         </ul>
       )}
 
-      {deleteRecord && (
+      {purging && (
         <ConfirmDialog
-          title={tenantConfirmTitle.deleteAppRecord(t, deleteRecord)}
-          confirmLabel="Delete record"
+          title={tenantConfirmTitle.purgeApp(t, purging)}
+          confirmLabel="Plan the purge"
           destructive
-          onCancel={() => setDeleteRecord(null)}
+          onCancel={() => setPurging(null)}
           onConfirm={() => {
-            const app = deleteRecord;
-            setDeleteRecord(null);
-            void act(() => planRun("tenant-delete-app-record", { tenantId: t.id, app }));
+            const app = purging;
+            setPurging(null);
+            void act(() => planRun("tenant-purge-app", { tenantId: t.id, app }));
           }}
         >
-          <p>The plan first reads that nothing of the app remains: no namespace, no ArgoCD Application or AppProject, no admission policy, no Vault key. Then the app's row is deleted; the run stays in the audit trail.</p>
+          <p>The plan names what of the app still stands and is deleted: its AppProject, its admission policy with its binding, its Vault keys, and last its record. Nothing of another app is touched. It refuses while the app is still deployed.</p>
         </ConfirmDialog>
       )}
     </>

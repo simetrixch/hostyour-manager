@@ -84,13 +84,13 @@ export function tenantRowOffer(status: TenantStatus): TenantRowOffer {
   return TENANT_ROW_OFFER[status];
 }
 
-// Whether an app row of a standing tenant offers the deletion of its record: only an offboarded app,
-// which a remove-app took off the tenant. The run reads that nothing of the app remains before it
-// deletes. A Record over TenantStatus for the reason the tenant row's offer is one.
-const APP_RECORD_DELETABLE: Record<TenantStatus, boolean> = { provisioning: false, active: false, suspended: false, offboarded: true, purged: false };
+// Whether an app row of a standing tenant offers its purge: only an offboarded app, which a remove-app
+// took off the tenant and whose AppProject, admission policy, Vault keys and record it kept. A Record
+// over TenantStatus for the reason the tenant row's offer is one.
+const APP_PURGEABLE: Record<TenantStatus, boolean> = { provisioning: false, active: false, suspended: false, offboarded: true, purged: false };
 
-export function appRecordDeletable(status: TenantStatus): boolean {
-  return APP_RECORD_DELETABLE[status];
+export function appPurgeable(status: TenantStatus): boolean {
+  return APP_PURGEABLE[status];
 }
 
 /** The Tenants page's three lists. `onboarded` is every tenant the manager still carries — active,
@@ -185,7 +185,7 @@ type Titled = { subdomain: string; stage: Stage; domain: string };
 const where = (t: Titled): string => `"${t.subdomain}" · ${t.stage} on ${t.domain}`;
 export const tenantConfirmTitle = {
   removeApp: (t: Titled, app: string): string => `Remove app "${app}" from ${where(t)}?`,
-  deleteAppRecord: (t: Titled, app: string): string => `Delete the record of app "${app}" of ${where(t)}?`,
+  purgeApp: (t: Titled, app: string): string => `Purge app "${app}" of ${where(t)}?`,
   backup: (t: Titled): string => `Back up tenant ${where(t)}?`,
   restore: (t: Titled): string => `Restore tenant "${t.subdomain}" · ${t.stage}, now on ${t.domain}, from its backup?`,
   offboard: (t: Titled): string => `Offboard tenant ${where(t)}?`,

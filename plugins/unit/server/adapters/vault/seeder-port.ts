@@ -332,9 +332,9 @@ export interface VaultSeeder {
    *  secret stays the same, so neither is ever overwritten. */
   seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome>;
   /** Remove every tenant app key of one tenant, of every kind (purge), found by listing the key names
-   *  under it, so the key of an app this manager no longer knows goes too. Answers what it removed,
-   *  each as <kind>/<app>. */
-  deleteTenantAppKeys(input: TenantCryptoDeleteInput): Promise<{ deleted: string[] }>;
+   *  under it, so the key of an app this manager no longer knows goes too; with `app`, that app's keys
+   *  only (the purge of one removed app). Answers what it removed, each as <kind>/<app>. */
+  deleteTenantAppKeys(input: TenantCryptoDeleteInput & { app?: string }): Promise<{ deleted: string[] }>;
   /** The keys one tenant app still has, of every kind, each as <kind>/<app>, found by listing the key
    *  names under the tenant: names, never a value. A deletion of an offboarded app's record asks it,
    *  because a key standing means something of the app is not gone. */
