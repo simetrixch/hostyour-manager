@@ -55,7 +55,7 @@ describe("a non-prod consumer on the shared MongoDB", () => {
 
 /** Run the shared-set restore script against stand-ins for rclone and mongorestore: the generation
  *  holds `archives`; answers what mongorestore was asked to restore, or the script's refusal. */
-function restoreShared(databases: string[], archives: string[]): { restored: string[]; refusal?: string } {
+function restoreShared(databases: string[], archives: string[], opts: { failingGrep?: boolean } = {}): { restored: string[]; refusal?: string } {
   const dir = mkdtempSync(join(tmpdir(), "restore-stage-"));
   const bin = join(dir, "bin");
   mkdirSync(bin);
@@ -63,6 +63,7 @@ function restoreShared(databases: string[], archives: string[]): { restored: str
   writeFileSync(join(dir, "archives"), archives.map((a) => `${a}\n`).join(""));
   writeFileSync(join(bin, "rclone"), `#!/bin/sh\ncase "$1" in obscure) echo x;; lsf) cat "$STUB/archives";; copyto) : > "$3";; esac\n`, { mode: 0o755 });
   writeFileSync(join(bin, "mongorestore"), `#!/bin/sh\necho "$*" >> "$STUB/restored"\n`, { mode: 0o755 });
+  if (opts.failingGrep) writeFileSync(join(bin, "grep"), "#!/bin/sh\nexit 2\n", { mode: 0o755 });
   const [job] = consumerRestoreJobs({
     name: CONSUMER, namespace: `${CONSUMER}-test`, stage: "test", databases, services: ["mongodb"], mongodb: "shared", pvcs: [], image: "dbtools:1", folder: "box/gen",
   }).filter((j) => j.spec.name.startsWith("reloc-restore-mongo"));
@@ -81,6 +82,18 @@ describe("the shared-set restore", () => {
   it("PLANTED: refuses a generation holding a database the consumer is not served, and restores nothing", () => {
     const { restored, refusal } = restoreShared(["acme_db_test"], ["acme_db_test.archive", "acme_db.archive"]);
     expect(refusal).toMatch(/acme_db\.archive/);
+    expect(restored).toEqual([]);
+  });
+
+  it("PLANTED: an archive whose name only contains a served name is foreign", () => {
+    const { restored, refusal } = restoreShared(["acme_db_test"], ["acme_db_test.archive", "x_acme_db_test.archive"]);
+    expect(refusal).toMatch(/x_acme_db_test\.archive/);
+    expect(restored).toEqual([]);
+  });
+
+  it("PLANTED: a grep that fails stops the restore before anything is restored", () => {
+    const { restored, refusal } = restoreShared(["acme_db_test"], ["acme_db_test.archive", "acme_db.archive"], { failingGrep: true });
+    expect(refusal).toBeDefined();
     expect(restored).toEqual([]);
   });
 
@@ -154,6 +167,28 @@ describe("moving or restoring onto a cluster where another registration holds th
     const dumped = (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
     const ctx = stepCtx(db, "restore", {}, []);
     await expect((await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET)).resolves.toBeUndefined();
+  });
+
+  it("PLANTED: a TEST move is refused at plan where the target serves the same _test database", async () => {
+    const { ports } = await worldAt("test");
+    await seedConsumerRegistration(ports.registrations, { name: "other", cluster: TARGET.cluster, databases: ["acme_db_test"] });
+    await expect(makeMigrateDef(ports).plan({ appId: "app_1", targetClusterId: TARGET.clusterId }, { db: db.db }))
+      .rejects.toThrow(/acme at test would be served the database acme_db_test/);
+  });
+
+  it("a TEST move is planned beside a PROD unit that holds the literal name on the target", async () => {
+    const { ports } = await worldAt("test");
+    await seedConsumerRegistration(ports.registrations, { name: "other", cluster: TARGET.cluster, databases: ["acme_db"] });
+    await expect(makeMigrateDef(ports).plan({ appId: "app_1", targetClusterId: TARGET.clusterId }, { db: db.db })).resolves.toMatchObject({ kind: "consumer-migrate" });
+  });
+
+  it("PLANTED: a TEST restore is refused where the target serves the same _test database", async () => {
+    const { ports } = await worldAt("test");
+    await seedConsumerRegistration(ports.registrations, { name: "other", cluster: TARGET.cluster, databases: ["acme_db_test"] });
+    const dumped = (await ports.registrations.readRegistration("test", CONSUMER))!.entry;
+    const ctx = stepCtx(db, "restore", {}, []);
+    await expect((await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET))
+      .rejects.toThrow(/acme at test would be served the database acme_db_test/);
   });
 
   it("a move onto a cluster where nothing collides is planned", async () => {
