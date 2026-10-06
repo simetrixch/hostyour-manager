@@ -4,7 +4,7 @@
 // stores are its Mongo databases[], its per-consumer PostgreSQL, its claim bucket and its PVCs.
 import { eq } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
-import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
+import type { ArgoAppStatus, WorkloadStatus } from "../../adapters/kube/port.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -58,6 +58,25 @@ async function readStageRegistration(ports: ConsumerRelocationPorts, stage: Stag
     throw errValidation(`registrations/${name}/${stage}.yaml carries no deploy group — a stage registration must`);
   }
   return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota, host: e.host };
+}
+
+/** Whether `w` is one of the consumer's OWN stores, which stand in its namespace as further sources of
+ *  its Application `appName` and read neither switch: they keep running through a quiesce, which is
+ *  what keeps them reachable for the dump, and through a suspend. The per-consumer PostgreSQL's chart
+ *  (hostyour-cloud clusters/units/postgresql) pins the database as `postgres` and renders a metrics
+ *  exporter, which reads and writes nothing; the upstream exporter chart names it after the Helm
+ *  release, which is the Application. An own MongoDB runs as the StatefulSet `mongodb`
+ *  (clusters/units/mongodb), an own Redis as the Deployments `redis` and `redis-exporter`
+ *  (clusters/units/redis), an own MariaDB as `mariadb` and `mariadb-exporter` (clusters/units/mariadb),
+ *  each only where the registration brings one. Exact names, so an application workload never passes
+ *  for a store. */
+export function consumerStoreWorkload(reg: Pick<ConsumerStageRegistration, "mongodb" | "redis" | "services">, appName: string): (w: WorkloadStatus) => boolean {
+  const ownMongo = reg.mongodb !== "shared";
+  const ownRedis = reg.redis === "standalone";
+  const ownMariadb = reg.services.includes("mariadb");
+  return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
+    (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter")) ||
+    (ownMariadb && w.kind === "Deployment" && (w.name === "mariadb" || w.name === "mariadb-exporter"));
 }
 
 /** The consumer world factory — resolved fresh at every step from the apps row + the registration. */
@@ -305,25 +324,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         localTx(c, (tx) => tx.update(apps).set({ clusterId: target.clusterId, status: "active", lastRunId: c.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
         c.log("meta", `consumer ${ac.name} recorded on cluster ${target.clusterId} (active)`);
       },
-      // The per-consumer PostgreSQL DELIBERATELY keeps running through a quiesce — that is what keeps
-      // its databases reachable for the dump. Its chart (hostyour-cloud clusters/units/postgresql) pins
-      // the database as `postgres` and renders a metrics exporter, which reads and writes nothing; the
-      // upstream exporter chart names it after the Helm release, which is this Application. An own
-      // MongoDB keeps running for the same reason, as the StatefulSet `mongodb` its chart
-      // (clusters/units/mongodb) renders, and only where the registration brings one: dump-mongo reads
-      // it there. An own Redis keeps running as the Deployments `redis` and `redis-exporter` its chart
-      // (clusters/units/redis) renders: dump-redis reads its snapshot. An own MariaDB keeps running as
-      // `mariadb` and `mariadb-exporter` (clusters/units/mariadb): dump-mariadb reads it. Exact names,
-      // so an application workload never passes for the store.
-      workloadExempt: async () => {
-        const reg = await readStageRegistration(ports, ac.stage, ac.name);
-        const ownMongo = reg.mongodb !== "shared";
-        const ownRedis = reg.redis === "standalone";
-        const ownMariadb = reg.services.includes("mariadb");
-        return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
-          (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter")) ||
-          (ownMariadb && w.kind === "Deployment" && (w.name === "mariadb" || w.name === "mariadb-exporter"));
-      },
+      workloadExempt: async () => consumerStoreWorkload(await readStageRegistration(ports, ac.stage, ac.name), appName),
     };
   };
 }

@@ -193,3 +193,45 @@ describe("the watch waits for the render the flip asked for", () => {
     expect(p.argo.operations).toEqual(["refresh-set:argocd/consumer-apps", "refresh:argocd/acme-prod", "watch:argocd/acme-prod"]);
   });
 });
+
+describe("a consumer with its own store", () => {
+  // The per-consumer PostgreSQL and its exporter stand in the consumer's namespace as another source of
+  // the same Application, and read neither switch: they keep running through a suspend.
+  const postgres: WorkloadStatus = { kind: "Deployment", name: "postgres", available: true, desired: 1, ready: 1 };
+  const exporter: WorkloadStatus = { kind: "Deployment", name: "acme-prod-prometheus-postgres-exporter", available: true, desired: 1, ready: 1 };
+  async function seedWithPostgres(reg: Registrations, suspended: boolean): Promise<void> {
+    await reg.commitRegistration({
+      unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended, quiesced: false },
+      builds: [],
+      deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: ["postgresql"], size: "small", mongodb: "shared", quota: seedQuota("small") },
+      runId: "run_onb",
+    });
+  }
+
+  it("a suspend passes while only the consumer's own store still asks for replicas", async () => {
+    seedApp("active");
+    const reg = new Registrations(new FakePlatformRepo());
+    await seedWithPostgres(reg, false);
+    await expect(watchAfterFlip(makeSuspendDef, ports(reg, rendering(true), [off, postgres, exporter]))).resolves.toBeUndefined();
+  });
+
+  it("a suspend passes while only the consumer's own Redis still asks for replicas", async () => {
+    seedApp("active");
+    const reg = new Registrations(new FakePlatformRepo());
+    await reg.commitRegistration({
+      unit: { name: "acme", repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
+      builds: [],
+      deploy: { stage: "prod", host: "acme", chartPath: "deploy/chart", cluster: "s1", databases: [], keyPatterns: [], channelPatterns: [], services: ["redis"], size: "small", mongodb: "shared", redis: "standalone", redisMaxmemoryPolicy: "noeviction", quota: seedQuota("small") },
+      runId: "run_onb",
+    });
+    const redis: WorkloadStatus = { kind: "Deployment", name: "redis", available: true, desired: 1, ready: 1 };
+    await expect(watchAfterFlip(makeSuspendDef, ports(reg, rendering(true), [off, redis, { ...redis, name: "redis-exporter" }]))).resolves.toBeUndefined();
+  });
+
+  it("PLANTED: a resume does not pass while only the consumer's own store asks for replicas", async () => {
+    seedApp("suspended");
+    const reg = new Registrations(new FakePlatformRepo());
+    await seedWithPostgres(reg, true);
+    await expect(watchAfterFlip(makeResumeDef, ports(reg, rendering(false), [off, postgres, exporter]))).rejects.toThrow(/no workload in acme-prod asks for replicas/);
+  });
+});

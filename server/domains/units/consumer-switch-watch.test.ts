@@ -22,4 +22,22 @@ describe("rendersSwitch", () => {
   it("PLANTED: a status read before ArgoCD consumed the refresh proves nothing", () => {
     expect(rendersSwitch(status({ refreshRequested: true }), chart, "suspended", false)).toBe(false);
   });
+
+  it("PLANTED: every source of the chart must carry the value, not one of them", () => {
+    const two = status({ syncSources: [
+      { repoURL: chart.repoURL, revision: "r", path: chart.chartPath, valuesObject: { suspended: true } },
+      { repoURL: chart.repoURL, revision: "r", path: chart.chartPath, valuesObject: { suspended: false } },
+    ] });
+    expect(rendersSwitch(two, chart, "suspended", true)).toBe(false);
+  });
+
+  it("PLANTED: a source of the same repository at another path is not the chart", () => {
+    const other = status({ syncSources: [{ repoURL: chart.repoURL, revision: "r", path: "deploy/other", valuesObject: { suspended: true } }] });
+    expect(rendersSwitch(other, chart, "suspended", true)).toBe(false);
+  });
+
+  it("PLANTED: a render that is Healthy but not Synced proves nothing", () => {
+    expect(rendersSwitch(status({ sync: "OutOfSync" }), chart, "suspended", false)).toBe(false);
+  });
 });
+

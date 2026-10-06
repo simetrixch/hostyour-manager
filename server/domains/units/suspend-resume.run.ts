@@ -4,8 +4,9 @@ import type { RunDefinition, Step } from "../../executor/types.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
-import type { WorkloadStatus } from "../../adapters/kube/port.ts";
+import { askingForReplicas, workloadNames } from "#unit/server/relocation.ts";
 import { watchConsumerSwitch } from "./consumer-switch-watch.ts";
+import { consumerStoreWorkload } from "./relocation-world-consumer.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 
@@ -45,19 +46,22 @@ function watchConvergedStep(ports: LifecyclePorts, appId: string, intent: "suspe
       const ac = loadAppCluster(ctx.db, appId);
       const suspended = intent === "suspended";
       const entry = (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry;
-      if (entry?.chartPath === undefined) throw errValidation(`consumer ${ac.name} has no stage registration with a chart at ${ac.stage} — there is no render to wait for`);
+      if (entry?.chartPath === undefined || entry.mongodb === undefined || entry.services === undefined) {
+        throw errValidation(`consumer ${ac.name} has no stage registration with its deploy group at ${ac.stage} — there is no render to wait for`);
+      }
       if (entry.suspended !== suspended) throw errValidation(`consumer ${ac.name} registration no longer requests the ${intent} render`);
       const appName = consumerArgoAppName(ac.name, ac.stage);
       await watchConsumerSwitch(ports, ctx, { clusterId: ac.clusterId, appName, chart: { repoURL: entry.repoURL, chartPath: entry.chartPath } }, "suspended", suspended, intent);
+      // The consumer's own stores read neither switch and keep running either way, so they are left
+      // out of the measurement, as the relocation's quiesce leaves them out.
       const namespace = consumerNamespace(ac.name, ac.stage);
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
-      const asking = (await clusterReader.smoke(namespace)).workloads.filter((w) => w.desired > 0);
-      const named = (ws: readonly WorkloadStatus[]): string => ws.map((w) => `${w.kind}/${w.name} (${w.ready}/${w.desired})`).join(", ");
-      if (suspended && asking.length > 0) throw errValidation(`Application ${appName} renders suspended, but ${namespace} still runs ${named(asking)}`);
+      const asking = askingForReplicas((await clusterReader.smoke(namespace)).workloads, consumerStoreWorkload({ mongodb: entry.mongodb, services: entry.services, ...(entry.redis !== undefined ? { redis: entry.redis } : {}) }, appName));
+      if (suspended && asking.length > 0) throw errValidation(`Application ${appName} renders suspended, but ${namespace} still runs ${workloadNames(asking)}`);
       if (!suspended && asking.length === 0) throw errValidation(`Application ${appName} renders running, but no workload in ${namespace} asks for replicas`);
       const unready = asking.filter((w) => !w.available);
-      if (!suspended && unready.length > 0) throw errValidation(`Application ${appName} renders running, but ${named(unready)} in ${namespace} is not available`);
-      ctx.log("meta", `Application ${appName} is Synced + Healthy on the ${intent} render — the consumer is ${intent}${suspended ? "" : `: ${named(asking)}`}`);
+      if (!suspended && unready.length > 0) throw errValidation(`Application ${appName} renders running, but ${workloadNames(unready)} in ${namespace} is not available`);
+      ctx.log("meta", `Application ${appName} is Synced + Healthy on the ${intent} render — the consumer is ${intent}${suspended ? "" : `: ${workloadNames(asking)}`}`);
     },
   };
 }

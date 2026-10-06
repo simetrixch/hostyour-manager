@@ -216,10 +216,16 @@ async function sharedMongoOf(ports: RelocationPorts, ctx: StepCtx, clusterId: st
   return sharedMongoFromValues(await ports.platformAppValues(SHARED_MONGO_APP, cluster.domain, cluster.stage));
 }
 
-/** The workloads still ASKING for replicas — the off measurement shared with the suspend run kinds:
- *  `available` cannot tell 0-of-0 from off, so the desired count is what is read. */
+/** The workloads still ASKING for replicas, but those `exempt` names — the off measurement shared with
+ *  the suspend run kinds: `available` cannot tell 0-of-0 from off, so the desired count is what is read. */
+export const askingForReplicas = (workloads: readonly WorkloadStatus[], exempt?: (w: WorkloadStatus) => boolean): WorkloadStatus[] =>
+  workloads.filter((w) => w.desired > 0 && !(exempt?.(w) ?? false));
+
+/** Workloads as a refusal names them: kind, name, and ready of desired. */
+export const workloadNames = (workloads: readonly WorkloadStatus[]): string => workloads.map((w) => `${w.kind}/${w.name} (${w.ready}/${w.desired})`).join(", ");
+
 const stillRunning = (workloads: readonly WorkloadStatus[], exempt?: (w: WorkloadStatus) => boolean): string[] =>
-  workloads.filter((w) => w.desired > 0 && !(exempt?.(w) ?? false)).map((w) => `${w.kind}/${w.name} (${w.ready}/${w.desired})`);
+  askingForReplicas(workloads, exempt).map((w) => workloadNames([w]));
 
 /** Close access: flip the registration to quiesced. The flip is a FIELD, never a prune — the
  *  ServiceClaims survive, which is precisely what keeps the databases reachable for the dump. */
