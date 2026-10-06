@@ -3,8 +3,9 @@ import { eq } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { consumerArgoAppName } from "../../../shared/consumer.ts";
-import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
+import { consumerArgoAppName, consumerNamespace } from "../../../shared/consumer.ts";
+import type { WorkloadStatus } from "../../adapters/kube/port.ts";
+import { watchConsumerSwitch } from "./consumer-switch-watch.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { attestTargetStep, loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 
@@ -31,28 +32,32 @@ const gitBranchLocks = (booksBranch: string, domain: string) => [
 ];
 const masterKubeLock = { resource: "master-kube" as const, key: "m" };
 
-/** Wait for the GENERATED Application (`<name>-<stage>`) to converge on the render the flip just
- *  asked for. Both run kinds wait for the SAME condition — Synced/Healthy — because neither prunes: the
- *  suspended render is still a full, healthy Application, it simply carries no replicas and no
- *  Ingress. `intent` only names the state in the message. Sync REVISIONS are deliberately not
- *  compared: the registration states no revision at all, the Application follows the delivery branch,
- *  and a branch tip moves. */
+/** Wait for the GENERATED Application (`<name>-<stage>`) to render what the flip just asked for, then
+ *  read the workloads. The render from before the flip is Synced and Healthy too (a suspended render
+ *  is a healthy Application with no replicas and no Ingress), so the wait reads the `suspended` value
+ *  off the chart source (consumer-switch-watch.ts). The workloads are read after it because a
+ *  Healthy Application says only that what it asks for stands, not that it asks for anything. */
 function watchConvergedStep(ports: LifecyclePorts, appId: string, intent: "suspended" | "running"): Step {
   return {
     name: "watch-converged",
     title: `Wait for ArgoCD to converge on the ${intent} render`,
     run: async (ctx) => {
       const ac = loadAppCluster(ctx.db, appId);
-      // The GENERATED Application is named `<name>-<stage>` (the consumers appset) — watching the
-      // bare name would read Missing immediately and falsely pass.
+      const suspended = intent === "suspended";
+      const entry = (await ports.registrations.readRegistration(ac.stage, ac.name))?.entry;
+      if (entry?.chartPath === undefined) throw errValidation(`consumer ${ac.name} has no stage registration with a chart at ${ac.stage} — there is no render to wait for`);
+      if (entry.suspended !== suspended) throw errValidation(`consumer ${ac.name} registration no longer requests the ${intent} render`);
       const appName = consumerArgoAppName(ac.name, ac.stage);
-      const converged = (s: ArgoAppStatus): boolean => s.sync === "Synced" && s.health === "Healthy";
-      const { argoReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
-      const status = await argoReader.watchApplication(argoNamespace, appName, converged, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal });
-      if (!converged(status)) {
-        throw errValidation(`Application ${appName} did not reach Synced/Healthy on the ${intent} render — last seen sync=${status.sync}, health=${status.health}${status.message ? ` (${status.message})` : ""}`);
-      }
-      ctx.log("meta", `Application ${appName} is Synced + Healthy — the consumer is ${intent}`);
+      await watchConsumerSwitch(ports, ctx, { clusterId: ac.clusterId, appName, chart: { repoURL: entry.repoURL, chartPath: entry.chartPath } }, "suspended", suspended, intent);
+      const namespace = consumerNamespace(ac.name, ac.stage);
+      const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
+      const asking = (await clusterReader.smoke(namespace)).workloads.filter((w) => w.desired > 0);
+      const named = (ws: readonly WorkloadStatus[]): string => ws.map((w) => `${w.kind}/${w.name} (${w.ready}/${w.desired})`).join(", ");
+      if (suspended && asking.length > 0) throw errValidation(`Application ${appName} renders suspended, but ${namespace} still runs ${named(asking)}`);
+      if (!suspended && asking.length === 0) throw errValidation(`Application ${appName} renders running, but no workload in ${namespace} asks for replicas`);
+      const unready = asking.filter((w) => !w.available);
+      if (!suspended && unready.length > 0) throw errValidation(`Application ${appName} renders running, but ${named(unready)} in ${namespace} is not available`);
+      ctx.log("meta", `Application ${appName} is Synced + Healthy on the ${intent} render — the consumer is ${intent}${suspended ? "" : `: ${named(asking)}`}`);
     },
   };
 }

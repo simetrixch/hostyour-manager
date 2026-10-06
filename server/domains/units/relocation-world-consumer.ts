@@ -25,6 +25,7 @@ import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { runRelocationJob, type RelocationPorts, type RelocationWorld, type WorldOf } from "#unit/server/relocation.ts";
+import { watchConsumerSwitch } from "./consumer-switch-watch.ts";
 import { targetOf } from "#unit/server/relocation-restore.ts";
 import {
   consumerDumpJobs, claimsIdentity, tarredClaims,
@@ -101,20 +102,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         const entry = await readStageRegistration(ports, ac.stage, ac.name);
         const quiesced = intent === "quiesced";
         if (entry.quiesced !== quiesced) throw errValidation(`consumer ${ac.name} registration no longer requests the ${intent} render`);
-        const { argoReader, argoNamespace } = await ports.resolver.resolve(clusterId);
-        await argoReader.refreshApplicationSet(argoNamespace, "consumer-apps");
-        await argoReader.refreshApplications(argoNamespace, [appName]);
-        const converged = (s: ArgoAppStatus): boolean => {
-          const charts = (s.syncSources ?? []).filter((src) => src.repoURL === entry.repoURL && src.path === entry.chartPath);
-          return !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy" && charts.length > 0 && charts.every((src) => {
-            const value = src.valuesObject?.["quiesced"];
-            return quiesced ? value === true : value === false || value === undefined;
-          });
-        };
-        const status = await argoReader.watchApplication(argoNamespace, appName, converged, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal });
-        if (!converged(status)) {
-          throw errValidation(`Application ${appName} did not reach Synced/Healthy on the ${intent} render — last seen sync=${status.sync}, health=${status.health}${status.message ? ` (${status.message})` : ""}`);
-        }
+        await watchConsumerSwitch(ports, c, { clusterId, appName, chart: { repoURL: entry.repoURL, chartPath: entry.chartPath } }, "quiesced", quiesced, intent);
         c.log("meta", `Application ${appName} is Synced + Healthy — the consumer render is ${intent}`);
       },
       dumpJobs: async (folder, registrationYaml) => {
