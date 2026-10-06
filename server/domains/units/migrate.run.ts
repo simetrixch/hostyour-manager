@@ -16,7 +16,7 @@ import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessSt
 import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "#unit/server/relocation-restore.ts";
 import { repointStep, clearSourceStep } from "#unit/server/relocation-migrate.ts";
 import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
-import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
+import { consumerWorld, refuseMoveSharingData, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 
 export const MigrateParams = z.object({ appId: z.string().startsWith("app_"), targetClusterId: z.string().startsWith("cls_") });
@@ -65,6 +65,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
     plan: async (params, { db }) => {
       const ac = loadAppCluster(db, params.appId);
       const target = assertMovableTo(db, ac.clusterId, params.targetClusterId);
+      await refuseMoveSharingData(ports, ac.stage, ac.name, target.cluster);
       const stepDefs = migrateSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, attestTargetStep(ports, params.appId), "moved consumer");
       return {
         kind: "consumer-migrate",

@@ -25,6 +25,7 @@ import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { runRelocationJob, type RelocationPorts, type RelocationWorld, type WorldOf } from "#unit/server/relocation.ts";
+import { servedSharedDatabases, sharedDataRefusal, type SharedDataClaim } from "./shared-data-guard.ts";
 import { targetOf } from "#unit/server/relocation-restore.ts";
 import {
   consumerDumpJobs, claimsIdentity, tarredClaims,
@@ -59,6 +60,18 @@ async function readStageRegistration(ports: ConsumerRelocationPorts, stage: Stag
   return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota, host: e.host };
 }
 
+/** Refuse to place `name` at `stage` on `cluster` where another registration is served a database it
+ *  would be served, or holds Redis keys or channels it would reach: the two would share data. */
+async function refuseSharedData(ports: ConsumerRelocationPorts, cluster: string, stage: Stage, name: string, claim: SharedDataClaim): Promise<void> {
+  const refusal = await sharedDataRefusal(ports.registrations, cluster, stage, name, claim);
+  if (refusal) throw errValidation(refusal);
+}
+
+/** Refuse a move of `name` at `stage` onto `cluster` that would make it share data there. */
+export async function refuseMoveSharingData(ports: ConsumerRelocationPorts, stage: Stage, name: string, cluster: string): Promise<void> {
+  await refuseSharedData(ports, cluster, stage, name, await readStageRegistration(ports, stage, name));
+}
+
 /** The consumer world factory — resolved fresh at every step from the apps row + the registration. */
 export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): WorldOf {
   return async (ctx: StepCtx): Promise<RelocationWorld> => {
@@ -72,7 +85,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
     // the unit's registration is deliberately ABSENT (offboarded), and must not fail on it.
     const registrationInputs = async (): Promise<{ name: string; namespace: string; stage: typeof ac.stage; databases: string[]; services: ConsumerStageRegistration["services"]; mongodb: ConsumerStageRegistration["mongodb"]; redis: RedisMode; image: string }> => {
       const reg = await readStageRegistration(ports, ac.stage, ac.name);
-      return { name: ac.name, namespace, stage: ac.stage, databases: reg.databases, services: reg.services, mongodb: reg.mongodb, redis: reg.redis ?? "shared", image };
+      return { name: ac.name, namespace, stage: ac.stage, databases: servedSharedDatabases(reg, ac.stage), services: reg.services, mongodb: reg.mongodb, redis: reg.redis ?? "shared", image };
     };
     const jobInputs = async (): Promise<Awaited<ReturnType<typeof registrationInputs>> & { pvcs: string[] }> => {
       const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
@@ -220,6 +233,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // the end, once the target holds a verified copy. The namespace is the carrier because a consumer
         // has no CR and its namespace outlives the prune (Delete=false, set by the appset's
         // managedNamespaceMetadata).
+        // Checked again here, after the plan, because another unit may have been placed on the target
+        // since; the flip below is what makes the target serve this unit its databases.
+        await refuseMoveSharingData(ports, ac.stage, ac.name, target.cluster);
         const { clusterReader } = await ports.resolver.resolve(ac.clusterId);
         await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: "true" });
         c.log("meta", `source namespace ${namespace} annotated ${CLAIM_RELOCATING_ANNOTATION} — the ServiceClaim teardown that the repoint sets off now keeps the data instead of dropping it`);
@@ -236,6 +252,14 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           const taken = (await ports.registrations.listAttestedFqdns({ unit: entry.name, stage: ac.stage })).find((a) => a.fqdn === entry.fqdn);
           if (taken) throw errValidation(`the dumped registration attests the fqdn ${entry.fqdn}, which ${taken.unit} now attests at ${taken.stage} — free it there before restoring ${entry.name}`);
         }
+        // The data travels with the unit too: a restore onto a cluster where another registration is
+        // served the same database, or holds the same Redis keys or channels, would join the two.
+        await refuseSharedData(ports, target.cluster, ac.stage, entry.name, {
+          services: entry.services ?? [], databases: entry.databases ?? [], mongodb: entry.mongodb ?? "shared",
+          ...(entry.redis !== undefined ? { redis: entry.redis } : {}),
+          ...(entry.keyPatterns !== undefined ? { keyPatterns: entry.keyPatterns } : {}),
+          ...(entry.channelPatterns !== undefined ? { channelPatterns: entry.channelPatterns } : {}),
+        });
         if (entry.smtpEntry !== undefined) {
           const sender = (await ports.registrations.listSmtpSenders(ac.stage)).find((s) => s.unit !== entry.name);
           if (sender) throw errValidation(`the dumped registration makes ${entry.name} the mail sender at ${ac.stage}, which ${sender.unit} is now — a stage has one sender; offboard it there before restoring ${entry.name}`);
