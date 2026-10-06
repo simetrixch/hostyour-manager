@@ -4,7 +4,7 @@
 // stores are its Mongo databases[], its per-consumer PostgreSQL, its claim bucket and its PVCs.
 import { eq } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
-import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
+import type { ArgoAppStatus, WorkloadStatus } from "../../adapters/kube/port.ts";
 import { apps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -25,6 +25,7 @@ import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { RepoCredentialWriter, BuildRbacWriter } from "../../adapters/kube/port.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { runRelocationJob, type RelocationPorts, type RelocationWorld, type WorldOf } from "#unit/server/relocation.ts";
+import { watchConsumerSwitch } from "./consumer-switch-watch.ts";
 import { servedSharedDatabases, sharedDataRefusal, type SharedDataClaim } from "./shared-data-guard.ts";
 import { targetOf } from "#unit/server/relocation-restore.ts";
 import {
@@ -58,6 +59,25 @@ async function readStageRegistration(ports: ConsumerRelocationPorts, stage: Stag
     throw errValidation(`registrations/${name}/${stage}.yaml carries no deploy group — a stage registration must`);
   }
   return { ...e, chartPath: e.chartPath, cluster: e.cluster, databases: e.databases, services: e.services, size: e.size, mongodb: e.mongodb, quota: e.quota, host: e.host };
+}
+
+/** Whether `w` is one of the consumer's OWN stores, which stand in its namespace as further sources of
+ *  its Application `appName` and read neither switch: they keep running through a quiesce, which is
+ *  what keeps them reachable for the dump, and through a suspend. The per-consumer PostgreSQL's chart
+ *  (hostyour-cloud clusters/units/postgresql) pins the database as `postgres` and renders a metrics
+ *  exporter, which reads and writes nothing; the upstream exporter chart names it after the Helm
+ *  release, which is the Application. An own MongoDB runs as the StatefulSet `mongodb`
+ *  (clusters/units/mongodb), an own Redis as the Deployments `redis` and `redis-exporter`
+ *  (clusters/units/redis), an own MariaDB as `mariadb` and `mariadb-exporter` (clusters/units/mariadb),
+ *  each only where the registration brings one. Exact names, so an application workload never passes
+ *  for a store. */
+export function consumerStoreWorkload(reg: Pick<ConsumerStageRegistration, "mongodb" | "redis" | "services">, appName: string): (w: WorkloadStatus) => boolean {
+  const ownMongo = reg.mongodb !== "shared";
+  const ownRedis = reg.redis === "standalone";
+  const ownMariadb = reg.services.includes("mariadb");
+  return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
+    (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter")) ||
+    (ownMariadb && w.kind === "Deployment" && (w.name === "mariadb" || w.name === "mariadb-exporter"));
 }
 
 /** Refuse to place `name` at `stage` on `cluster` where another registration is served a database it
@@ -114,20 +134,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         const entry = await readStageRegistration(ports, ac.stage, ac.name);
         const quiesced = intent === "quiesced";
         if (entry.quiesced !== quiesced) throw errValidation(`consumer ${ac.name} registration no longer requests the ${intent} render`);
-        const { argoReader, argoNamespace } = await ports.resolver.resolve(clusterId);
-        await argoReader.refreshApplicationSet(argoNamespace, "consumer-apps");
-        await argoReader.refreshApplications(argoNamespace, [appName]);
-        const converged = (s: ArgoAppStatus): boolean => {
-          const charts = (s.syncSources ?? []).filter((src) => src.repoURL === entry.repoURL && src.path === entry.chartPath);
-          return !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy" && charts.length > 0 && charts.every((src) => {
-            const value = src.valuesObject?.["quiesced"];
-            return quiesced ? value === true : value === false || value === undefined;
-          });
-        };
-        const status = await argoReader.watchApplication(argoNamespace, appName, converged, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal });
-        if (!converged(status)) {
-          throw errValidation(`Application ${appName} did not reach Synced/Healthy on the ${intent} render — last seen sync=${status.sync}, health=${status.health}${status.message ? ` (${status.message})` : ""}`);
-        }
+        await watchConsumerSwitch(ports, c, { clusterId, appName, chart: { repoURL: entry.repoURL, chartPath: entry.chartPath } }, "quiesced", quiesced, intent);
         c.log("meta", `Application ${appName} is Synced + Healthy — the consumer render is ${intent}`);
       },
       dumpJobs: async (folder, registrationYaml) => {
@@ -345,25 +352,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         localTx(c, (tx) => tx.update(apps).set({ clusterId: target.clusterId, status: "active", lastRunId: c.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
         c.log("meta", `consumer ${ac.name} recorded on cluster ${target.clusterId} (active)`);
       },
-      // The per-consumer PostgreSQL DELIBERATELY keeps running through a quiesce — that is what keeps
-      // its databases reachable for the dump. Its chart (hostyour-cloud clusters/units/postgresql) pins
-      // the database as `postgres` and renders a metrics exporter, which reads and writes nothing; the
-      // upstream exporter chart names it after the Helm release, which is this Application. An own
-      // MongoDB keeps running for the same reason, as the StatefulSet `mongodb` its chart
-      // (clusters/units/mongodb) renders, and only where the registration brings one: dump-mongo reads
-      // it there. An own Redis keeps running as the Deployments `redis` and `redis-exporter` its chart
-      // (clusters/units/redis) renders: dump-redis reads its snapshot. An own MariaDB keeps running as
-      // `mariadb` and `mariadb-exporter` (clusters/units/mariadb): dump-mariadb reads it. Exact names,
-      // so an application workload never passes for the store.
-      workloadExempt: async () => {
-        const reg = await readStageRegistration(ports, ac.stage, ac.name);
-        const ownMongo = reg.mongodb !== "shared";
-        const ownRedis = reg.redis === "standalone";
-        const ownMariadb = reg.services.includes("mariadb");
-        return (w) => w.name === "postgres" || w.name === `${appName}-prometheus-postgres-exporter` || (ownMongo && w.kind === "StatefulSet" && w.name === "mongodb") ||
-          (ownRedis && w.kind === "Deployment" && (w.name === "redis" || w.name === "redis-exporter")) ||
-          (ownMariadb && w.kind === "Deployment" && (w.name === "mariadb" || w.name === "mariadb-exporter"));
-      },
+      workloadExempt: async () => consumerStoreWorkload(await readStageRegistration(ports, ac.stage, ac.name), appName),
     };
   };
 }
