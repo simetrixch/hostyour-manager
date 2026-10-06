@@ -25,6 +25,7 @@ export const TENANT_COLUMNS = {
   ownDomainAliases: tenants.ownDomainAliases,
   approvedTags: tenants.approvedTags,
   senderDomain: tenants.senderDomain,
+  displayName: tenants.displayName,
   size: tenants.size,
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,

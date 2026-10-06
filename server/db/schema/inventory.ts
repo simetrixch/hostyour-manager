@@ -223,6 +223,8 @@ export const tenants = sqliteTable("tenants", {
   ownDomainAliases: text("own_domain_aliases", { mode: "json" }).$type<string[]>().notNull().default([]),
   approvedTags: text("approved_tags", { mode: "json" }).$type<Record<string, Record<string, string>>>().notNull().default({}),
   senderDomain: text("sender_domain").notNull().default(""),
+  // The tenant's display name, or "" for none (shared/tenant.ts tenantDisplayName).
+  displayName: text("display_name").notNull().default(""),
   // The size word (UNIT_SIZE) the registration's quota was resolved from, beside it for the tenant
   // view, which reads rows. Null for a stage written before the word was recorded: "no size recorded".
   size: text("size"),

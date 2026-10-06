@@ -12,7 +12,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   return {
     cluster: "s1",
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
-    identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "",
+    identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
@@ -100,7 +100,7 @@ describe("TenantRegistrations", () => {
     const reg = new TenantRegistrations(repo);
     const full = registration({
       cluster: "s1", subdomain: "simetrix",
-      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "",
+      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       apps: [{ name: "erp", seedReference: true, seedDemo: false, selections: {} }],
       seedUsers: true, quota: seedQuota("small"), resetNonce: "7", suspended: true, quiesced: true,
     });

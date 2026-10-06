@@ -162,6 +162,13 @@
       "when": 1791150109322,
       "tag": "0022_tenant-own-domain-aliases",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1791281906758,
+      "tag": "0023_tenant-display-name",
+      "breakpoints": true
     }
   ]
 }

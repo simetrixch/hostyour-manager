@@ -55,6 +55,7 @@ import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-mem
 import { makeTenantLineMoveDef } from "../domains/units/tenant-line-move.run.ts";
 import { readTenantLineMoves } from "../domains/units/tenant-line-move.ts";
 import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-domain.run.ts";
+import { makeTenantSetDisplayNameDef } from "../domains/units/tenant-display-name.run.ts";
 import { makeTenantSetDemoDef } from "../domains/units/tenant-demo.run.ts";
 import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
@@ -364,6 +365,7 @@ export function buildTenantOnboarding(
     makeTenantLineMoveDef({ ...onboardPorts, relocation: tenantRelocationPorts }),
     // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
     makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
+    makeTenantSetDisplayNameDef(onboardPorts),
     makeTenantSetDemoDef(onboardPorts),
     // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App
     // and onboarded build-only through the consumer family's chain (the same late-handed ports the

@@ -250,6 +250,15 @@ export function refineAppsBundle(e: AppsBundleFields, ctx: z.RefinementCtx): voi
  *  a render failure for the whole tenant. A standing installation is brought onto a new field by
  *  hand, once. An OPTIONAL field (`appsRepo`, where absent is a meaning) is left absent; a REQUIRED
  *  field with no default is a run kind's job — a run that knows the tenant. */
+/** A tenant's display name, as its members name the tenant in the From of a domainless tenant's
+ *  mail (`<name> <no-reply@<platform domain>>`). Letters of any script, digits, spaces and `.`, `-`,
+ *  `&`, `'` only, because digita-post parses `Name <address>` and refuses a name carrying `"`, `,`,
+ *  `(`, `)`, `@`, `<`, `>` or `\`; no leading or trailing space, at most 64 characters. "" names no one. */
+export const tenantDisplayName = z
+  .string()
+  .max(64, "at most 64 characters")
+  .regex(/^(?:[\p{L}\p{N}.&'-](?:[\p{L}\p{N} .&'-]*[\p{L}\p{N}.&'-])?)?$/u, "letters, digits, spaces and . - & ' only, with no space at either end");
+
 export const TenantRegistrationSchema = z
   .object({
     // The target SLAVE the tenant fans out on — the ArgoCD-REGISTERED cluster name (plane
@@ -308,6 +317,11 @@ export const TenantRegistrationSchema = z
     // product's sender-domain check answered that mail from it is signed. Defaulted to "" for every
     // file written before the field existed.
     senderDomain: z.union([z.literal(""), publicFqdn]).default(""),
+    // The tenant's display name, or "" where it has none. Every member receives it as
+    // tenant.displayName; a member without its own sender domain names the tenant in the From of its
+    // mail. Set by create-tenant and tenant-set-display-name. Defaulted to "" for every file written
+    // before the field existed.
+    displayName: tenantDisplayName.default(""),
     // The ceiling EVERY member namespace of this tenant is bounded by, resolved by the Manager from
     // its size table when it writes the registration and passed to hostyour-cloud/apps/unit-quota by the
     // tenant ApplicationSet. Per MEMBER and not per tenant, because a tenant owns one namespace per

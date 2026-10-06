@@ -35,6 +35,7 @@
 //
 // Boundary: pure leaf in the domain layer — type-only imports from shared/ (isomorphic), no adapters,
 // no db, no node builtins.
+import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { TenantSource, TenantSpec } from "../../../shared/consumer.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
@@ -144,6 +145,14 @@ export function memberAppProject(guid: string, member: string, stage: Stage): st
 export const TENANT_LABEL_KEY = "platform/tenant";
 
 /** ONE member's ArgoCD Application: <guid>-<member>-<stage> — the same string as its namespace. */
+/** Whether a member Application's last comparison renders `value` as tenant.<key> in every chart of
+ *  the deploy repository it reads — what a run that changed one registration field waits for, so a
+ *  green run is the value in use and not a commit nobody has rendered yet. */
+export function rendersTenantValue(status: ArgoAppStatus | undefined, deployRepoUrl: string, key: string, value: unknown): boolean {
+  const charts = (status?.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
+  return charts.length > 0 && charts.every((src) => (src.valuesObject?.["tenant"] as Record<string, unknown> | undefined)?.[key] === value);
+}
+
 export function memberApplication(guid: string, member: string, stage: Stage): string {
   return memberNamespace(guid, member, stage);
 }

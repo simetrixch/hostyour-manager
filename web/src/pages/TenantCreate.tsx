@@ -20,7 +20,7 @@ import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts"
  *  operator approves. */
 export function TenantCreate() {
   const nav = useNavigate();
-  const [form, setForm] = useState({ subdomain: "", owner: "", clusterId: "", adminEmail: "", size: "" });
+  const [form, setForm] = useState({ subdomain: "", displayName: "", owner: "", clusterId: "", adminEmail: "", size: "" });
   const [selectedStages, setSelectedStages] = useState<Stage[]>(["prod"]);
   const [stageMachines, setStageMachines] = useState<Partial<Record<Stage, string>>>({});
   const [demo, setDemo] = useState(false);
@@ -56,6 +56,7 @@ export function TenantCreate() {
         seedUsers: false,
         demo,
         adminEmail: form.adminEmail.trim(), // empty ⇒ buildCreateTenantBody omits it (no first-admin invite)
+        displayName: form.displayName, // blank ⇒ buildCreateTenantBody omits it (no name)
       });
       nav(`/runs/${runId}`); // the Run screen streams the live T1..T4 gate report + the approve card
     } catch (err) {
@@ -113,6 +114,14 @@ export function TenantCreate() {
             <span className="field__hint">
               One DNS label (zero PII): the tenant&apos;s zone is <code>&lt;subdomain&gt;.&lt;stage apex&gt;</code> and every member
               stands one level below it. Never a stage word — those are the zones themselves.
+            </span>
+          </label>
+          <label className="field">
+            <span className="field__label">Display name</span>
+            <input value={form.displayName} onChange={set("displayName")} placeholder="Acme" maxLength={64} />
+            <span className="field__hint">
+              Optional. A tenant without its own sender domain names itself with it in the From of its mail, such as
+              <code> Acme &lt;no-reply@…&gt;</code>. Letters, digits, spaces and . - &amp; &apos; only.
             </span>
           </label>
           <label className="field">

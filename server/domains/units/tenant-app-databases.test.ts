@@ -34,7 +34,7 @@ const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", domain: 
 function registration(apps: TenantRegistration["apps"], appsRepo = "https://github.com/acme/catalog-acme.git"): TenantRegistration {
   return {
     cluster: "s1", subdomain: "acme", members: testMembers(apps.map((a) => a.name)), identityProvider: "auth", routing: "host",
-    ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", apps, seedUsers: false, quota: seedQuota("small"),
+    ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps, seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1", suspended: false, quiesced: false, appsRepo, appsImage: "catalog-acme", appsImageTag: "0.3.001-stable-20260930120000-abc1234",
   };
 }

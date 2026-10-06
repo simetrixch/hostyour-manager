@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import {
   TenantRegistrationSchema,
+  tenantDisplayName,
   TenantValidationReportSchema,
   guid,
   appName,
@@ -441,5 +442,24 @@ describe("isOlderRelease — the order of two approved image tags (#297)", () =>
   it("takes a tag outside the grammar for no release: it is older than nothing", () => {
     expect(isOlderRelease("", V14)).toBe(false);
     expect(isOlderRelease(V13, "")).toBe(false);
+  });
+});
+
+describe("tenantDisplayName", () => {
+  it("admits a name digita-post parses in `Name <address>`, any script, and the empty name", () => {
+    for (const name of ["", "Simetrix", "Simetrix GmbH & Co.", "Müller & O'Brien", "Ελληνικά 2", "Show-Case"]) {
+      expect(tenantDisplayName.safeParse(name).success, name).toBe(true);
+    }
+  });
+
+  it("PLANTED: refuses each character post's sender parsing refuses, a name past 64 characters, and padding", () => {
+    for (const name of ["A, B", "A <b>", 'A "B"', "A (B)", "a@b", "A\\B", "A;B", "x".repeat(65), " Simetrix", "Simetrix "]) {
+      expect(tenantDisplayName.safeParse(name).success, name).toBe(false);
+    }
+  });
+
+  it("defaults a registration written before the field existed to the empty name", () => {
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    expect(parsed.displayName).toBe("");
   });
 });

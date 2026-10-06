@@ -28,6 +28,12 @@ describe("buildCreateTenantBody", () => {
     expect(body.apps).toEqual([]);
   });
 
+  it("trims the display name and leaves it out when blank", () => {
+    expect(buildCreateTenantBody({ ...base, displayName: "  Acme & Co. " }).displayName).toBe("Acme & Co.");
+    expect("displayName" in buildCreateTenantBody({ ...base, displayName: "   " })).toBe(false);
+    expect("displayName" in buildCreateTenantBody(base)).toBe(false);
+  });
+
   it("carries the Demo tenant box as it stands", () => {
     expect(buildCreateTenantBody(base).demo).toBe(false);
     expect(buildCreateTenantBody({ ...base, demo: true }).demo).toBe(true);

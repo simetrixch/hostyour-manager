@@ -4,7 +4,7 @@ import { TenantSizeSchema, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
-import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, tenantDisplayName, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { refreshTenantApplications } from "./lifecycle.ts";
 import { upsertTenantInventory } from "./create-tenant-inventory.ts";
@@ -198,7 +198,8 @@ export const CreateTenantStageParams = z.object({
   // The DNS label the product marks each tenant's identity provider under (tenant spec
   // issuerRecordLabel), frozen like the routing; absent where the product declares none.
   issuerRecordLabel: z.string().optional(),
-  seedUsers: z.boolean().default(false), // flips the tenant IdP's user boot-seed; a registration field
+  // seedUsers flips the tenant IdP's user boot-seed; displayName is the name the tenant is shown under. Both registration fields.
+  seedUsers: z.boolean().default(false), displayName: tenantDisplayName.default(""),
   demo: z.boolean().default(false), // a demo tenant: tenant.demo on every member; a registration field
   // The tenant's SIZE — the ceiling EVERY member namespace of it is bounded by. A NAME here, resolved
   // to figures as the registration is written, so a plan that waited for approval across a table edit
@@ -262,7 +263,9 @@ export const CreateTenantRequest = z.object({
   // A website is added to a standing tenant (tenant-add-app), which names it, points its hosts at
   // the zone and waits for it; an entry that carries a folder, a site or a domain is refused here.
   apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined), { message: "a website is added to a standing tenant with Add website, never when the tenant is created" }),
-  seedUsers: z.boolean().default(false),
+  // The name the tenant is shown under, "" for none: a member without its own sender domain names
+  // the tenant in the From of its mail. Changed later by tenant-set-display-name.
+  seedUsers: z.boolean().default(false), displayName: tenantDisplayName.default(""),
   // A demo tenant (the wizard's "Demo tenant" box): its members get tenant.demo, a one-click demo
   // login and a nightly reset in the product's charts.
   demo: z.boolean().default(false),
@@ -661,7 +664,7 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
         chartsRef: outcome.resolvedSha,
         registryHost,
         apps: withAppDatabases(req.apps, outcome.appDatabases), // each with its catalog database list, read by every member
-        seedUsers: req.seedUsers,
+        seedUsers: req.seedUsers, displayName: req.displayName,
         demo: req.demo,
         size: req.size,
         owner: req.owner,

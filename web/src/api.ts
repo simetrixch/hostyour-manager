@@ -504,6 +504,8 @@ export interface TenantView {
   approvedTags: Record<string, Record<string, string>>;
   /** The domain the tenant's mail is sent as, or "" for the platform's own. */
   senderDomain: string;
+  /** The name the tenant is shown under, or "" for none. */
+  displayName: string;
   size: UnitSize | null; // the size word the stage's quota was resolved from; null where none was recorded
   seedUsers: boolean;
   suspended: boolean;
@@ -569,6 +571,8 @@ export interface TenantCreateForm {
   demo: boolean;
   /** OPTIONAL first-admin email. Empty ⇒ omitted from the body (no first-admin invite). */
   adminEmail?: string;
+  /** OPTIONAL name the tenant is shown under. Empty ⇒ omitted from the body (the server defaults it to none). */
+  displayName?: string;
 }
 /** The POST /api/tenants body == the server's CreateTenantRequest (the domain is derived from the
  *  target cluster row server-side, never sent; the stage IS sent, and the server refuses one that is
@@ -592,6 +596,7 @@ export interface CreateTenantBody {
   seedUsers: boolean; // flips the tenant IdP's user boot-seed
   demo: boolean; // a demo tenant: tenant.demo on every member
   adminEmail?: string; // OPTIONAL — omitted when the operator left the field blank
+  displayName?: string; // OPTIONAL — omitted when the operator left the field blank
 }
 
 /** Shape the wizard state into the CreateTenantRequest body: trim every field, drop blank app rows,
@@ -618,6 +623,7 @@ export function buildCreateTenantBody(f: TenantCreateForm): CreateTenantBody {
     demo: f.demo,
     // Omit the field entirely when blank (never send adminEmail: "" — the server treats absent as "no invite").
     ...(adminEmail ? { adminEmail } : {}),
+    ...(f.displayName?.trim() ? { displayName: f.displayName.trim() } : {}),
   };
 }
 
@@ -687,9 +693,6 @@ export const migrateTenant = (tenant: Pick<TenantView, "id" | "stage" | "cluster
 export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
 
-/** Plan tenant-set-sender-domain: send the tenant's mail as `domain` ("" as the platform's own). */
-export const setTenantSenderDomain = (tenantId: string, domain: string): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/sender-domain`, { senderDomain: domain });
 
 export const setTenantDemo = (tenantId: string, demo: boolean): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/demo`, { demo });

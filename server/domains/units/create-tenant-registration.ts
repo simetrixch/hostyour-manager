@@ -68,6 +68,7 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
         size: p.size,
         quota: resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS),
         seedUsers: p.seedUsers,
+        displayName: p.displayName,
         ...(p.demo ? { demo: true as const } : {}),
         approvedTags,
         resetNonce: INITIAL_RESET_NONCE,

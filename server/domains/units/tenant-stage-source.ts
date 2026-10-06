@@ -85,6 +85,8 @@ export async function planStandingStage(
     clusterId: rc.clusterId, cluster: rc.cluster, domain: rc.domain, chartsRef: outcome.resolvedSha,
     registryHost, apps, members: outcome.memberRecords, identityProvider: entry.identityProvider,
     routing: entry.routing, seedUsers: false, demo: entry.demo === true, size: request.size, owner: source.owner,
+    // A new stage is shown under the name the stage it is added from carries.
+    displayName: entry.displayName,
     report: outcome.report, expectedApps: tenantApplicationSet(members.map((m) => m.name), source.guid, placement.stage),
     requiredImages, syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()), buildUnits: [],
     deployRepoUrl: ports.deployRepoUrl, replaces: [], ownDomain, ownDomainRedirects, approvedTags,

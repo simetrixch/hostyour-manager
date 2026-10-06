@@ -80,7 +80,7 @@ export function useOwnDomainHarness() {
     await reg.commitTenant({
       stage, guid: GUID, runId: "run_crt",
       registration: {
-        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "",
+        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "", displayName: "",
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });

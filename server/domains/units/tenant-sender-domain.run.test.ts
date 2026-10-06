@@ -86,7 +86,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
     await reg.commitTenant({
       stage: "prod", guid: GUID, runId: "run_crt",
       registration: {
-        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain,
+        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain, displayName: "",
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });

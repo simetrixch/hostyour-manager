@@ -1,0 +1,1 @@
+ALTER TABLE `tenants` ADD `display_name` text DEFAULT '' NOT NULL;

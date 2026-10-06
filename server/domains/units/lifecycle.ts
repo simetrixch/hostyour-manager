@@ -148,6 +148,8 @@ export interface TenantCluster {
   approvedTags: Record<string, Record<string, string>>;
   /** The domain the tenant's mail is sent as, or "" for the platform's own (shared/tenant.ts). */
   senderDomain: string;
+  /** The tenant's display name, or "" for none (shared/tenant.ts tenantDisplayName). */
+  displayName: string;
   /** The owner the tenant was onboarded under — what a bundle created later is onboarded under too. */
   owner: string;
 }
@@ -172,6 +174,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     ownDomainAliases: tenant.ownDomainAliases,
     approvedTags: tenant.approvedTags,
     senderDomain: tenant.senderDomain,
+    displayName: tenant.displayName,
     owner: tenant.owner ?? tenant.subdomain,
   };
 }

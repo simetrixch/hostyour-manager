@@ -5,14 +5,14 @@ import { tenants } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { publicFqdn } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
+import type { ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { stageApex } from "#unit/shared/unit-host.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
-import { memberApplication } from "./tenant-fanout.ts";
+import { memberApplication, rendersTenantValue } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -45,12 +45,6 @@ export type TenantSetSenderDomainPorts = TenantOnboardPorts & {
   /** Asks the product's sender-domain check from the outside. */
   probe: PublicProbe;
 };
-
-/** Whether a member Application's last comparison renders `domain` as tenant.senderDomain. */
-function rendersSenderDomain(status: ArgoAppStatus | undefined, deployRepoUrl: string, domain: string): boolean {
-  const charts = (status?.syncSources ?? []).filter((src) => src.repoURL === deployRepoUrl && src.path);
-  return charts.length > 0 && charts.every((src) => (src.valuesObject?.["tenant"] as { senderDomain?: unknown } | undefined)?.senderDomain === domain);
-}
 
 async function writeSenderDomain(ports: TenantSetSenderDomainPorts, tc: TenantCluster, db: Parameters<Step["run"]>[0]["db"], domain: string, runId: string): Promise<string> {
   const { commit } = await ports.registrations.setSenderDomain(tc.stage, tc.guid, domain, runId);
@@ -127,7 +121,7 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apps = tc.members.map((m) => memberApplication(tc.guid, m, tc.stage));
-        const renders = (byName: ArgoAppStatusMap): boolean => apps.every((a) => rendersSenderDomain(byName.get(a), ports.deployRepoUrl, p.senderDomain));
+        const renders = (byName: ArgoAppStatusMap): boolean => apps.every((a) => rendersTenantValue(byName.get(a), ports.deployRepoUrl, "senderDomain", p.senderDomain));
         const until = (byName: ArgoAppStatusMap): boolean => syncedAt(apps)(byName) && renders(byName);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
         const byName = await argoReader.watchApplicationSet(argoNamespace, apps, until, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: `platform/tenant=${tc.guid}` });

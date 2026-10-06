@@ -34,7 +34,7 @@ describe("CONSUMER_RUN_KINDS", () => {
 
 describe("TENANT_RUN_KINDS", () => {
   it("is exactly the tenant lifecycle kinds (create + add/remove-app + the apps repository + suspend/resume/offboard + purge + backup/restore/migrate + the nightly backup + the administrator check)", () => {
-    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-line-move", "tenant-migrate", "tenant-nightly-backup", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-demo", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-set-website-site", "tenant-suspend"]);
+    expect([...TENANT_RUN_KINDS].sort()).toEqual(["tenant-add-app", "tenant-apps-repo", "tenant-backup", "tenant-check", "tenant-create", "tenant-line-move", "tenant-migrate", "tenant-nightly-backup", "tenant-offboard", "tenant-purge", "tenant-refresh-members", "tenant-remove-app", "tenant-restart-workloads", "tenant-restore", "tenant-resume", "tenant-set-demo", "tenant-set-display-name", "tenant-set-own-domain", "tenant-set-routing", "tenant-set-sender-domain", "tenant-set-size", "tenant-set-website-domain", "tenant-set-website-site", "tenant-suspend"]);
   });
 
   it("keeps check-tenants — it targets no tenant row, so only a kind filter surfaces it", () => {
