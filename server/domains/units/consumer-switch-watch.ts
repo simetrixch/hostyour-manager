@@ -6,8 +6,7 @@
 import type { StepCtx } from "../../executor/types.ts";
 import type { ArgoAppStatus, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { errValidation } from "../../kernel/errors.ts";
-
-export type ConsumerSwitch = "suspended" | "quiesced";
+import { switchValuesSay, type UnitSwitch } from "#unit/server/argo-app-status.ts";
 
 /** The consumer chart's source: the repository and path the registration names. */
 export interface ConsumerChart {
@@ -16,15 +15,13 @@ export interface ConsumerChart {
 }
 
 /** The switch's value on every source of the consumer chart, as ArgoCD last compared it. */
-const switchValues = (s: ArgoAppStatus, chart: ConsumerChart, name: ConsumerSwitch): unknown[] =>
+const switchValues = (s: ArgoAppStatus, chart: ConsumerChart, name: UnitSwitch): unknown[] =>
   (s.syncSources ?? []).filter((src) => src.repoURL === chart.repoURL && src.path === chart.chartPath).map((src) => src.valuesObject?.[name]);
 
 /** Whether the Application renders the switch `name` as `on` (an absent value reads as off), with no
  *  refresh still queued, Synced and Healthy. */
-export function rendersSwitch(s: ArgoAppStatus, chart: ConsumerChart, name: ConsumerSwitch, on: boolean): boolean {
-  const values = switchValues(s, chart, name);
-  return !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy" && values.length > 0 &&
-    values.every((v) => (on ? v === true : v === false || v === undefined));
+export function rendersSwitch(s: ArgoAppStatus, chart: ConsumerChart, name: UnitSwitch, on: boolean): boolean {
+  return !s.refreshRequested && s.sync === "Synced" && s.health === "Healthy" && switchValuesSay(switchValues(s, chart, name), on);
 }
 
 /** Refresh the consumers ApplicationSet and the Application `appName`, then wait until it renders the
@@ -33,7 +30,7 @@ export async function watchConsumerSwitch(
   ports: { resolver: ClusterKubeResolver; argoWatchTimeoutMs: number },
   ctx: StepCtx,
   target: { clusterId: string; appName: string; chart: ConsumerChart },
-  name: ConsumerSwitch,
+  name: UnitSwitch,
   on: boolean,
   render: string,
 ): Promise<void> {
