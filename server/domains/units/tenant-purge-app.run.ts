@@ -41,13 +41,19 @@ interface AppLeftovers {
   vaultKeys: string[];
 }
 
-/** Every check a purge needs before it deletes, read now: the tenant stands, the app is offboarded
- *  and no longer deployed, and what of it is left. Vault unread is a refusal, never an empty answer,
- *  since a key standing there could not be seen. */
+/** Every check a purge needs before it deletes, read now: the tenant stands, the app is offboarded,
+ *  its registration no longer names it and nothing of it is deployed, and what of it is left. The
+ *  registration is read first because it is what the tenant runs: the cluster follows it, so an app
+ *  the registration names but ArgoCD has not deployed yet stands nowhere on the cluster. Vault unread
+ *  is a refusal, never an empty answer, since a key standing there could not be seen. */
 async function readLeftovers(ports: TenantLifecyclePorts, db: Db, tenantId: string, app: string): Promise<{ tc: TenantCluster; left: AppLeftovers }> {
   const tc = loadTenantCluster(db, tenantId);
   assertTenantStanding(db, tc);
   assertAppOffboarded(db, tc, app);
+  const registration = await ports.registrations.readTenant(tc.stage, tc.guid);
+  if (registration?.entry.apps.some((a) => a.name === app)) {
+    throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: the registration still names it — remove the app first`);
+  }
   if (!ports.seeder) throw errValidation(`this Manager cannot read Vault, so it cannot see whether app "${app}" of tenant ${tc.guid} still has a key there`);
   const { clusterReader, argoReader, projectWriter, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
   const deployed: string[] = [];

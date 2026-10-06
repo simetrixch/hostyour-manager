@@ -7,6 +7,8 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { fakeTenantSeeder } from "./tenant-seeder.fixture.ts";
+import { testMembers } from "./tenant-members.fixture.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { memberAppProject, memberApplication, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
@@ -53,7 +55,7 @@ const project = (guid: string, member: string) => renderTenantAppProject({
 /** The cluster, master and Vault as a remove-app leaves them: `web`'s namespace and Application gone,
  *  its AppProject, admission policy and Vault keys kept, unless a test says otherwise. A sibling app
  *  and the other tenant's `web` keep their own pieces throughout. */
-async function world(left: { namespace?: boolean; application?: boolean; project?: boolean; policy?: boolean; vaultKeys?: string[] } = {}) {
+async function world(left: { namespace?: boolean; application?: boolean; project?: boolean; policy?: boolean; vaultKeys?: string[]; registered?: boolean } = {}) {
   const cluster = new FakeClusterReader({
     deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
     absentNamespaces: left.namespace ? [] : [memberNamespace(GUID, "web", "prod")],
@@ -73,8 +75,18 @@ async function world(left: { namespace?: boolean; application?: boolean; project
     listTenantAppKeys: async () => vaultKeys,
     deleteTenantAppKeys: async (input: unknown) => { vaultDeletes.push(input); return { deleted: vaultKeys }; },
   };
+  // The tenant's registration names its standing apps; a removed app is no longer among them.
+  const registrations = new TenantRegistrations(new FakePlatformRepo());
+  const apps = [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, ...(left.registered ? [{ name: "web", seedReference: false, seedDemo: false, selections: {} }] : [])];
+  await registrations.commitTenant({
+    stage: "prod", guid: GUID, runId: "run_onb",
+    registration: {
+      cluster: "s1", members: testMembers(apps), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+      subdomain: "simetrix", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
+    },
+  });
   const ports: TenantLifecyclePorts = {
-    registrations: new TenantRegistrations(new FakePlatformRepo()),
+    registrations,
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),
     deployRepoUrl: "https://github.com/acme/acme-deploy.git",
     argoWatchTimeoutMs: 1000,
@@ -153,6 +165,17 @@ describe("tenant-purge-app run", () => {
     expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
   });
 
+  it("PLANTED DEFECT: refuses an app the tenant's registration still names, though nothing of it is deployed yet, and deletes nothing", async () => {
+    seedTenants();
+    const { ports, projects, vaultDeletes } = await world({ registered: true });
+    const def = makePurgeAppDef(ports);
+    await expect(def.plan(PARAMS, { db: db.db } as never)).rejects.toThrow("the registration still names it");
+    await expect(runAll(def)).rejects.toThrow("the registration still names it");
+    expect(appRow("tnt_1", "web")).toBeDefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
+    expect(vaultDeletes).toEqual([]);
+  });
+
   it.each(["active", "suspended", "provisioning", "purged"] as const)("refuses an app that is %s", async (status) => {
     seedTenants({ webStatus: status });
     const { ports } = await world();
@@ -195,6 +218,10 @@ describe("tenant-purge-app run", () => {
     db.db.update(tenantApps).set({ status: "active" }).where(eq(tenantApps.id, "tna_web")).run();
     await expect(steps[2]!.run(ctx("run_purge", steps[2]!.name, []))).rejects.toThrow("only an offboarded app is purged");
     expect(appRow("tnt_1", "web")?.status).toBe("active");
+    db.db.update(tenantApps).set({ status: "offboarded" }).where(eq(tenantApps.id, "tna_web")).run();
+    db.db.update(tenants).set({ status: "offboarded" }).where(eq(tenants.id, "tnt_1")).run();
+    await expect(steps[2]!.run(ctx("run_purge", steps[2]!.name, []))).rejects.toThrow(`tenant ${GUID} is offboarded`);
+    expect(appRow("tnt_1", "web")).toBeDefined();
   });
 
   it("refuses when this Manager cannot read Vault, since a key standing there could not be seen", async () => {
