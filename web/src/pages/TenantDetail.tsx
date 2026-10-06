@@ -9,7 +9,7 @@ import {
 } from "../api.ts";
 import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
 import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
-import { listedWebsites, removedWebsites, tenantAppRows } from "../tenantAppRows.ts";
+import { listedWebsites, removedWebsites } from "../tenantAppRows.ts";
 import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
@@ -20,6 +20,7 @@ import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
 import { TenantMoveAction } from "../components/TenantMoveAction.tsx";
 import { TenantStageActions } from "../components/TenantStageActions.tsx";
 import { TenantWebsites } from "../components/TenantWebsites.tsx";
+import { TenantAppList } from "../components/TenantAppList.tsx";
 import { TenantVersionsAction } from "../components/TenantVersionsAction.tsx";
 import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
@@ -230,43 +231,7 @@ export function TenantDetail() {
       </div>
 
       <div>{!unfinished && !settled && <TenantStageActions tenant={t} />}<h3 className="steps-panel__title">Apps</h3></div>
-      {/* The bundle's apps lead, deployed or not; an inventory row the bundle no longer names follows.
-          While the catalog is unreadable the list is the inventory alone, and the control below says why. */}
-      {(() => {
-        const rows = tenantAppRows(catalog?.apps ?? [], t.apps, catalog?.websites);
-        return rows.length === 0 ? (
-          <div className="empty">
-            <p>No apps yet — this tenant runs only its standing members.</p>
-          </div>
-        ) : (
-          <ul className="rows">
-            {rows.map((r) => (
-              <li key={r.name}>
-                <div className="row">
-                  {r.row ? <TenantStatusBadge status={r.row.status} /> : <span className="chip">{r.deployed ? "deployed" : "in the bundle"}</span>}
-                  <span className="row__title">{r.entry ? `${r.entry.title} (${r.name})` : r.name}</span>
-                  <span className="row__meta">{r.deployed ? `${t.guid}-${r.name}-${t.stage}` : "not deployed"}</span>
-                  <span className="row__end">
-                    {r.row?.lastRunId && (
-                      <Link className="btn" to={`/runs/${r.row.lastRunId}`}>
-                        Last run →
-                      </Link>
-                    )}
-                    {/* The per-app remove, gated by the SAME shared status rule as everything else on this
-                        page: an app row that a remove-app or a tenant-wide removal already settled
-                        ("offboarded" or "purged") has no Application left to prune. */}
-                    {r.row && !settled && !unfinished && !tenantRowOffer(r.row.status).settled && (
-                      <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setRemoveApp(r.name)}>
-                        Remove
-                      </button>
-                    )}
-                  </span>
-                </div>
-              </li>
-            ))}
-          </ul>
-        );
-      })()}
+      <TenantAppList tenant={t} catalog={catalog} editable={!settled && !unfinished} busy={busy} act={act} onRemove={setRemoveApp} />
 
       {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
 

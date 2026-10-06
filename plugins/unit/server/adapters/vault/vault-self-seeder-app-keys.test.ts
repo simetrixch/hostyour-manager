@@ -63,6 +63,34 @@ describe("VaultSelfSeeder tenant app keys", () => {
     await withSelf(async (seeder) => expect(seeder.deleteTenantAppKeys({ stage: "prod", guid: "g1" })).rejects.toThrow(/tenant app key list failed for secret\/prod\/tenants\/g1\/revalidate-secret \(403\)/));
   });
 
+  it("PLANTED DEFECT: lists the keys one app still has, by name, and reads, writes or deletes no key", async () => {
+    vault.metaLists["prod/tenants/g1/password-field-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp", "web"] } }) };
+    vault.metaLists["prod/tenants/g1/service-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp", "web"] } }) };
+    vault.metaLists["prod/tenants/g1/revalidate-secret"] = { status: 200, body: JSON.stringify({ data: { keys: ["webshop"] } }) };
+    await withSelf(async (seeder) => {
+      expect(await seeder.listTenantAppKeys({ stage: "prod", guid: "g1", app: "web" })).toEqual(["password-field-key/web", "service-key/web"]);
+      expect(vault.recorded.filter((r) => r.method === "DELETE" || r.url.includes("/data/"))).toEqual([]);
+    });
+  });
+
+  it("lists nothing where the app has no key, and fails closed on a refused list", async () => {
+    await withSelf(async (seeder) => expect(await seeder.listTenantAppKeys({ stage: "prod", guid: "g1", app: "web" })).toEqual([]));
+    vault.metaLists["prod/tenants/g1/service-key"] = { status: 403, body: "permission denied" };
+    await withSelf(async (seeder) => expect(seeder.listTenantAppKeys({ stage: "prod", guid: "g1", app: "web" })).rejects.toThrow(/tenant app key list failed for secret\/prod\/tenants\/g1\/service-key \(403\)/));
+  });
+
+  it("PLANTED DEFECT: purges the keys of one app only, of every kind, by metadata, and leaves every other app's", async () => {
+    vault.metaLists["prod/tenants/g1/password-field-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp", "web"] } }) };
+    vault.metaLists["prod/tenants/g1/service-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["web", "webshop"] } }) };
+    await withSelf(async (seeder) => {
+      expect(await seeder.deleteTenantAppKeys({ stage: "prod", guid: "g1", app: "web" })).toEqual({ deleted: ["password-field-key/web", "service-key/web"] });
+      expect(vault.recorded.filter((r) => r.method === "DELETE").map((r) => r.url)).toEqual([
+        "/v1/secret/metadata/prod/tenants/g1/password-field-key/web",
+        "/v1/secret/metadata/prod/tenants/g1/service-key/web",
+      ]);
+    });
+  });
+
   it("purges nothing, and says so, where no key stands", async () => {
     await withSelf(async (seeder) => expect(await seeder.deleteTenantAppKeys({ stage: "prod", guid: "g1" })).toEqual({ deleted: [] }));
   });

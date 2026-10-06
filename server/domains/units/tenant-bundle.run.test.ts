@@ -100,7 +100,7 @@ function fakeTenantSeeder(): VaultSeeder {
   return {
     seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedRedis: no, seedMariadb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no,
     deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
-    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {},
+    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {},
   };
 }
 /** The ports of a tenant WITHOUT the App and the template — what withAppsTemplate adds. */

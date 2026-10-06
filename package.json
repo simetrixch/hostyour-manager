@@ -1,6 +1,6 @@
 {
   "name": "hostyour-manager",
-  "version": "0.8.405",
+  "version": "0.8.406",
   "private": true,
   "type": "module",
   "engines": {
@@ -38,6 +38,7 @@
     "openid-client": "^6",
     "pino": "^9",
     "ssh2": "^1.16",
+    "tsx": "^4",
     "ulid": "^3",
     "yaml": "^2.9.0",
     "zod": "^4"
@@ -57,7 +58,6 @@
     "react-router": "^7.18.4",
     "stylelint": "^16",
     "stylelint-config-standard": "^36",
-    "tsx": "^4",
     "typescript": "^5.9",
     "typescript-eslint": "^8",
     "vite": "^7",

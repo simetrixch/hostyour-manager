@@ -494,6 +494,8 @@ export const RUN_KIND = [
   // new generation, retention after it, started by the manager itself each night.
   "consumer-nightly-backup", "tenant-nightly-backup",
   "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
+  // One removed app of a standing tenant, purged by hand: what remove-app kept, then its record.
+  "tenant-purge-app",
   // The tenant's OWN apps repository: created in the customer's owner from the deploy repository's
   // apps bundle with the chosen apps, registered build-only and built once — before create-tenant
   // mounts the image it produces. A run kind of its own because it acts on GitHub and the build
@@ -541,7 +543,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "mail-envelope-spf-publish", "mail-dkim-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-set-website-site", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-display-name", "tenant-set-demo", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-purge-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-set-website-site", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-display-name", "tenant-set-demo", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

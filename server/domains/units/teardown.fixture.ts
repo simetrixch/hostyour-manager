@@ -27,6 +27,7 @@ export class RecordingTeardownSeeder implements VaultSeeder {
   async deleteMariadb(i: MariadbSecretDeleteInput): Promise<void> { this.deletedMariadb.push(i); }
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { return { created: true }; }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
+  async listTenantAppKeys(): Promise<string[]> { return []; }
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }
