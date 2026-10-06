@@ -87,6 +87,7 @@ export function RunDetail() {
         if (ev.stream === "meta") reread.call();
       },
       ended: refresh,
+      dropped: () => reread.call(),
     });
     return () => { reread.cancel(); stop(); };
   }, [runId]);

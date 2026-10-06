@@ -72,11 +72,8 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
       // reports this one, and only the dropped one is to be reopened (web/src/runLogFollow.ts).
       const end = (): Promise<void> => stream.writeSSE({ event: "end", data: "" });
 
-      for (const e of readEvents(db, id, after)) await send(e);
-      const start = getRun(db, id);
-      // Terminal or soft-deleted → nothing more will come — replay the backlog and close.
-      if (!start || isTerminalRun(start.status) || start.deletedAt !== null) return end();
-
+      // Subscribed BEFORE the replay: every send yields, a step may write meanwhile, and a line the bus
+      // delivers to nobody is gone for this stream — and the client's cursor would step over it.
       const queue: RunEventView[] = [];
       let wake: (() => void) | null = null;
       const unsub = bus.subscribe(id, (e) => {
@@ -87,13 +84,21 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
         unsub();
         wake?.();
       });
+      let last = after;
+      const sendOnce = async (e: RunEventView): Promise<void> => {
+        if (e.seq <= last) return; // replayed from the table already
+        last = e.seq;
+        await send(e);
+      };
       try {
+        for (const e of readEvents(db, id, after)) await sendOnce(e);
         for (;;) {
-          while (queue.length > 0) await send(queue.shift() as RunEventView);
+          while (queue.length > 0) await sendOnce(queue.shift() as RunEventView);
           if (stream.aborted) break;
           const now = getRun(db, id);
+          // Terminal or soft-deleted → nothing more will come.
           if (!now || isTerminalRun(now.status) || now.deletedAt !== null) {
-            while (queue.length > 0) await send(queue.shift() as RunEventView);
+            while (queue.length > 0) await sendOnce(queue.shift() as RunEventView);
             await end();
             break;
           }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RunEventView } from "../../shared/api-types.ts";
-import { followRunLog, RUN_LOG_RETRY_MS, type RunLogSource } from "./runLogFollow.ts";
+import { followRunLog, RUN_LOG_RETRY_MAX_MS, RUN_LOG_RETRY_MS, type RunLogSource } from "./runLogFollow.ts";
 
 /** A stand-in for one EventSource: the test plays the server through `deliver`, `end` and `drop`. */
 class FakeSource implements RunLogSource {
@@ -30,19 +30,20 @@ function harness() {
   const timers: { fn: () => void; ms: number }[] = [];
   const lines: number[] = [];
   let ended = 0;
+  let dropped = 0;
   const stop = followRunLog(
     (after) => {
       const s = new FakeSource(after);
       sources.push(s);
       return s;
     },
-    { line: (e) => lines.push(e.seq), ended: () => ended++ },
+    { line: (e) => lines.push(e.seq), ended: () => ended++, dropped: () => dropped++ },
     (fn, ms) => {
       timers.push({ fn, ms });
     },
   );
   const fire = () => timers.splice(0).forEach((t) => t.fn());
-  return { sources, timers, lines, ended: () => ended, fire, stop };
+  return { sources, timers, lines, ended: () => ended, dropped: () => dropped, fire, stop };
 }
 
 const range = (from: number, to: number) => Array.from({ length: to - from + 1 }, (_, i) => from + i);
@@ -74,6 +75,29 @@ describe("followRunLog", () => {
     h.sources[2]!.deliver(2);
     expect(h.lines).toEqual([0, 1, 2]);
     expect(h.ended()).toBe(0);
+  });
+
+  it("PLANTED: every drop asks for the run again, so the page shows a run that moved, or a read that fails", () => {
+    const h = harness();
+    h.sources[0]!.drop();
+    expect(h.dropped()).toBe(1);
+    h.fire();
+    h.sources[1]!.drop();
+    expect(h.dropped()).toBe(2);
+  });
+
+  it("a stream that keeps failing waits twice as long each time, up to its ceiling, and a line resets the wait", () => {
+    const h = harness();
+    const waits: number[] = [];
+    for (let i = 0; i < 6; i++) {
+      h.sources.at(-1)!.drop();
+      waits.push(h.timers[0]!.ms);
+      h.fire();
+    }
+    expect(waits).toEqual([RUN_LOG_RETRY_MS, 4_000, 8_000, 16_000, RUN_LOG_RETRY_MAX_MS, RUN_LOG_RETRY_MAX_MS]);
+    h.sources.at(-1)!.deliver(0);
+    h.sources.at(-1)!.drop();
+    expect(h.timers[0]!.ms).toBe(RUN_LOG_RETRY_MS);
   });
 
   it("the server's end closes the stream for good: no reopen follows", () => {

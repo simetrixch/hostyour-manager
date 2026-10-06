@@ -16,18 +16,23 @@ export interface RunLogSource {
 
 const LINE_STREAMS = [...EVENT_STREAM, EPHEMERAL_STREAM];
 
-/** How long a dropped stream waits before it reopens: no reconnect storm while the Manager restarts. */
+/** How long a dropped stream waits before it reopens, doubling while it keeps failing up to the ceiling:
+ *  no reconnect storm while the Manager restarts, and none against a stream that answers 401 or 404. */
 export const RUN_LOG_RETRY_MS = 2_000;
+export const RUN_LOG_RETRY_MAX_MS = 30_000;
 
 /** Follow a run's log until the server ends it: `open(after)` opens the stream past the line `after`;
- *  each line reaches `line` once, in order; `ended` fires when the server says nothing more comes.
+ *  each line reaches `line` once, in order; `ended` fires when the server says nothing more comes;
+ *  `dropped` fires on every other close, for the caller to read the run again: its status may have
+ *  moved, and a stream that cannot reopen (an expired session, a purged run) shows only there.
  *  Returns the stop that closes it. */
 export function followRunLog(
   open: (after: number) => RunLogSource,
-  on: { line: (e: RunEventView) => void; ended: () => void },
+  on: { line: (e: RunEventView) => void; ended: () => void; dropped: () => void },
   schedule: (fn: () => void, ms: number) => void = (fn, ms) => void setTimeout(fn, ms),
 ): () => void {
   let after = -1;
+  let wait = RUN_LOG_RETRY_MS;
   let stopped = false;
   let source: RunLogSource;
   const connect = (): void => {
@@ -37,6 +42,7 @@ export function followRunLog(
       const e = JSON.parse(m.data as string) as RunEventView;
       if (e.seq <= after) return;
       after = e.seq;
+      wait = RUN_LOG_RETRY_MS;
       on.line(e);
     };
     for (const s of LINE_STREAMS) source.addEventListener(s, onLine);
@@ -47,7 +53,10 @@ export function followRunLog(
     });
     source.addEventListener("error", () => {
       source.close();
-      if (!stopped) schedule(connect, RUN_LOG_RETRY_MS);
+      if (stopped) return;
+      on.dropped();
+      schedule(connect, wait);
+      wait = Math.min(wait * 2, RUN_LOG_RETRY_MAX_MS);
     });
   };
   connect();

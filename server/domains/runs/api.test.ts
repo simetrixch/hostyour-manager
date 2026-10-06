@@ -37,7 +37,7 @@ describe("runs API + SSE", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
 
-  async function make(): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; db: DbHandle }> {
+  async function make(): Promise<{ app: Hono<AppEnv>; executor: Executor; cookie: string; db: DbHandle; bus: RunEventBus }> {
     const dir = mkdtempSync(join(tmpdir(), "mgr-api-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
@@ -59,7 +59,7 @@ describe("runs API + SSE", () => {
       registerProtected: (a) => registerRunRoutes(a, { executor, db: db.db, bus, config, logger }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
-    return { app, executor, cookie, db };
+    return { app, executor, cookie, db, bus };
   }
   afterEach(() => {
     for (const h of handles.splice(0)) h.sqlite.close();
@@ -133,6 +133,28 @@ describe("runs API + SSE", () => {
     expect(body).toContain("event: stdout");
     // The close is the server's own, and says so, so a browser can tell it from a dropped connection.
     expect(body.trimEnd().endsWith("event: end\ndata:")).toBe(true);
+  });
+
+  it("PLANTED: a line the run writes while the backlog is replayed reaches the stream once, after it", async () => {
+    const { app, cookie, db, bus } = await make();
+    const { runId } = (await (await post(app, "/api/runs", cookie, { kind: "noop" })).json()) as { runId: string };
+    const line = (seq: number) => {
+      db.sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, ts) VALUES (?, ?, 'stdout', ?, ?, ?)").run(`evt_${seq}`, runId, seq, `line ${seq}`, Date.now());
+      return { seq, stream: "stdout" as const, text: `line ${seq}`, at: Date.now() };
+    };
+    for (let seq = 100; seq < 110; seq++) line(seq);
+    const res = await app.request(`/api/runs/${runId}/events`, authed(cookie));
+    const reader = (res.body as ReadableStream<Uint8Array>).getReader();
+    const decoder = new TextDecoder();
+    // The first replayed line is out; the rest of the replay waits on this reader.
+    let body = decoder.decode((await reader.read()).value);
+    // Meanwhile the run writes a line, as RunContext.emit does: the row, then the bus; and it ends.
+    bus.publish(runId, line(110));
+    db.sqlite.prepare("UPDATE runs SET status = 'succeeded' WHERE id = ?").run(runId);
+    bus.publish(runId, line(111));
+    while (!body.includes("event: end")) body += decoder.decode((await reader.read()).value);
+    const seqs = [...body.matchAll(/^id: (\d+)$/gm)].map((m) => Number(m[1])).filter((seq) => seq >= 100);
+    expect(seqs).toEqual([100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111]);
   });
 
   it("PLANTED: a run that stays silent keeps its stream alive with a comment line, and ends no stream it did not finish", async () => {
