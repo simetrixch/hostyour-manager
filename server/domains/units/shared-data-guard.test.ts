@@ -45,6 +45,12 @@ describe("sharedDataRefusal", () => {
     expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: channels(["shop:*"]) }]), "s1", "prod", "blog", channels(["blog:*"]))).toBeNull();
   });
 
+  it("admits the same keys and channels on an own Redis server, which no other namespace reaches", async () => {
+    const redis = (mode: "shared" | "standalone"): SharedDataClaim => ({ services: ["redis"], databases: [], mongodb: "shared", redis: mode, keyPatterns: ["notify:*"], channelPatterns: ["notify:*"] });
+    expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: redis("shared") }]), "s1", "prod", "blog", redis("standalone"))).toBeNull();
+    expect(await sharedDataRefusal(books([{ name: "shop", stage: "prod", claim: redis("standalone") }]), "s1", "prod", "blog", redis("shared"))).toBeNull();
+  });
+
   it("PLANTED: refuses while a registration file of the cluster's books cannot be read", async () => {
     const unread = { async listConsumerRegistrations(_cluster: string, stage: Stage) {
       return { registrations: [], skipped: stage === "dev" ? [{ reason: "registrations/shop/dev.yaml failed its schema: cluster missing" }] : [] };
