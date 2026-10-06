@@ -132,8 +132,11 @@ function listedSites(item: unknown): string[] {
  *  entry of the template it lacks, copied as the template spells it — comments included. An entry of
  *  a folder the run serves sites of lists those sites only; one that stands gains the sites served
  *  now. NEVER removes an entry or a site: what the tenant added by hand, or chose in an earlier run,
- *  stays. `added` names the entries appended and `sitesAdded` the sites a standing entry gained, as
- *  `<entry>/<site>`, in template order; both empty means the file is left as it stands. */
+ *  stays. An appended entry's industry the file does not label yet brings its labels from the
+ *  template's `industries`, since the tenant's build refuses an app whose industry the file does not
+ *  label; an industry the file labels keeps the tenant's labels. `added` names the entries appended
+ *  and `sitesAdded` the sites a standing entry gained, as `<entry>/<site>`, in template order; both
+ *  empty means the file is left as it stands. */
 export function mergeAppsManifest(template: string, current: string | null, chosen: readonly string[], sites: ServedSites = {}): { content: string; added: string[]; sitesAdded: string[] } {
   const templateDoc = parseDocument(template);
   const templateApps = templateDoc.get("apps");
@@ -149,6 +152,19 @@ export function mergeAppsManifest(template: string, current: string | null, chos
     node.flow = true;
     item.set("sites", node);
   };
+  const templateIndustries = templateDoc.get("industries");
+  const bringIndustry = (item: unknown): void => {
+    const industry = isMap(item) ? item.get("industry") : undefined;
+    if (typeof industry !== "string" || !isMap(templateIndustries)) return;
+    const labels = templateIndustries.get(industry, true);
+    if (labels === undefined) return;
+    let industries = doc.get("industries");
+    if (!isMap(industries)) {
+      industries = doc.createNode({});
+      doc.set("industries", industries);
+    }
+    if (isMap(industries) && !industries.has(industry)) industries.set(industry, labels);
+  };
   const added: string[] = [];
   const sitesAdded: string[] = [];
   for (const item of templateItems) {
@@ -159,6 +175,7 @@ export function mergeAppsManifest(template: string, current: string | null, chos
     if (standing === undefined) {
       if (served) setSites(item, listedSites(item).filter((s) => served.includes(s)));
       apps.items.push(item);
+      bringIndustry(item);
       added.push(name);
       continue;
     }
