@@ -1,4 +1,5 @@
-import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
+import type { PurgeTenantTarget, RunTenantStateView, RunUnitCardView, RunView } from "../../shared/api-types.ts";
+import { chooseEnvironment } from "./tenantRows.ts";
 
 // The honesty rules of the Run screen, kept OUT of the components (the same factoring runKinds.ts
 // follows for the section run families): what that screen may DESCRIBE, and what it may DO. They exist
@@ -199,3 +200,11 @@ export function approvePayload(
     ...Object.fromEntries(run.requiredInputs.map((i) => [`activation-input:${i.field}`, stated[i.field] ?? ""])),
   };
 }
+
+/** Where the run page links back to: the card of the unit the run acted on, opened on the run's stage
+ *  through the page's `env.<key>` parameter (chooseEnvironment). Coming back through the rail opened
+ *  the card on PROD, where a TEST run's next action does not stand. */
+export function unitCardHref(card: RunUnitCardView): string {
+  return `/${card.page}?${chooseEnvironment(new URLSearchParams(), card.key, card.stage).toString()}`;
+}
+

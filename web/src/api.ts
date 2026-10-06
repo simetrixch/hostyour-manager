@@ -51,7 +51,7 @@ export class ApiRequestError extends Error {
  * Sec-Fetch-Site: same-origin automatically — the server's csrf guard is satisfied without a
  * token. A 401 means the session lapsed → bounce to OIDC login. Errors surface ApiError.message.
  */
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
+export async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const headers: Record<string, string> = { accept: "application/json" };
   if (init?.body) headers["content-type"] = "application/json";
   const res = await fetch(path, { ...init, headers });

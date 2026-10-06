@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { abortOffer, approvePayload, readyToApprove, recoverable, runOnScreen, runTenantPurgeTarget, secretsToSupply } from "./runScreen.ts";
+import { abortOffer, approvePayload, readyToApprove, recoverable, runOnScreen, runTenantPurgeTarget, secretsToSupply, unitCardHref } from "./runScreen.ts";
 import type { PurgeTenantTarget, RunTenantStateView, RunView } from "../../shared/api-types.ts";
 
 // The Run screen's honesty rules. All of them are about the same failure mode — the screen saying one
@@ -291,3 +291,11 @@ describe("approvePayload", () => {
     expect(approvePayload(bare, {}, {})).toEqual({});
   });
 });
+
+describe("unitCardHref", () => {
+  it("PLANTED: opens the run's card on the run's stage, through the page's env parameter", () => {
+    expect(unitCardHref({ page: "consumers", key: "digita-post", label: "digita-post", stage: "test" })).toBe("/consumers?env.digita-post=test");
+    expect(unitCardHref({ page: "tenants", key: "ak64h58875qw", label: "simetrix", stage: "test" })).toBe("/tenants?env.ak64h58875qw=test");
+  });
+});
+

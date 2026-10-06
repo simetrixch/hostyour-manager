@@ -190,6 +190,12 @@
   font-size: var(--fs-2);
 }
 
+.runhead__back {
+  align-self: flex-start;
+  color: var(--text-2);
+  font-size: var(--fs-2);
+}
+
 @media (width >= 768px) {
   .runhead {
     top: 0;

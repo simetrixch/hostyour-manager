@@ -13,6 +13,7 @@ import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
 import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallout.tsx";
 import { PlanFindings } from "../components/PlanFindings.tsx";
+import { RunUnitCardLink } from "../components/RunUnitCardLink.tsx";
 import { AnsiText, stripAnsi } from "../components/AnsiText.tsx";
 
 // "ephemeral" is the live-only stream: the server publishes it to this SSE stream and never writes
@@ -209,6 +210,7 @@ export function RunDetail() {
   return (
     <section className="page page--run">
       <header className="runhead">
+        <RunUnitCardLink runId={run.id} />
         <div className="runhead__row">
           <h2 className="runhead__title">{run.kind}</h2>
           <span className={`badge badge--${run.status}`}>{run.status}</span>
