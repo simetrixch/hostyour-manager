@@ -12,6 +12,7 @@ import { TENANT_LABEL_KEY, memberApplication, memberNamespace, tenantApplication
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { attestTenantTargetStep, loadTenantCluster, refreshTenantApplications, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
+import { tenantRendersSwitch, describeTenantSwitch } from "#unit/server/argo-app-status.ts";
 import { websiteRecordHosts } from "./website-domain.ts";
 import { removeOwnDomainRecord } from "./own-domain-records.ts";
 
@@ -119,26 +120,10 @@ export function tenantWatchNamespaces(db: Db, tenantId: string, guid: string, st
 export const allPruned = (names: readonly string[]) => (m: ArgoAppStatusMap): boolean =>
   names.every((n) => (m.get(n)?.health ?? "Missing") === "Missing");
 
-/** Sync predicate: EVERY expected name is present + Synced + Healthy (a member still Missing / OutOfSync
- *  fails the whole set). syncRevision is NOT checked — the appsets track a deploy repository BRANCH (not a
- *  per-tenant pin) and member Applications are multi-source (revision unset), so a revision gate would
- *  never converge; the immutable pin is enforced at plan time, not the watch. */
-const allSynced = (names: readonly string[]) => (m: ArgoAppStatusMap): boolean =>
-  names.every((n) => {
-    const s = m.get(n);
-    return !!s && s.sync === "Synced" && s.health === "Healthy" && !s.refreshRequested;
-  });
-
 /** The members that did NOT prune, for a fail message (name=health, …). */
 export const lingering = (m: ArgoAppStatusMap): string =>
   [...m.entries()].filter(([, s]) => s.health !== "Missing").map(([n, s]) => `${n}=${s.health}`).join(", ") || "none";
 
-/** The members that did NOT converge, for a fail message (name=sync/health, …). */
-const notSynced = (m: ArgoAppStatusMap): string =>
-  [...m.entries()]
-    .filter(([, s]) => !(s.sync === "Synced" && s.health === "Healthy"))
-    .map(([n, s]) => `${n}=${s.sync}/${s.health}`)
-    .join(", ") || "none";
 
 /** The OFF measurement, shared by tenant-suspend's verify step: a member namespace is switched off when
  *  it still EXISTS and every workload in it asks for ZERO replicas. `available` cannot say this — 0 of 0
@@ -174,8 +159,11 @@ function suspendSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams
         const tc = loadTenantCluster(ctx.db, tenantId);
         const names = tenantWatchSet(ctx.db, tc);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-        const status = await argoReader.watchApplicationSet(argoNamespace, names, allSynced(names), { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
-        if (!allSynced(names)(status)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on its off state — ${notSynced(status)}`);
+        // The render from before the flip is settled too, so the watch reads `tenant.suspended` off the
+        // members' deploy-repository sources (tenantRendersSwitch), not only Synced and Healthy.
+        const off = tenantRendersSwitch(names, ports.deployRepoUrl, "suspended", true);
+        const status = await argoReader.watchApplicationSet(argoNamespace, names, off, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
+        if (!off(status)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on its off state — ${describeTenantSwitch(names, ports.deployRepoUrl, "suspended", true, status)}`);
         ctx.log("meta", `tenant ${tc.guid} fan-out is Synced + Healthy at its off state (${names.length} Application(s)) — every member Application, namespace, ServiceClaim and database is untouched`);
       },
     },
@@ -233,8 +221,9 @@ function resumeSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams)
         const tc = loadTenantCluster(ctx.db, tenantId);
         const names = tenantWatchSet(ctx.db, tc);
         const { argoReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-        const status = await argoReader.watchApplicationSet(argoNamespace, names, allSynced(names), { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
-        if (!allSynced(names)(status)) throw errValidation(`tenant ${tc.guid} fan-out did not reach Synced/Healthy — ${notSynced(status)}`);
+        const running = tenantRendersSwitch(names, ports.deployRepoUrl, "suspended", false);
+        const status = await argoReader.watchApplicationSet(argoNamespace, names, running, { timeoutMs: ports.argoWatchTimeoutMs, signal: ctx.signal, labelSelector: tenantSelector(tc.guid) });
+        if (!running(status)) throw errValidation(`tenant ${tc.guid} fan-out did not reach Synced/Healthy on the running render — ${describeTenantSwitch(names, ports.deployRepoUrl, "suspended", false, status)}`);
         ctx.log("meta", `tenant ${tc.guid} fan-out is Synced + Healthy (${names.length} Application(s)) — the tenant is live again`);
       },
     },

@@ -23,7 +23,7 @@ import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.t
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { deleteTenantArgoSync } from "./tenant-teardown.ts";
 import { bookedIssuerLabel, issuerAddressHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/server/unit-dns.ts";
-import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
+import { tenantRendersSwitch, describeTenantSwitch } from "#unit/server/argo-app-status.ts";
 import type { RelocationPorts, RelocationWorld, WorldOf } from "#unit/server/relocation.ts";
 import {
   tenantDumpJobs,
@@ -81,16 +81,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       const quiesced = intent === "quiesced";
       if (entry.quiesced !== quiesced) throw errValidation(`tenant ${tc.guid} registration no longer requests the ${intent} render`);
       await refreshTenantApplications(ports.resolver, clusterId, names, c);
-      const until = (byName: Parameters<ReturnType<typeof syncedAt>>[0]): boolean => syncedAt(names)(byName) && names.every((name) => {
-        const charts = (byName.get(name)?.syncSources ?? []).filter((s) => s.repoURL === ports.deployRepoUrl && s.path);
-        return charts.length > 0 && charts.every((s) => {
-          const value = (s.valuesObject?.["tenant"] as { quiesced?: unknown } | undefined)?.quiesced;
-          return quiesced ? value === true : value === false || value === undefined;
-        });
-      });
+      const until = tenantRendersSwitch(names, ports.deployRepoUrl, "quiesced", quiesced);
       const { argoReader, argoNamespace } = await ports.resolver.resolve(clusterId);
       const byName = await argoReader.watchApplicationSet(argoNamespace, names, until, { timeoutMs: ports.argoWatchTimeoutMs, signal: c.signal, labelSelector: tenantSelector(tc.guid) });
-      if (!until(byName)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on the ${intent} render — ${describeUnsynced(names, byName)}`);
+      if (!until(byName)) throw errValidation(`tenant ${tc.guid} fan-out did not converge on the ${intent} render — ${describeTenantSwitch(names, ports.deployRepoUrl, "quiesced", quiesced, byName)}`);
       c.log("meta", `tenant ${tc.guid} fan-out is Synced + Healthy (${names.length} Application(s)) — the render is ${intent}`);
     };
     const applyIsolation = async (
