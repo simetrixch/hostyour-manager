@@ -44,4 +44,10 @@ describe("OffboardConsumerDialog", () => {
     expect(html).not.toContain("so what its stages share stays");
     expect(html).toContain("TEST is still provisioning. What the stages share — the repo PAT, the build webhook, the release kit and the build namespace — stays only if its registration was written; if not, it goes with this stage, the repo PAT NOT recoverable.");
   });
+
+  it("names two provisioning siblings in the plural", () => {
+    const html = render(row("dev"), [row("dev"), row("test", "provisioning"), row("prod", "provisioning")]);
+    expect(html).toContain("TEST and PROD are still provisioning.");
+    expect(html).toContain("stays only if their registrations were written;");
+  });
 });
