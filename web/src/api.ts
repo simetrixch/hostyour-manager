@@ -32,7 +32,7 @@ import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shar
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
-import type { AppProvenance, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
+import type { AppProvenance, AppStatus, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 import type { DataPart, SizeComponent, UnitComposition, UnitSize } from "#unit/shared/unit-size.ts";
 
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
@@ -297,7 +297,7 @@ export interface ConsumerView {
    *  Manager onboarded and gate-validated, "adopted" one whose row was RECONSTRUCTED from the
    *  GitOps registration by an adopt-consumer run and never gate-validated by it. */
   provenance: AppProvenance;
-  status: "active" | "suspended" | "offboarded";
+  status: AppStatus;
   lastRunId: string | null;
   /** What the scheduled check last measured (#210), or null where none has reached this unit. */
   check: UnitCheck | null;

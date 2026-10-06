@@ -23,7 +23,7 @@ import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
 import { ChosenConsumerEnvironment } from "../components/ConsumerCardHead.tsx";
-import { OffboardConsumerDialog, otherStandingStages } from "../components/OffboardConsumerDialog.tsx";
+import { OffboardConsumerDialog, siblingStages } from "../components/OffboardConsumerDialog.tsx";
 import { groupEnvironments } from "../tenantRows.ts";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
@@ -345,7 +345,7 @@ export function Consumers() {
       {confirmTarget && (
         <OffboardConsumerDialog
           target={confirmTarget}
-          otherStages={otherStandingStages(rows ?? [], confirmTarget)}
+          siblings={siblingStages(rows ?? [], confirmTarget)}
           onCancel={() => setConfirmTarget(null)}
           onConfirm={() => {
             const t = confirmTarget;
