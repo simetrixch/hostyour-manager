@@ -40,7 +40,7 @@ export function tarredClaims(i: Pick<ConsumerJobInputs, "pvcs" | "services" | "m
  *  whose root password stands there in a Secret of the same name and key. */
 /** Whether the generation holds a Mongo dump: always for an own instance, which is taken whole as
  *  the per-consumer PostgreSQL is, whatever databases[] and services name; on the shared set only the
- *  registration's databases[], which are all of the set that is the consumer's. */
+ *  databases[] it is served at its stage, which are all of the set that is the consumer's. */
 const dumpsMongo = (i: Pick<ConsumerJobInputs, "services" | "databases" | "mongodb">): boolean =>
   i.mongodb !== "shared" || (i.services.includes("mongodb") && i.databases.length > 0);
 
@@ -59,6 +59,18 @@ const mongoArchives = (i: Pick<ConsumerJobInputs, "mongodb" | "folder">): string
     : `rclone lsf "box:${i.folder}/" > /tmp/entries
 : > /tmp/archives
 if grep -qx 'mongo/' /tmp/entries; then rclone lsf --include '*.archive' "box:${i.folder}/mongo/" > /tmp/archives; fi
+`;
+
+/** On the shared set the restore may write only the databases the consumer is served at its stage. A
+ *  generation holding any other archive is refused whole: restoring it would drop and overwrite a
+ *  database another stage or unit is served, as a TEST generation written while TEST was still
+ *  served PROD's name would do to PROD. */
+const servedArchivesOnly = (i: Pick<ConsumerJobInputs, "databases" | "folder" | "name" | "stage">): string => `printf '%s.archive\\n' ${quoted(i.databases)} > /tmp/served
+grep -vxF -f /tmp/served /tmp/archives > /tmp/foreign || [ "$?" -eq 1 ]
+if [ -s /tmp/foreign ]; then
+  echo "FOREIGN ARCHIVE: the generation ${i.folder} holds $(tr '\\n' ' ' < /tmp/foreign)beside the databases ${i.name} is served at ${i.stage}; restoring it would overwrite a database another stage or unit is served, so nothing is restored"
+  exit 1
+fi
 `;
 
 /** An own instance's generation names every database it held in mongo/databases.txt; each needs its
@@ -144,8 +156,8 @@ export interface ConsumerJobInputs {
    *  where every job that reads them runs. */
   namespace: string;
   stage: Stage;
-  /** The registration's literal databases[] — Mongo names under a mongodb claim, PostgreSQL names
-   *  under a postgresql one (the registration's own engine-neutral contract). */
+  /** The Mongo databases the consumer is served on the stage's shared set (servedSharedDatabases): the
+   *  registration's names at prod, `<name>_<stage>` at any other stage, none on an own instance. */
   databases: readonly string[];
   services: readonly ConsumerService[];
   /** Whose MongoDB the consumer uses: the stage's shared set, of which databases[] are its part, or its
@@ -299,9 +311,11 @@ export function consumerRestoreJobs(i: ConsumerJobInputs): RelocationJob[] {
           BOX_REMOTE +
           (i.mongodb === "shared" ? "" : OWN_PRIMARY_WAIT) +
           mongoArchives(i) +
+          (i.mongodb === "shared" ? servedArchivesOnly(i) : "") +
+          // --nsInclude keeps each archive to the one database its name says, whatever else it holds.
           `while read -r f; do
   rclone copyto "box:${i.folder}/mongo/$f" "/tmp/$f"
-  mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --drop --quiet
+  mongorestore ${MONGO_FLAGS} --archive="/tmp/$f" --nsInclude="\${f%.archive}.*" --drop --quiet
   rm -f "/tmp/$f"
 done < /tmp/archives
 `,

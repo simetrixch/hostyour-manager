@@ -10,7 +10,7 @@ import type { StepCtx, Step } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
-import type { AppStatus, TenantStatus } from "../../../shared/enums.ts";
+import type { AppStatus, Stage, TenantStatus } from "../../../shared/enums.ts";
 import type { ConsumerService } from "../../../shared/consumer.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { readPlatformAppValues } from "../inventory/cluster-value-chain.ts";
@@ -61,8 +61,8 @@ export function seedClusters(db: DbHandle): void {
   db.db.insert(clusters).values({ id: TARGET.clusterId, serverId: "srv_2", stage: "prod", domain: TARGET.domain, name: (TARGET.domain).split(".")[0]!, status: "active" }).run();
 }
 
-export function seedConsumerRow(db: DbHandle, status: AppStatus = "active"): void {
-  db.db.insert(apps).values({ id: "app_1", clusterId: SOURCE.clusterId, name: CONSUMER, stage: "prod", host: CONSUMER, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status }).run();
+export function seedConsumerRow(db: DbHandle, status: AppStatus = "active", stage: Stage = "prod"): void {
+  db.db.insert(apps).values({ id: "app_1", clusterId: SOURCE.clusterId, name: CONSUMER, stage, host: CONSUMER, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status }).run();
 }
 
 export function seedTenantRows(db: DbHandle, status: TenantStatus = "active"): void {
@@ -194,15 +194,15 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
  *  passes its own `services`/`databases`. */
 export async function seedConsumerRegistration(
   registrations: Registrations,
-  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[]; mongodb?: MongodbMode; redis?: "standalone" } = {},
+  over: { quiesced?: boolean; services?: ConsumerService[]; databases?: string[]; keyPatterns?: string[]; channelPatterns?: string[]; mongodb?: MongodbMode; redis?: "standalone"; stage?: Stage; name?: string; cluster?: string } = {},
 ): Promise<void> {
   await registrations.commitRegistration({
-    unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: over.quiesced ?? false },
+    unit: { name: over.name ?? CONSUMER, repoURL: `https://github.com/x/${over.name ?? CONSUMER}.git`, suspended: false, quiesced: over.quiesced ?? false },
     builds: [],
     deploy: {
-      stage: "prod", host: "acme",
+      stage: over.stage ?? "prod", host: over.name ?? "acme",
       chartPath: "deploy/chart",
-      cluster: SOURCE.cluster,
+      cluster: over.cluster ?? SOURCE.cluster,
       keyPatterns: over.keyPatterns ?? [],
       channelPatterns: over.channelPatterns ?? [],
       databases: over.databases ?? ["acme_db"],
