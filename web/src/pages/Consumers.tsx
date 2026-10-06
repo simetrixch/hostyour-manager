@@ -11,7 +11,6 @@ import {
 import { CONSUMER_RUN_KINDS } from "../runKinds.ts";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { SectionRuns } from "../components/SectionRuns.tsx";
-import { TypeToConfirm } from "../components/TypeToConfirm.tsx";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { ConsumerLifecycleDialog, type LifecycleAction } from "../components/ConsumerLifecycleDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
@@ -24,6 +23,7 @@ import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
 import { ChosenConsumerEnvironment } from "../components/ConsumerCardHead.tsx";
+import { OffboardConsumerDialog, otherStandingStages } from "../components/OffboardConsumerDialog.tsx";
 import { groupEnvironments } from "../tenantRows.ts";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
@@ -343,24 +343,16 @@ export function Consumers() {
       </div>
 
       {confirmTarget && (
-        <TypeToConfirm
-          title={`Offboard "${confirmTarget.name}"?`}
-          expected={confirmTarget.name}
-          confirmLabel="Offboard consumer"
+        <OffboardConsumerDialog
+          target={confirmTarget}
+          otherStages={otherStandingStages(rows ?? [], confirmTarget)}
           onCancel={() => setConfirmTarget(null)}
           onConfirm={() => {
             const t = confirmTarget;
             setConfirmTarget(null);
             void act(offboardConsumer, t.id);
           }}
-        >
-          <p>
-            This removes the GitOps pointer and ArgoCD prunes the app&apos;s workloads and namespace on{" "}
-            <strong>{confirmTarget.domain}</strong>, then <strong>permanently deletes the consumer&apos;s Vault secrets</strong> — the
-            repo PAT and all ceremony secrets, every version, <strong>NOT recoverable</strong>. Only the inventory row is kept, marked
-            offboarded.
-          </p>
-        </TypeToConfirm>
+        />
       )}
 
       {purgeDialog && (
