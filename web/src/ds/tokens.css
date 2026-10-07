@@ -73,6 +73,11 @@
   /* Elevation (kept subtle — this is a dense operator tool, not a marketing page) */
   --shadow-1: 0 1px 2px hsl(224deg 40% 20% / 5%), 0 2px 6px hsl(224deg 40% 20% / 4%);
 
+  /* Focus ring: a soft halo in the accent, or in the error tone on a field that is wrong. Both read
+     the scheme's own --accent and --down, so the dark block needs no copy. */
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  --ring-down: 0 0 0 3px color-mix(in srgb, var(--down) 15%, transparent);
+
   /* Layout */
   --topbar-h: 3.25rem;
   --rail-w: 14.5rem;
