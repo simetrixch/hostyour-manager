@@ -125,6 +125,12 @@ describe("followTenant — one check of one tenant", () => {
     expect(executor.planned).toHaveLength(1);
   });
 
+  it("says a run whose record is gone left it unknown whether the stage moved, and claims no status", async () => {
+    const executor = fakeExecutor();
+    const said = await followTenant({ ...deps(executor), runEnding: () => undefined }, "tnt_1");
+    expect(said).toBe(`tenant acme at prod: the Versions run run_1 has no record, so whether it moved example-platform to ${NEW} is unknown`);
+  });
+
   it("plans once more only: a second stale plan is reported as not moved", async () => {
     const stale = { status: "failed" as const, error: `tenant ${GUID}'s ${MEMBERS_CHANGED} — plan it again` };
     const executor = fakeExecutor({ endings: [stale, stale] });

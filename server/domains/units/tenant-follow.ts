@@ -114,7 +114,13 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
       throw err;
     }
     await settle(deps, runId);
-    const { status, error } = deps.runEnding(runId) ?? { status: "failed" as const, error: `the run ${runId} has no record` };
+    const ending = deps.runEnding(runId);
+    if (!ending) {
+      const unknown = `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} has no record, so whether it moved ${moves} is unknown`;
+      deps.logger.warn({ tenantId, runId }, unknown);
+      return unknown;
+    }
+    const { status, error } = ending;
     if (status === "succeeded") return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moved ${moves}`;
     // The plan came before the wait for the tenant, so a run that held it may have rewritten the members.
     if (attempt === 1 && error?.includes(MEMBERS_CHANGED)) continue;
