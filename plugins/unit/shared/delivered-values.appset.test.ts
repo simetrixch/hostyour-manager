@@ -5,9 +5,10 @@
 // ABSENT, THE CASE FAILS, naming what it looked for, as cluster-marking.test.ts does for hostyour-deploy:
 // a skip reads exactly like a pass. Only a run that sets HOSTYOUR_CLOUD_CHECKOUT_MAY_BE_ABSENT goes
 // without the sibling checkout or Go, and then it says NOT RUN.
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
@@ -24,14 +25,19 @@ if (notRun) console.warn(`NOT RUN: the delivered values contract case, because $
 const APEX = { dev: "dev.example.com", test: "test.example.com", prod: "example.com" } as const;
 const API_HOST = "100.64.0.7";
 
+/** The render program, compiled once: a `go run` per render compiles it again each time, which on a
+ *  cold build cache (a CI runner) outlasts a test's time. */
+let renderDir = "";
+let renderBin = "";
+
 /** The unit's own source's valuesObject, as the ApplicationSet renders it for `registration`. */
 function appsetDelivers(registration: Record<string, unknown>): Record<string, unknown> {
   const appset = parse(readFileSync(appsetFile, "utf8")) as { spec: { templatePatch: string; goTemplateOptions: string[] } };
   const template = appset.spec.templatePatch
     .replaceAll("__STAGE_APEX_DEV__", APEX.dev).replaceAll("__STAGE_APEX_TEST__", APEX.test).replaceAll("__STAGE_APEX_PROD__", APEX.prod)
     .replaceAll("__API_HOST__", API_HOST);
-  const answer = JSON.parse(execFileSync("go", ["run", "."], {
-    cwd: join(cloud, "scripts/appset-render"), encoding: "utf8",
+  const answer = JSON.parse(execFileSync(renderBin, [], {
+    encoding: "utf8",
     input: JSON.stringify({ template, options: appset.spec.goTemplateOptions, params: [registration] }),
   })) as Array<{ output?: string; error?: string }>;
   if (answer[0]?.error) throw new Error(answer[0].error);
@@ -52,6 +58,17 @@ const registration = (fields: { databases: string[]; keyPatterns: string[]; chan
 });
 
 describe.skipIf(notRun)("the values the gate renders with are the consumers ApplicationSet's", () => {
+  // Downloading the modules and compiling is the slow part, so it gets the time once, here.
+  beforeAll(() => {
+    if (!ready) return;
+    renderDir = mkdtempSync(join(tmpdir(), "appset-render-"));
+    renderBin = join(renderDir, "appset-render");
+    execFileSync("go", ["build", "-o", renderBin, "."], { cwd: join(cloud, "scripts/appset-render"), stdio: "pipe" });
+  }, 180_000);
+  afterAll(() => {
+    if (renderDir) rmSync(renderDir, { recursive: true, force: true });
+  });
+
   it("PLANTED DEFECT: delivers the same host, zone, databases and redis grant, and the same SMTP entry", () => {
     expect(ready, `the consumers ApplicationSet is not at ${appsetFile}, or Go is missing: check out hostyour-cloud beside this checkout and install Go, or set ${CLOUD_CHECKOUT_MAY_BE_ABSENT}`).toBe(true);
     for (const fields of [
