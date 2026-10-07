@@ -322,6 +322,26 @@ describe("tenant-set-sender-domain through the Executor", () => {
     ).rejects.toThrow("tenant acme cannot send as customer.test — tenant other of prod already sends from it; a stage's tenants send from different domains");
   });
 
+  it("PLANTED DEFECT: refuses in the write step a domain another tenant took after the plan", async () => {
+    // The plan passed; another tenant of the stage takes the domain before this run writes. The step
+    // asks again under the tenant locks, so the run fails instead of giving the domain away twice.
+    const h = await make({ renders: DOMAIN });
+    const { runId } = await h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" });
+    await h.reg.commitTenant({
+      stage: "prod", guid: "e2e8ymj86dk8", runId: "run_other",
+      registration: {
+        cluster: "s1", subdomain: "other", apps: [], members: testMembers(), identityProvider: "auth", routing: "host",
+        ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: DOMAIN, displayName: "", seedUsers: false,
+        quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
+      },
+    });
+    await h.executor.approve(runId);
+    await h.executor.settle(runId);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect(await h.registered()).not.toBe(DOMAIN);
+    expect(h.row()).toBe("");
+  });
+
   it("plans a tenant re-applying the sender domain it already sends from", async () => {
     // Its own registration carries the domain: only ANOTHER tenant's makes it taken.
     const h = await make({ senderDomain: DOMAIN });

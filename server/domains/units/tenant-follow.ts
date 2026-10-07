@@ -79,6 +79,8 @@ async function approveWhenFree(deps: TenantFollowDeps, runId: string): Promise<v
       // waiting on it again would spin.
       if (holder === null || holder === waitedFor) throw err;
       waitedFor = holder;
+      // Said when the wait starts, so the log shows that a refresh waited for the tenant to be free.
+      deps.logger.info({ runId, holder }, `the Versions run ${runId} waits for run ${holder}, which holds the tenant, before it is approved`);
       await settle(deps, holder);
     }
   }

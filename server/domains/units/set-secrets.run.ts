@@ -75,7 +75,7 @@ export interface SetSecretsPorts extends LifecyclePorts {
   /** The merge write into `<stage>/consumer/<name>/app`. */
   seeder: VaultSeeder;
   /** The repository read the plan makes: the consumer's manifest, through the owner's identity. */
-  github: Pick<GitHubConsumer, "readFile">;
+  github: Pick<GitHubConsumer, "readFile" | "readBranchCommit">;
   /** The sealed credentials the owner's identity is opened from (repo-identity.ts); which identity
    *  reads this repository is resolved per read, the App riding the lifecycle ports. */
   store: Pick<CredentialStore, "open" | "list">;
@@ -110,11 +110,17 @@ export async function readDeclaredManifest(
   const parsed = ConsumerManifestSchema.safeParse(parseYaml(text));
   if (!parsed.success) return { outcome: "refused", why: `${CONSUMER_MANIFEST_PATH} of ${repoURL} (${revision}) failed its schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` };
   if (deliveryText !== null) return { outcome: "read", manifest: parsed.data, revision: deliveryRef };
+  // Only on the fallback: a unit before its first release at the stage has no delivery branch yet,
+  // while one whose release kit wrote no manifest has the branch without it; the operator acts on each differently.
+  const fallbackSentence = async (): Promise<string> =>
+    (await ports.github.readBranchCommit({ owner, repo, branch: deliveryRef, token: identity.token, ...(signal ? { signal } : {}) })) === null
+      ? `there is no delivery branch ${deliveryRef} yet — the manifest was read at the default branch's head, which the first release delivers`
+      : `${deliveryRef} carries no ${CONSUMER_MANIFEST_PATH}, because the release kit wrote none — the manifest was read at the default branch's head`;
   return {
     outcome: "read",
     manifest: parsed.data,
     revision: "default",
-    fallback: `${deliveryRef} carries no ${CONSUMER_MANIFEST_PATH} — the manifest was read at the default branch's head`,
+    fallback: await fallbackSentence(),
   };
 }
 

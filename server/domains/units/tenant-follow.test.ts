@@ -148,8 +148,11 @@ describe("followTenant — one check of one tenant", () => {
 
   it("waits for the run that holds the books branch to end, then approves", async () => {
     const executor = fakeExecutor({ busyHolder: "run_9" });
-    await followTenant(deps(executor), "tnt_1");
+    const said: string[] = [];
+    const logger = { ...pino({ level: "silent" }), info: (_o: unknown, m: string) => { said.push(m); } } as unknown as TenantFollowDeps["logger"];
+    await followTenant({ ...deps(executor), logger }, "tnt_1");
     expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_9", "approve run_1", "settle run_1"]);
+    expect(said).toContain("the Versions run run_1 waits for run run_9, which holds the tenant, before it is approved");
   });
 
   it("PLANTED DEFECT: discards a planned run it cannot approve for another reason, and reports that reason", async () => {

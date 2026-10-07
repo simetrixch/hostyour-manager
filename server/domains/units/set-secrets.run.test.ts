@@ -287,11 +287,31 @@ smtpEntry:
 
     const p = ports({ github: fakeGh });
     const offer = await readSecretOffer(p, db.db, "app_test2");
-    expect(offer.note).toBe("deploy/test carries no deploy/platform.yaml — the manifest was read at the default branch's head");
+    expect(offer.note).toBe("there is no delivery branch deploy/test yet — the manifest was read at the default branch's head, which the first release delivers");
 
     const def = makeSetSecretsDef(p);
     const planned = await def.planStream!({ appId: "app_test2" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
     if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
-    expect(planned.plan.warnings).toContain("deploy/test carries no deploy/platform.yaml — the manifest was read at the default branch's head");
+    expect(planned.plan.warnings).toContain("there is no delivery branch deploy/test yet — the manifest was read at the default branch's head, which the first release delivers");
+  });
+
+  it("names a delivery branch that carries no manifest apart from a missing branch", async () => {
+    db.db.insert(servers).values({ id: "srv_test3", name: "m_test3", host: "1.2.3.7", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_test3", serverId: "srv_test3", stage: "test", domain: "test3.example", name: "test3", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_test3", clusterId: "cls_test3", name: "swissbookai-test3", host: "swissbookai-test3", stage: "test", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+
+    const fakeGh = new FakeGitHubConsumer();
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", MANIFEST);
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", null, "deploy/test");
+    fakeGh.seedBranch("ahkutun", "swissbookai", "deploy/test", { sha: "a".repeat(40), parents: [] });
+
+    const p = ports({ github: fakeGh });
+    const offer = await readSecretOffer(p, db.db, "app_test3");
+    expect(offer.note).toBe("deploy/test carries no deploy/platform.yaml, because the release kit wrote none — the manifest was read at the default branch's head");
+
+    const def = makeSetSecretsDef(p);
+    const planned = await def.planStream!({ appId: "app_test3" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+    if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+    expect(planned.plan.warnings).toContain("deploy/test carries no deploy/platform.yaml, because the release kit wrote none — the manifest was read at the default branch's head");
   });
 });
