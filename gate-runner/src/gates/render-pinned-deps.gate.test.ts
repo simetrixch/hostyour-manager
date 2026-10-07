@@ -3,7 +3,7 @@
 // the tools), not here.
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
-import { checkDependencyLock, deliveredValues, renderArgs, stagedClusterValuePath, stagedDeliveredValuePath, unitApexOf } from "./render-pinned-deps.gate.ts";
+import { checkDependencyLock, deliveredValuesFile, apiHostOf, renderArgs, stagedClusterValuePath, stagedDeliveredValuePath, unitApexOf } from "./render-pinned-deps.gate.ts";
 import { clusterMapPath, clusterValueChainPaths, splitAtChartValues } from "../../../shared/cluster-values.ts";
 
 const CHART = "deploy/chart";
@@ -146,19 +146,23 @@ describe("renderArgs", () => {
   });
 });
 
-describe("deliveredValues", () => {
-  // The two values the consumers ApplicationSet hands every unit as valuesObject, composed by the
-  // platform's host law (plugins/unit/shared/unit-host.ts): prod stands directly under the unit apex, every other
-  // stage under its own zone — so the chart in the sandbox renders the host the deploy serves.
-  it("composes a prod unit's host directly under the unit apex", () => {
-    expect(parse(deliveredValues("auth", "prod", "digitacloud.app"))).toEqual({
+describe("deliveredValuesFile", () => {
+  // The values the consumers ApplicationSet hands every unit as valuesObject, composed by the shared
+  // contract (plugins/unit/shared/delivered-values.ts): the host by the platform's host law, and the
+  // databases, the redis grant and the SMTP entry from the manifest, so the chart in the sandbox
+  // renders with what the deploy hands it.
+  const delivery = { hostLabel: "auth", databases: ["auth_db"], keyPatterns: [], channelPatterns: [] };
+
+  it("composes a prod unit's host directly under the unit apex, and delivers the manifest's databases", () => {
+    expect(parse(deliveredValuesFile(delivery, "prod", "digitacloud.app", ""))).toMatchObject({
       unitHost: "auth.digitacloud.app",
       global: { stageApex: "digitacloud.app" },
+      mongodb: { databases: ["auth_db"] },
     });
   });
 
   it("composes a dev unit's host under the dev zone", () => {
-    expect(parse(deliveredValues("auth", "dev", "digitacloud.app"))).toEqual({
+    expect(parse(deliveredValuesFile(delivery, "dev", "digitacloud.app", ""))).toMatchObject({
       unitHost: "auth.dev.digitacloud.app",
       global: { stageApex: "dev.digitacloud.app" },
     });
@@ -166,6 +170,13 @@ describe("deliveredValues", () => {
 
   it("stages the file per env, beside the chain files", () => {
     expect(stagedDeliveredValuePath("/ws", "test")).toBe("/ws/.gate-delivered-values-test.yaml");
+  });
+});
+
+describe("apiHostOf", () => {
+  it("reads the map's API host, and answers \"\" where the map carries none, as the platform does", () => {
+    expect(apiHostOf([{ path: "clusters/active/s1.example.yaml", content: "global:\n  apiHost: 100.64.0.7\n" }])).toBe("100.64.0.7");
+    expect(apiHostOf([{ path: "clusters/active/s1.example.yaml", content: "global:\n  unitApex: example.com\n" }])).toBe("");
   });
 });
 

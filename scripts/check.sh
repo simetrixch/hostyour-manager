@@ -46,7 +46,7 @@ node - "$report" <<'JS' || fail "the test report could not be read, so nothing s
 const report = JSON.parse(require("node:fs").readFileSync(process.argv[2], "utf8"));
 // A real-serve file skips whole for one reason, and a file whose skip has one known cause says it;
 // any other skip is named by its tests' own titles.
-const known = { "server/domains/inventory/cluster-marking.test.ts": "no sibling hostyour-deploy checkout beside this one" };
+const known = { "server/domains/inventory/cluster-marking.test.ts": "no sibling hostyour-deploy checkout beside this one", "plugins/unit/shared/delivered-values.appset.test.ts": "no sibling hostyour-cloud checkout or no Go beside this one" };
 for (const suite of report.testResults) {
   const skipped = suite.assertionResults.filter((t) => t.status !== "passed" && t.status !== "failed");
   if (skipped.length === 0) continue;
