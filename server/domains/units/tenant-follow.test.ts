@@ -10,6 +10,8 @@ import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { followedVersions, followTenant, makeTenantFollower, type TenantFollowDeps } from "./tenant-follow.ts";
+import { MEMBERS_CHANGED } from "./tenant-refresh-members.run.ts";
+import type { RunStatus } from "../../../shared/enums.ts";
 import type { TenantVersionPart } from "./tenant-versions.ts";
 
 // A tenant that follows releases is moved by the Manager when a release run of a part it renders
@@ -39,7 +41,7 @@ function books(engine: string): TenantRegistrations {
 /** An executor that records what the follower asks of it. A plan it settles as failed refuses the
  *  approve, as the executor refuses a failed run; its first approve is refused as busy where
  *  `busyHolder` names the run holding the lock. */
-function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: string; approveError?: Error } = {}) {
+function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: string; approveError?: Error; endings?: Array<{ status: RunStatus; error: string | null }> } = {}) {
   const asked: string[] = [];
   const planned: unknown[] = [];
   let refused = false;
@@ -53,6 +55,8 @@ function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: st
       return { runId };
     },
     settle: async (runId: string): Promise<void> => { asked.push(`settle ${runId}`); },
+    /** How each planned run ended, in planning order; a run with none given succeeded. */
+    runEnding: (runId: string) => opts.endings?.[Number(runId.slice(4)) - 1] ?? { status: "succeeded" as const, error: null },
     discard: async (runId: string): Promise<void> => { asked.push(`discard ${runId}`); },
     approve: async (runId: string): Promise<void> => {
       asked.push(`approve ${runId}`);
@@ -79,6 +83,7 @@ function deps(executor: ReturnType<typeof fakeExecutor>, engine = OLD): TenantFo
   return {
     db: h.db,
     executor,
+    runEnding: executor.runEnding,
     ports: { registrations: books(engine), attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-auth", build: "example-auth" }] },
     logger: pino({ level: "silent" }),
   };
@@ -103,6 +108,28 @@ describe("followTenant — one check of one tenant", () => {
     expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moved example-platform to ${NEW}`);
     expect(executor.planned).toEqual([{ tenantId: "tnt_1", versions: { "example-platform": NEW } }]);
     expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_1"]);
+  });
+
+  it("PLANTED DEFECT: plans the refresh once more when another run changed the members while it waited, and that one moves the stage", async () => {
+    const executor = fakeExecutor({ endings: [{ status: "failed", error: `tenant ${GUID}'s ${MEMBERS_CHANGED} — plan it again` }] });
+    expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_2 moved example-platform to ${NEW}`);
+    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_1", "plan run_2", "settle run_2", "approve run_2", "settle run_2"]);
+  });
+
+  it("PLANTED DEFECT: says a refresh that failed did not move the stage, with its run and its error, at warn", async () => {
+    const executor = fakeExecutor({ endings: [{ status: "failed", error: "the push was refused" }] });
+    const warn = vi.fn();
+    const logger = { ...pino({ level: "silent" }), warn } as unknown as TenantFollowDeps["logger"];
+    expect(await followTenant({ ...deps(executor), logger }, "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 did not move example-platform to ${NEW}: it ended failed — the push was refused`);
+    expect(warn).toHaveBeenCalledWith({ tenantId: "tnt_1", runId: "run_1", status: "failed" }, expect.stringContaining("did not move"));
+    expect(executor.planned).toHaveLength(1);
+  });
+
+  it("plans once more only: a second stale plan is reported as not moved", async () => {
+    const stale = { status: "failed" as const, error: `tenant ${GUID}'s ${MEMBERS_CHANGED} — plan it again` };
+    const executor = fakeExecutor({ endings: [stale, stale] });
+    expect(await followTenant(deps(executor), "tnt_1")).toContain("the Versions run run_2 did not move");
+    expect(executor.planned).toHaveLength(2);
   });
 
   it("PLANTED DEFECT: plans nothing for a tenant whose switch is off, or one that runs every part at its stage pin", async () => {

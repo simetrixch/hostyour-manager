@@ -84,6 +84,11 @@ export function getRunParams(db: Db, id: string): { kind: string; params: Record
  *  step 0, which runs before record-provisional and therefore before ANY mutation — from one that mutated
  *  and left a tenant standing in GitOps with no inventory row (tenant-orphans.ts resolveRunTenantState):
  *  both end with no tenants row, and only the step rows tell them apart. */
+/** How a run stands: its status and, where it failed, its error. */
+export function getRunEnding(db: Db, id: string): { status: RunStatus; error: string | null } | undefined {
+  return db.select({ status: runs.status, error: runs.error }).from(runs).where(eq(runs.id, id)).get();
+}
+
 export function getRunStepStatus(db: Db, runId: string, stepName: string): StepStatus | undefined {
   return db.select({ status: steps.status }).from(steps).where(and(eq(steps.runId, runId), eq(steps.name, stepName))).get()?.status;
 }

@@ -13,7 +13,7 @@ import { registerSecret } from "../security/redact.ts";
 import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
 import { buildRunDefinitions } from "../domains/runs/run-definitions.ts";
-import { getRun, readEvents } from "./read.ts";
+import { getRun, readEvents, getRunEnding } from "./read.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "./types.ts";
 import type { RunKind } from "../../shared/enums.ts";
@@ -150,6 +150,9 @@ describe("Executor — noop happy path + resume", () => {
     await executor.settle(runId);
 
     expect(getRun(db.db, runId)?.status).toBe("failed");
+    // How it ended, as a caller that waited for it reads it: the failing step's own error, redacted.
+    expect(getRunEnding(db.db, runId)).toEqual({ status: "failed", error: "vault put failed for ••• (503)" });
+    expect(getRunEnding(db.db, "run_unknown")).toBeUndefined();
     const evts = readEvents(db.db, runId);
     // the failure reason is a visible log line, right before the ✗ meta — with the secret masked
     const reason = evts.find((e) => e.stream === "stderr" && e.text.includes("vault put failed"));

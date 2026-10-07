@@ -30,6 +30,10 @@ import {
   type Approvals, type TenantVersionPart,
 } from "./tenant-versions.ts";
 
+/** What write-members says when another run changed the members after this run was planned: the
+ *  release follower plans the refresh once more on it (tenant-follow.ts). */
+export const MEMBERS_CHANGED = "member entries changed since this run was planned";
+
 // `tenant-refresh-members` — resolve every member of a STANDING tenant again from the product's
 // manifest and write the entries into its registration.
 //
@@ -251,7 +255,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         // The plan's facts, asked again: another run may have changed the members since. A resume
         // finds its own write already standing.
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
-          throw errValidation(`tenant ${p.guid}'s member entries changed since this run was planned — plan it again`);
+          throw errValidation(`tenant ${p.guid}'s ${MEMBERS_CHANGED} — plan it again`);
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         // Admit the namespace labels before the registration asks ArgoCD to write them.

@@ -68,6 +68,7 @@ import { makeTenantBackupDef } from "../domains/units/backup.run.ts";
 import { makeTenantNightlyBackupDef } from "../domains/units/nightly-backup.run.ts";
 import { makeTenantRestoreDef } from "../domains/units/restore.run.ts";
 import { makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
+import { getRunEnding } from "../executor/read.ts";
 
 // A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
 // app, so it gets a longer budget before the set-watch fails loudly.
@@ -420,7 +421,7 @@ export function buildTenantOnboarding(
   // A unit registered after the start is watched from the next start; a release of it before then is
   // caught by that start's check.
   const follow = (executor: Executor, db: Db): TenantFollowWiring => {
-    const follower = makeTenantFollower({ db, executor, ports: onboardPorts, logger });
+    const follower = makeTenantFollower({ db, executor, runEnding: (runId) => getRunEnding(db, runId), ports: onboardPorts, logger });
     const start = async (): Promise<void> => {
       try {
         // Handed late, like the build steps take it: the consumer family is wired after this one.

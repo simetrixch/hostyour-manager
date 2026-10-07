@@ -13,11 +13,12 @@ import type { Db } from "../../db/client.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import type { Stage } from "../../../shared/enums.ts";
+import type { RunStatus, Stage } from "../../../shared/enums.ts";
 import type { ReleaseRunSucceeded } from "../../adapters/build-plane/port.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { tenantVersionParts, type TenantVersionPart } from "./tenant-versions.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import { MEMBERS_CHANGED } from "./tenant-refresh-members.run.ts";
 
 /** How long one wait of a check may last before the log says that every later check waits behind it. */
 const LONG_WAIT_MS = 30 * 60_000;
@@ -25,6 +26,8 @@ const LONG_WAIT_MS = 30 * 60_000;
 export interface TenantFollowDeps {
   db: Db;
   executor: Pick<Executor, "planStreamed" | "settle" | "approve" | "discard">;
+  /** How a run stands once it settled: its status and, where it failed, its error (executor/read.ts getRunEnding). */
+  runEnding: (runId: string) => { status: RunStatus; error: string | null } | undefined;
   ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">;
   logger: Logger;
 }
@@ -81,34 +84,44 @@ async function approveWhenFree(deps: TenantFollowDeps, runId: string): Promise<v
   }
 }
 
-/** One check of one tenant, answered as a sentence for the log. */
+/** One check of one tenant, answered as a sentence for the log. A refresh that another run's member
+ *  write overtook while it waited for the tenant is planned once more against the members as they then
+ *  stand; a refresh that did not succeed is said to have moved nothing, at warn, with its run. */
 export async function followTenant(deps: TenantFollowDeps, tenantId: string): Promise<string> {
   const row = deps.db.select({ followReleases: tenants.followReleases, status: tenants.status, suspended: tenants.suspended, subdomain: tenants.subdomain }).from(tenants).where(eq(tenants.id, tenantId)).get();
   if (!row?.followReleases) return `tenant ${tenantId} does not follow releases`;
   if (row.status !== "active" || row.suspended) return `tenant ${row.subdomain} is ${row.suspended ? "suspended" : row.status}, and only an active tenant follows releases`;
   const tc = loadTenantCluster(deps.db, tenantId);
-  const read = await deps.ports.registrations.readTenant(tc.stage, tc.guid);
-  if (!read) return `tenant ${tc.guid} has no registration at ${tc.stage}`;
-  const versions = followedVersions(await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags));
-  const moves = Object.entries(versions).map(([part, tag]) => `${part} to ${tag}`).join(", ");
-  if (moves === "") return `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin`;
-  const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
-  await settle(deps, runId);
-  try {
-    await approveWhenFree(deps, runId);
-  } catch (err) {
-    // A plan its gates refused settles its run as failed, and an operator may have cancelled it: in
-    // both it is no run to approve, and its record says which.
-    if ((err as { code?: unknown }).code === "ILLEGAL_TRANSITION") {
-      return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moving ${moves} was not approved: its plan was refused or the run was cancelled, and its record says which`;
+  for (let attempt = 1; ; attempt++) {
+    const read = await deps.ports.registrations.readTenant(tc.stage, tc.guid);
+    if (!read) return `tenant ${tc.guid} has no registration at ${tc.stage}`;
+    const versions = followedVersions(await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags));
+    const moves = Object.entries(versions).map(([part, tag]) => `${part} to ${tag}`).join(", ");
+    if (moves === "") return `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin`;
+    const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
+    await settle(deps, runId);
+    try {
+      await approveWhenFree(deps, runId);
+    } catch (err) {
+      // A plan its gates refused settles its run as failed, and an operator may have cancelled it: in
+      // both it is no run to approve, and its record says which.
+      if ((err as { code?: unknown }).code === "ILLEGAL_TRANSITION") {
+        return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moving ${moves} was not approved: its plan was refused or the run was cancelled, and its record says which`;
+      }
+      // Any other refusal leaves a planned run nobody will approve; it is discarded, so the next event
+      // plans afresh instead of adding to a pile.
+      await deps.executor.discard(runId).catch((discardErr: unknown) => deps.logger.error({ err: discardErr, runId }, "a planned Versions run could not be discarded"));
+      throw err;
     }
-    // Any other refusal leaves a planned run nobody will approve; it is discarded, so the next event
-    // plans afresh instead of adding to a pile.
-    await deps.executor.discard(runId).catch((discardErr: unknown) => deps.logger.error({ err: discardErr, runId }, "a planned Versions run could not be discarded"));
-    throw err;
+    await settle(deps, runId);
+    const { status, error } = deps.runEnding(runId) ?? { status: "failed" as const, error: `the run ${runId} has no record` };
+    if (status === "succeeded") return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moved ${moves}`;
+    // The plan came before the wait for the tenant, so a run that held it may have rewritten the members.
+    if (attempt === 1 && error?.includes(MEMBERS_CHANGED)) continue;
+    const missed = `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} did not move ${moves}: it ended ${status}${error ? ` — ${error}` : ""}`;
+    deps.logger.warn({ tenantId, runId, status }, missed);
+    return missed;
   }
-  await settle(deps, runId);
-  return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moved ${moves}`;
 }
 
 /** The follower: one check at a time, in the order they were asked for, so a check always reads the
