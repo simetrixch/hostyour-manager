@@ -208,4 +208,19 @@ describe("mail-dmarc-publish re-entered after a crash", () => {
     await cleanups[0]!.run(ctx(logs, PARAMS));
     expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual([STANDING]);
   });
+
+  it("leaves a record a hand changed after the write when the run is aborted", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("_dmarc.example.com", "TXT", STANDING);
+    recordDnsWrite(db.db, { name: "_dmarc.example.com", type: "TXT", content: STANDING, act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_prev" });
+    const logs: string[] = [];
+    const cleanups: Cleanup[] = [];
+    await makeMailDmarcPublishDef({ dns }).steps(PARAMS)[1]!.run(ctx(logs, PARAMS, cleanups));
+    const handChanged = "v=DMARC1; p=reject; rua=mailto:someone@example.net";
+    await dns.upsertRecord({ name: "_dmarc.example.com", type: "TXT", content: handChanged });
+
+    await cleanups[0]!.run(ctx(logs, PARAMS));
+
+    expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual([handChanged]);
+  });
 });
