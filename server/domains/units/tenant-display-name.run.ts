@@ -42,14 +42,15 @@ async function writeDisplayName(ports: TenantSetDisplayNamePorts, tc: TenantClus
   return commit;
 }
 
-/** On abort: write the previous name back, while the tenant still carries this run's. */
+/** On abort: write the previous name back, while the tenant's registration still carries this run's. The
+ *  registration decides, being what the members render (restoreSenderDomainCleanup says why). */
 function restoreDisplayNameCleanup(ports: TenantSetDisplayNamePorts, p: TenantSetDisplayNameParams): Cleanup {
   return {
     name: "restore-display-name",
     title: `Show the tenant under ${named(p.previous)} again`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
-      if (tc.displayName !== p.displayName) {
+      if ((await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.displayName !== p.displayName) {
         ctx.log("meta", `tenant ${tc.guid} is no longer named ${named(p.displayName)} by this run — another run wrote it since; left as it is`);
         return;
       }

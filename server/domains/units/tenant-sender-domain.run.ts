@@ -52,14 +52,16 @@ async function writeSenderDomain(ports: TenantSetSenderDomainPorts, tc: TenantCl
   return commit;
 }
 
-/** On abort: write the previous sender domain back, while the tenant still carries this run's. */
+/** On abort: write the previous sender domain back, while the tenant's registration still carries this
+ *  run's. The registration decides, being what the members render: the row is written second, so a run
+ *  that died between the two leaves the row on the previous domain while the members send from the new. */
 function restoreSenderDomainCleanup(ports: TenantSetSenderDomainPorts, p: TenantSetSenderDomainParams): Cleanup {
   return {
     name: "restore-sender-domain",
     title: `Send as ${p.previous || "the platform's own domain"} again`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
-      if (tc.senderDomain !== p.senderDomain) {
+      if ((await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.senderDomain !== p.senderDomain) {
         ctx.log("meta", `tenant ${tc.guid} no longer sends as this run's ${p.senderDomain || "platform domain"} — another run wrote it since; left as it is`);
         return;
       }

@@ -110,7 +110,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
     });
     const row = () => db.db.select({ d: tenants.senderDomain }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.d;
     const registered = async () => (await reg.readTenant("prod", GUID))?.entry.senderDomain;
-    return { db, executor, probe, row, registered };
+    return { db, executor, probe, row, registered, reg };
   }
 
   async function set(h: Awaited<ReturnType<typeof make>>, senderDomain: string, previous = ""): Promise<string> {
@@ -147,6 +147,29 @@ describe("tenant-set-sender-domain through the Executor", () => {
     expect(getRun(h.db.db, runId)?.status).toBe("cancelled");
     expect(h.row()).toBe("");
     expect(await h.registered()).toBe("");
+  });
+
+  it("PLANTED DEFECT: an abort after the registration was written and the row update failed writes the previous domain back to both", async () => {
+    const h = await make();
+    // The row update fails once the registration carries the new domain: the process dying between the two acts.
+    h.db.sqlite.exec("CREATE TRIGGER planted_row_failure BEFORE UPDATE OF sender_domain ON tenants BEGIN SELECT RAISE(ABORT, 'planted row failure'); END");
+    const runId = await set(h, DOMAIN);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect([await h.registered(), h.row()]).toEqual([DOMAIN, ""]);
+    h.db.sqlite.exec("DROP TRIGGER planted_row_failure");
+    await h.executor.abortWithCleanup(runId);
+    await h.executor.settle(runId);
+    expect([await h.registered(), h.row()]).toEqual(["", ""]);
+  });
+
+  it("PLANTED INNOCENT: an abort leaves a domain another writer registered since as it is", async () => {
+    const h = await make({ renders: "" });
+    const runId = await set(h, DOMAIN);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    await h.reg.setSenderDomain("prod", GUID, "other.test", "run_other");
+    await h.executor.abortWithCleanup(runId);
+    await h.executor.settle(runId);
+    expect(await h.registered()).toBe("other.test");
   });
 
   it("refuses a domain whose mail is not signed, one the product does not know, and a product that declares no check", async () => {

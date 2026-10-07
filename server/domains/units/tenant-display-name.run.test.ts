@@ -124,6 +124,19 @@ describe("tenant-set-display-name through the Executor", () => {
     expect(await h.registered()).toBe("");
   });
 
+  it("PLANTED DEFECT: an abort after the registration was written and the row update failed writes the previous name back to both", async () => {
+    const h = await make();
+    // The row update fails once the registration carries the new name: the process dying between the two acts.
+    h.db.sqlite.exec("CREATE TRIGGER planted_row_failure BEFORE UPDATE OF display_name ON tenants BEGIN SELECT RAISE(ABORT, 'planted row failure'); END");
+    const runId = await set(h, NAME);
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect([await h.registered(), h.row()]).toEqual([NAME, ""]);
+    h.db.sqlite.exec("DROP TRIGGER planted_row_failure");
+    await h.executor.abortWithCleanup(runId);
+    await h.executor.settle(runId);
+    expect([await h.registered(), h.row()]).toEqual(["", ""]);
+  });
+
   it("PLANTED: refuses a name post cannot parse, naming the field", async () => {
     const h = await make();
     for (const name of ["A, B", "A <b>", 'A "B"', "x".repeat(65)]) {
