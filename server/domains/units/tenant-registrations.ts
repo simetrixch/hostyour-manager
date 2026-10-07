@@ -76,6 +76,7 @@ export interface ScannedTenant {
   /** The hosts that redirect to the own domain, and its alias domains — the inventory lists their records too. */
   ownDomainRedirects: string[];
   ownDomainAliases: string[];
+  senderDomain: string;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -173,7 +174,15 @@ export class TenantRegistrations {
     }
     const r = TenantRegistrationSchema.safeParse(parsed);
     if (!r.success) return { status: "unreadable", reason: `${path} failed its schema: ${schemaWhy(r.error)}` };
-    return { status: "read", entry: { guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps, members: r.data.members.map((m) => m.name), routing: r.data.routing, ownDomain: r.data.ownDomain, ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [] } };
+    return {
+      status: "read",
+      entry: {
+        guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
+        members: r.data.members.map((m) => m.name), routing: r.data.routing, ownDomain: r.data.ownDomain,
+        ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
+        senderDomain: r.data.senderDomain ?? "",
+      },
+    };
   }
 
   /** The ONE scan of the registrations at a stage: scanTenantDir over every guid directory, bucketed

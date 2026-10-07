@@ -10,6 +10,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { buildConsumerSecretDataWithDerivations } from "#unit/server/secret-mint.ts";
 import { readStoreSecrets } from "#unit/server/store-secrets.ts";
 import { dropUnitCallKey, findUnitCallKey, keepUnitCallKey } from "#unit/server/unit-call-key.ts";
+import { registerSecret } from "../../security/redact.ts";
 import type { DeployableOnboardParams, OnboardPorts } from "./onboard.run.ts";
 
 export interface ConsumerSecretsSeedInput {
@@ -77,6 +78,12 @@ export async function seedConsumerSecrets(
       return ctx.creds.open(input.repoCredentialId, { purpose: "consumer-onboard:seed-secrets:deploy-git-credentials", runId: ctx.runId });
     },
   );
+  // Every value this seed minted, the Manager's unit key among them, is masked in the run's log from
+  // here on, so a line or an error that ever carried one would not print it.
+  for (const spec of input.secretSpecs) {
+    const value = data[spec.key];
+    if (spec.generate && value !== undefined) registerSecret(ctx.runId, Buffer.from(value, "utf8"));
+  }
   const keys = Object.keys(data);
   if (keys.length === 0) {
     ctx.log("meta", "all declared secrets are optional and none were supplied — nothing to seed");

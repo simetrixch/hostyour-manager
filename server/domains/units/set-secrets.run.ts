@@ -19,6 +19,7 @@ import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH, type ConsumerManifest }
 import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
 import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 import { keepUnitCallKey } from "#unit/server/unit-call-key.ts";
+import { registerSecret } from "../../security/redact.ts";
 
 // "consumer-set-secrets" — change a declared secret of a STANDING consumer (hostyour-manager#245).
 //
@@ -198,8 +199,12 @@ function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
           if (value !== undefined && value !== "") data[key] = value;
         }
         // The named generate keys, minted and verified by the onboarding's own mint, ride the same
-        // patch. Their names are logged below; their values never are.
+        // patch. Their names are logged below; their values never are, and the run's redactor masks
+        // them should a line ever carry one.
         const minted = p.mint.length > 0 ? buildConsumerSecretData(p.mint, () => undefined).data : {};
+        for (const val of Object.values(minted)) {
+          registerSecret(ctx.runId, Buffer.from(val, "utf8"));
+        }
         Object.assign(data, minted);
         const keys = Object.keys(data);
         if (keys.length === 0) throw errValidation("no value was supplied — every box was left empty and no key is minted, so there is nothing to change");

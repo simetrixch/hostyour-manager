@@ -6,6 +6,7 @@
 import type { Stage } from "../../../shared/enums.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import { registerSecret } from "../../security/redact.ts";
 import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
 import { findUnitCallKey } from "#unit/server/unit-call-key.ts";
 import { stageApex, tenantMemberUrl } from "#unit/shared/unit-host.ts";
@@ -42,6 +43,7 @@ export async function changeStageIssuer(
   const ref = await findUnitCallKey(deps.store, route.unit, stage);
   if (!ref) throw errValidation(`the Manager keeps no key for ${route.unit} (${stage}) — ${mintRepair(route, stage)}`);
   const key = (await deps.store.open(ref.id, { purpose: `tenant-set-sender-domain:${req.change}-issuer`, runId: req.runId })).toString("utf8");
+  registerSecret(req.runId, Buffer.from(key, "utf8"));
   const url = route.url.replaceAll("{stageApex}", stageApex(req.unitApex, stage)).replaceAll("{domain}", encodeURIComponent(req.domain));
   const call = () =>
     deps.unitCall.call({ method: req.change === "add" ? "PUT" : "DELETE", url, key, body: { issuer: req.issuer }, ...(req.signal ? { signal: req.signal } : {}) });

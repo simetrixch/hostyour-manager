@@ -12,6 +12,7 @@ import { makeOffboardDef, type OffboardPorts } from "./offboard.run.ts";
 import { makePurgeDef, type PurgePorts } from "./purge.run.ts";
 import { SHA, passReport, ports as onboardPorts, FakeSeeder } from "./onboard.fixture.ts";
 import { RecordingTeardownSeeder } from "./teardown.fixture.ts";
+import { redact, unregisterScope } from "../../security/redact.ts";
 
 // The key a stage accepts from the Manager alone lives exactly as long as the stage's Vault entry:
 // the onboarding's seed keeps it on the create, and every path that deletes the entry drops it.
@@ -39,7 +40,10 @@ beforeEach(() => {
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", host: "acme", stage: "prod", status: "active" }).run();
 });
-afterEach(() => { db.sqlite.close(); });
+afterEach(() => {
+  unregisterScope("run_key");
+  db.sqlite.close();
+});
 
 function ctx(stepName: string, params: Readonly<Record<string, unknown>>, cleanups: Cleanup[] = []): StepCtx {
   return {
@@ -75,8 +79,13 @@ describe("the key a unit's stage accepts from the Manager, across the runs", () 
     const seeder = new FakeSeeder();
     const p = onboardParams();
     const cleanups: Cleanup[] = [];
-    await makeOnboardDef(onboardPorts({ seeder })).steps(p).find((s) => s.name === "seed-secrets")!.run(ctx("seed-secrets", p, cleanups));
-    expect(await opened("prod")).toBe(seeder.seeded[0]!.data["ACME_MANAGER_KEY"]);
+    const logs: string[] = [];
+    await makeOnboardDef(onboardPorts({ seeder })).steps(p).find((s) => s.name === "seed-secrets")!.run({ ...ctx("seed-secrets", p, cleanups), log: (_s, t) => logs.push(t) });
+    const key = (await opened("prod"))!;
+    expect(key).toBe(seeder.seeded[0]!.data["ACME_MANAGER_KEY"]);
+    expect(logs.length).toBeGreaterThan(0);
+    expect(logs.some((l) => l.includes(key))).toBe(false);
+    expect(redact(`manager key: ${key}`)).toBe("manager key: •••");
     await cleanups.find((cleanup) => cleanup.name === "remove-ceremony-secrets")!.run(ctx("remove-ceremony-secrets", p));
     expect(await prodRows()).toBe(0);
   });

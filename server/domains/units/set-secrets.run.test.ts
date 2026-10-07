@@ -10,6 +10,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 import { seedCredentialRow } from "../../security/store.fixture.ts";
 import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
+import { redact, unregisterScope } from "../../security/redact.ts";
 
 // The one path that changes a declared secret of a standing consumer (#245): the manifest says which
 // keys exist, the merge write carries only what the operator filled, and the two acts that make a
@@ -51,7 +52,10 @@ beforeEach(() => {
   seedCredentialRow(db.db, { id: "cred_pat_ahkutun", kind: "pat", label: "repository PAT (ahkutun)", subject: { kind: "owner", id: "ahkutun" }, purpose: "repository-pat" });
   db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "swissbookai", host: "swissbookai", stage: "prod", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
 });
-afterEach(() => { db.sqlite.close(); });
+afterEach(() => {
+  unregisterScope("run_sec");
+  db.sqlite.close();
+});
 
 function ports(over: Partial<SetSecretsPorts> = {}, manifest: string | null = MANIFEST): SetSecretsPorts {
   const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
@@ -174,6 +178,7 @@ describe("consumer-set-secrets", () => {
       expect(data["DKIM_KEY_ENCRYPTION_KEY"]).toMatch(/^[0-9a-f]{64}$/);
       expect(logs.some((l) => l.includes("minted new: DKIM_KEY_ENCRYPTION_KEY"))).toBe(true);
       expect(logs.some((l) => l.includes(data["DKIM_KEY_ENCRYPTION_KEY"]!))).toBe(false); // nothing minted is logged
+      expect(redact(`minted: ${data["DKIM_KEY_ENCRYPTION_KEY"]}`)).toBe("minted: •••");
       // The book: the typed key as set, the minted one as minted, never a value.
       const book = listSecretWrites(db.db, consumerSecretEntry("prod", "swissbookai")).map((w) => [w.key, w.act]).sort();
       expect(book).toEqual([["DKIM_KEY_ENCRYPTION_KEY", "minted"], ["SMTP_URL", "set"]]);

@@ -294,13 +294,19 @@ async function hashOf(ports: RecordPorts, r: Pick<MailRecordHash, "name" | "type
   return createHash("sha256").update([...contents].sort().join("\n"), "utf8").digest("hex");
 }
 
+function normalizeMailDomain(host: string): string {
+  const lower = host.toLowerCase();
+  const withoutDot = lower.endsWith(".") ? lower.slice(0, -1) : lower;
+  return withoutDot.startsWith("www.") ? withoutDot.slice(4) : withoutDot;
+}
+
 /** The mail records beside `hosts`, hashed: those at each host's domain (the host without `www.`). A
  *  domain in a zone nobody here manages has none — the run writes nothing there. The plan freezes
  *  them, and checkMailRecordsStep refuses the run where one changed since. */
 export async function mailRecordHashes(ports: RecordPorts, hosts: readonly string[], signal?: AbortSignal): Promise<MailRecordHash[]> {
   if (!ports.dns) return [];
   const hashes: MailRecordHash[] = [];
-  for (const domain of new Set(hosts.map((h) => h.replace(/^www\./, "")))) {
+  for (const domain of new Set(hosts.map(normalizeMailDomain))) {
     try {
       for (const r of mailNames(domain)) hashes.push({ ...r, sha256: await hashOf(ports, r, signal) });
     } catch (e) {

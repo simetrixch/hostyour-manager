@@ -288,4 +288,75 @@ describe("tenant-set-sender-domain through the Executor", () => {
     const s = await make({ suspended: true });
     await expect(s.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" })).rejects.toThrow(/suspended/);
   });
+
+  it("refuses a sender domain another tenant of the same stage sends from, naming it", async () => {
+    const h = await make();
+    const otherGuid = "e2e8ymj86dk8";
+    await h.reg.commitTenant({
+      stage: "prod",
+      guid: otherGuid,
+      runId: "run_other",
+      registration: {
+        cluster: "s1",
+        subdomain: "other",
+        apps: [],
+        members: testMembers(),
+        identityProvider: "auth",
+        routing: "host",
+        ownDomain: "",
+        ownDomainRedirects: [],
+        approvedTags: {},
+        senderDomain: DOMAIN,
+        displayName: "",
+        seedUsers: false,
+        quota: TEST_QUOTA,
+        resetNonce: "1",
+        suspended: false,
+        quiesced: false,
+        appsImage: "",
+        appsImageTag: "",
+      },
+    });
+    await expect(
+      h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" }),
+    ).rejects.toThrow("tenant acme cannot send as customer.test — tenant other of prod already sends from it; a stage's tenants send from different domains");
+  });
+
+  it("plans a sender domain that another tenant sends from at another stage", async () => {
+    const h = await make();
+    const otherGuid = "e2e8ymj86dk8";
+    await h.reg.commitTenant({
+      stage: "test",
+      guid: otherGuid,
+      runId: "run_other_test",
+      registration: {
+        cluster: "s1",
+        subdomain: "other",
+        apps: [],
+        members: testMembers(),
+        identityProvider: "auth",
+        routing: "host",
+        ownDomain: "",
+        ownDomainRedirects: [],
+        approvedTags: {},
+        senderDomain: DOMAIN,
+        displayName: "",
+        seedUsers: false,
+        quota: TEST_QUOTA,
+        resetNonce: "1",
+        suspended: false,
+        quiesced: false,
+        appsImage: "",
+        appsImageTag: "",
+      },
+    });
+    const { runId } = await h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" });
+    expect(runId).toMatch(/^run_/);
+  });
+
+  it("plans clearing the sender domain to empty", async () => {
+    const h = await make({ senderDomain: DOMAIN });
+    const { runId } = await h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: "", previous: DOMAIN });
+    expect(runId).toMatch(/^run_/);
+  });
 });

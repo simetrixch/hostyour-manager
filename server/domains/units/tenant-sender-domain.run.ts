@@ -235,6 +235,11 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       if (tc.senderDomain !== params.previous) throw errValidation(`tenant ${tc.subdomain} sends as ${tc.senderDomain || "the platform's own domain"}, not ${params.previous || "the platform's own domain"} as this request says — ask again`);
       const spec = await readTenantSpec(ports, {});
       if (params.senderDomain !== "") {
+        const { pointers } = await ports.registrations.listTenantPointers(tc.stage);
+        const other = pointers.find((p) => p.guid !== tc.guid && p.senderDomain === params.senderDomain);
+        if (other) {
+          throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — tenant ${other.subdomain} of ${tc.stage} already sends from it; a stage's tenants send from different domains`);
+        }
         const refused = await refuseUnsigned(ports, tc, spec?.senderDomainCheck, params.senderDomain);
         if (refused) throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — ${refused}`);
       }

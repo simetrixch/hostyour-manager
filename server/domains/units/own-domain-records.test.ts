@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
-import { customerHostProblem, recordsToReplace, replacementSentence, restoreReplacedRecords, ReplacedRecord } from "./own-domain-records.ts";
+import { customerHostProblem, recordsToReplace, replacementSentence, restoreReplacedRecords, ReplacedRecord, mailRecordHashes } from "./own-domain-records.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
@@ -202,5 +202,18 @@ describe("a replaced record is written back as it stood", () => {
     await dns.upsertRecord({ name: "www.shop.example", type: "CNAME", content: ZONE });
     await dns.createRecord({ name: "api.shop.example", type: "CNAME", content: ZONE });
     expect(await dns.listStandingRecords({ name: "api.shop.example", type: "CNAME" })).toEqual([{ content: ZONE, proxied: false, ttl: 1 }]);
+  });
+});
+
+describe("mailRecordHashes", () => {
+  it("hosts produce exactly the four records of one domain, each once", async () => {
+    const dns = new FakeDnsProvider();
+    const hashes = await mailRecordHashes({ dns }, ["example.com", "WWW.Example.com.", "www.example.com"]);
+    expect(hashes.map((h) => `${h.type} ${h.name}`)).toEqual([
+      "MX example.com",
+      "TXT example.com",
+      "TXT _dmarc.example.com",
+      "CNAME autodiscover.example.com",
+    ]);
   });
 });
