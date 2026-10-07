@@ -61,14 +61,22 @@ export async function attestBuildsAgain(
   ctx.log("meta", `${app} renders ${sorted(builds)} — the release may build them`);
 }
 
+/** G16's rule, held here as at onboarding: a build name is one unit's. Two units attesting one name
+ *  push to one registry repository, and each release would move the other's pins. */
+export async function assertBuildNamesFree(
+  registrations: { listAttestedBuildNames(exceptUnit?: string): Promise<{ unit: string; build: string }[]> },
+  unit: string,
+  builds: readonly string[],
+): Promise<void> {
+  const taken = (await registrations.listAttestedBuildNames(unit)).filter((a) => builds.includes(a.build));
+  if (taken.length > 0) throw errValidation(`build unit ${unit} now declares ${taken.map((t) => `${t.build} (attested by ${t.unit})`).join(", ")} — a build name is one unit's; rename the build in ${unit}'s manifest`);
+}
+
 async function writeAttestation(
   ctx: StepCtx, ports: BuildPorts, unit: string, builds: readonly string[],
   entry: NonNullable<Awaited<ReturnType<BuildPorts["registrations"]["readBuildRegistration"]>>>["entry"], attested: readonly string[],
 ): Promise<void> {
-  // G16's rule, held here as at onboarding: a build name is one unit's. Two units attesting one name
-  // push to one registry repository, and each release would move the other's pins.
-  const taken = (await ports.registrations.listAttestedBuildNames(unit)).filter((a) => builds.includes(a.build));
-  if (taken.length > 0) throw errValidation(`build unit ${unit} now declares ${taken.map((t) => `${t.build} (attested by ${t.unit})`).join(", ")} — a build name is one unit's; rename the build in ${unit}'s manifest`);
+  await assertBuildNamesFree(ports.registrations, unit, builds);
   const { commit } = await ports.registrations.commitRegistration({
     unit: {
       name: unit, repoURL: entry.repoURL, ...(entry.owner ? { owner: entry.owner } : {}),

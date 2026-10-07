@@ -14,7 +14,9 @@ import { localTx } from "../../executor/stepkit.ts";
 import { unitRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { serializePointer, parseRegistration } from "#unit/server/registration-laws.ts";
-import type { Registrations } from "#unit/server/registrations.ts";
+import type { Registrations, RegistrationCommit } from "#unit/server/registrations.ts";
+import { assertBuildNamesFree } from "#unit/server/build-unit-attest.ts";
+import { readDeclaredManifest } from "./set-secrets.run.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
@@ -294,14 +296,30 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           const sender = (await ports.registrations.listSmtpSenders(ac.stage)).find((s) => s.unit !== entry.name);
           if (sender) throw errValidation(`the dumped registration makes ${entry.name} the mail sender at ${ac.stage}, which ${sender.unit} is now — a stage has one sender; offboard it there before restoring ${entry.name}`);
         }
-        // The dumped registration is re-committed AT THE TARGET, closed: the unit deploys quiesced,
-        // its claims provision empty stores, and only after the data is restored does open-access lift it.
+        const standing = await ports.registrations.readBuildRegistration(entry.name);
+        let unit: RegistrationCommit["unit"];
+        let builds: string[];
+        if (standing !== null) {
+          const s = standing.entry;
+          unit = { name: s.name, repoURL: s.repoURL, ...(s.owner ? { owner: s.owner } : {}), ...(s.onboardedAt ? { onboardedAt: s.onboardedAt } : {}), suspended: s.suspended, quiesced: s.quiesced };
+          builds = s.builds ?? [];
+        } else {
+          const read = await readDeclaredManifest(ports, (org) => readOwnerIdentity(c.db, org), entry.repoURL, c.signal);
+          if (read.outcome === "refused") throw errValidation(read.why);
+          const manifestBuilds = read.manifest.builds.map((b) => b.name);
+          await assertBuildNamesFree(ports.registrations, entry.name, manifestBuilds);
+          unit = { name: entry.name, repoURL: entry.repoURL, ...(entry.owner ? { owner: entry.owner } : {}), ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: false };
+          builds = manifestBuilds;
+        }
+        // The dumped registration is re-committed AT THE TARGET: the restored stage deploys closed
+        // (deploy.quiesced: true) until the data is back and open-access lifts it, while the unit
+        // file keeps what stands (or writes the manifest's builds when the last stage was offboarded).
         await ports.registrations.commitRegistration({
-          unit: { name: entry.name, repoURL: entry.repoURL, ...(entry.owner ? { owner: entry.owner } : {}), ...(entry.onboardedAt ? { onboardedAt: entry.onboardedAt } : {}), suspended: entry.suspended, quiesced: true },
-          builds: [],
+          unit,
+          builds,
           // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
           // target cluster, whatever stage that cluster's map carries.
-          deploy: { stage: ac.stage, chartPath: entry.chartPath!, cluster: target.cluster, host: entry.host ?? ac.name, databases: entry.databases ?? [],
+          deploy: { stage: ac.stage, quiesced: true, chartPath: entry.chartPath!, cluster: target.cluster, host: entry.host ?? ac.name, databases: entry.databases ?? [],
                     // The redis grant travels with the unit, for the reason the size below does: a
                     // move must land it with what it ran with. Dropped here, the unit would arrive
                     // granted NOTHING and its ACL user would be refused its own keys.

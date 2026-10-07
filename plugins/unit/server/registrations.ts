@@ -95,7 +95,27 @@ export interface RegistrationCommit {
    *  domain the standing stage file carries is kept: setFqdn below is its writer, and a second
    *  registration of a standing stage does not take it away. Absent deploy ⇒ a build-only unit:
    *  build.yaml is written, no stage file. */
-  deploy?: { stage: Stage; chartPath: string; cluster: string; host: string; databases: string[]; keyPatterns: string[]; channelPatterns: string[]; services: ConsumerRegistration["services"]; size: ConsumerStageRegistration["size"]; sizes?: PartSizes; volumes?: PartVolumes; mongodb: ConsumerStageRegistration["mongodb"]; redis?: ConsumerRegistration["redis"]; redisMaxmemoryPolicy?: ConsumerRegistration["redisMaxmemoryPolicy"]; quota: UnitQuota; fqdn?: string; smtpEntry?: SmtpEntry };
+  deploy?: {
+    stage: Stage;
+    /** The stage's own pause, where it differs from the unit's: a restore closes one stage while the unit's other stages run. */
+    quiesced?: boolean;
+    chartPath: string;
+    cluster: string;
+    host: string;
+    databases: string[];
+    keyPatterns: string[];
+    channelPatterns: string[];
+    services: ConsumerRegistration["services"];
+    size: ConsumerStageRegistration["size"];
+    sizes?: PartSizes;
+    volumes?: PartVolumes;
+    mongodb: ConsumerStageRegistration["mongodb"];
+    redis?: ConsumerRegistration["redis"];
+    redisMaxmemoryPolicy?: ConsumerRegistration["redisMaxmemoryPolicy"];
+    quota: UnitQuota;
+    fqdn?: string;
+    smtpEntry?: SmtpEntry;
+  };
 }
 
 export class Registrations {
@@ -374,6 +394,7 @@ export class Registrations {
         content: serializePointer(ConsumerRegistrationSchema, {
           ...unit,
           removing: false,
+          ...(deploy.quiesced !== undefined ? { quiesced: deploy.quiesced } : {}),
           chartPath: deploy.chartPath,
           cluster: deploy.cluster,
           host: deploy.host,

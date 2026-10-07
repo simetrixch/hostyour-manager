@@ -15,7 +15,7 @@ import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
 import { judgeRepoIdentity, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { buildConsumerSecretData } from "#unit/server/secret-mint.ts";
-import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
+import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH, type ConsumerManifest } from "../../../shared/consumer.ts";
 import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
 import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 import { keepUnitCallKey } from "#unit/server/unit-call-key.ts";
@@ -83,11 +83,13 @@ export interface SetSecretsPorts extends LifecyclePorts {
 /** What reads a consumer's manifest: the GitHub client and the owner's identity it reads with. */
 export type ManifestReadPorts = Pick<SetSecretsPorts, "github" | "store" | "githubApp">;
 
-/** WHAT THE REPOSITORY DECLARES NOW — the manifest at the default branch's head, read through the
- *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
- *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
- *  repository or the manifest does not parse. */
-export async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
+/** Read the consumer manifest from its repository through the owner's identity. */
+export async function readDeclaredManifest(
+  ports: ManifestReadPorts,
+  owners: OwnerIdentityReader,
+  repoURL: string,
+  signal?: AbortSignal,
+): Promise<{ outcome: "read"; manifest: ConsumerManifest } | { outcome: "refused"; why: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const judged = await judgeRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, ...(signal ? { signal } : {}) });
   if ("refused" in judged) return { outcome: "refused", why: judged.refused };
@@ -96,8 +98,18 @@ export async function readDeclaredSecrets(ports: ManifestReadPorts, owners: Owne
   if (text === null) return { outcome: "refused", why: `${repoURL} carries no ${CONSUMER_MANIFEST_PATH}` };
   const parsed = ConsumerManifestSchema.safeParse(parseYaml(text));
   if (!parsed.success) return { outcome: "refused", why: `${CONSUMER_MANIFEST_PATH} of ${repoURL} failed its schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` };
-  const dkimKey = parsed.data.smtpEntry?.dkimKey;
-  return { outcome: "read", secrets: parsed.data.secrets, ...(dkimKey ? { dkimKey } : {}) };
+  return { outcome: "read", manifest: parsed.data };
+}
+
+/** WHAT THE REPOSITORY DECLARES NOW — the manifest at the default branch's head, read through the
+ *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
+ *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
+ *  repository or the manifest does not parse. */
+export async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
+  const read = await readDeclaredManifest(ports, owners, repoURL, signal);
+  if (read.outcome === "refused") return read;
+  const dkimKey = read.manifest.smtpEntry?.dkimKey;
+  return { outcome: "read", secrets: read.manifest.secrets, ...(dkimKey ? { dkimKey } : {}) };
 }
 
 /** The repository the consumer was onboarded from — the row's own field, the one this run reads the
