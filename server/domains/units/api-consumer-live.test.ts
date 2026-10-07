@@ -14,7 +14,7 @@ import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerConsumerRoutes } from "./api.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { Registrations } from "#unit/server/registrations.ts";
+import { Registrations, type RegistrationRead } from "#unit/server/registrations.ts";
 import type { SmokeResult, ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AppStatus, DriftVerdict } from "../../../shared/enums.ts";
@@ -105,12 +105,23 @@ function liveResolver(smoke: SmokeResult, argo: ArgoAppStatus | null): FakeClust
  *  domain — the shape every real cluster has, since install.sh defaults `unit-apex` to the cluster
  *  FQDN minus its first label. Without a registrations the route cannot read a chain at all, which is the
  *  null case every other test in this file exercises. */
-function apexRegistrations(unitApex: string): Registrations {
+function apexRegistrations(unitApex: string, registration?: { quiesced: boolean } | "error"): Registrations {
   const repo = new FakePlatformRepo();
   repo.seed(repo.booksBranch, "clusters/platform/values-common.yaml", "global:\n  timezone: Europe/Amsterdam\n");
   repo.seed(repo.booksBranch, "clusters/platform/values-prod.yaml", "global:\n  env: prod\n");
   repo.seed(repo.booksBranch, clusterMapPath("s1.example"), `global:\n  unitApex: ${unitApex}\n`);
-  return new Registrations(repo);
+  const reg = new Registrations(repo);
+  if (registration === "error") {
+    reg.readRegistration = () => Promise.reject(new Error("unreadable registration"));
+  } else if (registration) {
+    reg.readRegistration = async () => ({
+      entry: {
+        fqdn: "acme.example.com",
+        quiesced: registration.quiesced,
+      },
+    } as unknown as RegistrationRead);
+  }
+  return reg;
 }
 
 async function makeConsumerLive(resolver?: FakeClusterKubeResolver, registrations?: Registrations): Promise<{ app: Hono<AppEnv>; cookie: string }> {
@@ -130,6 +141,8 @@ async function makeConsumerLive(resolver?: FakeClusterKubeResolver, registration
 
 interface LiveBody {
   unitHost: string | null;
+  fqdn: string | null;
+  quiesced: boolean | null;
   row: { name: string; domain: string; repoUrl?: string };
   cluster: { ok: boolean; namespaceExists: boolean; externalSecretsReady: boolean };
   argo: { ok: boolean; sync: string; health: string; syncRevision: string | null };
@@ -159,6 +172,29 @@ describe("the consumer's public address on the live payload", () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })));
     expect((await live(app, cookie)).unitHost).toBeNull();
+  });
+
+  // Mutant: ignoring `quiesced` or hardcoding false yields false/null when registration is quiesced.
+  it("answers quiesced: true when the stage registration is quiesced", async () => {
+    seedConsumer();
+    const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", { quiesced: true }));
+    expect((await live(app, cookie)).quiesced).toBe(true);
+  });
+
+  // Mutant: hardcoding quiesced to true yields true when registration is open.
+  it("answers quiesced: false when the stage registration is not quiesced", async () => {
+    seedConsumer();
+    const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", { quiesced: false }));
+    expect((await live(app, cookie)).quiesced).toBe(false);
+  });
+
+  // Mutant: failing to catch readRegistration errors crashes the route or drops unitHost.
+  it("answers quiesced: null while unitHost still answers when registration cannot be read", async () => {
+    seedConsumer();
+    const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", "error"));
+    const body = await live(app, cookie);
+    expect(body.quiesced).toBeNull();
+    expect(body.unitHost).toBe("acme.example.com");
   });
 });
 

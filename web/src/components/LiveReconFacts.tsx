@@ -1,4 +1,5 @@
-import type { ConsumerLiveProbeView, WorkloadStatusView } from "../../../shared/api-types.ts";
+import type { ReactNode } from "react";
+import type { ConsumerLiveProbeView, WorkloadStatusView } from "../../../shared/api-types-live.ts";
 import { ReconDrift } from "./ReconDrift.tsx";
 
 /** The three FACT rows of one live reconciliation card — the cluster smoke, the ArgoCD status, and
@@ -7,10 +8,12 @@ import { ReconDrift } from "./ReconDrift.tsx";
  *  panel's name-keyed probe (ConsumerLiveProbeView). One renderer for the same
  *  reason the server computes the answer in one place (live-recon.ts): two copies of these rows is how
  *  two cards drift into describing the same live situation differently. The CALLER keeps the fetch and
- *  the loading/error/not-configured branches — their wording is per-surface; the facts are not. */
-export function LiveReconFacts({ live }: { live: Pick<ConsumerLiveProbeView, "cluster" | "argo" | "drift" | "argocdUrl"> }) {
+ *  the loading/error/not-configured branches — their wording is per-surface; the facts are not. A surface
+ *  that knows more of the stage puts its own row first as `children`. */
+export function LiveReconFacts({ live, children }: { live: Pick<ConsumerLiveProbeView, "cluster" | "argo" | "drift" | "argocdUrl">; children?: ReactNode }) {
   return (
     <div className="recon">
+      {children}
       <div className="recon__row">
         <span className="recon__label">Cluster</span>
         {live.cluster === null ? (

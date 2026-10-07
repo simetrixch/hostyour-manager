@@ -2,7 +2,7 @@
 // unit's Application TARGETS? One answer for every card, so no two cards can describe the same live
 // situation differently.
 import type { DriftVerdict, ArgoSync } from "#core/shared/enums.ts";
-import type { LiveDriftView } from "#core/shared/api-types.ts";
+import type { LiveDriftView } from "#core/shared/api-types-live.ts";
 
 /** The revision block of a live card: `pinned` is what the unit's chart source TARGETS as ArgoCD sees it
  *  — the delivery branch for a consumer, the books branch for a tenant, a SHA only where a pin says one

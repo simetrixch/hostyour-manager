@@ -1,4 +1,4 @@
-import type { LiveDriftView } from "../../../shared/api-types.ts";
+import type { LiveDriftView } from "../../../shared/api-types-live.ts";
 import { PINNED, DEPLOYED, sha7, driftReadout } from "../reconVocabulary.ts";
 
 /** The revision half of a live reconciliation card, rendered ONCE for BOTH the Consumers page and the

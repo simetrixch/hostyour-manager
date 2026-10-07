@@ -22,6 +22,7 @@ import { ConsumerActions } from "../components/ConsumerActions.tsx";
 import { PurgeOrphanDialog } from "../components/PurgeOrphanDialog.tsx";
 import { DetectedConsumerPanel, type PurgeTarget } from "../components/DetectedConsumerPanel.tsx";
 import { LiveReconFacts } from "../components/LiveReconFacts.tsx";
+import { ClosedStageLine } from "../components/closed-stage.tsx";
 import { ChosenConsumerEnvironment } from "../components/ConsumerCardHead.tsx";
 import { OffboardConsumerDialog, siblingStages } from "../components/OffboardConsumerDialog.tsx";
 import { groupEnvironments } from "../tenantRows.ts";
@@ -71,7 +72,9 @@ function ConsumerLive({ appId }: { appId: string }) {
           </a>
         </div>
       )}
-      <LiveReconFacts live={live} />
+      <LiveReconFacts live={live}>
+        <ClosedStageLine quiesced={live.quiesced} />
+      </LiveReconFacts>
     </>
   );
 }

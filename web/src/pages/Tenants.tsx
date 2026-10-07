@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import type { OrphanScanView, PurgeTenantTarget, WorkloadStatusView } from "../../../shared/api-types.ts";
+import type { OrphanScanView, PurgeTenantTarget } from "../../../shared/api-types.ts";
+import type { WorkloadStatusView } from "../../../shared/api-types-live.ts";
 import {
   listTenants, getTenantLive, scanTenantOrphans, purgeTenant,
   type TenantView,
@@ -14,6 +15,7 @@ import { BackupChip, useLatestBackups } from "../components/BackupChip.tsx";
 import { SectionRuns } from "../components/SectionRuns.tsx";
 import { InviteAdminDialog } from "../components/InviteAdminDialog.tsx";
 import { PurgeTenantDialog } from "../components/PurgeTenantDialog.tsx";
+import { ClosedStageLine } from "../components/closed-stage.tsx";
 import { TenantOrphanPanel } from "../components/TenantOrphanPanel.tsx";
 import { TenantStatusBadge, UnfinishedTenantNotice } from "../components/TenantStatusBadge.tsx";
 import { ReconDrift } from "../components/ReconDrift.tsx";
@@ -103,6 +105,7 @@ function TenantLive({ tenantId }: { tenantId: string }) {
 
   return (
     <div className="recon">
+      <ClosedStageLine quiesced={live.row.quiesced} />
       <div className="recon__row">
         <span className="recon__label">Cluster</span>
         {live.cluster === null ? (

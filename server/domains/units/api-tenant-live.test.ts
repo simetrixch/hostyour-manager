@@ -12,6 +12,7 @@ import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "../../domains/runs/run-definitions.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerTenantRoutes } from "./api.ts";
+import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication, tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import type { SmokeResult, ArgoAppStatus } from "../../adapters/kube/port.ts";
@@ -120,7 +121,7 @@ function liveResolver(smoke: SmokeResult, set: ReadonlyMap<string, ArgoAppStatus
   });
 }
 
-async function makeTenantLive(resolver?: FakeClusterKubeResolver): Promise<{ app: Hono<AppEnv>; cookie: string }> {
+async function makeTenantLive(resolver?: FakeClusterKubeResolver, registrations?: Pick<TenantRegistrations, "readTenant">): Promise<{ app: Hono<AppEnv>; cookie: string }> {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
   // The live route is a pure READ — no run defs are needed; the bare registrations satisfies the executor dep.
@@ -131,13 +132,29 @@ async function makeTenantLive(resolver?: FakeClusterKubeResolver): Promise<{ app
     registerAuth: () => undefined,
     // resolver + deployRepoUrl are wired together (both come from config.deployRepo), so the
     // "not configured" case below drops BOTH — the live read needs both or it degrades to SQL-only.
-    registerProtected: (a) => registerTenantRoutes(a, { executor, db: db.db, onboardingEnabled: true, ...(resolver ? { resolver, deployRepoUrl: DEPLOY_REPO } : {}) }),
+    registerProtected: (a) => registerTenantRoutes(a, {
+      executor, db: db.db, onboardingEnabled: true,
+      ...(resolver ? { resolver, deployRepoUrl: DEPLOY_REPO } : {}),
+      ...(registrations ? { registrations: registrations as unknown as TenantRegistrations } : {}),
+    }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, cookie };
 }
 
 describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
+  // Mutant: ignoring registrations or omitting quiesced leaves row.quiesced null instead of true.
+  it("quiesced: true on the stage registration reaches row.quiesced", async () => {
+    seedTenant();
+    const registrations = {
+      readTenant: async () => ({
+        entry: { quiesced: true },
+      }),
+    };
+    const { app, cookie } = await makeTenantLive(liveResolver(SMOKE_OK, statuses()), registrations as unknown as TenantRegistrations);
+    const body = (await (await app.request("/api/tenants/tnt_1/live", authed(cookie))).json()) as { row: { quiesced: boolean | null } };
+    expect(body.row.quiesced).toBe(true);
+  });
   it("404 for an unknown tenant", async () => {
     seedTenant();
     const { app, cookie } = await makeTenantLive(liveResolver(SMOKE_OK, statuses()));

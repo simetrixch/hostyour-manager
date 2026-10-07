@@ -8,7 +8,7 @@ import { eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { MASTER_ROLES, type Stage, type ArgoSync } from "../../../shared/enums.ts";
-import type { LiveArgoView, ConsumerLiveProbeView } from "../../../shared/api-types.ts";
+import type { LiveArgoView, ConsumerLiveProbeView } from "../../../shared/api-types-live.ts";
 import { syncedRevisionFor, targetedRevisionFor, type ClusterKubeResolver, type ClusterReader, type SmokeResult } from "../../adapters/kube/port.ts";
 import { consumerArgoAppName, consumerArgocdUrl, consumerNamespace } from "../../../shared/consumer.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
@@ -16,7 +16,7 @@ import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
 import { driftOf } from "#unit/server/live-drift.ts";
 
-const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+export const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** The cluster half of a TENANT's live read: smoke every member namespace and fold the answers into
  *  the ONE SmokeResult the card renders. A tenant holds one namespace per member, and the card's
@@ -115,20 +115,21 @@ export async function probeConsumerLive(
  *  serve, and install.sh defaults the apex to the cluster FQDN minus its first label, so the two
  *  differ on every cluster that is not itself the apex.
  *
- *  Beside it `fqdn`: the domain the consumer answers at, at its stage, off its stage registration —
- *  "" where it carries none.
+ *  Beside it `fqdn` and `quiesced`: the domain the consumer answers at and whether its stage
+ *  registration is quiesced, off the same stage registration read — null where the registration could
+ *  not be read or does not stand.
  *
  *  Fail-SOFT, unlike the offboard orphan scan which makes the same read and must fail closed: this
  *  answers a card, so an unreadable chain or registration yields null for its half and the card shows
  *  no address there. A composed guess would be a link to a name nothing serves. */
-export async function readConsumerAddresses(
+export async function readConsumerStanding(
   registrations: Pick<Registrations, "readClusterValueFiles" | "readRegistration"> | undefined,
   row: { name: string; host: string; domain: string; stage: Stage },
-): Promise<{ unitHost: string | null; fqdn: string | null }> {
-  if (!registrations) return { unitHost: null, fqdn: null };
-  const [unitHost, fqdn] = await Promise.all([
+): Promise<{ unitHost: string | null; fqdn: string | null; quiesced: boolean | null }> {
+  if (!registrations) return { unitHost: null, fqdn: null, quiesced: null };
+  const [unitHost, standing] = await Promise.all([
     registrations.readClusterValueFiles(row.domain, row.stage).then((chain) => consumerUnitHost(row.host, row.stage, unitApexFromChain(chain))).catch(() => null),
-    registrations.readRegistration(row.stage, row.name).then((reg) => (reg === null ? null : reg.entry.fqdn ?? "")).catch(() => null),
+    registrations.readRegistration(row.stage, row.name).then((reg) => (reg === null ? { fqdn: null, quiesced: null } : { fqdn: reg.entry.fqdn ?? "", quiesced: reg.entry.quiesced })).catch(() => ({ fqdn: null, quiesced: null })),
   ]);
-  return { unitHost, fqdn };
+  return { unitHost, fqdn: standing.fqdn, quiesced: standing.quiesced };
 }

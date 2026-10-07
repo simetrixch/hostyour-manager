@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { ClusterOrphanConsumerView, ConsumerLiveProbeView, DetectedConsumerView, DetectedScanView } from "../../../shared/api-types.ts";
+import type { ClusterOrphanConsumerView, DetectedConsumerView, DetectedScanView } from "../../../shared/api-types.ts";
+import type { ConsumerLiveProbeView } from "../../../shared/api-types-live.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import { probeConsumerLive } from "../api.ts";
 import { LiveReconFacts } from "./LiveReconFacts.tsx";

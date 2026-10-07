@@ -5,14 +5,15 @@ import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, Plugi
   // the shapes this client resolves to are the shapes that module answers in — there is no browser-side
   // twin of them left to fall behind a server change, which is exactly how a `not-deployed` state the
   // callout had never heard of once unmounted the whole Run screen.
-  TenantPurgeInput, OrphanScanView, RunTenantStateView, // The two live-reconciliation payloads. Same rule, same reason: the server
-  // answers in these exact shapes and this client resolves to them, so the `argo` union the cards
-  // narrow on `.ok` is the server's OWN union — a member added there stops THIS build, instead of
-  // reaching a ternary chain that has never heard of it.
-  ConsumerLiveView, TenantLiveView, // The DETECTED-consumer surface: the scan result the Detected tab renders and
-  // the row-less live probe its rows are verified with. One declaration, both ends — as above.
-  DetectedScanView, ConsumerLiveProbeView, // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
+  TenantPurgeInput, OrphanScanView, RunTenantStateView, // The DETECTED-consumer surface: the scan result the Detected tab renders.
+  // One declaration, both ends — as above.
+  DetectedScanView, // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
   OperatorKeyView, VersionsView } from "../../shared/api-types.ts";
+// The two live-reconciliation payloads and the Detected tab's row-less live probe. Same rule, same
+// reason: the server answers in these exact shapes and this client resolves to them, so the `argo`
+// union the cards narrow on `.ok` is the server's OWN union — a member added there stops THIS build,
+// instead of reaching a ternary chain that has never heard of it.
+import type { ConsumerLiveView, TenantLiveView, ConsumerLiveProbeView } from "../../shared/api-types-live.ts";
 import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
