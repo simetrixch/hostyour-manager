@@ -1,15 +1,16 @@
-// gate-runner/src/gates/claim-sync-ordering.gate.ts
-// G30 "claim sync ordering" (HARD). A workload that uses the Secret of a ServiceClaim stands in a LATER
-// sync wave than the claim, and no PreSync hook uses such a Secret.
+// gate-runner/src/gates/secret-sync-ordering.gate.ts
+// G30 "secret sync ordering" (HARD). A workload whose pod reads a Secret that a controller writes, the
+// service-provisioner for a ServiceClaim or ESO for an ExternalSecret, stands in a LATER sync wave than
+// the object that has it written, and no PreSync hook reads such a Secret.
 //
 // WHY: the service-provisioner writes a claim's Secret, then marks the claim Ready (hostyour-cloud
-// clusters/inventories/service-provisioner/templates/configmap.yaml, reconcile), and Argo CD holds the
-// next sync wave until every claim of the current one is Ready (clusters/bootstrap/argocd/values.tpl,
-// the ServiceClaim health check). That orders nothing inside ONE wave: a Deployment beside its pull
+// clusters/inventories/service-provisioner/templates/configmap.yaml, reconcile); ESO marks an
+// ExternalSecret Ready once its target Secret is written. Argo CD holds the next sync wave until the
+// objects of the current one are Healthy (its ServiceClaim check in clusters/bootstrap/argocd/values.tpl,
+// its built-in ExternalSecret check). That orders nothing inside ONE wave: a Deployment beside its pull
 // claim starts its pod before the pull Secret exists, the first pull fails, and the pod waits on the
-// kubelet's back-off. It healed in 16 s on a node that already held the image; on one that does not,
-// it can outlast the run that watches the first sync. A PreSync hook runs before every wave, so no
-// wave puts a claim ahead of it.
+// kubelet's back-off. A PreSync hook runs before every wave, so no wave puts a writer ahead of it; a
+// PostSync, SyncFail or PostDelete hook runs after every wave, so every writer is Ready by then.
 //
 // Pure and synchronous over the read-only GateContext. ctx.rendered[i].raw is UNTRUSTED, so every
 // nested read is guarded and a malformed shape reads as "no reference", never a crash.
@@ -18,15 +19,18 @@ import type { GateEvidence, GateResult } from "../../../shared/gates.ts";
 import { fail, pass } from "./result.ts";
 
 const ID = "G30";
-const TITLE = "claim sync ordering";
+const TITLE = "secret sync ordering";
 const SEVERITY = "hard" as const;
 
 const WAVE_ANNOTATION = "argocd.argoproj.io/sync-wave";
 const HOOK_ANNOTATION = "argocd.argoproj.io/hook";
 
 const EXPECTED =
-  "every workload that uses the Secret of a ServiceClaim stands in a later sync wave than that claim, " +
-  "and no PreSync hook uses such a Secret (Argo CD holds a wave until its claims are Ready, and runs PreSync before every wave)";
+  "every workload that reads a Secret a ServiceClaim or an ExternalSecret has written stands in a later sync wave than that object, " +
+  "and no PreSync hook reads such a Secret (Argo CD holds a wave until its objects are Healthy, and runs PreSync before every wave)";
+
+/** Hook phases that run after every sync wave: whatever their numbers, every writer is Ready by then. */
+const AFTER_EVERY_WAVE = ["PostSync", "SyncFail", "PostDelete"];
 
 const record = (value: unknown): Record<string, unknown> | null =>
   typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -38,23 +42,29 @@ function annotationsOf(doc: RenderedDoc): Record<string, unknown> {
   return record(record(doc.raw.metadata)?.annotations) ?? {};
 }
 
-/** A wave annotation as Argo CD reads it: an integer, 0 when absent or not an integer. */
+/** A wave annotation as Argo CD reads it (strconv.Atoi): an optional sign and digits, nothing around
+ *  them; 0 when absent or not such an integer. */
 function waveOf(doc: RenderedDoc): number {
   const value = annotationsOf(doc)[WAVE_ANNOTATION];
-  const parsed = typeof value === "number" ? value : typeof value === "string" && /^-?\d+$/.test(value.trim()) ? Number(value.trim()) : 0;
-  return Number.isInteger(parsed) ? parsed : 0;
+  if (typeof value === "number") return Number.isInteger(value) ? value : 0;
+  return typeof value === "string" && /^[+-]?\d+$/.test(value) ? Number(value) : 0;
 }
 
-function isPreSync(doc: RenderedDoc): boolean {
+function hookPhases(doc: RenderedDoc): string[] {
   const value = annotationsOf(doc)[HOOK_ANNOTATION];
-  return typeof value === "string" && value.split(",").map((s) => s.trim()).includes("PreSync");
+  return typeof value === "string" ? value.split(",").map((s) => s.trim()) : [];
 }
 
-/** The Secret a claim's provisioner writes: `spec.secretName`, else `<claim>-<service>` as the provisioner names it. */
-function claimSecret(doc: RenderedDoc): string | null {
+/** The Secret a controller writes for `doc`: a claim's `spec.secretName`, else `<claim>-<service>` as the
+ *  provisioner names it; an ExternalSecret's `spec.target.name`, else its own name, as ESO names it. */
+function writtenSecret(doc: RenderedDoc): string | null {
   const spec = record(doc.raw.spec);
-  const service = text(spec?.service);
-  return text(spec?.secretName) ?? (service && doc.name ? `${doc.name}-${service}` : null);
+  if (doc.kind === "ServiceClaim") {
+    const service = text(spec?.service);
+    return text(spec?.secretName) ?? (service && doc.name ? `${doc.name}-${service}` : null);
+  }
+  if (doc.kind === "ExternalSecret") return text(record(spec?.target)?.name) ?? (doc.name || null);
+  return null;
 }
 
 /** The pod spec of a workload kind, or null for anything that runs no pod. */
@@ -89,28 +99,29 @@ function secretsOf(pod: Record<string, unknown>): { name: string; fieldPath: str
 
 const label = (doc: RenderedDoc): string => `${doc.kind}/${doc.name || `#${doc.docIndex}`}`;
 
-export const claimSyncOrderingGate: CheckGate = {
+export const secretSyncOrderingGate: CheckGate = {
   id: ID,
   title: TITLE,
   severity: SEVERITY,
   check(ctx: GateContext): GateResult {
-    const claims = new Map<string, RenderedDoc>();
+    const writers = new Map<string, RenderedDoc>();
     for (const doc of ctx.rendered) {
-      const secret = doc.kind === "ServiceClaim" ? claimSecret(doc) : null;
-      if (secret) claims.set(secret, doc);
+      const secret = writtenSecret(doc);
+      if (secret) writers.set(secret, doc);
     }
-    if (claims.size === 0) {
-      return pass({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found: "no ServiceClaim is rendered, so there is no claim Secret to order a workload after." });
+    if (writers.size === 0) {
+      return pass({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found: "no ServiceClaim or ExternalSecret is rendered, so there is no written Secret to order a workload after." });
     }
     let uses = 0;
     for (const doc of ctx.rendered) {
       const pod = podOf(doc);
-      if (!pod) continue;
+      const phases = hookPhases(doc);
+      if (!pod || phases.includes("Skip") || (phases.length > 0 && phases.every((p) => AFTER_EVERY_WAVE.includes(p)))) continue;
+      const preSync = phases.includes("PreSync");
       for (const { name, fieldPath } of secretsOf(pod)) {
-        const owner = claims.get(name);
+        const owner = writers.get(name);
         if (!owner) continue;
         uses++;
-        const preSync = isPreSync(doc);
         if (!preSync && waveOf(doc) > waveOf(owner)) continue;
         const evidence: GateEvidence = { source: "rendered", docIndex: doc.docIndex, kind: doc.kind, name: doc.name, fieldPath, value: name };
         const found = preSync
@@ -125,7 +136,7 @@ export const claimSyncOrderingGate: CheckGate = {
     }
     return pass({
       id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED,
-      found: `${claims.size} ServiceClaim Secret(s); ${uses} use(s) by workloads, each in a later wave than its claim.`,
+      found: `${writers.size} written Secret(s); ${uses} use(s) by workloads, each in a later wave than the object that writes it.`,
     });
   },
 };
