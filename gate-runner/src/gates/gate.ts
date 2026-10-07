@@ -1,5 +1,5 @@
 // gate-runner/src/gates/gate.ts
-// The contract every sandbox gate implements. G1, G2, G3, G6, G7, G8 and G22
+// The contract every sandbox gate implements. G1, G2, G3, G6, G7, G8, G22 and G30
 // run INSIDE the runner over untrusted content; G16/G17/G18 are Manager-side (domains/units/
 // gates/compose.ts) and are NOT here. The pipeline (../pipeline.ts) does ALL the IO — unpack + verify the
 // bundle tree, parse the manifest (G1), `helm dependency build` + `helm template` per env
@@ -47,12 +47,12 @@ export interface GateContext {
   readonly dependencies: readonly ResolvedDependency[];
 }
 
-/** A pure sandbox check gate: G2, G6, G7, G8, G22. G1 (structure/manifest parse) and G3
+/** A pure sandbox check gate: G2, G6, G7, G8, G22, G30. G1 (structure/manifest parse) and G3
  *  (render + pinned deps) are pipeline PHASES that additionally produce parts of the context, so
  *  they live in the pipeline, not behind this interface. Each check authors its own expected/found/reason
  *  expected/found/reason via ./result.ts, so the text and the predicate cannot drift. */
 export interface CheckGate {
-  readonly id: string; // "G2" | "G6" | "G7" | "G8" | "G22"
+  readonly id: string; // "G2" | "G6" | "G7" | "G8" | "G22" | "G30"
   readonly title: string;
   readonly severity: GateSeverity;
   check(ctx: GateContext): GateResult;
