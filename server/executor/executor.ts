@@ -21,9 +21,10 @@ import { hashPlan } from "./plan-hash.ts";
 import { beginStreamingPlan } from "./streaming-plan.ts";
 import { registeredCleanupNames, settleAbortWithoutCleanup, scheduleCleanupSteps } from "./cleanup.ts";
 import type { RunEventBus } from "./bus.ts";
-import type { AnyRunDefinition, Plan, PlanSnapshot, RunTargetRef, Step } from "./types.ts";
+import type { AnyRunDefinition, Plan, PlanSnapshot, Step } from "./types.ts";
 import { setStepStatus, setStepStatusIn } from "./step-status.ts";
-import { appendRunMeta } from "./run-meta.ts";
+import { appendRunMeta, callOnTerminal } from "./run-meta.ts";
+import { declaredTargets, defaultTargets, targetServerId } from "./run-targets.ts";
 
 export interface ExecutorDeps {
   db: Db;
@@ -106,7 +107,7 @@ export class Executor {
     const run = this.loadRun(runId);
     assertRunTransition(run.status, "approved");
     await assertApprovable(run, this.deps.runDefinitions.get(run.kind), this.deps.db, secrets);
-    const targets = run.plan.targets ?? this.defaultTargets(run.plan);
+    const targets = run.plan.targets ?? defaultTargets(run.plan);
     acquireLocks(this.deps.db, runId, [...deriveServerLocks(targets), ...(run.plan.locks ?? [])]);
     const actor = this.deps.actor();
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "approved", approvedAt: new Date() }).where(eq(runs.id, runId)).run());
@@ -124,7 +125,7 @@ export class Executor {
     assertRunTransition(run.status, "cancelled");
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
     writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { discarded: true } });
-    this.safeOnTerminal(this.deps.runDefinitions.get(run.kind), runId, run.params, "cancelled");
+    callOnTerminal(this.deps, this.deps.runDefinitions.get(run.kind), runId, run.params, "cancelled");
   }
 
   /** Soft-delete a run — gated purely on status (isDeletableRun): any SETTLED run
@@ -154,7 +155,7 @@ export class Executor {
     // cancelled run onTerminal("cancelled") at cancel/discard time, and a succeeded run
     // onTerminal("succeeded") on completion — so only planned needs a nudge here.
     if (r.status === "planned") {
-      this.safeOnTerminal(this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
+      callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
     }
     this.deps.db.transaction((tx) => {
       tx.delete(runLocks).where(eq(runLocks.runId, runId)).run(); // planned/failed normally hold none — defensive, a hidden run must never keep a lock
@@ -172,8 +173,23 @@ export class Executor {
   }
 
   async cancel(runId: string): Promise<void> {
-    this.active.get(runId)?.abort();
+    const inFlight = this.active.get(runId);
+    if (inFlight) inFlight.abort();
+    else if (this.stopping) this.cancelPaused(runId);
     await this.settle(runId);
+  }
+
+  /** A run the shutdown paused has no step in flight, so a cancel during the drain ends it here, as
+   *  the loop ends a run cancelled between two steps; the next Manager then finds nothing to resume. */
+  private cancelPaused(runId: string): void {
+    const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
+    if (r?.status !== "running") return;
+    const next = this.allStepRows(runId).find((row) => row.status !== "ok" && row.status !== "skipped");
+    this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
+    appendRunMeta(this.deps.db, this.deps.bus, runId, `✕ cancelled before: ${next?.title ?? "its end"}`);
+    writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: next?.name ?? null } });
+    callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
+    releaseLocks(this.deps.db, runId);
   }
 
   /** Resume-on-boot. No locked boot while the keystore is plaintext, so this
@@ -409,8 +425,8 @@ export class Executor {
         secrets,
         signal: manager.signal,
         sshFactory: this.deps.sshFactory,
-        targetServerId: this.targetServerId(run),
-        declaredTargets: this.declaredTargets(run),
+        targetServerId: targetServerId(run),
+        declaredTargets: declaredTargets(run),
       });
       // Log the run's sanitized inputs (run.params — never secret material) so the DB run log states WHAT it ran with, not just "Run started".
       const args = Object.entries(run.params).map(([k, v]) => `${k}=${v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("  ");
@@ -421,16 +437,6 @@ export class Executor {
       const isCleanupRun = stepRows.some((r) => r.name.startsWith("cleanup:"));
       for (const row of stepRows) {
         if (row.status === "ok" || row.status === "skipped") continue;
-        // A shutdown pauses the run here, between two steps: it stays `running` with its locks, and
-        // the next Manager resumes it at this step.
-        if (this.stopping) {
-          ctx.emitMeta(`⏸ interrupted by a Manager restart before: ${row.title} — the next Manager resumes this run`);
-          secrets.wipe();
-          ctx.close();
-          this.active.delete(runId);
-          this.runSecrets.delete(runId);
-          return;
-        }
         // The gap between two steps is the one reliable cancellation point: most step
         // implementations never consult ctx.signal, so an abort taken mid-step lets that step
         // finish and commit ok (its work happened). Without this check the loop would keep
@@ -441,8 +447,19 @@ export class Executor {
           this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
           ctx.emitMeta(`✕ cancelled before: ${row.title}`);
           writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: row.name } });
-          this.safeOnTerminal(def, runId, params, "cancelled");
+          callOnTerminal(this.deps, def, runId, params, "cancelled");
           this.finishRun(runId, ctx, secrets);
+          return;
+        }
+        // A shutdown pauses the run here, between two steps and after a cancel had its say: it stays
+        // `running` with its locks, and the next Manager resumes it at this step.
+        if (this.stopping) {
+          const dropped = secrets.size > 0 ? "; the values typed at approve are not kept across a restart, so a step that reads them asks for them again" : "";
+          ctx.emitMeta(`⏸ interrupted by a Manager restart before: ${row.title} — the next Manager resumes this run${dropped}`);
+          secrets.wipe();
+          ctx.close();
+          this.active.delete(runId);
+          this.runSecrets.delete(runId);
           return;
         }
         const impl = implByName.get(row.name);
@@ -454,7 +471,7 @@ export class Executor {
           });
           ctx.emitMeta(`✗ failed: ${row.name} — ${missing}`);
           writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { failedStep: row.name } });
-          this.safeOnTerminal(def, runId, params, "failed");
+          callOnTerminal(this.deps, def, runId, params, "failed");
           this.finishRun(runId, ctx, secrets);
           return;
         }
@@ -482,7 +499,7 @@ export class Executor {
           writeAudit(this.deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { failedStep: row.name } });
           // Every failed run is one error line in the process log, the line master's log alarm reads.
           if (!aborted) this.deps.logger.error({ runId, kind: def.kind, runError: message }, "run failed");
-          this.safeOnTerminal(def, runId, params, aborted ? "cancelled" : "failed");
+          callOnTerminal(this.deps, def, runId, params, aborted ? "cancelled" : "failed");
           this.finishRun(runId, ctx, secrets);
           return;
         }
@@ -491,7 +508,7 @@ export class Executor {
       this.deps.db.transaction((tx) => tx.update(runs).set({ status: finalStatus, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
       ctx.emitMeta(isCleanupRun ? "Run cancelled — cleanup complete" : "Run succeeded");
       writeAudit(this.deps.db, { actor: "system", action: isCleanupRun ? "run.cancelled" : "run.succeeded", runId, ...(isCleanupRun ? { detail: { cleanedUp: true } } : {}) });
-      this.safeOnTerminal(def, runId, params, finalStatus);
+      callOnTerminal(this.deps, def, runId, params, finalStatus);
       this.finishRun(runId, ctx, secrets);
     } catch (err) {
       // Unexpected executor error (not a step failure — those are handled above).
@@ -505,22 +522,6 @@ export class Executor {
     ctx.close();
     this.active.delete(runId);
     this.runSecrets.delete(runId);
-  }
-
-  // Call a definition's onTerminal hook (status choreography). Never lets a hook error
-  // escalate — the run's terminal status is already committed, so a throwing hook could only
-  // corrupt the record of a run that has already finished.
-  private safeOnTerminal(def: AnyRunDefinition | undefined, runId: string, params: Record<string, unknown>, status: RunStatus): void {
-    if (!def?.onTerminal) return;
-    try {
-      def.onTerminal(status, { db: this.deps.db, runId, params });
-    } catch (err) {
-      this.deps.logger.error({ err, runId }, "onTerminal hook failed (swallowed)");
-      // Log-everything: the hook is the run's status choreography (inventory
-      // rows) — its failure must land in the DB run log, not only pod stdout. appendMeta
-      // redacts; self-guarded so safeOnTerminal keeps its never-escalate contract.
-      try { appendRunMeta(this.deps.db, this.deps.bus, runId, `✗ post-run choreography (onTerminal → ${status}) failed: ${err instanceof Error ? err.message : String(err)} — server/cluster rows may not reflect this run's outcome`); } catch { /* the pino line above is the last resort */ }
-    }
   }
 
   /** Record that a run failed. Every line of the recording is a database write, and the database is
@@ -547,7 +548,7 @@ export class Executor {
       writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
       this.deps.logger.error({ runId, kind: r?.kind, runError: message }, "run failed");
-      if (r) this.safeOnTerminal(this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
+      if (r) callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
       releaseLocks(this.deps.db, runId);
     } catch (err) {
       this.deps.logger.error({ err, runId, runError: message }, "could not record the run's failure — the run row still reads whatever it read before, and the reason it failed now exists only in this line");
@@ -555,26 +556,6 @@ export class Executor {
     // Reached whether or not the recording landed, because the catch above swallows deliberately.
     this.active.delete(runId);
     this.runSecrets.delete(runId);
-  }
-
-  private defaultTargets(plan: Plan): RunTargetRef[] {
-    if (plan.targetKind === "server") return [{ serverId: plan.targetId, ownsHost: true, label: plan.targetId }];
-    return [];
-  }
-
-  private targetServerId(run: LoadedRun): string | undefined {
-    if (run.targetKind === "server") return run.targetId;
-    const targets = run.plan.targets ?? [];
-    return targets.find((t) => t.ownsHost)?.serverId ?? targets[0]?.serverId;
-  }
-
-  // Every target the run's plan declares — the gate for a non-default ctx.ssh(id) (deploy-slave
-  // per target server AND per address), and the address each host is reached on. Read off the FROZEN plan, so the transport a
-  // run was approved with is the transport it runs with. Falls back to the derived single
-  // owns-host target for a plan that declares no explicit targets, so single-target
-  // runs stay unchanged.
-  private declaredTargets(run: LoadedRun): RunTargetRef[] {
-    return run.plan.targets ?? this.defaultTargets(run.plan);
   }
 
   private loadRun(runId: string): LoadedRun {

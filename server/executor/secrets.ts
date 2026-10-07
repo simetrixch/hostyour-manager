@@ -22,6 +22,10 @@ export class RunSecretsMap implements RunSecrets {
     return this.map.get(name);
   }
 
+  get size(): number {
+    return this.map.size;
+  }
+
   wipe(name?: string): void {
     if (name === undefined) {
       for (const b of this.map.values()) b.fill(0);

@@ -25,7 +25,7 @@ const logger = createLogger(parseConfig({
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 
 /** Two steps: `first` waits until the test releases it, `second` counts its runs. */
-function twoSteps() {
+function twoSteps(requiredSecrets: string[] = []) {
   const seen = { first: 0, second: 0, aborted: 0 };
   let release: (() => void) | undefined;
   const def: AnyRunDefinition = {
@@ -34,7 +34,7 @@ function twoSteps() {
     mutating: false,
     plan: async () => ({
       kind: "noop", targetKind: "self", targetId: "manager", summary: "two steps",
-      steps: [{ name: "first", title: "First" }, { name: "second", title: "Second" }], warnings: [], requiredSecrets: [],
+      steps: [{ name: "first", title: "First" }, { name: "second", title: "Second" }], warnings: [], requiredSecrets,
     }),
     steps: () => [
       {
@@ -111,6 +111,54 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     await resumed;
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
     expect(steps.seen).toEqual({ first: 2, second: 1, aborted: 0 });
+  });
+
+  it("a cancel while the step is in flight during the drain wins: the run ends cancelled and nothing resumes it", async () => {
+    const steps = twoSteps();
+    const { db, executor } = make(steps.def);
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId);
+    await until(() => steps.seen.first === 1);
+
+    const shutdown = executor.shutdown(5_000);
+    const cancelled = executor.cancel(runId);
+    steps.release();
+    await Promise.all([shutdown, cancelled]);
+    expect(getRun(db.db, runId)?.status).toBe("cancelled");
+    await managerOver(db, steps.def).resumeOnBoot();
+    expect(getRun(db.db, runId)?.status).toBe("cancelled");
+    expect(steps.seen.second).toBe(0);
+  });
+
+  it("a cancel of a run the drain already paused ends it, releases its locks, and nothing resumes it", async () => {
+    const steps = twoSteps();
+    const { db, executor } = make(steps.def);
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId);
+    await until(() => steps.seen.first === 1);
+    const shutdown = executor.shutdown(5_000);
+    steps.release();
+    await shutdown;
+    expect(getRun(db.db, runId)?.status).toBe("running");
+
+    await executor.cancel(runId);
+    expect(getRun(db.db, runId)?.status).toBe("cancelled");
+    expect(log(db, runId)).toContain("✕ cancelled before: Second");
+    expect((db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id = ?").get(runId) as { n: number }).n).toBe(0);
+    await managerOver(db, steps.def).resumeOnBoot();
+    expect(steps.seen.second).toBe(0);
+  });
+
+  it("says at the pause that the values typed at approve are not kept, where the run had any", async () => {
+    const steps = twoSteps(["consumer-secret:SMTP_PASSWORD"]);
+    const { db, executor } = make(steps.def);
+    const { runId } = await executor.plan("noop", {});
+    await executor.approve(runId, { "consumer-secret:SMTP_PASSWORD": Buffer.from("smtp-password-value") });
+    await until(() => steps.seen.first === 1);
+    const shutdown = executor.shutdown(5_000);
+    steps.release();
+    await shutdown;
+    expect(log(db, runId).find((t) => t.startsWith("⏸"))).toMatch(/the values typed at approve are not kept across a restart/);
   });
 
   it("starts no step of a run approved while the Manager shuts down", async () => {
