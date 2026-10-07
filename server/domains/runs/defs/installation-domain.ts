@@ -8,6 +8,12 @@ export interface InstallationDomainActions {
   read(db: Db, from: string, to: string, signal?: AbortSignal): Promise<InstallationDomainSnapshot>;
   validateRollback(ctx: StepCtx, snapshot: InstallationDomainSnapshot, sourceRunId: string): Promise<void>;
   apply(ctx: StepCtx, snapshot: InstallationDomainSnapshot, reverse: boolean, sourceRunId: string): Promise<void>;
+  // The service issuers at the tenants' own sender domains, which move with the installation
+  // (server/domains/units/installation-domain-issuers.ts).
+  bindIssuers(ctx: StepCtx, snapshot: InstallationDomainSnapshot, which: "after" | "before"): Promise<void>;
+  watchTenantZones(ctx: StepCtx, snapshot: InstallationDomainSnapshot, which: "after" | "before"): Promise<void>;
+  unbindIssuers(ctx: StepCtx, snapshot: InstallationDomainSnapshot, which: "after" | "before"): Promise<void>;
+  issuerCleanups(snapshot: InstallationDomainSnapshot): Cleanup[];
 }
 
 function actions(value: InstallationDomainActions | undefined): InstallationDomainActions {
@@ -21,9 +27,23 @@ function frozen(snapshot: InstallationDomainSnapshot | undefined): InstallationD
 }
 
 function plan(kind: string, snapshot: InstallationDomainSnapshot, dryRun: boolean): Plan {
+  const isRollback = kind === "installation-domain-rollback";
+  const mutatingSteps = isRollback
+    ? [
+        { name: "bind-previous-issuers", title: "Bind previous service token issuers at sender domains" },
+        { name: "move-unit-domains", title: "Restore only the recorded unit records and domain fields" },
+        { name: "watch-tenant-zones", title: "Wait until every tenant member renders its previous zone" },
+        { name: "unbind-new-issuers", title: "Remove new service token issuers from sender domains" },
+      ]
+    : [
+        { name: "bind-new-issuers", title: "Bind new service token issuers at sender domains" },
+        { name: "move-unit-domains", title: "Move only the recorded unit records and domain fields" },
+        { name: "watch-tenant-zones", title: "Wait until every tenant member renders its new zone" },
+        { name: "unbind-previous-issuers", title: "Remove previous service token issuers from sender domains" },
+      ];
   return { kind, targetKind: "installation", targetId: snapshot.booksBranch,
     summary: `${dryRun ? "Dry run" : "Unit domain phase"}: ${snapshot.fromDomain} → ${snapshot.toDomain}; ${snapshot.records.length} records, ${snapshot.registrations.length} registrations, ${snapshot.tenants.length} tenant issuer/cookie effects. Old records retained. External store and session coverage is stated in the preview.`,
-    steps: [{ name: "attest-target", title: dryRun ? "Read and report the frozen domain preview" : "Check the frozen domain plan before any write" }, ...(dryRun ? [] : [{ name: "move-unit-domains", title: "Move only the recorded unit records and domain fields" }])],
+    steps: [{ name: "attest-target", title: dryRun ? "Read and report the frozen domain preview" : (isRollback ? "Validate every recorded inverse before any write" : "Check the frozen domain plan before any write") }, ...(dryRun ? [] : mutatingSteps)],
     targets: [], locks: [{ resource: "git-branch", key: snapshot.booksBranch }, { resource: "master-kube", key: "m" }, ...[...new Set(snapshot.clusters.map(c => c.serverId))].map(key => ({ resource: "server" as const, key }))],
     requiredSecrets: [], warnings: [...snapshot.blockers, "Everyone signs in once on the new hosts: no session is carried over.", "No machine rename, old-record retirement or mail change is performed; each old unit host redirects to its new one."] };
 }
@@ -51,12 +71,23 @@ export function makeInstallationDomainDef(value: InstallationDomainActions | und
       if (JSON.stringify(current) !== JSON.stringify(snapshot)) throw errValidation("installation domain data changed since planning; ask for a fresh plan");
       if (!params.dryRun && current.blockers.length) throw errValidation("the machine/session preflight still has blockers");
       ctx.log("meta", JSON.stringify(snapshot));
-    } }, ...(params.dryRun ? [] : [{ name: "move-unit-domains", title: "Move the recorded unit domain fields", run: async (ctx: StepCtx) => {
-      const snapshot = frozen(params.snapshot);
-      ctx.registerCleanup(compensation(value, snapshot));
-      await actions(value).apply(ctx, snapshot, false, ctx.runId);
-    } }])],
-    cleanups: params => params.dryRun || !params.snapshot ? [] : [compensation(value, params.snapshot)],
+    } }, ...(params.dryRun ? [] : [
+      { name: "bind-new-issuers", title: "Bind new service token issuers at sender domains", run: async (ctx: StepCtx) => {
+        await actions(value).bindIssuers(ctx, frozen(params.snapshot), "after");
+      } },
+      { name: "move-unit-domains", title: "Move the recorded unit domain fields", run: async (ctx: StepCtx) => {
+        const snapshot = frozen(params.snapshot);
+        ctx.registerCleanup(compensation(value, snapshot));
+        await actions(value).apply(ctx, snapshot, false, ctx.runId);
+      } },
+      { name: "watch-tenant-zones", title: "Wait until every tenant member renders its new zone", run: async (ctx: StepCtx) => {
+        await actions(value).watchTenantZones(ctx, frozen(params.snapshot), "after");
+      } },
+      { name: "unbind-previous-issuers", title: "Remove previous service token issuers from sender domains", run: async (ctx: StepCtx) => {
+        await actions(value).unbindIssuers(ctx, frozen(params.snapshot), "before");
+      } },
+    ])],
+    cleanups: params => params.dryRun || !params.snapshot ? [] : [compensation(value, params.snapshot), ...actions(value).issuerCleanups(params.snapshot)],
   };
 }
 
@@ -82,6 +113,19 @@ export function makeInstallationDomainRollbackDef(value: InstallationDomainActio
       if (recorded.dryRun || JSON.stringify(recorded.snapshot) !== JSON.stringify(frozen(params.snapshot))) throw errValidation("the recorded move journal changed; rollback refuses");
       await actions(value).validateRollback(ctx, frozen(params.snapshot), params.sourceRunId);
       ctx.log("meta", JSON.stringify(frozen(params.snapshot)));
-    } }, ...(params.dryRun ? [] : [{ name: "move-unit-domains", title: "Restore the recorded unit domain fields", run: async (ctx: StepCtx) => { await actions(value).apply(ctx, frozen(params.snapshot), true, params.sourceRunId); } }])],
+    } }, ...(params.dryRun ? [] : [
+      { name: "bind-previous-issuers", title: "Bind previous service token issuers at sender domains", run: async (ctx: StepCtx) => {
+        await actions(value).bindIssuers(ctx, frozen(params.snapshot), "before");
+      } },
+      { name: "move-unit-domains", title: "Restore the recorded unit domain fields", run: async (ctx: StepCtx) => {
+        await actions(value).apply(ctx, frozen(params.snapshot), true, params.sourceRunId);
+      } },
+      { name: "watch-tenant-zones", title: "Wait until every tenant member renders its previous zone", run: async (ctx: StepCtx) => {
+        await actions(value).watchTenantZones(ctx, frozen(params.snapshot), "before");
+      } },
+      { name: "unbind-new-issuers", title: "Remove new service token issuers from sender domains", run: async (ctx: StepCtx) => {
+        await actions(value).unbindIssuers(ctx, frozen(params.snapshot), "after");
+      } },
+    ])],
   };
 }

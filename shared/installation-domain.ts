@@ -19,7 +19,11 @@ export const InstallationDomainSnapshotSchema = z.object({
   tenants: z.array(z.object({ id: z.string().nullable(), guid: z.string(), stage: z.enum(STAGE),
     issuerBefore: z.string(), issuerAfter: z.string(), cookieBefore: z.string(), cookieAfter: z.string(),
     cookieOverrides: z.array(z.object({ path: z.array(z.string()), before: z.string(), after: z.string() })),
-    ownDomainBefore: z.string(), ownDomainAfter: z.string(), redirectsBefore: z.array(z.string()), redirectsAfter: z.array(z.string()) })),
+    ownDomainBefore: z.string(), ownDomainAfter: z.string(), redirectsBefore: z.array(z.string()), redirectsAfter: z.array(z.string()),
+    // What a move needs to rebind the stage's issuer at its own sender domain. A plan frozen before
+    // they were recorded lacks them, and its run rebinds nothing.
+    senderDomain: z.string().optional(), zoneBefore: z.string().optional(), zoneAfter: z.string().optional(),
+    clusterId: z.string().optional(), members: z.array(z.string()).optional() })),
   retainedBooks: z.array(z.object({ name: z.string(), type: z.string(), reason: z.string() })),
   blockers: z.array(z.string()),
   coverage: z.object({ clusters: z.number(), consumers: z.number(), tenants: z.number(), stages: z.array(z.enum(STAGE)),

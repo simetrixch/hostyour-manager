@@ -58,6 +58,7 @@ import { makeTenantSetSenderDomainDef } from "../domains/units/tenant-sender-dom
 import { makeTenantSetDisplayNameDef } from "../domains/units/tenant-display-name.run.ts";
 import { makeTenantSetDemoDef } from "../domains/units/tenant-demo.run.ts";
 import { makeTenantAppsRepoDef, readTenantSpec } from "../domains/units/tenant-apps-repo.run.ts";
+import type { InstallationDomainIssuerPorts } from "../domains/units/installation-domain-issuers.ts";
 import { makeSuspendTenantDef, makeResumeTenantDef, makeRemoveAppDef } from "../domains/units/tenant-lifecycle.run.ts";
 import { makePurgeAppDef } from "../domains/units/tenant-purge-app.run.ts";
 import { makeOffboardTenantDef } from "../domains/units/tenant-offboard.run.ts";
@@ -99,6 +100,8 @@ export interface TenantFamily {
   /** The deploy repository URL its live read resolves the fan-out's pin against. Undefined when the family is
    *  not configured. */
   deployRepoUrl?: string;
+  /** What an installation domain move needs to take the tenants' service issuers along (installation-domain-issuers.ts). */
+  installationIssuers?: InstallationDomainIssuerPorts;
   /** The pointer registrations its orphan-scan read route diffs against the inventory. Undefined
    *  when the family is not configured. */
   tenantRegistrations?: TenantRegistrations;
@@ -440,5 +443,9 @@ export function buildTenantOnboarding(
     };
     return { follower, start };
   };
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, appCatalog, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
+  const installationIssuers: InstallationDomainIssuerPorts = {
+    readTenantSpec: (signal) => readTenantSpec(onboardPorts, signal ? { signal } : {}),
+    unitCall, resolver, deployRepoUrl: repoURL, argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
+  };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, installationIssuers, appCatalog, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
 }
