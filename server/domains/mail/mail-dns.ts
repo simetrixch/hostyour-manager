@@ -1,9 +1,10 @@
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters, servers } from "../../db/schema/inventory.ts";
+import { listDnsWrites } from "../../db/dns-writes.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, envelopeDomainOf, mailRecordNames, platformDomainRefusal, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, dmarcRecordName, envelopeDomainOf, mailRecordNames, platformDomainRefusal, type FormerDmarcView, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
@@ -232,11 +233,27 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
       publishRefusal: platform ? platformDomainRefusal(s.domain) : null,
     });
   }
+  const senderDomainNames = new Set(senderDomains.map((s) => s.domain));
+  const formerDmarcRows = listDnsWrites(deps.db).filter(
+    (r) => r.type === "TXT" && r.owner.kind === "mail" && r.name === dmarcRecordName(r.owner.name) && !senderDomainNames.has(r.owner.name),
+  );
+  const formerDmarc: FormerDmarcView[] = [];
+  for (const row of formerDmarcRows) {
+    const dmarc = (await deps.publicDns.txt(row.name)).filter(MAIL_RECORD_TAG.dmarc);
+    formerDmarc.push({
+      domain: row.owner.name,
+      name: row.name,
+      found: joined(dmarc),
+      publishedAt: row.writtenAt.toISOString(),
+    });
+  }
+  formerDmarc.sort((a, b) => a.domain.localeCompare(b.domain));
   return {
     master: { serverId: master.id, name: master.name, fqdn: cluster.domain, stage: cluster.stage },
     sender: out.sender,
     egress: { name: out.name, address: out.address },
     domains,
+    formerDmarc,
     measuredAt: new Date().toISOString(),
   };
 }

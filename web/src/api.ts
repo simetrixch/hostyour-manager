@@ -20,7 +20,7 @@ import type { ServerReachView } from "../../shared/api-types-reach.ts";
 import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
 import type { LineMoveView } from "../../shared/api-types-line-move.ts";
-import type { MailDkimPublishInput, MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
+import type { MailDkimPublishInput, MailDmarcPublishInput, MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
 // The app catalog the create-tenant wizard renders: the apps repository's own manifest shape,
 // answered as-is by GET /api/tenants/app-catalog (server app-catalog.ts) — no browser-side twin.
 import type { AppsManifest, TenantAppCatalogView } from "../../shared/apps-manifest.ts";
@@ -137,6 +137,9 @@ export const publishEnvelopeSpf = (input: MailEnvelopeSpfPublishInput): Promise<
 /** The DKIM key the stage's mail sender signs the platform domain with, published from the master. */
 export const publishPlatformDkim = (input: MailDkimPublishInput): Promise<{ runId: string }> =>
   planRun("mail-dkim-publish", input as unknown as Record<string, unknown>);
+/** Rewrite only the report mailbox of ONE DMARC record this Manager published. */
+export const publishMailDmarc = (input: MailDmarcPublishInput): Promise<{ runId: string }> =>
+  planRun("mail-dmarc-publish", input as unknown as Record<string, unknown>);
 /** Every record this installation is responsible for at the DNS provider, read there now (the DNS page). */
 export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 /** The book of the records a run of this Manager actually wrote, each read at the provider now. */

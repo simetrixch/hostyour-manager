@@ -45,6 +45,14 @@ export interface MailDnsDomainView {
   publishRefusal: string | null;
 }
 
+/** A DMARC record this Manager published for a domain that is no longer one of the map's two sender domains; only its report mailbox may change. */
+export interface FormerDmarcView {
+  domain: string;
+  name: string;
+  found: string | null;
+  publishedAt: string;
+}
+
 /** GET /api/mail/dns — the mail DNS of the installation as receivers see it: the master whose map
  *  names the sender domains, the stage's mail SENDER where a unit declares one (its SMTP entry, on the
  *  cluster it stands on), the name mail leaves by and the address that name resolves to, and one block
@@ -58,6 +66,7 @@ export interface MailDnsView {
    *  the address it resolves to at public DNS, CNAMEs followed; null where it resolves to none. */
   egress: { name: string; address: string | null };
   domains: MailDnsDomainView[];
+  formerDmarc: FormerDmarcView[];
   measuredAt: string;
 }
 
@@ -87,6 +96,12 @@ export interface MailDkimPublishInput {
   stage: Stage;
 }
 
+/** POST /api/runs {kind: "mail-dmarc-publish"} — rewrite only the report mailbox of ONE DMARC record this Manager published. */
+export interface MailDmarcPublishInput {
+  domain: string;
+  dmarcMailbox: string;
+}
+
 /** The name the platform's mail transfer agent sends its envelope from (MAIL FROM
  *  bounces@mail.<platform domain>): the MTA's own name, whose address record and reverse DNS are set
  *  where the egress address is rented. Receivers check SPF here, not at the platform domain's apex. */
@@ -111,10 +126,15 @@ export function platformDomainRefusal(domain: string): string {
 export const PUBLISHED_MAIL_RECORD = ["spf", "dkim", "dmarc"] as const satisfies readonly MailDnsRecord[];
 export type PublishedMailRecord = (typeof PUBLISHED_MAIL_RECORD)[number];
 
+/** The name a sender domain's DMARC record stands under — does not depend on the stage. */
+export function dmarcRecordName(domain: string): string {
+  return `_dmarc.${domain}`;
+}
+
 /** The NAME each published record stands under — composed here and nowhere else, so the Mail page's
  *  measurement, the DNS inventory and the book of DNS writes ask about one spelling. */
 export function mailRecordNames(domain: string, stage: Stage): Record<PublishedMailRecord, string> {
-  return { spf: domain, dkim: `${stage}._domainkey.${domain}`, dmarc: `_dmarc.${domain}` };
+  return { spf: domain, dkim: `${stage}._domainkey.${domain}`, dmarc: dmarcRecordName(domain) };
 }
 
 /** The TXT records of the mail DNS this platform writes: the three of a sender domain and the

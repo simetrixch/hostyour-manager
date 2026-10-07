@@ -13,9 +13,11 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // mail-dns-publish: publish the mail DNS of ONE sender domain of this installation — its SPF, its
 // DKIM key, its DMARC policy — by running the
 // programs checkout's `publish-mail-dns` program on the master, the way deploy-slave and redeploy run the
-// machine's own programs. The Manager writes no mail record itself: the program is the ONE writer of
-// these records (its SPF merge keeps what another service published and refuses a domain that already
-// carries two v=spf1 records), and a second writer of the same records would drift from it.
+// machine's own programs. The program is the ONE writer of these records (its SPF merge keeps what
+// another service published and refuses a domain that already carries two v=spf1 records), and a
+// second writer of the same records would drift from it. The one exception is mail-dmarc-publish: it
+// rewrites only the rua tag of a DMARC record this program published, at the provider, and keeps every
+// other tag, so the program's next publish of that domain still writes the whole record.
 //
 // WHICH DOMAINS. An installation sends as exactly two: customer mail as its platform domain and
 // alert mail as its unit apex — the two names deploy-branch writes into the relay's
@@ -48,7 +50,7 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 
 export const MAIL_DNS_PROGRAM = "publish-mail-dns";
 
-const senderDomain = z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "a DNS apex, lowercase");
+export const senderDomain = z.string().regex(/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/, "a DNS apex, lowercase");
 
 export const MailDnsPublishParams = z.object({
   serverId: z.string().startsWith("srv_"),

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { apps, clusters, servers } from "../../db/schema/inventory.ts";
+import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
@@ -219,5 +220,37 @@ describe("readMailDns", () => {
     await expect(readMailDns({ db: db.db, publicDns: published() })).rejects.toThrow(/no platform repository is configured/);
     db.sqlite.exec("DELETE FROM clusters; DELETE FROM servers");
     await expect(readMailDns({ db: db.db, platformRepo, publicDns: published() })).rejects.toThrow(/no master server is registered/);
+  });
+
+  it("surfaces former sender domains' DMARC records from the book in formerDmarc, excluding map domains", async () => {
+    const platformRepo = seed();
+    const dns = published();
+    dns.seedA("m1.example.com", EGRESS);
+    dns.seedTxt("_dmarc.former.example", "v=DMARC1; p=none; rua=mailto:old@former.example");
+    recordDnsWrite(db.db, {
+      name: "_dmarc.former.example",
+      type: "TXT",
+      content: "v=DMARC1; p=none; rua=mailto:old@former.example",
+      act: "inserted",
+      owner: { kind: "mail", name: "former.example" },
+      runId: "run_former",
+    });
+    recordDnsWrite(db.db, {
+      name: "_dmarc.apps.example.net",
+      type: "TXT",
+      content: "v=DMARC1; p=none; rua=mailto:alert@example.net",
+      act: "inserted",
+      owner: { kind: "mail", name: "apps.example.net" },
+      runId: "run_active",
+    });
+    const view = await readMailDns({ db: db.db, platformRepo, publicDns: dns });
+    expect(view.formerDmarc).toEqual([
+      {
+        domain: "former.example",
+        name: "_dmarc.former.example",
+        found: "v=DMARC1; p=none; rua=mailto:old@former.example",
+        publishedAt: expect.any(String),
+      },
+    ]);
   });
 });

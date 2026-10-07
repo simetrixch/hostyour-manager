@@ -1,8 +1,8 @@
 import { useEffect, useState, type ChangeEvent } from "react";
 import { useNavigate } from "react-router";
 import { DMARC_POLICY, STAGE, type DmarcPolicy, type Stage } from "../../../shared/enums.ts";
-import type { MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
-import { getMailDns, publishEnvelopeSpf, publishMailDns, publishPlatformDkim, unpublishMailDns } from "../api.ts";
+import type { FormerDmarcView, MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
+import { getMailDns, publishEnvelopeSpf, publishMailDmarc, publishMailDns, publishPlatformDkim, unpublishMailDns } from "../api.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -10,9 +10,8 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 const RECORD_LABEL: Record<MailDnsRow["record"], string> = { spf: "SPF", "envelope-spf": "SPF (envelope)", a: "A", dkim: "DKIM", dmarc: "DMARC", ptr: "PTR" };
 
 /** The report mailbox a published DMARC record already names, so the form starts from what stands. */
-function reportMailboxOf(rows: MailDnsRow[]): string {
-  const found = rows.find((r) => r.record === "dmarc")?.found ?? "";
-  const m = /rua=mailto:([^;,\s]+)/i.exec(found);
+function reportMailboxOf(found: string | null): string {
+  const m = /rua=mailto:([^;,\s]+)/i.exec(found ?? "");
   return m?.[1] ?? "";
 }
 
@@ -33,7 +32,7 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
   const nav = useNavigate();
   const [policy, setPolicy] = useState<DmarcPolicy>("none");
   const [dkimStage, setDkimStage] = useState<Stage>(masterStage);
-  const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.rows));
+  const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.rows.find((r) => r.record === "dmarc")?.found ?? null));
   const [busy, setBusy] = useState(false);
   const green = view.rows.filter((r) => r.ok).length;
   const envelope = view.rows.find((r) => r.record === "envelope-spf");
@@ -91,6 +90,19 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
     onError(null);
     try {
       const { runId } = await unpublishMailDns(view.domain);
+      nav(`/runs/${runId}`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function changeDmarc(): Promise<void> {
+    setBusy(true);
+    onError(null);
+    try {
+      const { runId } = await publishMailDmarc({ domain: view.domain, dmarcMailbox: mailbox.trim() });
       nav(`/runs/${runId}`);
     } catch (err) {
       onError(msg(err));
@@ -157,13 +169,61 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
             <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void publish()}>
               {busy ? "Planning…" : `Publish the mail DNS of ${view.domain}`}
             </button>
+            <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void changeDmarc()}>
+              {busy ? "Planning…" : "Change only the report mailbox"}
+            </button>
             <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void unpublish()}>
               {busy ? "Planning…" : `Unpublish ${view.domain}`}
             </button>
-            <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone.</span>
+            <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone. Changing only the report mailbox rewrites the rua tag of the DMARC record and nothing else.</span>
           </div>
         </div>
       )}
+    </section>
+  );
+}
+
+function FormerDmarcCard({ view, onError }: { view: FormerDmarcView; onError: (m: string | null) => void }) {
+  const nav = useNavigate();
+  const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.found));
+  const [busy, setBusy] = useState(false);
+
+  async function changeDmarc(): Promise<void> {
+    setBusy(true);
+    onError(null);
+    try {
+      const { runId } = await publishMailDmarc({ domain: view.domain, dmarcMailbox: mailbox.trim() });
+      nav(`/runs/${runId}`);
+    } catch (err) {
+      onError(msg(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="card">
+      <h3 className="page__title">
+        {view.domain} <span className="muted">— no longer a sender domain</span>
+      </h3>
+      <p>
+        Its DMARC record <span className="mono">{view.name}</span>, published here on {new Date(view.publishedAt).toLocaleDateString()}, stands at{" "}
+        {view.found ? <span className="mono">{view.found}</span> : "nothing"}.
+      </p>
+      <div className="form-grid">
+        <label className="field">
+          <span className="field__label">DMARC report mailbox</span>
+          <input type="email" value={mailbox} onChange={(e) => setMailbox(e.target.value)} placeholder="dmarc@example.com" required />
+          <span className="field__hint">Where receivers send their aggregate reports — a mailbox somebody reads.</span>
+        </label>
+        <div className="field">
+          <span className="field__label">Publish</span>
+          <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void changeDmarc()}>
+            {busy ? "Planning…" : "Change only the report mailbox"}
+          </button>
+          <span className="field__hint">Changing only the report mailbox rewrites the rua tag of the DMARC record and nothing else.</span>
+        </div>
+      </div>
     </section>
   );
 }
@@ -206,6 +266,7 @@ export function Mail() {
             </p>
           </section>
           {data.domains.map((d) => <DomainCard key={d.domain} view={d} masterId={data.master.serverId} masterStage={data.master.stage} onError={setError} />)}
+          {data.formerDmarc.map((f) => <FormerDmarcCard key={f.domain} view={f} onError={setError} />)}
         </>
       )}
     </section>

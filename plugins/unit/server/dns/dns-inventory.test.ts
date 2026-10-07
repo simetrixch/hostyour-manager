@@ -34,6 +34,7 @@ const mailView = (publishRefusal: string | null = null): MailDnsView => ({
       publishRefusal,
     },
   ],
+  formerDmarc: [],
   measuredAt: new Date().toISOString(),
 });
 
