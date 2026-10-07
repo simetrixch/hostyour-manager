@@ -90,6 +90,15 @@ describe("the key a unit's stage accepts from the Manager, across the runs", () 
     expect(await prodRows()).toBe(0);
   });
 
+  it("seed-secrets masks every value it minted, not only the manager key", async () => {
+    const seeder = new FakeSeeder();
+    const p = OnboardParams.parse({ ...onboardParams(), secretSpecs: [{ key: "ACME_MANAGER_KEY", required: true, generate: "manager-key" }, { key: "ACME_SESSION_SECRET", required: true, generate: "hex32" }] });
+    await makeOnboardDef(onboardPorts({ seeder })).steps(p).find((s) => s.name === "seed-secrets")!.run(ctx("seed-secrets", p));
+    const session = seeder.seeded[0]!.data["ACME_SESSION_SECRET"]!;
+    expect(session.length).toBeGreaterThan(16);
+    expect(redact(`session: ${session}`)).toBe("session: •••");
+  });
+
   it("seed-secrets over a standing entry keeps nothing it minted, and a kept key stays as it was", async () => {
     const seeder = new FakeSeeder();
     seeder.created = false;

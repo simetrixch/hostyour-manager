@@ -121,6 +121,15 @@ function restoreSenderDomainCleanup(ports: TenantSetSenderDomainPorts, p: Tenant
   };
 }
 
+/** Why `domain` is refused because another tenant of the stage already sends from it, or null. Read
+ *  from the registrations, which are what the members render; the plan asks, and the write asks again
+ *  under the tenant locks, so two runs approved together cannot both give one domain away. */
+async function refuseSharedSenderDomain(ports: TenantSetSenderDomainPorts, tc: TenantCluster, domain: string): Promise<string | null> {
+  const { pointers } = await ports.registrations.listTenantPointers(tc.stage);
+  const other = pointers.find((t) => t.guid !== tc.guid && t.senderDomain === domain);
+  return other ? `tenant ${tc.subdomain} cannot send as ${domain} — tenant ${other.subdomain} of ${tc.stage} already sends from it; a stage's tenants send from different domains` : null;
+}
+
 /** Why the product's check refuses `domain`, or null where mail from it is signed. */
 async function refuseUnsigned(ports: TenantSetSenderDomainPorts, tc: TenantCluster, template: string | undefined, domain: string): Promise<string | null> {
   if (!template) return "the product declares no senderDomainCheck in its tenant spec, so no tenant of it sends from a domain of its own";
@@ -179,6 +188,10 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
         if (tc.senderDomain !== p.previous && tc.senderDomain !== p.senderDomain) {
           throw errValidation(`tenant ${tc.subdomain} sends as ${tc.senderDomain || "the platform's own domain"} now, not ${p.previous || "the platform's own domain"} as when this run was planned — plan it again`);
         }
+        if (p.senderDomain !== "") {
+          const shared = await refuseSharedSenderDomain(ports, tc, p.senderDomain);
+          if (shared) throw errValidation(shared);
+        }
         ctx.registerCleanup(restoreSenderDomainCleanup(ports, p));
         const commit = await writeSenderDomain(ports, tc, ctx.db, p.senderDomain, ctx.runId);
         ctx.checkpoint({ commit });
@@ -235,11 +248,8 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       if (tc.senderDomain !== params.previous) throw errValidation(`tenant ${tc.subdomain} sends as ${tc.senderDomain || "the platform's own domain"}, not ${params.previous || "the platform's own domain"} as this request says — ask again`);
       const spec = await readTenantSpec(ports, {});
       if (params.senderDomain !== "") {
-        const { pointers } = await ports.registrations.listTenantPointers(tc.stage);
-        const other = pointers.find((p) => p.guid !== tc.guid && p.senderDomain === params.senderDomain);
-        if (other) {
-          throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — tenant ${other.subdomain} of ${tc.stage} already sends from it; a stage's tenants send from different domains`);
-        }
+        const shared = await refuseSharedSenderDomain(ports, tc, params.senderDomain);
+        if (shared) throw errValidation(shared);
         const refused = await refuseUnsigned(ports, tc, spec?.senderDomainCheck, params.senderDomain);
         if (refused) throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — ${refused}`);
       }

@@ -322,6 +322,12 @@ describe("tenant-set-sender-domain through the Executor", () => {
     ).rejects.toThrow("tenant acme cannot send as customer.test — tenant other of prod already sends from it; a stage's tenants send from different domains");
   });
 
+  it("plans a tenant re-applying the sender domain it already sends from", async () => {
+    // Its own registration carries the domain: only ANOTHER tenant's makes it taken.
+    const h = await make({ senderDomain: DOMAIN });
+    await expect(h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: DOMAIN })).resolves.toBeDefined();
+  });
+
   it("plans a sender domain that another tenant sends from at another stage", async () => {
     const h = await make();
     const otherGuid = "e2e8ymj86dk8";
