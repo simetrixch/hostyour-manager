@@ -26,6 +26,9 @@
   --down: hsl(0deg 68% 44%);
   --neutral: hsl(220deg 10% 42%);
 
+  /* The wash behind a modal dialog: the same dark scrim in BOTH themes, so the dark block keeps it */
+  --scrim: hsl(0deg 0% 0% / 55%);
+
   /* Terminal (the log viewer stays dark in BOTH themes, like a real console) */
   --term-bg: hsl(222deg 24% 8%);
   --term-head: hsl(222deg 18% 13%);
