@@ -8,6 +8,7 @@ import {
 import { makeBackupDef, makeTenantBackupDef } from "./backup.run.ts";
 import { makeMigrateDef, makeTenantMigrateDef } from "./migrate.run.ts";
 import { tenantWorld } from "./relocation-world-tenant.ts";
+import { quiesceStep, type RelocationWorld } from "#unit/server/relocation.ts";
 
 let db: DbHandle;
 beforeEach(() => {
@@ -71,6 +72,25 @@ describe("reopen-access compensation", () => {
     await abort(def.cleanups!(params), armed, params, logs);
     expect((await ports.registrations.readRegistration("prod", CONSUMER))?.entry.quiesced).toBe(false);
     expect(logs.some((l) => l.includes("reopened"))).toBe(true);
+  });
+
+  // Planted defect: arming after the flip leaves a unit closed where the run stops while the flip lands.
+  it("arms the reopen before the flip, so a failed flip still has it, and it finds the unit open", async () => {
+    let flips = 0;
+    const world = {
+      kindWord: "consumer", unit: CONSUMER, sourceCluster: SOURCE.cluster, sourceClusterId: SOURCE.clusterId,
+      readStanding: async () => ({ quiesced: false, cluster: SOURCE.cluster }),
+      setQuiesced: async () => { flips++; throw new Error("the books branch refused the commit"); },
+    } as unknown as RelocationWorld;
+    const armed: Cleanup[] = [];
+    const logs: string[] = [];
+    await expect(quiesceStep(async () => world).run({ ...stepCtx(db, "quiesce", params, logs), registerCleanup: (c: Cleanup) => { armed.push(c); } }))
+      .rejects.toThrow("refused the commit");
+    expect(armed.map((c) => c.name)).toEqual(["reopen-access"]);
+
+    await armed[0]!.run(stepCtx(db, "reopen-access", params, logs));
+    expect(flips).toBe(1);
+    expect(logs.some((l) => l.includes("is open already"))).toBe(true);
   });
 
   // Planted defect: arming the reopen unconditionally opens a unit an operator had closed.
