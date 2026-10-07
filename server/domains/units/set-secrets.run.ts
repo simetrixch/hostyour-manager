@@ -87,7 +87,7 @@ export type ManifestReadPorts = Pick<SetSecretsPorts, "github" | "store" | "gith
  *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
  *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
  *  repository or the manifest does not parse. */
-async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
+export async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const judged = await judgeRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, ...(signal ? { signal } : {}) });
   if ("refused" in judged) return { outcome: "refused", why: judged.refused };

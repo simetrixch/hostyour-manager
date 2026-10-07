@@ -24,8 +24,9 @@ import { seedRedisInstanceStep } from "./onboard-seed-redis.ts";
 import { seedMariadbInstanceStep } from "./onboard-seed-mariadb.ts";
 import {
   attestTargetStep, seedSecretsStep, provisionRepoCredentialStep,
-  provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep, removeCeremonySecretsCleanup,
+  provisionSmtpOpsGrantStep, provisionDnsStep, smokeStep, recordProvisionalStep, recordInventoryStep,
 } from "./onboard-steps.ts";
+import { removeCeremonySecretsCleanup } from "./consumer-secrets-seed.ts";
 import { deployableOnboardCleanups, assertOnboardAbortable } from "./onboard-abort.ts";
 import { buildOnlyCleanups } from "#unit/server/build-registration.ts";
 import {

@@ -24,6 +24,9 @@ import {
 } from "#unit/server/relocation-restore.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
+import { eq } from "drizzle-orm";
+import { apps } from "../../db/schema/inventory.ts";
+import { planRestoreSecrets } from "./restore-seed-secrets.ts";
 
 /** A generation as its folder names it (generationId): the UTC moment it was taken. */
 const Generation = z.string().regex(/^\d{8}T\d{6}Z$/, "a generation is named YYYYMMDDTHHMMSSZ");
@@ -73,6 +76,9 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
       const target = loadActiveTargetCluster(db, params.targetClusterId);
       assertRestorable(db, { kind: "consumer", unit: ac.name, stage: ac.stage }, params.generation);
       const stepDefs = restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer");
+      const row = db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, params.appId)).get();
+      if (!row?.repoUrl) throw errValidation(`consumer "${ac.name}" has no repo URL on record — nothing says which manifest declares its secrets`);
+      const { requiredSecrets, warnings } = await planRestoreSecrets(ports, db, { stage: ac.stage, consumerName: ac.name, repoURL: row.repoUrl });
       return {
         kind: "consumer-restore",
         targetKind: "app",
@@ -81,8 +87,8 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [{ resource: "git-branch", key: ports.registrations.branch }, { resource: "git-branch", key: target.domain }, masterKubeLock],
-        warnings: [],
-        requiredSecrets: [],
+        warnings,
+        requiredSecrets,
       };
     },
     steps: (params) => restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer"),

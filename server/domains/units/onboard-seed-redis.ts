@@ -1,9 +1,31 @@
 // The onboard `seed-redis-instance` step, beside onboard-seed-mongodb.ts: the one per-consumer Redis
 // credential write, as a small unit of its own.
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { mintRedisPassword } from "#unit/server/secret-mint.ts";
+
+/** Seeds the per-consumer Redis instance password create-only. */
+export async function seedRedisInstance(
+  seeder: VaultSeeder,
+  ctx: StepCtx,
+  unit: { stage: Stage; consumerName: string; services: readonly string[]; mongodb?: string | undefined; redis?: string | undefined },
+): Promise<void> {
+  if (unit.redis !== "standalone") {
+    ctx.log("meta", "consumer runs on the cluster's shared Redis — no instance password to seed");
+    return;
+  }
+  const { created } = await seeder.seedRedis({ stage: unit.stage, consumerName: unit.consumerName, password: mintRedisPassword() });
+  const path = `${KV_MOUNT}/${unit.stage}/consumer/${unit.consumerName}/redis`;
+  ctx.log(
+    "meta",
+    created
+      ? `seeded the Redis instance password write-only into ${path} (create-only)`
+      : `Redis instance password already present at ${path} — left untouched (create-only). A re-onboard re-uses the password its clients hold; it is never rotated here.`,
+  );
+}
 
 /** The onboard `seed-redis-instance` step. A consumer on the cluster's shared Redis needs nothing
  *  seeded; one with a Redis of its OWN needs the password its server boots with (`--requirepass`)
@@ -14,19 +36,6 @@ export function seedRedisInstanceStep(ports: OnboardPorts, p: DeployableOnboardP
   return {
     name: "seed-redis-instance",
     title: "Seed the per-consumer Redis instance password into Vault",
-    run: async (ctx) => {
-      if (p.redis !== "standalone") {
-        ctx.log("meta", "consumer runs on the cluster's shared Redis — no instance password to seed");
-        return;
-      }
-      const { created } = await ports.seeder.seedRedis({ stage: p.stage, consumerName: p.consumerName, password: mintRedisPassword() });
-      const path = `${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/redis`;
-      ctx.log(
-        "meta",
-        created
-          ? `seeded the Redis instance password write-only into ${path} (create-only)`
-          : `Redis instance password already present at ${path} — left untouched (create-only). A re-onboard re-uses the password its clients hold; it is never rotated here.`,
-      );
-    },
+    run: (ctx) => seedRedisInstance(ports.seeder, ctx, p),
   };
 }

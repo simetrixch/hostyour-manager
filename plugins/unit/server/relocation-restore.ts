@@ -68,6 +68,7 @@ export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: Wor
         throw errValidation(`the generation ${g.folder}/ carries no readable registration.yaml — a restore rebuilds the unit FROM its dump, and this generation has none`);
       }
       await w.provisionTarget(ctx, target, registrationYaml);
+      await w.seedSecrets?.(ctx, registrationYaml);
       await w.writeRegistrationFromDump(ctx, registrationYaml, target);
     },
   };

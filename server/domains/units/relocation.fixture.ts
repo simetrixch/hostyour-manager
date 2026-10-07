@@ -24,6 +24,19 @@ import type { TenantRegistration } from "../../../shared/tenant.ts";
 import type { ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
+import { seedCredentialRow } from "../../security/store.fixture.ts";
+import { FakeSeeder } from "./onboard.fixture.ts";
+import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
+
+const FIXTURE_CONSUMER_MANIFEST = `
+apiVersion: hostyour.cloud/v1
+kind: ConsumerManifest
+name: acme
+owner: x
+envs: [prod, test, dev]
+chart:
+  path: deploy/chart
+`;
 
 const SHA = "a".repeat(40);
 export const GUID = "zsjs023ctne0";
@@ -43,7 +56,9 @@ const TENANT_WATCH = tenantApplicationSet([...TENANT_MEMBERS, ...TENANT_APPS.map
 
 
 export function openFixtureDb(): DbHandle {
-  return openDb(":memory:");
+  const db = openDb(":memory:");
+  seedCredentialRow(db.db, { id: "cred_pat_x", kind: "pat", label: "repository PAT (x)", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" });
+  return db;
 }
 
 /** The master, whose domain is the installation every backup generation is filed under. */
@@ -165,6 +180,12 @@ export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { r
     platformAppValues: (app, domain, stage) => readPlatformAppValues(f.platformRepo, app, domain, stage),
     buildRbac: f.buildRbac,
     repoCredential: f.repoCredential,
+    seeder: new FakeSeeder(),
+    github: { readFile: async () => FIXTURE_CONSUMER_MANIFEST } as unknown as GitHubConsumer,
+    store: {
+      open: async () => Buffer.from("ghp_owner"),
+      list: async () => [{ id: "cred_pat_x", kind: "pat", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" }],
+    } as unknown as Pick<CredentialStore, "open" | "list">,
   };
 }
 
@@ -223,7 +244,12 @@ export async function seedTenantWorld(registrations: TenantRegistrations): Promi
 
 export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<string, unknown>>, logs: string[], runId = "run_reloc"): StepCtx {
   return {
-    runId, stepName, db: db.db, creds: {} as unknown as CredentialStore, params: p,
+    runId, stepName, db: db.db,
+    creds: {
+      open: async () => Buffer.from("ghp_owner"),
+      list: async () => [{ id: "cred_pat_x", kind: "pat", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" }],
+    } as unknown as CredentialStore,
+    params: p,
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
