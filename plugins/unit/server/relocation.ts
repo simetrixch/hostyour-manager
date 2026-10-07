@@ -198,12 +198,13 @@ export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clu
   for (const line of result.logs.split("\n")) {
     if (line.trim()) ctx.log("stdout", line);
   }
-  // A cancel ends the watch, not the job: what the watch saw last says nothing about how it ended, so
-  // the run is told it was interrupted, as an abort the executor counts as a cancel.
-  if (ctx.signal.aborted) {
-    throw new DOMException(`job ${job.spec.name} in ${job.namespace} was interrupted — the run was cancelled while it ran, so nothing says how it ended`, "AbortError");
-  }
   if (!result.succeeded) {
+    // A cancel ends the watch, not the job: a job the watch left before it ended is not known to have
+    // failed, so the run is told it was interrupted, as an abort the executor counts as a cancel. A job
+    // that finished before the cancel came is reported as it ended.
+    if (ctx.signal.aborted) {
+      throw new DOMException(`job ${job.spec.name} in ${job.namespace} was interrupted — the run was cancelled while it ran, so nothing says how it ended`, "AbortError");
+    }
     const tail = result.logs.trim().split("\n").slice(-5).join(" | ");
     const ended = result.ended !== undefined ? `: ${result.ended}` : "";
     throw errValidation(`job ${job.spec.name} in ${job.namespace} did not succeed${ended}${tail ? ` — its last lines: ${tail}` : " (no log collected)"}`);
@@ -371,10 +372,18 @@ export async function takeOnlineGeneration(ports: RelocationPorts, ctx: StepCtx,
   // Armed although a failure below deletes the generation itself: a Manager that dies mid-dump runs
   // no catch, and only the abort's cleanup then takes the `taking` row and its folder away.
   const g = openGeneration(ctx, w, trigger, discardGenerationCleanup(ports, () => Promise.resolve(w)));
+  let taking = "the dump";
   try {
     await dumpInto(ports, ctx, w, g, image);
+    taking = "the verification";
     await verifyInto(ports, ctx, w, g, image);
   } catch (e) {
+    // A cancel leaves the purge no chance, since its job would run under the same aborted signal: the
+    // folder stays, and the book says where and what takes it away.
+    if (ctx.signal.aborted) {
+      recordBackupFinished(ctx.db, g, { state: "failed", detail: `interrupted by a cancel during ${taking} — the folder ${g.folder}/ stays on the box until the run's Abort (cleanup) deletes it` });
+      throw e;
+    }
     const detail = e instanceof Error ? e.message : String(e);
     await discardGeneration(ports, ctx, w, g, detail).catch((d: unknown) => ctx.log("meta", `the failed generation ${g.folder}/ of ${w.unit} could not be deleted — delete it by hand: ${d instanceof Error ? d.message : String(d)}`));
     throw e;
