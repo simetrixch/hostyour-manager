@@ -1,7 +1,8 @@
 // consumer-nightly-backup / tenant-nightly-backup — the nightly pass over every standing unit of a
-// family (hostyour-cloud#254): one online generation each, without closing access, then retention.
-// One unit's failure is recorded and the next unit is backed up anyway; the run fails at its end,
-// naming every unit that has no generation of tonight, so a red run is the whole report.
+// family: one online generation each, without closing access, retention, and a
+// purge of failed generations from earlier runs. One unit's failure is recorded and the next unit is
+// backed up anyway; the run fails at its end, naming every unit that has no generation of tonight, so
+// a red run is the whole report.
 import { z } from "zod";
 import { inArray } from "drizzle-orm";
 import type { RunDefinition, Step, StepCtx } from "../../executor/types.ts";
@@ -40,7 +41,37 @@ async function applyRetention(ports: RelocationPorts, ctx: StepCtx, w: Relocatio
   return drop.length;
 }
 
-/** Back up one unit, and say in `failed` what kept it from a generation of tonight or from retention. */
+/** Purge from the box, and mark pruned in the book, every failed generation of this unit from an earlier run. */
+async function purgeFailedGenerations(
+  ports: RelocationPorts,
+  ctx: StepCtx,
+  w: RelocationWorld,
+): Promise<{ purged: string[]; absent: string[] }> {
+  // Reached only after this run's own generation of the unit was verified, so every failed row is an earlier run's.
+  const failed = listBackups(ctx.db, backupUnitOf(w)).filter((b) => b.state === "failed");
+  if (failed.length === 0) return { purged: [], absent: [] };
+  const image = requireDbtoolsImage(ports, "purge of failed generations");
+  const purged: string[] = [];
+  const absent: string[] = [];
+  for (const g of failed) {
+    const out = await runRelocationJob(
+      ports,
+      ctx,
+      w.sourceClusterId,
+      purgeGenerationJob({ unit: w.unit, folder: g.folder, namespace: MONGO_NAMESPACE, image }),
+    );
+    if (out.split("\n").some((line) => line.trim().startsWith("ABSENT"))) {
+      absent.push(g.folder);
+    } else {
+      purged.push(g.folder);
+    }
+    recordBackupPruned(ctx.db, g);
+  }
+  return { purged, absent };
+}
+
+/** Back up one unit, and say in `failed` what kept it from a generation of tonight, from retention,
+ *  or from the purge of earlier failed generations. */
 async function backUpUnit(ports: RelocationPorts, ctx: StepCtx, u: NightlyUnit, failed: string[]): Promise<void> {
   let w: RelocationWorld;
   try {
@@ -65,6 +96,19 @@ async function backUpUnit(ports: RelocationPorts, ctx: StepCtx, u: NightlyUnit, 
     failed.push(`${u.label} (retention: ${why})`);
     ctx.log("meta", `${u.label}: backed up, but retention failed — ${why}`);
   }
+  try {
+    const { purged, absent } = await purgeFailedGenerations(ports, ctx, w);
+    if (purged.length > 0 || absent.length > 0) {
+      ctx.log(
+        "meta",
+        `${u.label}: ${purged.length} failed generation(s) purged from the box (${purged.join(", ")}), ${absent.length} already gone — marked pruned in the book`,
+      );
+    }
+  } catch (e) {
+    const why = e instanceof Error ? e.message : String(e);
+    failed.push(`${u.label} (purge of failed generations: ${why})`);
+    ctx.log("meta", `${u.label}: backed up, but purge of failed generations failed — ${why}`);
+  }
 }
 
 function nightlyStep(ports: RelocationPorts, family: string, unitsOf: (ctx: StepCtx) => NightlyUnit[]): Step {
@@ -83,7 +127,7 @@ function nightlyStep(ports: RelocationPorts, family: string, unitsOf: (ctx: Step
 }
 
 const summaryOf = (count: number, family: string): string =>
-  `Back up ${count} standing ${family}(s) online — access stays open — each into a new generation on the Storage Box with its manifest, verify it, and keep the newest ${KEEP_NEWEST} plus the newest of each of the last ${KEEP_WEEKS} weeks. A ${family} that fails is recorded and the next one is backed up; the run fails at its end, naming each.`;
+  `Back up ${count} standing ${family}(s) online — access stays open — each into a new generation on the Storage Box with its manifest, verify it, keep the newest ${KEEP_NEWEST} plus the newest of each of the last ${KEEP_WEEKS} weeks, and purge every generation that failed on an earlier run. A ${family} that fails is recorded and the next one is backed up; the run fails at its end, naming each.`;
 
 /** The definition both families share: one step, the master lock every relocation run takes (a dump
  *  job of a unit carries the same name in a Backup, a move and this pass), and a plan that refuses a

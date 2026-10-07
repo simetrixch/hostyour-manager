@@ -37,6 +37,7 @@ describe("consumer-nightly-backup", () => {
     expect(plan.steps.map((s) => s.name)).toEqual(["back-up-every-consumer"]);
     expect(plan.locks).toEqual([{ resource: "master-kube", key: "m" }]);
     expect(plan.summary).toMatch(/^Back up 1 standing consumer\(s\) online — access stays open/);
+    expect(plan.summary).toContain("and purge every generation that failed on an earlier run");
     const unwired = { ...consumerPorts(f) };
     delete (unwired as { storageBox?: unknown }).storageBox;
     await expect(makeConsumerNightlyBackupDef(unwired).plan({}, { db: db.db })).rejects.toThrow(/requires the Hetzner Storage Box/);
@@ -101,6 +102,113 @@ describe("consumer-nightly-backup", () => {
     expect(ghost[0]!.detail).toMatch(/not registered at prod/);
     // The failed generation was taken off the box again, before the failure was reported.
     expect(jobNames(f.source)).toContain("reloc-purge-generation-ghost");
+  });
+
+  it("purges an earlier failed generation from the box, marks it pruned leaving detail unchanged, logs the folder, and leaves kept ok generations ok", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+
+    const failedFolder = `${INSTALLATION}/prod/consumers/${CONSUMER}/20261001T030000Z`;
+    const gFailed = { ...consumer, generation: "20261001T030000Z" };
+    recordBackupStarted(db.db, { ...gFailed, folder: failedFolder, trigger: "nightly", runId: "run_earlier_failed" });
+    recordBackupFinished(db.db, gFailed, { state: "failed", detail: "dump timed out" });
+
+    // PLANTED INNOCENT: an earlier ok generation that retention keeps
+    const keptFolder = `${INSTALLATION}/prod/consumers/${CONSUMER}/20261002T030000Z`;
+    const gKept = { ...consumer, generation: "20261002T030000Z" };
+    recordBackupStarted(db.db, { ...gKept, folder: keptFolder, trigger: "nightly", runId: "run_earlier_ok" });
+    recordBackupFinished(db.db, gKept, { state: "ok" });
+
+    const logs: string[] = [];
+    await driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, logs);
+
+    const purgeJobs = f.source.reader.jobs.filter((j) => j.spec.name === `reloc-purge-generation-${CONSUMER}`);
+    expect(purgeJobs.some((j) => j.spec.script.includes(failedFolder))).toBe(true);
+
+    const bookFailed = listBackups(db.db, consumer).find((b) => b.generation === gFailed.generation);
+    expect(bookFailed).toMatchObject({ state: "pruned", detail: "dump timed out" });
+    expect(logs.some((l) => l.includes(failedFolder))).toBe(true);
+
+    // PLANTED INNOCENT: kept ok generation and tonight's generation both stay ok
+    const bookKept = listBackups(db.db, consumer).find((b) => b.generation === gKept.generation);
+    expect(bookKept?.state).toBe("ok");
+    const tonight = listBackups(db.db, consumer).find((b) => b.runId === "run_reloc");
+    expect(tonight?.state).toBe("ok");
+  });
+
+  it("does not touch a failed generation of another unit during this unit's pass", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+
+    const otherUnit = { kind: "consumer" as const, unit: "ghost", stage: "prod" as const };
+    const otherFolder = `${INSTALLATION}/prod/consumers/ghost/20261001T030000Z`;
+    const gOther = { ...otherUnit, generation: "20261001T030000Z" };
+    recordBackupStarted(db.db, { ...gOther, folder: otherFolder, trigger: "nightly", runId: "run_other_failed" });
+    recordBackupFinished(db.db, gOther, { state: "failed", detail: "ghost dump failed" });
+
+    const logs: string[] = [];
+    await driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, logs);
+
+    const bookOther = listBackups(db.db, otherUnit).find((b) => b.generation === gOther.generation);
+    expect(bookOther?.state).toBe("failed");
+    expect(bookOther?.detail).toBe("ghost dump failed");
+    expect(jobNames(f.source)).not.toContain("reloc-purge-generation-ghost");
+  });
+
+  it("fails the run naming 'purge of failed generations' when the purge job fails, leaving the row failed", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+
+    const failedFolder = `${INSTALLATION}/prod/consumers/${CONSUMER}/20261001T030000Z`;
+    const gFailed = { ...consumer, generation: "20261001T030000Z" };
+    recordBackupStarted(db.db, { ...gFailed, folder: failedFolder, trigger: "nightly", runId: "run_earlier_failed" });
+    recordBackupFinished(db.db, gFailed, { state: "failed", detail: "earlier dump failure" });
+
+    f.source.reader.setJobResult(`reloc-purge-generation-${CONSUMER}`, { succeeded: false, logs: "rclone: permission denied" });
+
+    const logs: string[] = [];
+    await expect(driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, logs))
+      .rejects.toThrow(/purge of failed generations/);
+
+    const bookFailed = listBackups(db.db, consumer).find((b) => b.generation === gFailed.generation);
+    expect(bookFailed?.state).toBe("failed");
+    expect(bookFailed?.detail).toBe("earlier dump failure");
+  });
+
+  it("marks an earlier failed generation pruned when the purge job reports it was already absent", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedConsumerRow(db);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations);
+
+    const failedFolder = `${INSTALLATION}/prod/consumers/${CONSUMER}/20261001T030000Z`;
+    const gFailed = { ...consumer, generation: "20261001T030000Z" };
+    recordBackupStarted(db.db, { ...gFailed, folder: failedFolder, trigger: "nightly", runId: "run_earlier_failed" });
+    recordBackupFinished(db.db, gFailed, { state: "failed", detail: "already gone on box" });
+
+    f.source.reader.setJobResult(`reloc-purge-generation-${CONSUMER}`, { succeeded: true, logs: `ABSENT ${failedFolder}\n` });
+
+    const logs: string[] = [];
+    await driveSteps(db, f, makeConsumerNightlyBackupDef(ports).steps({}), {}, logs);
+
+    const bookFailed = listBackups(db.db, consumer).find((b) => b.generation === gFailed.generation);
+    expect(bookFailed?.state).toBe("pruned");
+    expect(bookFailed?.detail).toBe("already gone on box");
+    expect(logs.some((l) => l.includes("1 already gone — marked pruned in the book"))).toBe(true);
   });
 });
 
