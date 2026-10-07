@@ -483,8 +483,13 @@ export class Executor {
           this.deps.db.transaction((tx) => setStepStatus(tx, row.id, "running", "ok", { finishedAt: new Date() }));
           ctx.emitMeta(`✓ ${impl.title}`);
         } catch (err) {
-          const aborted = manager.signal.aborted || (err instanceof Error && err.name === "AbortError");
-          const message = redact(err instanceof Error ? err.message : String(err));
+          const abortError = err instanceof Error && err.name === "AbortError";
+          const aborted = manager.signal.aborted || abortError;
+          const answered = redact(err instanceof Error ? err.message : String(err));
+          // After a cancel a step's own failure is the cancel seen from inside (a watch cut short reads
+          // as a fan-out that did not converge): the run is told it was interrupted, and the answer is
+          // kept as what came after. An AbortError already says what was interrupted.
+          const message = aborted && !abortError ? `interrupted by a cancel while this step ran — it answered afterwards: ${answered}` : answered;
           this.deps.db.transaction((tx) => {
             setStepStatus(tx, row.id, "running", "failed", { error: message, finishedAt: new Date() });
             tx.update(runs).set({ status: aborted ? "cancelled" : "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run();
