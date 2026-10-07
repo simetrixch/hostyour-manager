@@ -62,21 +62,41 @@ async function keepBothStages(): Promise<void> {
 }
 const prodRows = async (): Promise<number> => (await store.list({ subject: { kind: "unit-stage", id: "acme-prod" }, purpose: "unit-call-key" })).length;
 
+const onboardParams = (): OnboardParams => OnboardParams.parse({
+  consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "x", repoCredentialId: "cred_pat",
+  version: "1.0.0", channel: "stable", resolvedSha: SHA, builds: ["acme"], form: "deployable", stage: "prod",
+  domain: "s1.example", clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com", host: "acme",
+  chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(),
+  secretSpecs: [{ key: "ACME_MANAGER_KEY", required: true, generate: "manager-key" }],
+});
+
 describe("the key a unit's stage accepts from the Manager, across the runs", () => {
   it("seed-secrets keeps the minted manager-key, the value it wrote; the onboarding's abort drops it with the entry", async () => {
     const seeder = new FakeSeeder();
-    const p = OnboardParams.parse({
-      consumerName: "acme", repoURL: "https://github.com/x/acme.git", owner: "x", repoCredentialId: "cred_pat",
-      version: "1.0.0", channel: "stable", resolvedSha: SHA, builds: ["acme"], form: "deployable", stage: "prod",
-      domain: "s1.example", clusterId: "cls_1", cluster: "s1", namespace: "acme-prod", unitApex: "example.com", host: "acme",
-      chartPath: "deploy/chart", argoAppName: "acme-prod", report: passReport(),
-      secretSpecs: [{ key: "ACME_MANAGER_KEY", required: true, generate: "manager-key" }],
-    });
+    const p = onboardParams();
     const cleanups: Cleanup[] = [];
     await makeOnboardDef(onboardPorts({ seeder })).steps(p).find((s) => s.name === "seed-secrets")!.run(ctx("seed-secrets", p, cleanups));
     expect(await opened("prod")).toBe(seeder.seeded[0]!.data["ACME_MANAGER_KEY"]);
     await cleanups.find((cleanup) => cleanup.name === "remove-ceremony-secrets")!.run(ctx("remove-ceremony-secrets", p));
     expect(await prodRows()).toBe(0);
+  });
+
+  it("seed-secrets over a standing entry keeps nothing it minted, and a kept key stays as it was", async () => {
+    const seeder = new FakeSeeder();
+    seeder.created = false;
+    const p = onboardParams();
+    const seed = async (): Promise<string[]> => {
+      const logs: string[] = [];
+      await makeOnboardDef(onboardPorts({ seeder })).steps(p).find((s) => s.name === "seed-secrets")!.run({ ...ctx("seed-secrets", p), log: (_s, t) => logs.push(t) });
+      return logs;
+    };
+    const repair = 'mint it anew with "Set secrets" (ACME_MANAGER_KEY)';
+    expect((await seed()).some((l) => l.includes(repair))).toBe(true);
+    expect(await findUnitCallKey(store, "acme", "prod")).toBeNull();
+    await keepUnitCallKey(store, { unit: "acme", stage: "prod", key: "ACME_MANAGER_KEY", value: "a".repeat(64) });
+    expect((await seed()).some((l) => l.includes(repair))).toBe(false);
+    expect(await opened("prod")).toBe("a".repeat(64));
+    expect(await prodRows()).toBe(1);
   });
 
   it("offboard's remove-app-secrets drops every row of the stage's key and leaves the other stage's", async () => {

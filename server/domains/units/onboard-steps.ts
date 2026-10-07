@@ -19,7 +19,7 @@ import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "#unit/server/build-rbac.ts";
 import { buildConsumerSecretDataWithDerivations } from "#unit/server/secret-mint.ts";
-import { dropUnitCallKey, keepUnitCallKey } from "#unit/server/unit-call-key.ts";
+import { dropUnitCallKey, findUnitCallKey, keepUnitCallKey } from "#unit/server/unit-call-key.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
@@ -283,6 +283,12 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
         // Say it plainly: an operator who added a key to the manifest and re-ran MUST see that
         // it did not land, rather than discover it as a missing env var at the consumer's boot.
         ctx.log("meta", `secrets already present at ${path} — left untouched (create-only). This run minted nothing new: re-running never rotates or extends an existing entry. To change it, rotate deliberately.`);
+        // The value just minted was discarded, so it is never kept: a kept key the entry does not
+        // hold would be presented to the unit as the Manager's and refused there.
+        const standingKey = p.secretSpecs.find((s) => s.generate === "manager-key");
+        if (standingKey && !(await findUnitCallKey(ctx.creds, p.consumerName, p.stage))) {
+          ctx.log("meta", `the Manager keeps no ${standingKey.key} for ${p.consumerName} (${p.stage}), so it cannot call the unit — mint it anew with "Set secrets" (${standingKey.key})`);
+        }
         return;
       }
       // Arm the inverse ONLY on a real create (see removeCeremonySecretsCleanup for why never up
