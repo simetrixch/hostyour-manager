@@ -18,7 +18,7 @@ import type { Registrations } from "#unit/server/registrations.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
-import { } from "#unit/server/build-rbac.ts";
+import { restoreCleanups } from "./restore-cleanups.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { consumerUnitHost } from "#unit/server/unit-dns.ts";
@@ -238,6 +238,9 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
         c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${access}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
+      },
+      armRestoreCleanups: (c, target) => {
+        for (const cleanup of restoreCleanups(ports, { appId, targetClusterId: target.clusterId })) c.registerCleanup(cleanup);
       },
       seedSecrets: async (c, registrationYaml) => {
         const reg = ConsumerRegistrationSchema.parse(parseRegistration(registrationYaml));

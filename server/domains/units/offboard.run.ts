@@ -54,6 +54,9 @@ import { dropUnitCallKey } from "#unit/server/unit-call-key.ts";
 // unitStaysRegistered and keep their object while another <stage>.yaml stands, so offboarding prod
 // leaves a unit that still stands at dev able to build, release and deploy there.
 
+/** Predicate checking if an ArgoCD application health is Missing (pruned). */
+export const gone = (s: { health: string }): boolean => s.health === "Missing";
+
 export const OffboardParams = z.object({ appId: z.string().startsWith("app_") });
 export type OffboardParams = z.infer<typeof OffboardParams>;
 
@@ -126,7 +129,6 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
         // The GENERATED Application is named `<name>-<stage>` (consumers appset) — watching the
         // bare name would read Missing immediately and falsely pass while the app still exists.
         const appName = consumerArgoAppName(ac.name, ac.stage);
-        const gone = (s: { health: string }): boolean => s.health === "Missing";
         const { argoReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);
         // Unbounded, like the deployment wait (#140): a prune takes what it takes (finalizers, a
         // graceful shutdown), and what ends it is Missing, ArgoCD's own DeletionError — a deletion

@@ -626,7 +626,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     cleanups: (params) =>
       params.form === "standing-build-only" ? [] : params.form === "build-only"
         ? buildOnlyCleanups(ports, params)
-        : [...deployableOnboardCleanups(ports, params), removeCeremonySecretsCleanup(ports, params)],
+        : [...deployableOnboardCleanups(ports, params), removeCeremonySecretsCleanup(ports, () => ({ stage: params.stage, consumerName: params.consumerName }))],
     assertAbortable: (params, deps) => assertOnboardAbortable(ports, params, deps.db),
   };
 }

@@ -97,6 +97,8 @@ export interface RelocationWorld {
    *  live one is long gone), so the dumped bytes ride in; a migrate reads the live registration and
    *  passes nothing. */
   provisionTarget(ctx: StepCtx, target: TargetCluster, dumpedRegistrationYaml?: string): Promise<void>;
+  /** Compensations armed on the target cluster for an aborted restore; called as the first action of provision-target-from-dump. */
+  armRestoreCleanups?(ctx: StepCtx, target: TargetCluster): void;
   /** Flip the registration's cluster field onto the target — plus, for a tenant, annotate the source
    *  CR relocating and delete it (the annotation makes that delete a release, not a deprovision). */
   repoint(ctx: StepCtx, target: TargetCluster): Promise<void>;
