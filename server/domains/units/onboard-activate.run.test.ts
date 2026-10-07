@@ -264,11 +264,11 @@ describe("onboard post-onboard activation step", () => {
     expect(logs.some((l) => l.includes("skipped") && l.includes("one-time"))).toBe(true);
   });
 
-  it("fails loud when a required operator input is missing at approve", async () => {
+  it("fails loud, naming the re-entry, when an operator input is not available (none typed, or a restart dropped it)", async () => {
     const p = params({ activation: AUTH_ACTIVATION, secretSpecs: [BOOTSTRAP_SPEC] });
     const steps = makeOnboardDef(ports({ seeder: new FakeSeeder() })).steps(p);
     await steps.find((s) => s.name === "seed-secrets")!.run(ctx(p, "seed-secrets", []));
-    await expect(steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", []))).rejects.toThrow(/operator input "email"/);
+    await expect(steps.find((s) => s.name === "activate")!.run(ctx(p, "activate", []))).rejects.toThrow(/activation input "email" \(First administrator email\) is not available — .*re-enter it and retry this step/);
   });
 
   it("planStream freezes the activation into params, appends the activate step, and surfaces requiredInputs (NOT requiredSecrets)", async () => {

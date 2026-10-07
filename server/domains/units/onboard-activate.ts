@@ -99,7 +99,8 @@ export function activateStep(ports: OnboardPorts, p: DeployableOnboardParams, ru
       const body: Record<string, string> = {};
       for (const pr of act.prompt) {
         const v = ctx.secrets.get(`activation-input:${pr.field}`)?.toString("utf8");
-        if (!v) throw errValidation(`activation requires operator input "${pr.field}" (${pr.label}) — it was not supplied at approve`);
+        // Typed at approve and held in memory only, so a Manager restart since then drops it as well.
+        if (!v) throw errValidation(`activation input "${pr.field}" (${pr.label}) is not available — a value typed at approve is never stored, so a Manager restart drops it: re-enter it and retry this step (or discard the run)`);
         body[pr.field] = v;
       }
       if (!ports.activator) throw errValidation(`consumer "${p.consumerName}" declares an activation but no activator is wired on this manager — refusing to skip a declared activation silently`);

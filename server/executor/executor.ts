@@ -1,8 +1,8 @@
-import { eq, and, inArray, gte, sql } from "drizzle-orm";
+import { eq, and, inArray, gte } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { runs, steps, events, runLocks } from "../db/schema/runs.ts";
+import { runs, steps, runLocks } from "../db/schema/runs.ts";
 import { writeAudit } from "../db/audit-writer.ts";
-import { runId as genRunId, stepId as genStepId, evtId as genEvtId } from "../kernel/ids.ts";
+import { runId as genRunId, stepId as genStepId } from "../kernel/ids.ts";
 import { errValidation, errNotFound, errIllegalTransition, errInternal } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
 import type { CredentialStore } from "../security/store.ts";
@@ -23,6 +23,7 @@ import { registeredCleanupNames, settleAbortWithoutCleanup, scheduleCleanupSteps
 import type { RunEventBus } from "./bus.ts";
 import type { AnyRunDefinition, Plan, PlanSnapshot, RunTargetRef, Step } from "./types.ts";
 import { setStepStatus, setStepStatusIn } from "./step-status.ts";
+import { appendRunMeta } from "./run-meta.ts";
 
 export interface ExecutorDeps {
   db: Db;
@@ -45,12 +46,19 @@ interface LoadedRun {
   startedAt: Date | null;
 }
 
+/** How long a shutdown lets the steps in flight end before the process exits. It stays below the
+ *  Manager pod's grace period (30 s, the Deployment's default) so the exit is the Manager's own and
+ *  never a kill; a step still running then is resumed by the next Manager like one a crash cut off. */
+const SHUTDOWN_DRAIN_MS = 20_000;
+
 /**
  * The single write path for the world. Route handlers never touch
  * runs/steps/events directly — only this API. Every `db.transaction` is one atomic step,
  * so a crash between any two leaves a consistent, resumable picture.
  */
 export class Executor {
+  /** Set by shutdown(): no run starts another step, so the runs wait for the next Manager. */
+  private stopping = false;
   private readonly active = new Map<string, AbortController>();
   private readonly runSecrets = new Map<string, RunSecretsMap>();
   private readonly inflight = new Map<string, Promise<void>>();
@@ -212,13 +220,17 @@ export class Executor {
       // Only the steps left RUNNING by the crash: pending ones are already where they belong, and
       // an ok one must never be reset. The state list IS the WHERE, so that holds in the statement.
       for (const run of pending) setStepStatusIn(this.deps.db, run.id, ["running"], "pending", { startedAt: null });
-      await Promise.all(pending.map((run) => this.fireExecute(run.id)));
+      await Promise.all(pending.map((run) => this.fireExecute(run.id, { afterRestart: true })));
     } catch (err) { this.deps.logger.error({ err }, "boot-time recovery could not read or normalize the runs a crash left behind — nothing was resumed on this boot; they stay as the crash left them and the next boot takes them again"); }
   }
 
-  async shutdown(): Promise<void> {
-    for (const ctrl of this.active.values()) ctrl.abort();
-    const deadline = Date.now() + 10_000;
+  /** A restart pauses the runs, it never cancels one: no run starts another step, the steps in flight
+   *  get until `drainMs` to end, and every run stays `running` for resumeOnBoot on the next Manager.
+   *  A step still running at the deadline is cut off with the process and run again there, which
+   *  the Step contract allows (types.ts: idempotent, safe to re-run after a crash mid-step). */
+  async shutdown(drainMs = SHUTDOWN_DRAIN_MS): Promise<void> {
+    this.stopping = true;
+    const deadline = Date.now() + drainMs;
     while (this.active.size > 0 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 25));
     }
@@ -304,7 +316,7 @@ export class Executor {
       tx.update(runs).set({ status: "running", error: null, finishedAt: null }).where(eq(runs.id, runId)).run();
     });
     writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.step_skipped", runId, detail: { step: stepName, reason } });
-    this.appendMeta(runId, `⏭ skipped by ${this.deps.actor()}: ${reason}`);
+    appendRunMeta(this.deps.db, this.deps.bus, runId, `⏭ skipped by ${this.deps.actor()}: ${reason}`);
     this.fireExecute(runId);
   }
 
@@ -344,7 +356,7 @@ export class Executor {
       settleAbortWithoutCleanup(this.deps.db, runId);
       // Said on the run itself: an abort that settles without a cleanup step to show would otherwise
       // leave the log exactly as it was, and the operator guessing whether anything happened (#236).
-      this.appendMeta(runId, "\u2715 cancelled \u2014 nothing to clean up: no completed step registered a compensation");
+      appendRunMeta(this.deps.db, this.deps.bus, runId, "\u2715 cancelled \u2014 nothing to clean up: no completed step registered a compensation");
       writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { cleanedUp: false } });
       return;
     }
@@ -358,7 +370,7 @@ export class Executor {
 
   // ---- internals
 
-  private async execute(runId: string): Promise<void> {
+  private async execute(runId: string, opts: { afterRestart?: boolean } = {}): Promise<void> {
     try {
       const run = this.loadRun(runId);
       const def = this.deps.runDefinitions.get(run.kind);
@@ -402,13 +414,23 @@ export class Executor {
       });
       // Log the run's sanitized inputs (run.params — never secret material) so the DB run log states WHAT it ran with, not just "Run started".
       const args = Object.entries(run.params).map(([k, v]) => `${k}=${v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("  ");
-      ctx.emitMeta(resuming ? "Run resumed" : `Run started${args ? `  ·  ${args}` : ""}`);
+      ctx.emitMeta(opts.afterRestart ? "Run resumed after a Manager restart" : resuming ? "Run resumed" : `Run started${args ? `  ·  ${args}` : ""}`);
       writeAudit(this.deps.db, { actor: "system", action: resuming ? "run.resumed" : "run.started", runId });
 
       const stepRows = this.allStepRows(runId);
       const isCleanupRun = stepRows.some((r) => r.name.startsWith("cleanup:"));
       for (const row of stepRows) {
         if (row.status === "ok" || row.status === "skipped") continue;
+        // A shutdown pauses the run here, between two steps: it stays `running` with its locks, and
+        // the next Manager resumes it at this step.
+        if (this.stopping) {
+          ctx.emitMeta(`⏸ interrupted by a Manager restart before: ${row.title} — the next Manager resumes this run`);
+          secrets.wipe();
+          ctx.close();
+          this.active.delete(runId);
+          this.runSecrets.delete(runId);
+          return;
+        }
         // The gap between two steps is the one reliable cancellation point: most step
         // implementations never consult ctx.signal, so an abort taken mid-step lets that step
         // finish and commit ok (its work happened). Without this check the loop would keep
@@ -497,7 +519,7 @@ export class Executor {
       // Log-everything: the hook is the run's status choreography (inventory
       // rows) — its failure must land in the DB run log, not only pod stdout. appendMeta
       // redacts; self-guarded so safeOnTerminal keeps its never-escalate contract.
-      try { this.appendMeta(runId, `✗ post-run choreography (onTerminal → ${status}) failed: ${err instanceof Error ? err.message : String(err)} — server/cluster rows may not reflect this run's outcome`); } catch { /* the pino line above is the last resort */ }
+      try { appendRunMeta(this.deps.db, this.deps.bus, runId, `✗ post-run choreography (onTerminal → ${status}) failed: ${err instanceof Error ? err.message : String(err)} — server/cluster rows may not reflect this run's outcome`); } catch { /* the pino line above is the last resort */ }
     }
   }
 
@@ -521,7 +543,7 @@ export class Executor {
       this.deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", error: message, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
       // Same observability law as the step catch: every failure reason lands in the visible
       // run log (appendMeta redacts), never only in runs.error.
-      this.appendMeta(runId, `✗ run failed: ${message}`);
+      appendRunMeta(this.deps.db, this.deps.bus, runId, `✗ run failed: ${message}`);
       writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
       this.deps.logger.error({ runId, kind: r?.kind, runError: message }, "run failed");
@@ -606,21 +628,9 @@ export class Executor {
    *  and discarding the result — the shape this replaces — makes a SECOND promise that no caller can
    *  ever reach: on a rejection, awaiting settle() handled the first one while the discarded one went
    *  to the process as an unhandled rejection, with no way for anyone to catch it. */
-  private fireExecute(runId: string): Promise<void> {
-    const p = this.execute(runId).finally(() => this.inflight.delete(runId));
+  private fireExecute(runId: string, opts: { afterRestart?: boolean } = {}): Promise<void> {
+    const p = this.execute(runId, opts).finally(() => this.inflight.delete(runId));
     this.inflight.set(runId, p);
     return p;
-  }
-
-  private appendMeta(runId: string, text: string): void {
-    const row = this.deps.db
-      .select({ maxSeq: sql<number>`COALESCE(MAX(${events.seq}), -1)` })
-      .from(events)
-      .where(eq(events.runId, runId))
-      .get();
-    const seq = (row?.maxSeq ?? -1) + 1;
-    const line = redact(text);
-    this.deps.db.insert(events).values({ id: genEvtId(), runId, stepId: null, stream: "meta", seq, text: line }).run();
-    this.deps.bus.publish(runId, { seq, stream: "meta", text: line, at: Date.now() });
   }
 }
