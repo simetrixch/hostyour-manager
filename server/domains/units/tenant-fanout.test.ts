@@ -155,7 +155,7 @@ describe("resolveMembers — the ONE resolution the registration records and the
       perApp: { engine: { chart: "charts/e" }, front: { chart: "charts/f", values: { site: { domain: "{domain}", aliases: "{aliases}" } } } },
     });
     const site = (a: AppRef) => resolveMembers(spec, [a]).find((x) => x.name === a.name)!.sources[1]!.values;
-    expect(site({ name: "home", domain: "simplidigita.ai", aliases: ["simetrix.ch", "simetrix.de"] })).toEqual({ site: { domain: "simplidigita.ai", aliases: ["simetrix.ch", "simetrix.de"] } });
+    expect(site({ name: "home", domain: "simplidigita.ai", aliases: ["example.org", "simetrix.de"] })).toEqual({ site: { domain: "simplidigita.ai", aliases: ["example.org", "simetrix.de"] } });
     expect(site({ name: "home", domain: "simplidigita.ai", aliases: [] })).toEqual({ site: { domain: "simplidigita.ai" } });
     expect(site({ name: "home", domain: "simplidigita.ai" })).toEqual({ site: { domain: "simplidigita.ai" } });
   });

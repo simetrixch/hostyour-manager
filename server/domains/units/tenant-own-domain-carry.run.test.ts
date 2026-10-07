@@ -21,9 +21,9 @@ import { tenantZone } from "#unit/shared/unit-host.ts";
 
 useMemoryDb();
 
-const OLD = "show.simetrix.ch";
+const OLD = "show.example.org";
 const NEW = "show.simplidigita.ai";
-const VELO = { name: "veloluck", site: "shop", domain: "veloluck.show.simetrix.ch" };
+const VELO = { name: "veloluck", site: "shop", domain: "veloluck.show.example.org" };
 
 function at(repo: FakePlatformRepo, showAliases: string[] = []): TenantRegistrations {
   const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD, ...(showAliases.length ? { aliases: showAliases } : {}) }, VELO].map((a) => ({ folder: "web", ...a }))];
@@ -46,7 +46,7 @@ function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
   seedWebsiteTenant();
   db.db.update(tenants).set({ ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
-  dns.zones = ["simetrix.ch", "simplidigita.ai"];
+  dns.zones = ["example.org", "simplidigita.ai"];
   const repo = new FakePlatformRepo();
   const registrations = at(repo, opts.showAliases);
   const urls = ["https://show.simplidigita.ai/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`, `https://${ZONE}/auth/`, `https://${ZONE}/`];
@@ -118,10 +118,10 @@ describe("an own-domain move with a website on the own host", () => {
   });
 
   it("hands an alias a carried website still holds to the own domain, which serves its redirect", async () => {
-    const { def } = world({ showAliases: ["old.show.simetrix.ch"] });
+    const { def } = world({ showAliases: ["old.show.example.org"] });
     const planned = await def.planStream!(MOVE, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
-    expect(planned.params.ownDomainAliases).toEqual([OLD, "old.show.simetrix.ch"]);
+    expect(planned.params.ownDomainAliases).toEqual([OLD, "old.show.example.org"]);
   });
 });
 
@@ -162,7 +162,7 @@ describe("clearing the own domain with a website on the own host", () => {
   });
 
   it("PLANTED DEFECT: refuses a clear while the carried website holds an alias, which then has no own domain to redirect to", async () => {
-    const { def } = world({ showAliases: ["old.show.simetrix.ch"] });
-    await expect(def.planStream!(CLEAR, planCtx())).rejects.toThrow(/old\.show\.simetrix\.ch.*website show.*Domain and aliases/);
+    const { def } = world({ showAliases: ["old.show.example.org"] });
+    await expect(def.planStream!(CLEAR, planCtx())).rejects.toThrow(/old\.show\.example\.org.*website show.*Domain and aliases/);
   });
 });

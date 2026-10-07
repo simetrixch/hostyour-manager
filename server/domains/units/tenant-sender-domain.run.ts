@@ -26,7 +26,7 @@ import {
 } from "./tenant-sender-domain-dkim.ts";
 
 // `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as.
-// A customer sends from its own domain (the company tenant from simetrix.ch) instead of
+// A customer sends from its own domain (example.org) instead of
 // the platform's.
 //
 // THE CONTRACT WITH THE PRODUCT. The tenants ApplicationSet hands every member tenant.senderDomain, and

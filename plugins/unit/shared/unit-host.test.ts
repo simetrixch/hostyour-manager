@@ -124,36 +124,36 @@ describe("a tenant identity provider's DNS mark — the issuer under the zone", 
 
 describe("a stage host — the stage stands directly before the zone that holds the host", () => {
   it("composes a dev or test host as <labels below the zone>.<stage>.<zone>, and keeps a prod host as it is", () => {
-    expect(stageHost("show.simetrix.ch", "simetrix.ch", "test")).toBe("show.test.simetrix.ch");
-    expect(stageHost("veloluck.show.simetrix.ch", "simetrix.ch", "test")).toBe("veloluck.show.test.simetrix.ch");
-    expect(stageHost("simetrix.ch", "simetrix.ch", "dev")).toBe("dev.simetrix.ch");
+    expect(stageHost("show.example.org", "example.org", "test")).toBe("show.test.example.org");
+    expect(stageHost("veloluck.show.example.org", "example.org", "test")).toBe("veloluck.show.test.example.org");
+    expect(stageHost("example.org", "example.org", "dev")).toBe("dev.example.org");
     expect(stageHost("show.example.co.uk", "example.co.uk", "test")).toBe("show.test.example.co.uk");
-    expect(stageHost("show.simetrix.ch", "simetrix.ch", "prod")).toBe("show.simetrix.ch");
+    expect(stageHost("show.example.org", "example.org", "prod")).toBe("show.example.org");
   });
 
   it("reads the prod host back off a stage host, and nothing off a host without the stage before the zone", () => {
-    expect(prodHostOf("veloluck.show.test.simetrix.ch", "simetrix.ch", "test")).toBe("veloluck.show.simetrix.ch");
-    expect(prodHostOf("test.simetrix.ch", "simetrix.ch", "test")).toBe("simetrix.ch");
-    expect(prodHostOf("test.show.simetrix.ch", "simetrix.ch", "test")).toBeNull();
-    expect(prodHostOf("show.simetrix.ch", "simetrix.ch", "prod")).toBe("show.simetrix.ch");
+    expect(prodHostOf("veloluck.show.test.example.org", "example.org", "test")).toBe("veloluck.show.example.org");
+    expect(prodHostOf("test.example.org", "example.org", "test")).toBe("example.org");
+    expect(prodHostOf("test.show.example.org", "example.org", "test")).toBeNull();
+    expect(prodHostOf("show.example.org", "example.org", "prod")).toBe("show.example.org");
   });
 
   it("PLANTED DEFECT: refuses a test host with the stage in front of the whole name, naming the host it is", () => {
-    expect(stageHostProblem("test.show.simetrix.ch", "simetrix.ch", "test")).toBe("test.show.simetrix.ch is no test host: the stage stands directly before the zone simetrix.ch, so it is show.test.simetrix.ch");
-    expect(stageHostProblem("test.veloluck.show.simetrix.ch", "simetrix.ch", "test")).toMatch(/so it is veloluck\.show\.test\.simetrix\.ch$/);
-    expect(stageHostProblem("show.simetrix.ch", "simetrix.ch", "test")).toMatch(/so it is show\.test\.simetrix\.ch$/);
-    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "dev")).toMatch(/is no dev host: .* so it is show\.dev\.simetrix\.ch$/);
+    expect(stageHostProblem("test.show.example.org", "example.org", "test")).toBe("test.show.example.org is no test host: the stage stands directly before the zone example.org, so it is show.test.example.org");
+    expect(stageHostProblem("test.veloluck.show.example.org", "example.org", "test")).toMatch(/so it is veloluck\.show\.test\.example\.org$/);
+    expect(stageHostProblem("show.example.org", "example.org", "test")).toMatch(/so it is show\.test\.example\.org$/);
+    expect(stageHostProblem("show.test.example.org", "example.org", "dev")).toMatch(/is no dev host: .* so it is show\.dev\.example\.org$/);
   });
 
   it("PLANTED DEFECT: refuses a prod host with a stage label before its zone, naming the prod host", () => {
-    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "prod")).toBe("show.test.simetrix.ch carries the stage test before its zone simetrix.ch, and prod carries none: it is show.simetrix.ch");
+    expect(stageHostProblem("show.test.example.org", "example.org", "prod")).toBe("show.test.example.org carries the stage test before its zone example.org, and prod carries none: it is show.example.org");
   });
 
   it("PLANTED INNOCENT: passes a host that keeps the rule at its stage", () => {
-    expect(stageHostProblem("show.test.simetrix.ch", "simetrix.ch", "test")).toBeNull();
-    expect(stageHostProblem("test.simetrix.ch", "simetrix.ch", "test")).toBeNull();
-    expect(stageHostProblem("veloluck.show.dev.simetrix.ch", "simetrix.ch", "dev")).toBeNull();
-    expect(stageHostProblem("show.simetrix.ch", "simetrix.ch", "prod")).toBeNull();
-    expect(stageHostProblem("simetrix.ch", "simetrix.ch", "prod")).toBeNull();
+    expect(stageHostProblem("show.test.example.org", "example.org", "test")).toBeNull();
+    expect(stageHostProblem("test.example.org", "example.org", "test")).toBeNull();
+    expect(stageHostProblem("veloluck.show.dev.example.org", "example.org", "dev")).toBeNull();
+    expect(stageHostProblem("show.example.org", "example.org", "prod")).toBeNull();
+    expect(stageHostProblem("example.org", "example.org", "prod")).toBeNull();
   });
 });

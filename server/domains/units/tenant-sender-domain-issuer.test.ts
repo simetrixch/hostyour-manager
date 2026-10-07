@@ -12,7 +12,7 @@ describe("stageServiceIssuer", () => {
   it("is the identity provider on the zone, whatever own domain the tenant has", () => {
     const tc = { routing: "path", identityProvider: "auth", stage: "test", subdomain: "simetrix", ownDomain: "show.test.simplidigita.ai" } as TenantCluster;
     expect(stageServiceIssuer(tc, "digitacloud.app")).toBe("https://simetrix.test.digitacloud.app/auth");
-    expect(stageServiceIssuer({ ...tc, stage: "prod", ownDomain: "simetrix.ch" }, "digitacloud.app")).toBe("https://simetrix.digitacloud.app/auth");
+    expect(stageServiceIssuer({ ...tc, stage: "prod", ownDomain: "example.org" }, "digitacloud.app")).toBe("https://simetrix.digitacloud.app/auth");
     expect(stageServiceIssuer({ ...tc, routing: "host", stage: "prod" }, "example.com")).toBe("https://auth.simetrix.example.com");
   });
 });

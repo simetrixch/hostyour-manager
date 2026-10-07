@@ -39,7 +39,7 @@ function twoStages(testOwn: string, prodOwn: string): FakeDnsProvider {
   db.db.insert(clusters).values({ id: "cls_prod", serverId: "srv_prod", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
   db.db.insert(tenants).values({ id: "tnt_prod", clusterId: "cls_prod", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "path", ownDomain: prodOwn, ownDomainRedirects: [`www.${prodOwn}`], status: "active" }).run();
   const dns = new FakeDnsProvider();
-  dns.zones = ["simetrix.ch"];
+  dns.zones = ["example.org"];
   return dns;
 }
 
@@ -48,62 +48,62 @@ const VELO = { name: "veloluck", site: "shop" };
 
 describe("the host checks of a move at test, the same tenant standing at prod", () => {
   it("PLANTED DEFECT: moves a website off its old-shape name, which lies under the tenant's prod host, keeping the name it leaves", async () => {
-    const dns = twoStages("show.test.simetrix.ch", "show.simetrix.ch");
-    const registrations = at("show.test.simetrix.ch", [{ ...SHOW, domain: "test.show.simetrix.ch" }, { ...VELO, domain: "test.veloluck.show.simetrix.ch" }]);
+    const dns = twoStages("show.test.example.org", "show.example.org");
+    const registrations = at("show.test.example.org", [{ ...SHOW, domain: "test.show.example.org" }, { ...VELO, domain: "test.veloluck.show.example.org" }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
-    const show = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: "show.test.simetrix.ch", aliases: [] }, planCtx());
+    const show = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: "show.test.example.org", aliases: [] }, planCtx());
     // Onto the own domain, the name it leaves is the own domain's alias, never the website's.
-    expect(show.outcome === "planned" ? [show.params.aliases, show.params.ownDomainAliases] : show.summary).toEqual([[], ["test.show.simetrix.ch"]]);
-    const velo = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simetrix.ch", aliases: [] }, planCtx());
-    expect(velo.outcome === "planned" ? velo.params.aliases : velo.summary).toEqual(["test.veloluck.show.simetrix.ch"]);
+    expect(show.outcome === "planned" ? [show.params.aliases, show.params.ownDomainAliases] : show.summary).toEqual([[], ["test.show.example.org"]]);
+    const velo = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.example.org", aliases: [] }, planCtx());
+    expect(velo.outcome === "planned" ? velo.params.aliases : velo.summary).toEqual(["test.veloluck.show.example.org"]);
   });
 
   it("PLANTED DEFECT: moves the own domain off its old-shape name under the prod host", async () => {
-    const dns = twoStages("test.x.simetrix.ch", "x.simetrix.ch");
-    const registrations = at("test.x.simetrix.ch", []);
+    const dns = twoStages("test.x.example.org", "x.example.org");
+    const registrations = at("test.x.example.org", []);
     const def = makeTenantSetOwnDomainDef(ports({ registrations, dns }));
-    const moved = await def.planStream!({ tenantId: "tnt_1", ownDomain: "x.test.simetrix.ch", ownDomainRedirects: ["www.x.test.simetrix.ch"], previous: "test.x.simetrix.ch", previousRedirects: ["www.test.x.simetrix.ch"] }, planCtx());
-    expect(moved.outcome === "planned" ? moved.params.ownDomainAliases : moved.summary).toEqual(["test.x.simetrix.ch"]);
+    const moved = await def.planStream!({ tenantId: "tnt_1", ownDomain: "x.test.example.org", ownDomainRedirects: ["www.x.test.example.org"], previous: "test.x.example.org", previousRedirects: ["www.test.x.example.org"] }, planCtx());
+    expect(moved.outcome === "planned" ? moved.params.ownDomainAliases : moved.summary).toEqual(["test.x.example.org"]);
   });
 
   it("plans the owner's whole TEST sequence after the own domain moved: each website, then each alias drop, the own host's through Own domain…", async () => {
-    const dns = twoStages("show.test.simetrix.ch", "show.simetrix.ch");
+    const dns = twoStages("show.test.example.org", "show.example.org");
     const plan = async (apps: Parameters<typeof at>[1], request: Record<string, unknown>) => {
-      const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at("show.test.simetrix.ch", apps), dns }, WEBSITE_APPS));
+      const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at("show.test.example.org", apps), dns }, WEBSITE_APPS));
       const r = await def.planStream!({ tenantId: "tnt_1", aliases: [], ...request }, planCtx());
       if (r.outcome !== "planned") throw new Error(r.summary);
       return r.params;
     };
-    const velo = { ...VELO, domain: "test.veloluck.show.simetrix.ch" };
-    const step2 = await plan([{ ...SHOW, domain: "test.show.simetrix.ch" }, velo], { app: "show", domain: "show.test.simetrix.ch" });
-    expect([step2.aliases, step2.ownDomainAliases, step2.retiredHosts]).toEqual([[], ["test.show.simetrix.ch"], []]);
+    const velo = { ...VELO, domain: "test.veloluck.show.example.org" };
+    const step2 = await plan([{ ...SHOW, domain: "test.show.example.org" }, velo], { app: "show", domain: "show.test.example.org" });
+    expect([step2.aliases, step2.ownDomainAliases, step2.retiredHosts]).toEqual([[], ["test.show.example.org"], []]);
     // Step 3 is Own domain…: the drop retires the old name and its www, and nothing the prod row holds.
-    const shown = { ...SHOW, domain: "show.test.simetrix.ch" };
-    db.db.update(tenants).set({ ownDomainAliases: ["test.show.simetrix.ch"] }).where(eq(tenants.id, "tnt_1")).run();
-    const own = makeTenantSetOwnDomainDef(ports({ registrations: at("show.test.simetrix.ch", [shown, velo], ["test.show.simetrix.ch"]), dns }));
-    const step3 = await own.planStream!({ tenantId: "tnt_1", ownDomain: "show.test.simetrix.ch", ownDomainRedirects: ["www.show.test.simetrix.ch"], previous: "show.test.simetrix.ch",
-      previousRedirects: ["www.show.test.simetrix.ch"], ownDomainAliases: [], previousAliases: ["test.show.simetrix.ch"] }, planCtx());
-    expect(step3.outcome === "planned" ? step3.plan.summary : step3.summary).toMatch(/then remove the records of test\.show\.simetrix\.ch, www\.test\.show\.simetrix\.ch\./);
+    const shown = { ...SHOW, domain: "show.test.example.org" };
+    db.db.update(tenants).set({ ownDomainAliases: ["test.show.example.org"] }).where(eq(tenants.id, "tnt_1")).run();
+    const own = makeTenantSetOwnDomainDef(ports({ registrations: at("show.test.example.org", [shown, velo], ["test.show.example.org"]), dns }));
+    const step3 = await own.planStream!({ tenantId: "tnt_1", ownDomain: "show.test.example.org", ownDomainRedirects: ["www.show.test.example.org"], previous: "show.test.example.org",
+      previousRedirects: ["www.show.test.example.org"], ownDomainAliases: [], previousAliases: ["test.show.example.org"] }, planCtx());
+    expect(step3.outcome === "planned" ? step3.plan.summary : step3.summary).toMatch(/then remove the records of test\.show\.example\.org, www\.test\.show\.example\.org\./);
     db.db.update(tenants).set({ ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
-    const step4 = await plan([shown, velo], { app: "veloluck", domain: "veloluck.show.test.simetrix.ch" });
-    expect(step4.aliases).toEqual(["test.veloluck.show.simetrix.ch"]);
-    const step5 = await plan([shown, { ...VELO, domain: "veloluck.show.test.simetrix.ch", aliases: ["test.veloluck.show.simetrix.ch"] }], { app: "veloluck", domain: "veloluck.show.test.simetrix.ch" });
-    expect(step5.retiredHosts).toEqual(["test.veloluck.show.simetrix.ch", "www.test.veloluck.show.simetrix.ch"]);
+    const step4 = await plan([shown, velo], { app: "veloluck", domain: "veloluck.show.test.example.org" });
+    expect(step4.aliases).toEqual(["test.veloluck.show.example.org"]);
+    const step5 = await plan([shown, { ...VELO, domain: "veloluck.show.test.example.org", aliases: ["test.veloluck.show.example.org"] }], { app: "veloluck", domain: "veloluck.show.test.example.org" });
+    expect(step5.retiredHosts).toEqual(["test.veloluck.show.example.org", "www.test.veloluck.show.example.org"]);
   });
 
   it("PLANTED INNOCENT: still refuses a NEW test host under the tenant's own prod host", async () => {
-    const dns = twoStages("show.test.simetrix.ch", "show.simetrix.ch");
-    const registrations = at("show.test.simetrix.ch", [{ ...SHOW, domain: "show.test.simetrix.ch" }, { ...VELO, domain: "veloluck.show.test.simetrix.ch" }]);
+    const dns = twoStages("show.test.example.org", "show.example.org");
+    const registrations = at("show.test.example.org", [{ ...SHOW, domain: "show.test.example.org" }, { ...VELO, domain: "veloluck.show.test.example.org" }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
-    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "x.show.simetrix.ch", aliases: [] }, planCtx())).rejects.toThrow(/^x\.show\.simetrix\.ch overlaps a host of tenant acme at prod \(show\.simetrix\.ch\)$/);
+    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "x.show.example.org", aliases: [] }, planCtx())).rejects.toThrow(/^x\.show\.example\.org overlaps a host of tenant acme at prod \(show\.example\.org\)$/);
   });
 
   it("PLANTED INNOCENT: still refuses a host typed now that overlaps another tenant's, as a domain and as an alias", async () => {
-    const dns = twoStages("show.test.simetrix.ch", "show.simetrix.ch");
-    db.db.insert(tenants).values({ id: "tnt_other", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "other", stage: "test", members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: "shop.test.simetrix.ch", ownDomainRedirects: [], status: "active" }).run();
-    const registrations = at("show.test.simetrix.ch", [{ ...SHOW, domain: "test.show.simetrix.ch" }, { ...VELO, domain: "test.veloluck.show.simetrix.ch" }]);
+    const dns = twoStages("show.test.example.org", "show.example.org");
+    db.db.insert(tenants).values({ id: "tnt_other", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "other", stage: "test", members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: "shop.test.example.org", ownDomainRedirects: [], status: "active" }).run();
+    const registrations = at("show.test.example.org", [{ ...SHOW, domain: "test.show.example.org" }, { ...VELO, domain: "test.veloluck.show.example.org" }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
-    await expect(def.planStream!({ tenantId: "tnt_1", app: "show", domain: "a.shop.test.simetrix.ch", aliases: [] }, planCtx())).rejects.toThrow(/overlaps a host of tenant other \(shop\.test\.simetrix\.ch\)/);
-    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simetrix.ch", aliases: ["test.veloluck.show.simetrix.ch", "b.shop.test.simetrix.ch"] }, planCtx())).rejects.toThrow(/b\.shop\.test\.simetrix\.ch overlaps a host of tenant other/);
+    await expect(def.planStream!({ tenantId: "tnt_1", app: "show", domain: "a.shop.test.example.org", aliases: [] }, planCtx())).rejects.toThrow(/overlaps a host of tenant other \(shop\.test\.example\.org\)/);
+    await expect(def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.example.org", aliases: ["test.veloluck.show.example.org", "b.shop.test.example.org"] }, planCtx())).rejects.toThrow(/b\.shop\.test\.example\.org overlaps a host of tenant other/);
   });
 });

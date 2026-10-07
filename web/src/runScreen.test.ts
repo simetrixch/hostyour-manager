@@ -268,9 +268,9 @@ describe("approvePayload", () => {
   });
 
   it("carries the secrets under their names and every input under activation-input:", () => {
-    expect(approvePayload(onboard(), { "repo-pat": "pw" }, { email: "info@simetrix.ch" })).toEqual({
+    expect(approvePayload(onboard(), { "repo-pat": "pw" }, { email: "info@example.org" })).toEqual({
       "repo-pat": "pw",
-      "activation-input:email": "info@simetrix.ch",
+      "activation-input:email": "info@example.org",
       // A BLANK IS SENT AS A BLANK: the server drops it (domains/runs/api.ts) and the refusal an
       // untyped answer earns is the one the field exists to produce, rather than a browser deciding
       // to withhold it.

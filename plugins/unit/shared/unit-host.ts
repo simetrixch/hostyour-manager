@@ -25,8 +25,8 @@ export function stageApex(unitApex: string, stage: Stage): string {
 }
 
 /** A domain's host at one stage: the labels below the DNS zone that holds it, then the stage, then
- *  the zone, as `stageApex` puts the stage before the apex (`show.simetrix.ch` at test is
- *  `show.test.simetrix.ch`, the zone itself `test.simetrix.ch`). Prod is the host itself. The zone is
+ *  the zone, as `stageApex` puts the stage before the apex (`show.example.org` at test is
+ *  `show.test.example.org`, the zone itself `test.example.org`). Prod is the host itself. The zone is
  *  the one the installation's DNS provider resolves for the host, never its last two labels: a zone
  *  can be `example.co.uk`, or delegated below. */
 export function stageHost(prodHost: string, zone: string, stage: Stage): string {
