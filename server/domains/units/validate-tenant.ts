@@ -4,7 +4,7 @@
 // template's the apps repository declares, read here (app-catalog.ts) — resolves the fan-out
 // (the standing members + the guid × apps[] matrix) at a THROWAWAY probe guid, renders every member
 // INTO ITS OWN member namespace with the Manager's own HelmRenderer (the tenant charts are TRUSTED
-// first-party charts, so there is no sandbox — the Manager renders them itself), and runs the T1..T4
+// first-party charts, so there is no sandbox — the Manager renders them itself), and runs the T1..T6
 // gates over the RenderedDocs. It composes one frozen TenantValidationReport whose verdict is a pass
 // IFF every hard gate passed.
 //
@@ -24,6 +24,7 @@ import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { gateT5Fit } from "./gates/tenant-fit.ts";
+import { gateT6SecretOrder } from "./gates/tenant-secret-order.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog } from "./app-catalog.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
@@ -333,7 +334,8 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       const t3 = gateT3Isolation(docsByMember);
       const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: req.members ? req.members.map((m) => m.name).filter((name) => !req.apps.some((a) => a.name === name)) : t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
       const t5 = gateT5Fit(docsByMember, req.quota);
-      for (const g of [t2, t3, t4, t5]) {
+      const t6 = gateT6SecretOrder(docsByMember);
+      for (const g of [t2, t3, t4, t5, t6]) {
         gates.push(g);
         streamGate(deps, g);
       }

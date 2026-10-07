@@ -144,7 +144,7 @@ describe("G27 over the tenant's wildcard — validateTenant reads the zone where
     const { clusterFqdn: _drop, ...noZone } = req();
     const outcome = await validateTenant(noZone, deps({ standingHost: async () => ({ kind: "collision", cluster: "s2.example" }) }));
     expect(outcome.verdict).toBe("pass");
-    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "G9"]);
+    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "T6", "G9"]);
   });
 });
 

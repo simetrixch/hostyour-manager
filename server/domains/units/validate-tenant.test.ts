@@ -288,7 +288,7 @@ describe("validateTenant", () => {
     expect(outcome.verdict).toBe("pass");
     expect(outcome.resolvedSha).toBe(SHA);
     expect(outcome.report.chartsRef).toBe(SHA);
-    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "G9"]);
+    expect(outcome.report.gates.map((g) => g.id)).toEqual(["T1", "T2", "T3", "T4", "T5", "T6", "G9"]);
     expect(outcome.report.appsValidated).toEqual(["erp"]);
     expect(outcome.report.resolvedMembers).toEqual(["auth", "jobs", "report", "erp-1", "erp-2"]);
     expect(outcome.report.manifest?.name).toBe("deploy");
