@@ -62,7 +62,7 @@ function restoreSenderDomainCleanup(ports: TenantSetSenderDomainPorts, p: Tenant
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       if ((await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.senderDomain !== p.senderDomain) {
-        ctx.log("meta", `tenant ${tc.guid} no longer sends as this run's ${p.senderDomain || "platform domain"} — another run wrote it since; left as it is`);
+        ctx.log("meta", `tenant ${tc.guid}'s registration does not carry this run's ${p.senderDomain || "platform domain"} — left as it is`);
         return;
       }
       const commit = await writeSenderDomain(ports, tc, ctx.db, p.previous, ctx.runId);

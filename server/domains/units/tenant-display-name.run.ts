@@ -51,7 +51,7 @@ function restoreDisplayNameCleanup(ports: TenantSetDisplayNamePorts, p: TenantSe
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       if ((await ports.registrations.readTenant(tc.stage, tc.guid))?.entry.displayName !== p.displayName) {
-        ctx.log("meta", `tenant ${tc.guid} is no longer named ${named(p.displayName)} by this run — another run wrote it since; left as it is`);
+        ctx.log("meta", `tenant ${tc.guid}'s registration does not carry this run's name ${named(p.displayName)} — left as it is`);
         return;
       }
       const commit = await writeDisplayName(ports, tc, ctx.db, p.previous, ctx.runId);
