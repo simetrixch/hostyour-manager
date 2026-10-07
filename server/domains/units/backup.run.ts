@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { RunDefinition, LockClaim, Step } from "../../executor/types.ts";
 import { attestTargetStep, attestTenantTargetStep, loadAppCluster, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, type WorldOf } from "#unit/server/relocation.ts";
+import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, reopenAccessCleanup, type WorldOf } from "#unit/server/relocation.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
 
@@ -47,7 +47,7 @@ export function makeBackupDef(ports: ConsumerRelocationPorts): RunDefinition<Bac
       };
     },
     steps: (params) => backupSteps(ports, consumerWorld(ports, params.appId), attestTargetStep(ports, params.appId)),
-    cleanups: (params) => [discardGenerationCleanup(ports, consumerWorld(ports, params.appId))],
+    cleanups: (params) => [discardGenerationCleanup(ports, consumerWorld(ports, params.appId)), reopenAccessCleanup(consumerWorld(ports, params.appId))],
   };
 }
 
@@ -72,6 +72,6 @@ export function makeTenantBackupDef(ports: TenantRelocationPorts): RunDefinition
       };
     },
     steps: (params) => backupSteps(ports, tenantWorld(ports, params.tenantId), attestTenantTargetStep(ports, params.tenantId)),
-    cleanups: (params) => [discardGenerationCleanup(ports, tenantWorld(ports, params.tenantId))],
+    cleanups: (params) => [discardGenerationCleanup(ports, tenantWorld(ports, params.tenantId)), reopenAccessCleanup(tenantWorld(ports, params.tenantId))],
   };
 }

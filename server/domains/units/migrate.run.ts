@@ -12,7 +12,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { loadTenantMove, tenantMoveWorld, tenantMoveCleanupWorld, attestTenantMoveStep } from "./tenant-migrate-stage.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
-import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, generationOfThisRun, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
+import { quiesceStep, verifyQuiescedStep, dumpStep, verifyDumpStep, openAccessStep, discardGenerationCleanup, reopenAccessCleanup, generationOfThisRun, type RelocationPorts, type WorldOf } from "#unit/server/relocation.ts";
 import { provisionTargetStep, watchTargetStep, restoreStep, verifyCompletenessStep, switchDnsStep, targetSmokeStep, recordStep } from "#unit/server/relocation-restore.ts";
 import { repointStep, clearSourceStep } from "#unit/server/relocation-migrate.ts";
 import { verifySourceReleasedStep } from "#unit/server/verify-source-released.ts";
@@ -80,7 +80,7 @@ export function makeMigrateDef(ports: ConsumerRelocationPorts): RunDefinition<Mi
       };
     },
     steps: (params) => migrateSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, attestTargetStep(ports, params.appId), "moved consumer"),
-    cleanups: (params) => [discardGenerationCleanup(ports, consumerWorld(ports, params.appId))],
+    cleanups: (params) => [discardGenerationCleanup(ports, consumerWorld(ports, params.appId)), reopenAccessCleanup(consumerWorld(ports, params.appId))],
   };
 }
 
@@ -106,6 +106,6 @@ export function makeTenantMigrateDef(ports: TenantRelocationPorts): RunDefinitio
       };
     },
     steps: (params) => migrateSteps(ports, tenantMoveWorld(ports, params), params.targetClusterId, attestTenantMoveStep(ports, params), "moved tenant stage"),
-    cleanups: (params) => [discardGenerationCleanup(ports, tenantMoveCleanupWorld(ports, params))],
+    cleanups: (params) => [discardGenerationCleanup(ports, tenantMoveCleanupWorld(ports, params)), reopenAccessCleanup(tenantMoveCleanupWorld(ports, params))],
   };
 }

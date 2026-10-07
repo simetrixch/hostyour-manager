@@ -140,6 +140,13 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
       namespaces: [namespace],
       homeNamespace: namespace,
       setQuiesced: (q, runId) => ports.registrations.setQuiesced(ac.stage, ac.name, q, runId),
+      readStanding: async () => {
+        const read = await ports.registrations.readRegistration(ac.stage, ac.name);
+        if (!read) return null;
+        const { quiesced, cluster } = read.entry;
+        if (cluster === undefined) throw errValidation(`the ${ac.stage} registration of ${ac.name} names no cluster, which every stage registration does`);
+        return { quiesced, cluster };
+      },
       readRegistrationYaml: async () => serializePointer(ConsumerRegistrationSchema, await readStageRegistration(ports, ac.stage, ac.name)),
       watchConverged: async (c, clusterId, intent) => {
         const entry = await readStageRegistration(ports, ac.stage, ac.name);

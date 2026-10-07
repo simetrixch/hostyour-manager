@@ -127,6 +127,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       namespaces: tenantNamespaces(allMembers, tc.guid, tc.stage),
       homeNamespace: memberNamespace(tc.guid, tc.identityProvider, tc.stage),
       setQuiesced: (q, runId) => ports.registrations.setTenantQuiesced(tc.stage, tc.guid, q, runId),
+      readStanding: async () => {
+        const read = await ports.registrations.readTenant(tc.stage, tc.guid);
+        return read ? { quiesced: read.entry.quiesced, cluster: read.entry.cluster } : null;
+      },
       readRegistrationYaml: async () => serializePointer(TenantRegistrationSchema, await readRegistration(ports, tc.stage, tc.guid)),
       watchConverged: watchSet,
       dumpJobs: async (folder, registrationYaml) => tenantDumpJobs({ guid: tc.guid, folder, stage: tc.stage, apps, identityProvider: tc.identityProvider, image, registrationYaml }),
