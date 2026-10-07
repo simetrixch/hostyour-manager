@@ -3,7 +3,7 @@ import type { Step, StepCtx, RunDefinition } from "../../../executor/types.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import { recordDnsWrite } from "../../../db/dns-writes.ts";
 import { DMARC_POLICY, isMasterRole, type Stage } from "../../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, platformDomainRefusal, type MailEgress } from "../../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, PUBLISHED_MAIL_RECORD, mailRecordNames, platformDomainRefusal, spfHostMechanism, type MailEgress } from "../../../../shared/mail.ts";
 import type { DnsProvider } from "../../../adapters/dns/port.ts";
 import { resolveClusterMarking } from "../../inventory/cluster-marking.ts";
 import { activeClusterTarget, requirePlatformRepo, type DeploySlavePorts } from "./deploy-slave.kit.ts";
@@ -31,7 +31,8 @@ import { ansiwiseProgramStep, ANSIWISE_ELEVATION_SECRET, type AnsiwisePorts, typ
 // WHAT IS ANSWERED, AND FROM WHERE. `stage` is the cluster row's (composeAnswers reads the inventory);
 // `mail_domain` is the run's; `egress_address` comes from the Mail page's own reading of where the
 // stage's mail leaves (MailEgress) — the address the name mail leaves by resolves to at public DNS,
-// never typed. No `dkim_public_key` is answered: the alert domain is signed by the relay, whose key
+// never typed; `egress_host` comes from the reverse DNS of the egress address, forward-confirmed.
+// No `dkim_public_key` is answered: the alert domain is signed by the relay, whose key
 // the program reads out of the store. `dkim_selector` is left to the program's default, the stage;
 // `dmarc_policy` and `dmarc_mailbox` are the operator's on the Mail page.
 //
@@ -109,6 +110,22 @@ async function publishableRole(ports: MailDnsPublishPorts, clusterDomain: string
   return role;
 }
 
+/** Where the stage's mail leaves, refusing when public DNS has no address for the egress name or when
+ *  the address has no forward-confirmed reverse DNS name. */
+export async function requireMailEgress(ports: MailDnsPublishPorts, stage: Stage, domain: string): Promise<MailEgress & { address: string; host: string }> {
+  if (!ports.mailEgress) throw errValidation("no mail reading is wired into this manager — the egress address has no other source");
+  const out = await ports.mailEgress(stage, domain);
+  if (out.address === null) {
+    throw errValidation(`${out.name} resolves to no address at public DNS — mail leaves from that address, and the SPF names it`);
+  }
+  if (out.host === null) {
+    throw errValidation(
+      `${out.address} has no reverse DNS name that resolves back to it — the SPF names the host mail leaves by, and there is none to name; set the reverse DNS where the address is rented`,
+    );
+  }
+  return out as MailEgress & { address: string; host: string };
+}
+
 /** What `publish-mail-dns` is answered with beyond the inventory (composeAnswers reads `stage` off
  *  the cluster row): the run's domain and DMARC choices, and the address mail leaves from.
  *  Fail-closed where the name mail leaves by resolves to no address: a guessed address in the SPF
@@ -117,21 +134,19 @@ export function mailDnsAnswers(params: MailDnsPublishParams, ports: MailDnsPubli
   return async (ctx) => {
     const { cluster } = loadActiveCluster(ctx.db, params.serverId);
     const role = await publishableRole(ports, cluster.domain, params.senderDomain);
-    if (!ports.mailEgress) throw errValidation("no mail reading is wired into this manager — the egress address has no other source");
-    const out = await ports.mailEgress(cluster.stage, cluster.domain);
-    if (out.address === null) {
-      throw errValidation(`${out.name} resolves to no address at public DNS — mail leaves from that address, and the SPF names it`);
-    }
+    const out = await requireMailEgress(ports, cluster.stage, cluster.domain);
     ctx.log(
       "meta",
       `${MAIL_DNS_PROGRAM} is told mail_domain=${params.senderDomain} (${role}), egress_address=${out.address} (${out.name}` +
         `${out.sender !== null ? `, where the mail sender ${out.sender.unit} stands` : ", the master"}), ` +
+        `egress_host=${out.host}, ` +
         "no dkim_public_key (the relay's key is read out of the store), " +
         `dmarc_policy=${params.dmarcPolicy}, dmarc_mailbox=${params.dmarcMailbox}; dkim_selector is left to the stage`,
     );
     return {
       mail_domain: params.senderDomain,
       egress_address: out.address,
+      egress_host: out.host,
       dmarc_policy: params.dmarcPolicy,
       dmarc_mailbox: params.dmarcMailbox,
     };
@@ -232,7 +247,7 @@ function mailDnsPublishSteps(params: MailDnsPublishParams, ports: MailDnsPublish
       extra: mailDnsAnswers(params, ports),
       // Silent degradation this run may not produce: a program that dropped one of these would
       // publish a record for the wrong domain, a wrong address, or reports to nobody.
-      requiredAnswers: ["mail_domain", "egress_address", "dmarc_mailbox"],
+      requiredAnswers: ["mail_domain", "egress_address", "egress_host", "dmarc_mailbox"],
     })),
   ];
 }
@@ -251,6 +266,7 @@ export function makeMailDnsPublishDef(ports: MailDnsPublishPorts): RunDefinition
         );
       }
       const role = await publishableRole(ports, cluster.domain, params.senderDomain);
+      const out = await requireMailEgress(ports, cluster.stage, cluster.domain);
       const stepDefs = mailDnsPublishSteps(params, ports);
       return {
         kind: "mail-dns-publish",
@@ -258,10 +274,12 @@ export function makeMailDnsPublishDef(ports: MailDnsPublishPorts): RunDefinition
         targetId: params.serverId,
         summary:
           `Publish the mail DNS of ${params.senderDomain} (${role}) through the DNS provider, from the master "${server.name}" ` +
-          `(${cluster.domain}, ${cluster.stage}): the programs checkout's ${MAIL_DNS_PROGRAM} program merges the address mail leaves from into the ` +
-          `domain's SPF (one v=spf1 record, everything already in it kept), publishes the DKIM key it is signed with, and sets ` +
-          `DMARC ${params.dmarcPolicy} with reports to ${params.dmarcMailbox} — proved dry, then run, on the master's own record. ` +
-          `The password you enter raises the program's root commands and is stored nowhere.`,
+          `(${cluster.domain}, ${cluster.stage}): the programs checkout's ${MAIL_DNS_PROGRAM} program merges ${spfHostMechanism(params.senderDomain, out.host)} — the ` +
+          `host mail leaves by — into the domain's SPF, replacing an ip4 of ${out.address} where one stands and keeping everything ` +
+          `else in it (the mechanism costs one of the ten DNS lookups SPF allows the record), publishes the DKIM key it is signed ` +
+          `with, and sets DMARC ${params.dmarcPolicy} with reports to ` +
+          `${params.dmarcMailbox} — proved dry, then run, on the master's own record. The password you enter raises the program's root ` +
+          "commands and is stored nowhere.",
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [{ serverId: server.id, ownsHost: true, label: `${server.name} (${server.role})` }],
         locks: [],

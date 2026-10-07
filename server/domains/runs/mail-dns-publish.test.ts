@@ -40,7 +40,7 @@ function ports(h: Harness, dns?: FakeDnsProvider): MailDnsPublishPorts {
 function egressOf(over: Partial<MailEgress> = {}, asked: string[] = []): NonNullable<MailDnsPublishPorts["mailEgress"]> {
   return async (stage, masterDomain) => {
     asked.push(`${stage} ${masterDomain}`);
-    return { sender: null, name: masterDomain, address: EGRESS, dkimPublicKey: null, ...over };
+    return { sender: null, name: masterDomain, address: EGRESS, host: "mail.example.org", dkimPublicKey: null, ...over };
   };
 }
 
@@ -60,15 +60,23 @@ describe("mail-dns-publish plan", () => {
   it("stands on the master: attest, then the ONE program step, the elevation password required, the master the only target", async () => {
     const h = await makeHarness();
     seedMaster(h);
-    const plan = await makeMailDnsPublishDef(ports(h)).plan(PARAMS, { db: h.db.db });
+    const plan = await makeMailDnsPublishDef({ ...ports(h), mailEgress: egressOf() }).plan(PARAMS, { db: h.db.db });
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-publish-mail-dns"]);
     expect(plan.targets).toEqual([{ serverId: MASTER_ID, ownsHost: true, label: "m1 (master)" }]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.summary).toContain(`${ALERT} (alert mail)`);
+    expect(plan.summary).toContain("a:mail.example.org");
     // The PTR is the provider's to set; the plan says so rather than pretending to.
     expect(plan.warnings.join(" ")).toMatch(/reverse DNS of the address mail leaves from .* resolve back to that address/);
     expect(plan.summary).not.toMatch(/address record/);
     expect(senderRoleOf("nobody.example", { platformDomain: "example.com", unitApex: ALERT })).toBeUndefined();
+  });
+
+  it("refuses an egress with host: null at the plan, naming the address", async () => {
+    const h = await makeHarness();
+    seedMaster(h);
+    await expect(makeMailDnsPublishDef({ ...ports(h), mailEgress: egressOf({ host: null }) }).plan(PARAMS, { db: h.db.db }))
+      .rejects.toThrow(new RegExp(`${EGRESS} has no reverse DNS name that resolves back to it`));
   });
 
   it("PLANTED DEFECT: refuses the platform domain, whose apex SPF, DKIM selectors and DMARC policy are its own mail service's", async () => {
@@ -106,7 +114,7 @@ describe("what publish-mail-dns is answered with", () => {
     const asked: string[] = [];
     const logs: string[] = [];
     const answers = await mailDnsAnswers({ ...PARAMS, dmarcPolicy: "quarantine" }, { ...ports(h), mailEgress: egressOf({}, asked) })(ctx(h, logs));
-    expect(answers).toEqual({ mail_domain: ALERT, egress_address: EGRESS, dmarc_policy: "quarantine", dmarc_mailbox: "dmarc@example.com" });
+    expect(answers).toEqual({ mail_domain: ALERT, egress_address: EGRESS, egress_host: "mail.example.org", dmarc_policy: "quarantine", dmarc_mailbox: "dmarc@example.com" });
     expect(asked).toEqual([`prod ${MASTER_FQDN}`]);
     // dkim_selector is NOT answered: the program defaults it to the stage, which is what the signers sign with.
     expect(logs.join(" ")).toContain("dkim_selector is left to the stage");
@@ -117,7 +125,7 @@ describe("what publish-mail-dns is answered with", () => {
     seedMaster(h);
     const logs: string[] = [];
     const answers = await mailDnsAnswers(PARAMS, { ...ports(h), mailEgress: egressOf(SENDER) })(ctx(h, logs));
-    expect(answers).toMatchObject({ egress_address: EGRESS });
+    expect(answers).toMatchObject({ egress_address: EGRESS, egress_host: "mail.example.org" });
     expect(answers).not.toHaveProperty("dkim_public_key");
     expect(logs.join(" ")).toContain("a1.example.com, where the mail sender post stands");
   });
@@ -133,6 +141,13 @@ describe("what publish-mail-dns is answered with", () => {
     seedMaster(h);
     await expect(mailDnsAnswers(PARAMS, { ...ports(h), mailEgress: egressOf({ address: null }) })(ctx(h, [])))
       .rejects.toThrow(/m1\.example\.com resolves to no address at public DNS/);
+  });
+
+  it("refuses where the egress address has no forward-confirmed host", async () => {
+    const h = await makeHarness();
+    seedMaster(h);
+    await expect(mailDnsAnswers(PARAMS, { ...ports(h), mailEgress: egressOf({ host: null }) })(ctx(h, [])))
+      .rejects.toThrow(new RegExp(`${EGRESS} has no reverse DNS name that resolves back to it`));
   });
 
   it("refuses without the mail reading wired — the address has no other source", async () => {

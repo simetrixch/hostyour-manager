@@ -180,6 +180,17 @@ export interface MailDnsDeps {
   smtpSenders?: (stage: Stage) => Promise<{ unit: string; cluster: string }[]>;
 }
 
+/** The name the reverse DNS of `address` gives, when exactly one name is given and it resolves
+ *  back to `address`; null otherwise. Lowercased, because DNS names are case-insensitive and the
+ *  SPF step accepts a host only in lowercase. */
+async function forwardConfirmedHost(publicDns: PublicDns, address: string | null): Promise<string | null> {
+  if (address === null) return null;
+  const ptr = await publicDns.ptr(address);
+  if (ptr.length !== 1) return null;
+  const host = ptr[0]!.toLowerCase();
+  return (await publicDns.a(host)).includes(address) ? host : null;
+}
+
 /** Where the stage's mail leaves. THE SENDER, where a unit declares one — G29 keeps it at one per
  *  stage: mail then leaves by the cluster it stands on, and the platform domain is signed with the
  *  unit's key. Where no unit sends, by the master's identity, whose relay delivers and signs. The name
@@ -187,14 +198,19 @@ export interface MailDnsDeps {
  *  followed to its address, which is where mail leaves from. */
 export async function readMailEgress(deps: Pick<MailDnsDeps, "db" | "publicDns" | "smtpSenders">, stage: Stage, masterDomain: string): Promise<MailEgress> {
   const sender = (deps.smtpSenders ? await deps.smtpSenders(stage) : [])[0];
-  if (sender === undefined) return { sender: null, name: masterDomain, address: (await deps.publicDns.a(masterDomain))[0] ?? null, dkimPublicKey: null };
+  if (sender === undefined) {
+    const address = (await deps.publicDns.a(masterDomain))[0] ?? null;
+    return { sender: null, name: masterDomain, address, host: await forwardConfirmedHost(deps.publicDns, address), dkimPublicKey: null };
+  }
   const on = deps.db.select({ domain: clusters.domain }).from(clusters).where(eq(clusters.name, sender.cluster)).get();
   if (!on) throw errNotFound(`the mail sender ${sender.unit} stands on cluster "${sender.cluster}", which is no cluster of this Manager`);
   const row = deps.db.select({ key: apps.dkimPublicKey }).from(apps).where(and(eq(apps.name, sender.unit), eq(apps.stage, stage))).get();
+  const address = (await deps.publicDns.a(on.domain))[0] ?? null;
   return {
     sender: { unit: sender.unit, cluster: on.domain },
     name: on.domain,
-    address: (await deps.publicDns.a(on.domain))[0] ?? null,
+    address,
+    host: await forwardConfirmedHost(deps.publicDns, address),
     dkimPublicKey: row?.key ? dkimRecordKey(row.key) : null,
   };
 }

@@ -78,6 +78,8 @@ export interface MailEgress {
   sender: { unit: string; cluster: string } | null;
   name: string;
   address: string | null;
+  /** The name the reverse DNS of `address` gives, when exactly one name is given and it resolves back to `address`; null otherwise. The SPF names this host. */
+  host: string | null;
   dkimPublicKey: string | null;
 }
 
@@ -152,3 +154,8 @@ export const MAIL_RECORD_TAG: Record<MailTxtRecord, (txt: string) => boolean> = 
   dkim: (txt) => txt.trim().toLowerCase().startsWith("v=dkim1"),
   dmarc: (txt) => txt.trim().toLowerCase().startsWith("v=dmarc1"),
 };
+
+/** The mechanism text the SPF step uses to authorise a host: bare "a" when the host is the record's own name, else "a:<host>". */
+export function spfHostMechanism(record: string, host: string): string {
+  return record === host ? "a" : `a:${host}`;
+}

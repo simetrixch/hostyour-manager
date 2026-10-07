@@ -33,7 +33,7 @@ function ports(h: Harness, over: Partial<MailDnsPublishPorts> = {}): MailDnsPubl
 
 /** The Mail page's reading, scripted: the stage's sender and the key it signs with. */
 function egressOf(over: Partial<MailEgress> = {}): NonNullable<MailDnsPublishPorts["mailEgress"]> {
-  return async () => ({ sender: { unit: "post", cluster: "a1.example.com" }, name: "a1.example.com", address: "203.0.113.9", dkimPublicKey: KEY, ...over });
+  return async () => ({ sender: { unit: "post", cluster: "a1.example.com" }, name: "a1.example.com", address: "203.0.113.9", host: "mail.example.org", dkimPublicKey: KEY, ...over });
 }
 
 function ctx(h: Harness, logs: string[]): StepCtx {

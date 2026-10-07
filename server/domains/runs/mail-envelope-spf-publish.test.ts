@@ -32,7 +32,7 @@ function ports(h: Harness, over: Partial<MailDnsPublishPorts> = {}): MailDnsPubl
 
 /** The Mail page's reading, scripted: without a sender, mail leaves by the master's identity. */
 function egressOf(over: Partial<MailEgress> = {}): NonNullable<MailDnsPublishPorts["mailEgress"]> {
-  return async (_stage, masterDomain) => ({ sender: null, name: masterDomain, address: EGRESS, dkimPublicKey: null, ...over });
+  return async (_stage, masterDomain) => ({ sender: null, name: masterDomain, address: EGRESS, host: "mail.example.org", dkimPublicKey: null, ...over });
 }
 
 function ctx(h: Harness, logs: string[]): StepCtx {
@@ -56,12 +56,26 @@ describe("mail-envelope-spf-publish plan", () => {
   it("stands on the master and names the one record it writes: attest, then the program step, the elevation password required", async () => {
     const h = await makeHarness();
     seedMasterCluster(h);
-    const plan = await makeMailEnvelopeSpfPublishDef(ports(h)).plan(PARAMS, { db: h.db.db });
+    const plan = await makeMailEnvelopeSpfPublishDef(ports(h, { mailEgress: egressOf() })).plan(PARAMS, { db: h.db.db });
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "run-publish-envelope-spf"]);
     expect(plan.targets).toEqual([{ serverId: MASTER_ID, ownsHost: true, label: "m1 (master)" }]);
     expect(plan.requiredSecrets).toEqual([ANSIWISE_ELEVATION_SECRET]);
     expect(plan.summary).toContain(`Publish the SPF of ${ENVELOPE}`);
     expect(plan.summary).toContain("Nothing of example.com itself is touched");
+  });
+
+  it("with the host equal to the envelope name, the summary contains v=spf1 a -all", async () => {
+    const h = await makeHarness();
+    seedMasterCluster(h);
+    const plan = await makeMailEnvelopeSpfPublishDef(ports(h, { mailEgress: egressOf({ host: ENVELOPE }) })).plan(PARAMS, { db: h.db.db });
+    expect(plan.summary).toContain("v=spf1 a -all");
+  });
+
+  it("refuses an egress with host: null at the plan, naming the address", async () => {
+    const h = await makeHarness();
+    seedMasterCluster(h);
+    await expect(makeMailEnvelopeSpfPublishDef(ports(h, { mailEgress: egressOf({ host: null }) })).plan(PARAMS, { db: h.db.db }))
+      .rejects.toThrow(new RegExp(`${EGRESS} has no reverse DNS name that resolves back to it`));
   });
 
   it("refuses a slave: the DNS token is the master's", async () => {
@@ -77,8 +91,12 @@ describe("what publish-envelope-spf is answered with", () => {
     seedMasterCluster(h);
     const logs: string[] = [];
     const sender = { sender: { unit: "post", cluster: "a1.example.com" }, name: "a1.example.com" };
-    expect(await envelopeSpfAnswers(PARAMS, ports(h, { mailEgress: egressOf(sender) }))(ctx(h, logs))).toEqual({ envelope_domain: ENVELOPE, egress_address: EGRESS });
-    expect(logs.join(" ")).toContain(`envelope_domain=${ENVELOPE}, egress_address=${EGRESS} (a1.example.com, where the mail sender post stands)`);
+    expect(await envelopeSpfAnswers(PARAMS, ports(h, { mailEgress: egressOf(sender) }))(ctx(h, logs))).toEqual({
+      envelope_domain: ENVELOPE,
+      egress_address: EGRESS,
+      egress_host: "mail.example.org",
+    });
+    expect(logs.join(" ")).toContain(`envelope_domain=${ENVELOPE}, egress_address=${EGRESS} (a1.example.com, where the mail sender post stands), egress_host=mail.example.org`);
   });
 
   it("refuses where the name mail leaves by resolves to no address, and without the mail reading wired", async () => {
@@ -86,6 +104,13 @@ describe("what publish-envelope-spf is answered with", () => {
     seedMasterCluster(h);
     await expect(envelopeSpfAnswers(PARAMS, ports(h, { mailEgress: egressOf({ address: null }) }))(ctx(h, []))).rejects.toThrow(new RegExp(`${MASTER_FQDN.replaceAll(".", "\\.")} resolves to no address at public DNS`));
     await expect(envelopeSpfAnswers(PARAMS, ports(h))(ctx(h, []))).rejects.toThrow(/no mail reading is wired/);
+  });
+
+  it("refuses where the egress address has no forward-confirmed host", async () => {
+    const h = await makeHarness();
+    seedMasterCluster(h);
+    await expect(envelopeSpfAnswers(PARAMS, ports(h, { mailEgress: egressOf({ host: null }) }))(ctx(h, [])))
+      .rejects.toThrow(new RegExp(`${EGRESS} has no reverse DNS name that resolves back to it`));
   });
 });
 

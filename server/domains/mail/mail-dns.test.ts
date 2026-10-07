@@ -5,7 +5,7 @@ import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
-import { dkimRecordKey, mailDnsRows, readMailDns, type MailDnsNeed } from "./mail-dns.ts";
+import { dkimRecordKey, mailDnsRows, readMailDns, readMailEgress, type MailDnsNeed } from "./mail-dns.ts";
 
 // The Mail page's check: the records of a sender domain, measured at public DNS and held against where
 // mail leaves — the name it leaves by, the address that name resolves to, and the key the sender signs
@@ -32,6 +32,49 @@ function published(): FakePublicDns {
   dns.seedTxt("_dmarc.example.com", "v=DMARC1; p=none; rua=mailto:dmarc@example.com");
   return dns;
 }
+
+describe("readMailEgress", () => {
+  let db: DbHandle;
+  beforeEach(() => { db = openDb(":memory:"); });
+  afterEach(() => { db.sqlite.close(); });
+
+  it("gives host: mail.example.org when PTR gives mail.example.org and its A record includes the egress address", async () => {
+    const dns = new FakePublicDns();
+    dns.seedA("m1.example.com", EGRESS);
+    dns.seedPtr(EGRESS, "mail.example.org");
+    dns.seedA("mail.example.org", EGRESS);
+    const egress = await readMailEgress({ db: db.db, publicDns: dns }, "prod", "m1.example.com");
+    expect(egress.host).toBe("mail.example.org");
+  });
+
+  it("PLANTED INNOCENT: a PTR name whose A record is another address gives host: null", async () => {
+    const dns = new FakePublicDns();
+    dns.seedA("m1.example.com", EGRESS);
+    dns.seedPtr(EGRESS, "mail.example.org");
+    dns.seedA("mail.example.org", "198.51.100.99");
+    const egress = await readMailEgress({ db: db.db, publicDns: dns }, "prod", "m1.example.com");
+    expect(egress.host).toBeNull();
+  });
+
+  it("lowercases a PTR name given in capitals, which the SPF step accepts only in lowercase", async () => {
+    const dns = new FakePublicDns();
+    dns.seedA("m1.example.com", EGRESS);
+    dns.seedPtr(EGRESS, "MAIL.Example.ORG");
+    dns.seedA("mail.example.org", EGRESS);
+    const egress = await readMailEgress({ db: db.db, publicDns: dns }, "prod", "m1.example.com");
+    expect(egress.host).toBe("mail.example.org");
+  });
+
+  it("two PTR names give host: null", async () => {
+    const dns = new FakePublicDns();
+    dns.seedA("m1.example.com", EGRESS);
+    dns.seedPtr(EGRESS, "mail.example.org", "mail2.example.org");
+    dns.seedA("mail.example.org", EGRESS);
+    dns.seedA("mail2.example.org", EGRESS);
+    const egress = await readMailEgress({ db: db.db, publicDns: dns }, "prod", "m1.example.com");
+    expect(egress.host).toBeNull();
+  });
+});
 
 describe("dkimRecordKey", () => {
   it("is the body of the SPKI PEM — the DER a DKIM record carries in p=", () => {
