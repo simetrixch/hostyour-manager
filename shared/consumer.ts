@@ -183,6 +183,14 @@ export const TenantSpecSchema = z.object({
   // answers 200 {"domain", "signing": true|false} or 404 for a domain it does not know. Absent, no
   // tenant of this product gets a sender domain of its own.
   senderDomainCheck: z.string().regex(/^https:\/\/\S*\{domain\}\S*$/, "an https URL template that contains {domain}").optional(),
+  // Where the product's mail service binds a stage's service issuer at the stage's own sender domain,
+  // so the stage may send from it: `url`, an https URL template with {stageApex} and {domain} that
+  // answers PUT and DELETE { issuer } with { added } and { removed }; `unit`, the consumer whose kept
+  // key (generate:"manager-key") the Manager presents there. Absent, the sender-domain run binds nothing.
+  senderDomainIssuers: z.object({
+    url: z.string().regex(/^https:\/\/\S*\{domain\}\S*$/, "an https URL template that contains {domain}"),
+    unit: consumerName,
+  }).strict().optional(),
   // The DNS label under which the Manager marks each tenant's identity provider for the product's mail
   // service: TXT `<label>.<issuer host>` holding the issuer, the identity provider's address on the
   // tenant's zone (plugins/unit/shared/unit-host.ts tenantIssuerRecord). Published with the tenant's

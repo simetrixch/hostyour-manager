@@ -10,7 +10,7 @@ import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
-import { getRun } from "../../executor/read.ts";
+import { getRun, readEvents } from "../../executor/read.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
@@ -18,6 +18,8 @@ import { makeTenantSetSenderDomainDef, type TenantSetSenderDomainPorts } from ".
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
+import { FakeUnitCall, type UnitCallRequest } from "#unit/server/adapters/unit-call/testing/fake.ts";
+import { keepUnitCallKey } from "#unit/server/unit-call-key.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 
@@ -32,13 +34,19 @@ const DOMAIN = "customer.test";
 const CHECK = "https://post.{stageApex}/api/public/sender-domains/{domain}";
 const ASKED = `https://post.example.com/api/public/sender-domains/${DOMAIN}`;
 const MEMBERS = ["auth", "jobs", "report"];
+const ISSUERS_ROUTE = "https://post.{stageApex}/api/internal/sender-domains/{domain}/issuers";
+const BOUND_AT = (domain: string) => `https://post.example.com/api/internal/sender-domains/${domain}/issuers`;
+/** The prod stage's service issuer: the identity provider on the tenant's zone, host routing. */
+const ISSUER = "https://auth.acme.example.com";
+const OTHER_ISSUER = "https://shop.example.org/auth";
+const KEPT = "k".repeat(64);
 
 const logger = createLogger(parseConfig({
   ...REQUIRED_ENV, PUBLIC_URL: "https://x.example", OIDC_ISSUER: "https://i.example/", OIDC_CLIENT_ID: "c", OIDC_CLIENT_SECRET: "s",
   MANAGER_VERSION: "test", DATA_DIR: "/data", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv));
 
-const manifest = (check: string | null): string => `apiVersion: hostyour.cloud/v1
+const manifest = (check: string | null, issuers: boolean): string => `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
 name: acme-deploy
 owner: platform
@@ -52,7 +60,23 @@ tenant:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }
   buildRepos: []
-${check ? `  senderDomainCheck: ${check}\n` : ""}`;
+${check ? `  senderDomainCheck: ${check}\n` : ""}${issuers ? `  senderDomainIssuers: { url: "${ISSUERS_ROUTE}", unit: post }\n` : ""}`;
+
+/** post's issuer lists per sender domain, answering the Manager's route as post does: only with the
+ *  kept key, one issuer added or removed, the others kept; `status` forces one answer instead. */
+function fakePost(lists: Record<string, string[]>, status?: number[]): FakeUnitCall {
+  return new FakeUnitCall((req: UnitCallRequest) => {
+    const forced = status?.shift();
+    if (forced !== undefined) return { status: forced, detail: `HTTP ${forced}` };
+    if (req.key !== KEPT) return { status: 401, detail: "HTTP 401" };
+    const domain = decodeURIComponent(req.url.split("/sender-domains/")[1]!.split("/")[0]!);
+    const issuer = (req.body as { issuer: string }).issuer;
+    const list = lists[domain] ?? [];
+    const had = list.includes(issuer);
+    lists[domain] = req.method === "PUT" ? (had ? list : [...list, issuer]) : list.filter((i) => i !== issuer);
+    return { status: 200, detail: "HTTP 200", body: req.method === "PUT" ? { added: !had } : { removed: had } };
+  });
+}
 
 /** Every member Synced + Healthy, each chart rendering `domain` as tenant.senderDomain. */
 function rendering(domain: string): Map<string, ArgoAppStatus> {
@@ -70,7 +94,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { senderDomain?: string; renders?: string; answer?: { status: number; body?: string }; check?: string | null; suspended?: boolean } = {}) {
+  async function make(opts: { senderDomain?: string; renders?: string; answer?: { status: number; body?: string }; check?: string | null; suspended?: boolean; issuers?: boolean; kept?: boolean; post?: FakeUnitCall } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-senderdomain-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
@@ -90,27 +114,30 @@ describe("tenant-set-sender-domain through the Executor", () => {
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });
+    const creds = new CredentialStore({ db: db.db, logger });
+    if (opts.kept ?? opts.issuers) await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEPT });
+    const post = opts.post ?? fakePost({});
     const probe = new FakePublicProbe();
     const answer = opts.answer ?? { status: 200, body: JSON.stringify({ domain: DOMAIN, signing: true }) };
     probe.set(ASKED, { reachable: answer.status < 500 && answer.status !== 404, status: answer.status, detail: `HTTP ${answer.status}`, ...(answer.body !== undefined ? { body: answer.body } : {}) });
     const def = makeTenantSetSenderDomainDef({
       registrations: reg,
-      repo: new FakeRepoReader({ resolvedSha: "a".repeat(40), files: { "deploy/platform.yaml": manifest(opts.check === undefined ? CHECK : opts.check) } }),
+      repo: new FakeRepoReader({ resolvedSha: "a".repeat(40), files: { "deploy/platform.yaml": manifest(opts.check === undefined ? CHECK : opts.check, opts.issuers ?? false) } }),
       resolver: new FakeClusterKubeResolver({
         clusterReader: new FakeClusterReader({ deployState: { domain: CLUSTER, stage: "prod", writtenAt: "x", generation: 1 } }),
         argoReader: new FakeMasterArgoReader({ statuses: rendering(opts.renders ?? senderDomain) }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
-      deployRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, probe,
+      deployRepoUrl: DEPLOY_REPO, argoWatchTimeoutMs: 1000, probe, unitCall: post, store: creds,
       resolveClusterValueFiles: async () => [{ path: "clusters/s1.yaml", content: "global:\n  unitApex: example.com\n" }],
     } as unknown as TenantSetSenderDomainPorts);
     const executor = new Executor({
-      db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
+      db: db.db, creds, bus: new RunEventBus(), logger,
       runDefinitions: new Map([["tenant-set-sender-domain", def as unknown as AnyRunDefinition]]),
       sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
     });
     const row = () => db.db.select({ d: tenants.senderDomain }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.d;
     const registered = async () => (await reg.readTenant("prod", GUID))?.entry.senderDomain;
-    return { db, executor, probe, row, registered, reg };
+    return { db, executor, probe, row, registered, reg, post };
   }
 
   async function set(h: Awaited<ReturnType<typeof make>>, senderDomain: string, previous = ""): Promise<string> {
@@ -170,6 +197,78 @@ describe("tenant-set-sender-domain through the Executor", () => {
     await h.executor.abortWithCleanup(runId);
     await h.executor.settle(runId);
     expect(await h.registered()).toBe("other.test");
+  });
+
+  describe("the stage's service issuer at the product's mail service", () => {
+    it("binds it beside the issuers already there before the registration is written, with the kept key", async () => {
+      const lists: Record<string, string[]> = { [DOMAIN]: [OTHER_ISSUER] };
+      const h = await make({ issuers: true, renders: DOMAIN, post: fakePost(lists) });
+      const runId = await set(h, DOMAIN);
+      expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+      expect(h.post.calls).toEqual([{ method: "PUT", url: BOUND_AT(DOMAIN), key: KEPT, body: { issuer: ISSUER } }]);
+      expect(lists[DOMAIN]).toEqual([OTHER_ISSUER, ISSUER]);
+      expect(getRun(h.db.db, runId)?.steps.map((st) => st.name)).toEqual(["attest-target", "bind-issuer", "write-sender-domain", "watch-members", "unbind-previous-issuer"]);
+    });
+
+    it("an abort takes back only the issuer this run added", async () => {
+      const lists: Record<string, string[]> = { [DOMAIN]: [OTHER_ISSUER] };
+      const h = await make({ issuers: true, renders: "", post: fakePost(lists) });
+      const runId = await set(h, DOMAIN);
+      expect(getRun(h.db.db, runId)?.status).toBe("failed");
+      await h.executor.abortWithCleanup(runId);
+      await h.executor.settle(runId);
+      expect(getRun(h.db.db, runId)?.status).toBe("cancelled");
+      expect(lists[DOMAIN]).toEqual([OTHER_ISSUER]);
+      expect(await h.registered()).toBe("");
+    });
+
+    it("PLANTED INNOCENT: an abort leaves an issuer the domain already named before the run", async () => {
+      const lists: Record<string, string[]> = { [DOMAIN]: [ISSUER] };
+      const h = await make({ issuers: true, renders: "", post: fakePost(lists) });
+      const runId = await set(h, DOMAIN);
+      await h.executor.abortWithCleanup(runId);
+      await h.executor.settle(runId);
+      expect(lists[DOMAIN]).toEqual([ISSUER]);
+    });
+
+    it("moving to another domain binds it there and, once every member renders it, takes it from the previous one", async () => {
+      const lists: Record<string, string[]> = { "old.test": [ISSUER, OTHER_ISSUER], [DOMAIN]: [] };
+      const h = await make({ issuers: true, senderDomain: "old.test", renders: DOMAIN, post: fakePost(lists) });
+      const runId = await set(h, DOMAIN, "old.test");
+      expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+      expect(h.post.calls.map((c) => [c.method, c.url])).toEqual([["PUT", BOUND_AT(DOMAIN)], ["DELETE", BOUND_AT("old.test")]]);
+      expect(lists).toEqual({ "old.test": [OTHER_ISSUER], [DOMAIN]: [ISSUER] });
+    });
+
+    it("clearing the domain binds nothing and takes the issuer from the former domain; a product without the route is never called", async () => {
+      const lists: Record<string, string[]> = { [DOMAIN]: [ISSUER] };
+      const h = await make({ issuers: true, senderDomain: DOMAIN, renders: "", post: fakePost(lists) });
+      expect(getRun(h.db.db, await set(h, "", DOMAIN))?.status).toBe("succeeded");
+      expect(h.post.calls.map((c) => c.method)).toEqual(["DELETE"]);
+      expect(lists[DOMAIN]).toEqual([]);
+      const plain = await make({ renders: DOMAIN });
+      expect(getRun(plain.db.db, await set(plain, DOMAIN))?.status).toBe("succeeded");
+      expect(plain.post.calls).toEqual([]);
+    });
+
+    it("asks once more after a race inside the product (409)", async () => {
+      const lists: Record<string, string[]> = {};
+      const h = await make({ issuers: true, renders: DOMAIN, post: fakePost(lists, [409]) });
+      expect(getRun(h.db.db, await set(h, DOMAIN))?.status).toBe("succeeded");
+      expect(h.post.calls).toHaveLength(2);
+      expect(lists[DOMAIN]).toEqual([ISSUER]);
+    });
+
+    it("refuses at the plan without a kept key, and fails naming the repair when the product refuses the key or holds none", async () => {
+      await expect(set(await make({ issuers: true, kept: false }), DOMAIN)).rejects.toThrow(/keeps no key for post \(prod\).*"Secrets…" on post \(prod\)/);
+      for (const [status, says] of [[401, /refused the key the Manager keeps for it \(401\)/], [503, /holds no Manager key yet \(503\)/], [404, /does not know customer\.test as a sender domain/]] as const) {
+        const h = await make({ issuers: true, renders: DOMAIN, post: fakePost({}, [status]) });
+        const runId = await set(h, DOMAIN);
+        expect(getRun(h.db.db, runId)?.status).toBe("failed");
+        expect(readEvents(h.db.db, runId).map((e) => e.text).join("\n")).toMatch(says);
+        expect(await h.registered()).toBe("");
+      }
+    });
   });
 
   it("refuses a domain whose mail is not signed, one the product does not know, and a product that declares no check", async () => {

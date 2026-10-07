@@ -16,6 +16,8 @@ import { HttpActivator } from "./adapters/activation/activation-http.ts";
 import type { Activator } from "./adapters/activation/port.ts";
 import { HttpPublicProbe } from "./adapters/http-probe/http-probe.ts";
 import type { PublicProbe } from "./adapters/http-probe/port.ts";
+import { HttpUnitCall } from "./adapters/unit-call/unit-call.ts";
+import type { UnitCall } from "./adapters/unit-call/port.ts";
 import { HttpGitHubConsumer } from "./adapters/github-consumer/github-consumer-http.ts";
 import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
 import { VaultSelfSeeder } from "./adapters/vault/vault-self-seeder.ts";
@@ -36,6 +38,8 @@ export interface UnitPorts {
   /** The relocation surface both families' backup/restore/migrate share: the public probe the
    *  quiesce is measured with, and the staging area and job image the keys configure. */
   relocation: { probe: PublicProbe; storageBox?: StorageBoxAccess; dbtoolsImage?: string };
+  /** A call to a unit's stage as the Manager itself, with the key it keeps for that stage. */
+  unitCall: UnitCall;
 }
 
 export const unitPlugin: Plugin<typeof UnitEnv> = {
@@ -55,6 +59,7 @@ export const unitPlugin: Plugin<typeof UnitEnv> = {
       activator: new HttpActivator(),
       seeder: new VaultSelfSeeder(vault ? { self: { addr: vault.addr, k8sAuthMount: vault.k8sAuthMount, k8sRole: vault.k8sRole, saTokenPath: vault.saTokenPath } } : {}),
       github: new HttpGitHubConsumer(),
+      unitCall: new HttpUnitCall(),
       relocation: {
         probe: new HttpPublicProbe(),
         ...(config.storageBox ? { storageBox: config.storageBox } : {}),

@@ -64,7 +64,7 @@ describe("the plugins this product compiles", () => {
     const wiring = active[0]!.wiring;
     expect(wiring.definitions).toEqual([]);
     const ports = unitPorts(wiring.provides);
-    expect(Object.keys(ports).sort()).toEqual(["activator", "github", "relocation", "seeder"]);
+    expect(Object.keys(ports).sort()).toEqual(["activator", "github", "relocation", "seeder", "unitCall"]);
     expect(ports.relocation.storageBox).toBeUndefined();
     expect(ports.relocation.dbtoolsImage).toBeUndefined();
 

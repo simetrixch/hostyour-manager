@@ -274,7 +274,7 @@ export function buildUnits(
   // The unit check's slot: the consumer family's probes are registered first, the order the check has
   // always walked the families in, and read the consumer onboarding's ports late like the builds do.
   const unitProbes: UnitProbes[] = resolveUnitApex ? [consumerUnitProbes({ onboard: () => lateBuild.onboard, resolveUnitApex, githubApp })] : [];
-  const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, unitProbes, githubApp);
+  const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, unitProbes, githubApp, unit.unitCall);
   const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp, unit.github);
   if (consumer.onboardPorts) {
     lateBuild.onboard = consumer.onboardPorts;

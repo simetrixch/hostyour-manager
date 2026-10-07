@@ -69,6 +69,7 @@ import { makeTenantNightlyBackupDef } from "../domains/units/nightly-backup.run.
 import { makeTenantRestoreDef } from "../domains/units/restore.run.ts";
 import { makeTenantMigrateDef } from "../domains/units/migrate.run.ts";
 import { getRunEnding } from "../executor/read.ts";
+import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
 
 // A whole tenant fan-out (base + trio + N per-app stacks) has more to converge than a single consumer
 // app, so it gets a longer budget before the set-watch fails loudly.
@@ -162,6 +163,8 @@ export function buildTenantOnboarding(
   /** The platform's GitHub App — the identity the deploy repository is read and written with, and a tenant's
    *  own repository is created with. */
   githubApp: GitHubApp,
+  /** Calls a unit's stage as the Manager: the sender-domain run binds a stage's issuer with it. */
+  unitCall: UnitCall,
 ): TenantFamily {
   // The platform repo coordinates are required: every member AppProject must allow the `$values`
   // source its Application pulls from, and a project written without it would fail every sync.
@@ -366,7 +369,7 @@ export function buildTenantOnboarding(
     // A move to a newer engine line takes an online backup first, so it carries the relocation surface.
     makeTenantLineMoveDef({ ...onboardPorts, relocation: tenantRelocationPorts }),
     // The tenant's sender domain: the product's manifest names the check, the public probe asks it.
-    makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe }),
+    makeTenantSetSenderDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, unitCall, store }),
     makeTenantSetDisplayNameDef(onboardPorts),
     makeTenantSetDemoDef(onboardPorts),
     // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App

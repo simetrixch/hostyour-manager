@@ -16,6 +16,9 @@ import { memberApplication, rendersTenantValue } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { readTenantSpec } from "./tenant-apps-repo.run.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
+import { changeStageIssuer, refuseWithoutKey, stageServiceIssuer, type SenderDomainIssuers } from "./tenant-sender-domain-issuer.ts";
 
 // `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as.
 // A customer sends from its own domain (the company tenant from simetrix.ch) instead of
@@ -29,6 +32,13 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 //
 // WHAT THE RUN WAITS FOR: every member Application Synced + Healthy on a comparison that renders the
 // new value, so a green run is the domain in use and not a commit nobody has looked at yet.
+//
+// THE ISSUER. Where the product declares senderDomainIssuers, its mail service lets the stage's service
+// issuer send from the new domain before any member sends as it, and stops letting it send from the
+// previous one once every member has switched (tenant-sender-domain-issuer.ts); that removal is the
+// run's last step, so nothing after it can fail and ask for it back. Both steps stand in
+// every plan and do nothing where there is nothing to bind, so the plan's step list never depends on
+// the product's manifest.
 
 const senderDomain = z.union([z.literal(""), publicFqdn]);
 
@@ -44,7 +54,47 @@ export type TenantSetSenderDomainParams = z.infer<typeof TenantSetSenderDomainPa
 export type TenantSetSenderDomainPorts = TenantOnboardPorts & {
   /** Asks the product's sender-domain check from the outside. */
   probe: PublicProbe;
+  /** Calls the product's issuer route as the Manager, with the key it keeps for the unit's stage. */
+  unitCall: UnitCall;
+  /** Where the plan looks for that key; a step opens it through its own context. */
+  store: Pick<CredentialStore, "list">;
 };
+
+/** The tenant's public apex, off its cluster's values chain. */
+async function tenantUnitApex(ports: TenantSetSenderDomainPorts, tc: TenantCluster): Promise<string> {
+  return unitApexFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
+}
+
+/** Adds or removes the stage's issuer at `domain` through the product's route; null where the product
+ *  declares none. */
+async function changeIssuerAt(
+  ports: TenantSetSenderDomainPorts,
+  ctx: Parameters<Step["run"]>[0],
+  p: TenantSetSenderDomainParams,
+  domain: string,
+  change: "add" | "remove",
+): Promise<{ changed: boolean; issuer: string; route: SenderDomainIssuers; stage: string } | null> {
+  const route = (await readTenantSpec(ports, {}))?.senderDomainIssuers;
+  if (!route) return null;
+  const tc = loadTenantCluster(ctx.db, p.tenantId);
+  const unitApex = await tenantUnitApex(ports, tc);
+  const issuer = stageServiceIssuer(tc, unitApex);
+  const changed = await changeStageIssuer({ store: ctx.creds, unitCall: ports.unitCall }, { route, stage: tc.stage, unitApex, domain, issuer, change, runId: ctx.runId, signal: ctx.signal });
+  return { changed, issuer, route, stage: tc.stage };
+}
+
+/** On abort: take back the issuer this run's bind-issuer added. Registered only where it added one. */
+function unbindIssuerCleanup(ports: TenantSetSenderDomainPorts, p: TenantSetSenderDomainParams): Cleanup {
+  return {
+    name: "unbind-issuer",
+    title: `Stop the service issuer sending from ${p.senderDomain}`,
+    run: async (ctx) => {
+      const done = await changeIssuerAt(ports, ctx, p, p.senderDomain, "remove");
+      if (!done) throw errValidation(`the product no longer declares senderDomainIssuers, so the issuer this run bound at ${p.senderDomain} stays — remove it in the product's mail service`);
+      ctx.log("meta", `${done.route.unit} (${done.stage}) no longer lets ${done.issuer} send from ${p.senderDomain}`);
+    },
+  };
+}
 
 async function writeSenderDomain(ports: TenantSetSenderDomainPorts, tc: TenantCluster, db: Parameters<Step["run"]>[0]["db"], domain: string, runId: string): Promise<string> {
   const { commit } = await ports.registrations.setSenderDomain(tc.stage, tc.guid, domain, runId);
@@ -72,10 +122,9 @@ function restoreSenderDomainCleanup(ports: TenantSetSenderDomainPorts, p: Tenant
 }
 
 /** Why the product's check refuses `domain`, or null where mail from it is signed. */
-async function refuseUnsigned(ports: TenantSetSenderDomainPorts, tc: TenantCluster, domain: string): Promise<string | null> {
-  const template = (await readTenantSpec(ports, {}))?.senderDomainCheck;
+async function refuseUnsigned(ports: TenantSetSenderDomainPorts, tc: TenantCluster, template: string | undefined, domain: string): Promise<string | null> {
   if (!template) return "the product declares no senderDomainCheck in its tenant spec, so no tenant of it sends from a domain of its own";
-  const apex = stageApex(unitApexFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage)), tc.stage);
+  const apex = stageApex(await tenantUnitApex(ports, tc), tc.stage);
   const url = template.replaceAll("{stageApex}", apex).replaceAll("{domain}", encodeURIComponent(domain));
   const answer = await ports.probe.probe(url, { readBody: true });
   if (answer.status === 404) return `the product does not know ${domain} as a sender domain (${url} answered 404) — register it in the product's mail service first`;
@@ -99,6 +148,25 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
         const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
         const state = assertDeployState(await clusterReader.readDeployState(), tc.domain, "tenant");
         ctx.log("meta", `target ${tc.domain} attested for ${tc.guid} at ${tc.stage} — deploy-state generation ${state.generation}`);
+      },
+    },
+    {
+      name: "bind-issuer",
+      title: `Let the stage's service issuer send from ${p.senderDomain || "the platform's own domain"}`,
+      run: async (ctx) => {
+        if (p.senderDomain === "") {
+          ctx.log("meta", "the platform's own domain admits a tenant's identity provider by its DNS mark — nothing to bind");
+          return;
+        }
+        const done = await changeIssuerAt(ports, ctx, p, p.senderDomain, "add");
+        if (!done) {
+          ctx.log("meta", `the product declares no senderDomainIssuers — the stage's issuer is bound at ${p.senderDomain} in its mail service by hand`);
+          return;
+        }
+        if (done.changed) ctx.registerCleanup(unbindIssuerCleanup(ports, p));
+        ctx.log("meta", done.changed
+          ? `${done.route.unit} (${done.stage}) lets ${done.issuer} send from ${p.senderDomain}`
+          : `${done.route.unit} (${done.stage}) already let ${done.issuer} send from ${p.senderDomain} — left as it stood, and an abort leaves it`);
       },
     },
     {
@@ -132,6 +200,24 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
         ctx.log("meta", `tenant ${tc.guid}: every member sends as ${p.senderDomain || "the platform's own domain"}`);
       },
     },
+    {
+      name: "unbind-previous-issuer",
+      title: `Stop the stage's service issuer sending from ${p.previous && p.previous !== p.senderDomain ? p.previous : "a former sender domain"}`,
+      run: async (ctx) => {
+        if (p.previous === "" || p.previous === p.senderDomain) {
+          ctx.log("meta", "no former sender domain of its own — nothing to take back");
+          return;
+        }
+        const done = await changeIssuerAt(ports, ctx, p, p.previous, "remove");
+        if (!done) {
+          ctx.log("meta", `the product declares no senderDomainIssuers — the stage's issuer stays bound at ${p.previous} until it is removed in its mail service`);
+          return;
+        }
+        ctx.log("meta", done.changed
+          ? `${done.route.unit} (${done.stage}) no longer lets ${done.issuer} send from ${p.previous}`
+          : `${done.route.unit} (${done.stage}) did not let ${done.issuer} send from ${p.previous} — nothing to take back`);
+      },
+    },
   ];
 }
 
@@ -147,9 +233,21 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       if (row && (TENANT_SETTLED_STATUS as readonly string[]).includes(row.status)) throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing runs to send mail for`);
       if (row?.suspended) throw errValidation(`tenant ${tc.subdomain} is suspended — its members render no workloads, so the wait could never end; resume it first`);
       if (tc.senderDomain !== params.previous) throw errValidation(`tenant ${tc.subdomain} sends as ${tc.senderDomain || "the platform's own domain"}, not ${params.previous || "the platform's own domain"} as this request says — ask again`);
+      const spec = await readTenantSpec(ports, {});
       if (params.senderDomain !== "") {
-        const refused = await refuseUnsigned(ports, tc, params.senderDomain);
+        const refused = await refuseUnsigned(ports, tc, spec?.senderDomainCheck, params.senderDomain);
         if (refused) throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — ${refused}`);
+      }
+      const route = spec?.senderDomainIssuers;
+      const unbinds = params.previous !== "" && params.previous !== params.senderDomain;
+      let issuerNote = "";
+      if (route && (params.senderDomain !== "" || unbinds)) {
+        const refused = await refuseWithoutKey(ports.store, route, tc.stage);
+        if (refused) throw errValidation(`tenant ${tc.subdomain} cannot change its sender domain — ${refused}`);
+        const issuer = stageServiceIssuer(tc, await tenantUnitApex(ports, tc));
+        issuerNote =
+          (params.senderDomain !== "" ? ` ${route.unit} first lets the stage's service issuer ${issuer} send from ${params.senderDomain}.` : "") +
+          (unbinds ? ` Once every member renders the change, ${route.unit} stops letting ${issuer} send from ${params.previous}.` : "");
       }
       const steps = tenantSetSenderDomainSteps(ports, params);
       return {
@@ -160,7 +258,8 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
           `Send the mail of tenant ${tc.guid} (${tc.domain}, ${tc.stage}) as ${params.senderDomain ? `no-reply@${params.senderDomain}` : "the platform's own domain"}` +
           `${params.previous === params.senderDomain ? " (unchanged, re-applied)" : `, instead of ${params.previous || "the platform's own domain"}`}` +
           `: record it on the registration and the row, then wait until every member is Synced + Healthy rendering it.` +
-          `${params.senderDomain ? ` The product's check answered that mail from ${params.senderDomain} is signed. The domain's SPF record must allow the platform's mail server, which is the domain owner's to set.` : ""}`,
+          `${params.senderDomain ? ` The product's check answered that mail from ${params.senderDomain} is signed. The domain's SPF record must allow the platform's mail server, which is the domain owner's to set.` : ""}` +
+          issuerNote,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -169,6 +268,6 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       };
     },
     steps: (params) => tenantSetSenderDomainSteps(ports, params),
-    cleanups: (params) => [restoreSenderDomainCleanup(ports, params)],
+    cleanups: (params) => [restoreSenderDomainCleanup(ports, params), unbindIssuerCleanup(ports, params)],
   };
 }
