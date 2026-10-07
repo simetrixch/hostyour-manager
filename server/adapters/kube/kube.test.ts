@@ -165,6 +165,34 @@ describe("KubeMasterArgoReader.watchApplication (poll loop: until / failFast / b
     expect(s.message).toBe("successfully synced (all tasks run)"); // untouched: `message` prefers the operation's text, which would hide the condition
     expect(mapArgoStatus({ status: { sync: { status: "Synced" }, health: { status: "Healthy" } } })).not.toHaveProperty("deletionError");
   });
+
+  // ArgoCD also sets DeletionError while it prunes an object another deletion already removed: the
+  // delete answers NotFound, ArgoCD retries, and the prune finishes on its own.
+  const ALREADY_GONE = 'networkpolicies.networking.k8s.io "mariadb-allow-internal" not found';
+  const deleting = (message: string): ArgoAppStatus => mapArgoStatus({ status: {
+    sync: { status: "Unknown" }, health: { status: "Progressing" }, conditions: [{ type: "DeletionError", message }],
+  } });
+
+  it("PLANTED: reads a DeletionError that only says a managed object is already gone as no deletion error", () => {
+    expect(deleting(ALREADY_GONE)).not.toHaveProperty("deletionError");
+    expect(deleting('configmaps "app-settings" not found')).not.toHaveProperty("deletionError");
+  });
+
+  it("PLANTED: the removal watch keeps waiting through that message and ends when the app is Missing", async () => {
+    const missing: ArgoAppStatus = { syncRevision: null, targetRevision: null, sync: "Unknown", health: "Missing" };
+    const { reader, calls } = stubbedReader([deleting(ALREADY_GONE), missing]);
+    const gone = (s: ArgoAppStatus): boolean => s.health === "Missing";
+    const s = await reader.watchApplication("argocd", "acme-test", gone, { failFast: (st) => st.deletionError !== undefined });
+    expect(gone(s)).toBe(true);
+    expect(calls()).toBe(2);
+  });
+
+  it("still reports a deletion that cannot finish: the app's own project gone, alone or wrapped, or any other error", () => {
+    for (const message of [DELETION_ERROR, 'appproject.argoproj.io "acme-prod" not found', 'appprojects.argoproj.io "acme-prod" not found',
+      `${ALREADY_GONE}; failed to remove finalizer`, 'admission webhook "policy" denied the request']) {
+      expect(deleting(message).deletionError).toBe(message);
+    }
+  });
 });
 
 describe("FakeMasterArgoReader", () => {

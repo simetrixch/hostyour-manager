@@ -152,7 +152,16 @@ function argoMessage(status: RawArgoApp["status"]): string | undefined {
  *  Undefined otherwise, so the port field stays absent (exactOptionalPropertyTypes). */
 function argoDeletionError(status: RawArgoApp["status"]): string | undefined {
   const c = (status?.conditions ?? []).find((c) => c.type === "DeletionError");
-  return typeof c?.message === "string" && c.message !== "" ? c.message : undefined;
+  return typeof c?.message === "string" && c.message !== "" && !isAlreadyGone(c.message) ? c.message : undefined;
+}
+
+/** ArgoCD also sets DeletionError while it prunes an object another deletion already removed: the
+ *  delete answers Kubernetes' NotFound (`<resource> "<name>" not found`, the whole message), ArgoCD
+ *  retries, and the prune finishes on its own. The app's own AppProject is the exception: without it
+ *  ArgoCD can delete nothing, so that NotFound stays a deletion that cannot finish. */
+function isAlreadyGone(message: string): boolean {
+  const notFound = /^([a-z0-9.-]+) "[^"]+" not found$/.exec(message);
+  return notFound !== null && !/^appprojects?\.argoproj\.io$/.test(notFound[1]!);
 }
 
 /** The phase of the app's last sync operation (`status.operationState.phase`) — a non-empty string
