@@ -166,6 +166,40 @@ describe("tenant-purge-app run", () => {
     expect(appRow("tnt_1", "web")).toBeUndefined();
   });
 
+  it("PLANTED DEFECT: reads the tenant's own cluster though it is not active, and deletes what stands there", async () => {
+    seedTenants();
+    db.db.update(clusters).set({ status: "rebuilding" }).where(eq(clusters.id, "cls_1")).run();
+    const { ports, projects, cluster } = await world();
+    await runAll(makePurgeAppDef(ports));
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeUndefined();
+    expect(cluster.deletedAdmissionPolicies).toEqual([tenantMemberAdmissionPolicyName(GUID, "web", "prod")]);
+  });
+
+  it("names a former cluster it cannot read, leaves what may stand there, and purges the rest", async () => {
+    seedTenants();
+    db.db.insert(servers).values({ id: "srv_2", name: "m2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
+    const { ports, projects } = await world();
+    const unreachable = new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 } });
+    unreachable.readNamespaceAnnotations = async () => { throw new Error("connect ECONNREFUSED"); };
+    (ports.resolver as FakeClusterKubeResolver).set("cls_2", { clusterReader: unreachable, argoReader: new FakeMasterArgoReader({}), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "s2" });
+    const def = makePurgeAppDef(ports);
+    const plan = await def.plan(PARAMS, { db: db.db });
+    expect(plan.summary).toContain("not read: s2.example — connect ECONNREFUSED; its AppProject and policy, if any, stay");
+    const logs: string[] = [];
+    await runAll(def, logs);
+    expect(logs.join("\n")).toContain("not read: s2.example — connect ECONNREFUSED");
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeUndefined();
+    expect(appRow("tnt_1", "web")).toBeUndefined();
+  });
+
+  it("PLANTED DEFECT: fails where the tenant's own cluster cannot be read", async () => {
+    seedTenants();
+    const { ports, cluster } = await world();
+    cluster.readNamespaceAnnotations = async () => { throw new Error("connect ECONNREFUSED"); };
+    await expect(makePurgeAppDef(ports).plan(PARAMS, { db: db.db })).rejects.toThrow("connect ECONNREFUSED");
+  });
+
   it("names only the record where nothing else of the app stands, and deletes it", async () => {
     seedTenants();
     const { ports } = await world({ project: false, policy: false, vaultKeys: [] });

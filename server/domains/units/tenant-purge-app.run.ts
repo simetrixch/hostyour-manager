@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, ne } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -43,10 +43,12 @@ interface ClusterLeftovers {
   policy?: string;
 }
 
-/** What of the app still stands and the purge deletes: per cluster, and its Vault keys. */
+/** What of the app still stands and the purge deletes: per cluster, and its Vault keys; and each former
+ *  cluster that could not be read, with why. */
 interface AppLeftovers {
   clusters: ClusterLeftovers[];
   vaultKeys: string[];
+  unread: string[];
 }
 
 /** Every check a purge needs before it deletes, read now: the tenant stands, the app is offboarded,
@@ -63,32 +65,43 @@ async function readLeftovers(ports: TenantLifecyclePorts, db: Db, tenantId: stri
     throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: the registration still names it — remove the app first`);
   }
   if (!ports.seeder) throw errValidation(`this Manager cannot read Vault, so it cannot see whether app "${app}" of tenant ${tc.guid} still has a key there`);
-  // EVERY active cluster, the tenant's own first: a move before every app row's objects were cleared
-  // left a removed app's AppProject and policy on the former cluster, and nothing records which one.
-  // The names carry the guid, the app and the stage, so on another cluster they are this app's alone.
-  const active = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.status, "active")).all();
-  const order = [...active.filter((c) => c.id === tc.clusterId), ...active.filter((c) => c.id !== tc.clusterId)];
+  // The tenant's own cluster, whatever its status, then every other active one: a move before every app
+  // row's objects were cleared left a removed app's AppProject and policy on the former cluster, and
+  // nothing records which one. The names carry the guid, the app and the stage, so on another cluster
+  // they are this app's alone. The own cluster must be read; another one that cannot be is named, and
+  // what may stand on it stays there for a later purge.
+  const own = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.id, tc.clusterId)).all();
+  const others = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(and(eq(clusters.status, "active"), ne(clusters.id, tc.clusterId))).all();
   const namespace = memberNamespace(tc.guid, app, tc.stage);
   const application = memberApplication(tc.guid, app, tc.stage);
   const project = memberAppProject(tc.guid, app, tc.stage);
   const policy = tenantMemberAdmissionPolicyName(tc.guid, app, tc.stage);
   const deployed: string[] = [];
   const onClusters: ClusterLeftovers[] = [];
-  for (const cluster of order) {
+  const unread: string[] = [];
+  const read = async (cluster: { id: string; domain: string }, former: boolean): Promise<void> => {
     const { clusterReader, argoReader, projectWriter, argoNamespace } = await ports.resolver.resolve(cluster.id);
-    const where = cluster.id === tc.clusterId ? "" : ` on ${cluster.domain}`;
+    const where = former ? ` on ${cluster.domain}` : "";
     if (await clusterReader.readNamespaceAnnotations(namespace)) deployed.push(`namespace ${namespace}${where}`);
     if (await argoReader.getApplication(argoNamespace, application)) deployed.push(`ArgoCD Application ${application}${where}`);
     const left: ClusterLeftovers = {
       clusterId: cluster.id,
-      ...(where ? { former: cluster.domain } : {}),
+      ...(former ? { former: cluster.domain } : {}),
       ...((await projectWriter.appProjectExists(argoNamespace, project)) ? { project } : {}),
       ...((await clusterReader.admissionPolicyExists(policy)) ? { policy } : {}),
     };
     if (left.project || left.policy) onClusters.push(left);
+  };
+  for (const cluster of own) await read(cluster, false);
+  for (const cluster of others) {
+    try {
+      await read(cluster, true);
+    } catch (err) {
+      unread.push(`${cluster.domain} — ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
   if (deployed.length > 0) throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: ${deployed.join("; ")} — remove the app first`);
-  return { tc, left: { clusters: onClusters, vaultKeys: await ports.seeder.listTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) } };
+  return { tc, left: { clusters: onClusters, vaultKeys: await ports.seeder.listTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }), unread } };
 }
 
 const describeLeftovers = (tc: TenantCluster, left: AppLeftovers): string[] => [
@@ -98,6 +111,10 @@ const describeLeftovers = (tc: TenantCluster, left: AppLeftovers): string[] => [
   }),
   ...left.vaultKeys.map((key) => `Vault key ${tc.stage}/tenants/${tc.guid}/${key}`),
 ];
+
+/** The former clusters that could not be read, said where the person approves and in the run's log. */
+const unreadNote = (left: AppLeftovers): string =>
+  left.unread.map((u) => `; not read: ${u}; its AppProject and policy, if any, stay`).join("");
 
 function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): Step[] {
   const { tenantId, app } = params;
@@ -116,7 +133,7 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
         }
         const { deleted } = left.vaultKeys.length > 0 ? await ports.seeder!.deleteTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) : { deleted: [] };
         const gone = describeLeftovers(tc, { ...left, vaultKeys: deleted });
-        ctx.log("meta", gone.length > 0 ? `app "${app}" of tenant ${tc.guid}: deleted ${gone.join(", ")}` : `app "${app}" of tenant ${tc.guid}: nothing but its record stood`);
+        ctx.log("meta", (gone.length > 0 ? `app "${app}" of tenant ${tc.guid}: deleted ${gone.join(", ")}` : `app "${app}" of tenant ${tc.guid}: nothing but its record stood`) + unreadNote(left));
       },
     },
     {
@@ -149,7 +166,7 @@ export function makePurgeAppDef(ports: TenantLifecyclePorts): RunDefinition<Remo
         kind: "tenant-purge-app",
         targetKind: "tenant",
         targetId: params.tenantId,
-        summary: `Purge the offboarded app "${params.app}" of tenant ${tc.guid} (${tc.stage}): ${pieces.length > 0 ? `delete ${pieces.join(", ")}, then its record` : "nothing else of it stands; delete its record"}`,
+        summary: `Purge the offboarded app "${params.app}" of tenant ${tc.guid} (${tc.stage}): ${pieces.length > 0 ? `delete ${pieces.join(", ")}, then its record` : "nothing else of it stands; delete its record"}${unreadNote(left)}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
