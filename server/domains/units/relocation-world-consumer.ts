@@ -304,7 +304,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           unit = { name: s.name, repoURL: s.repoURL, ...(s.owner ? { owner: s.owner } : {}), ...(s.onboardedAt ? { onboardedAt: s.onboardedAt } : {}), suspended: s.suspended, quiesced: s.quiesced };
           builds = s.builds ?? [];
         } else {
-          const read = await readDeclaredManifest(ports, (org) => readOwnerIdentity(c.db, org), entry.repoURL, c.signal);
+          const read = await readDeclaredManifest(ports, (org) => readOwnerIdentity(c.db, org), entry.repoURL, ac.stage, c.signal);
           if (read.outcome === "refused") throw errValidation(read.why);
           const manifestBuilds = read.manifest.builds.map((b) => b.name);
           await assertBuildNamesFree(ports.registrations, entry.name, manifestBuilds);

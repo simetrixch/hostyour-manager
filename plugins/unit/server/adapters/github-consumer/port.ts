@@ -193,7 +193,7 @@ export interface GitHubConsumer {
   /** ONE file of the repository at its default branch, as text (GET /repos/{owner}/{repo}/contents/
    *  {path}, raw), or null where it carries none — what the wizard's prefill reads the `.npmrc` with
    *  to know whether the owner's packages reader is needed (#237), before any clone exists. */
-  readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null>;
+  readFile(input: { owner: string; repo: string; path: string; token: string; ref?: string; signal?: AbortSignal }): Promise<string | null>;
 
   /** Every tag of the repository with the commit it names (paginated): the next-version read keeps
    *  the names in the release grammar (shared/release.ts nextReleaseVersion), and putting a release

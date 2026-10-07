@@ -29,6 +29,7 @@ export interface ConsumerSecretKeyView {
  *  key its manifest declares, read as the set-secrets plan reads it. */
 export interface ConsumerSecretOfferView {
   keys: ConsumerSecretKeyView[];
+  note?: string;
 }
 
 /** A credential of an owner the wizard asks for where the measurement demands it: recorded

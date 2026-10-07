@@ -28,7 +28,7 @@ export async function planRestoreSecrets(
   if (stands) {
     return { requiredSecrets: [], warnings: [] };
   }
-  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), unit.repoURL, signal);
+  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), unit.repoURL, unit.stage, signal);
   if (read.outcome === "refused") {
     throw errValidation(read.why);
   }
@@ -42,6 +42,7 @@ export async function planRestoreSecrets(
   const requiredSecrets = read.secrets.filter((s) => isOperatorSecret(s) && s.required).map((s) => `consumer-secret:${s.key}`);
   const path = `${KV_MOUNT}/${unit.stage}/consumer/${unit.consumerName}/app`;
   const warnings = [
+    ...(read.fallback ? [read.fallback] : []),
     `the Manager holds no record of ${path} (an offboard removes it) — this restore seeds it where Vault holds none, create-only: ${requiredSecrets.length} typed by you, the rest minted or copied from the installation's store; if Vault holds the entry without a record here, your typed values are discarded and the standing entry stays`,
   ];
   return { requiredSecrets, warnings };
@@ -66,7 +67,7 @@ export async function seedRestoredSecrets(
     return;
   }
 
-  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(ctx.db, org), unit.repoURL, ctx.signal);
+  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(ctx.db, org), unit.repoURL, unit.stage, ctx.signal);
   if (read.outcome === "refused") {
     throw errValidation(read.why);
   }

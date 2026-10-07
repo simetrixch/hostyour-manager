@@ -9,6 +9,7 @@ import { FakeSeeder } from "./onboard.fixture.ts";
 import { planRestoreSecrets, seedRestoredSecrets, type RestoreSecretsPorts } from "./restore-seed-secrets.ts";
 import type { InstallationStore } from "#unit/server/adapters/vault/installation-store-port.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
@@ -106,13 +107,17 @@ afterEach(() => {
   db.sqlite.close();
 });
 
-function makePorts(seeder: RecordingSeeder, storeEntries: Record<string, Record<string, string>> = { "idp/clients/post": { "client-secret": STORE_SECRET_VALUE } }): RestoreSecretsPorts {
+function makePorts(
+  seeder: RecordingSeeder,
+  storeEntries: Record<string, Record<string, string>> = { "idp/clients/post": { "client-secret": STORE_SECRET_VALUE } },
+  gh?: GitHubConsumer,
+): RestoreSecretsPorts {
   return {
     seeder,
     installationStore: fakeStore(storeEntries),
-    github: {
+    github: gh ?? ({
       readFile: async () => MANIFEST_YAML,
-    } as unknown as GitHubConsumer,
+    } as unknown as GitHubConsumer),
     store: {
       open: async () => Buffer.from("ghp_fake_owner_token"),
       list: async () => [{ id: "cred_pat_acme", kind: "pat", subject: { kind: "owner", id: "acme-org" }, purpose: "repository-pat" }],
@@ -335,5 +340,14 @@ smtpEntry:
     expect(appRow?.k).toContain("-----BEGIN PUBLIC KEY-----");
     const privatePem = seeder.seeded[0]!.data["MAIL_DKIM_PRIVATE_KEY"]!;
     expect(appRow?.k).toBe(createPublicKey(privatePem).export({ type: "spki", format: "pem" }).toString());
+  });
+
+  it("reads the manifest at deploy/<stage>", async () => {
+    const seeder = new RecordingSeeder();
+    const fakeGh = new FakeGitHubConsumer();
+    fakeGh.seedFile("acme-org", "acme-app", "deploy/platform.yaml", MANIFEST_YAML);
+    const ports = makePorts(seeder, undefined, fakeGh);
+    await planRestoreSecrets(ports, db.db, { stage: "test", consumerName: "acme", repoURL: REPO_URL });
+    expect(fakeGh.fileReads).toContainEqual(expect.objectContaining({ path: "deploy/platform.yaml", ref: "deploy/test" }));
   });
 });

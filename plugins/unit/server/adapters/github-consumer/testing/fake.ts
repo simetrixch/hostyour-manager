@@ -96,12 +96,31 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   private readonly branches = new Map<string, BranchCommit>();
   /** owner/repo/path -> the text readFile answers; an unseeded path answers null (no such file). */
   private readonly files = new Map<string, string>();
+  /** owner/repo@ref/path -> the text readFile answers for a specific ref (null means absent on that ref). */
+  private readonly filesByRef = new Map<string, string | null>();
+  /** Every readFile call, recording the ref it was asked for. */
+  readonly fileReads: Array<{ owner: string; repo: string; path: string; ref?: string }> = [];
 
-  seedFile(owner: string, repo: string, path: string, text: string): void {
-    this.files.set(`${this.key(owner, repo)}/${path}`, text);
+  seedFile(owner: string, repo: string, path: string, text: string | null, ref?: string): void {
+    if (ref !== undefined) {
+      this.filesByRef.set(`${this.key(owner, repo)}@${ref}/${path}`, text);
+    } else {
+      if (text === null) {
+        this.files.delete(`${this.key(owner, repo)}/${path}`);
+      } else {
+        this.files.set(`${this.key(owner, repo)}/${path}`, text);
+      }
+    }
   }
 
-  async readFile(input: { owner: string; repo: string; path: string; token: string; signal?: AbortSignal }): Promise<string | null> {
+  async readFile(input: { owner: string; repo: string; path: string; token: string; ref?: string; signal?: AbortSignal }): Promise<string | null> {
+    this.fileReads.push({ owner: input.owner, repo: input.repo, path: input.path, ...(input.ref !== undefined ? { ref: input.ref } : {}) });
+    if (input.ref !== undefined) {
+      const refKey = `${this.key(input.owner, input.repo)}@${input.ref}/${input.path}`;
+      if (this.filesByRef.has(refKey)) {
+        return this.filesByRef.get(refKey)!;
+      }
+    }
     return this.files.get(`${this.key(input.owner, input.repo)}/${input.path}`) ?? null;
   }
   /** Every listReleaseTags call, so a test can assert which repositories the next-version read spanned. */

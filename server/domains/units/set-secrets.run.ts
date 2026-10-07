@@ -84,33 +84,64 @@ export interface SetSecretsPorts extends LifecyclePorts {
 /** What reads a consumer's manifest: the GitHub client and the owner's identity it reads with. */
 export type ManifestReadPorts = Pick<SetSecretsPorts, "github" | "store" | "githubApp">;
 
-/** Read the consumer manifest from its repository through the owner's identity. */
+export type ManifestReadOutcome =
+  | { outcome: "read"; manifest: ConsumerManifest; revision: `deploy/${string}` | "default"; fallback?: string }
+  | { outcome: "refused"; why: string };
+
+/** Read the consumer manifest from its repository through the owner's identity, first at the delivery
+ *  branch deploy/<stage>, falling back to the default branch head where absent. */
 export async function readDeclaredManifest(
   ports: ManifestReadPorts,
   owners: OwnerIdentityReader,
   repoURL: string,
+  stage: string,
   signal?: AbortSignal,
-): Promise<{ outcome: "read"; manifest: ConsumerManifest } | { outcome: "refused"; why: string }> {
+): Promise<ManifestReadOutcome> {
   const { owner, repo } = parseGitHubOwnerRepo(repoURL);
   const judged = await judgeRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, ...(signal ? { signal } : {}) });
   if ("refused" in judged) return { outcome: "refused", why: judged.refused };
   const identity = await resolveRepoIdentity({ repoURL, ...(ports.githubApp ? { githubApp: ports.githubApp as RepoIdentityApp } : {}), owners, store: ports.store, ...(signal ? { signal } : {}) });
-  const text = await ports.github.readFile({ owner, repo, path: CONSUMER_MANIFEST_PATH, token: identity.token, ...(signal ? { signal } : {}) });
-  if (text === null) return { outcome: "refused", why: `${repoURL} carries no ${CONSUMER_MANIFEST_PATH}` };
+  const deliveryRef = `deploy/${stage}` as const;
+  const read = (ref?: string) => ports.github.readFile({ owner, repo, path: CONSUMER_MANIFEST_PATH, token: identity.token, ...(ref ? { ref } : {}), ...(signal ? { signal } : {}) });
+  const deliveryText = await read(deliveryRef);
+  const text = deliveryText ?? (await read());
+  if (text === null) return { outcome: "refused", why: `${repoURL} carries no ${CONSUMER_MANIFEST_PATH}, at ${deliveryRef} or at its default branch` };
+  const revision = deliveryText !== null ? deliveryRef : "default";
   const parsed = ConsumerManifestSchema.safeParse(parseYaml(text));
-  if (!parsed.success) return { outcome: "refused", why: `${CONSUMER_MANIFEST_PATH} of ${repoURL} failed its schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` };
-  return { outcome: "read", manifest: parsed.data };
+  if (!parsed.success) return { outcome: "refused", why: `${CONSUMER_MANIFEST_PATH} of ${repoURL} (${revision}) failed its schema: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}` };
+  if (deliveryText !== null) return { outcome: "read", manifest: parsed.data, revision: deliveryRef };
+  return {
+    outcome: "read",
+    manifest: parsed.data,
+    revision: "default",
+    fallback: `${deliveryRef} carries no ${CONSUMER_MANIFEST_PATH} — the manifest was read at the default branch's head`,
+  };
 }
 
-/** WHAT THE REPOSITORY DECLARES NOW — the manifest at the default branch's head, read through the
- *  owner's identity, never the params frozen at onboarding: a key added since then is exactly what
- *  this run kind exists to carry. Refuses in the owner's words where no identity reads the
- *  repository or the manifest does not parse. */
-export async function readDeclaredSecrets(ports: ManifestReadPorts, owners: OwnerIdentityReader, repoURL: string, signal?: AbortSignal): Promise<{ outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string } | { outcome: "refused"; why: string }> {
-  const read = await readDeclaredManifest(ports, owners, repoURL, signal);
+export type SecretsReadOutcome =
+  | { outcome: "read"; secrets: ConsumerSecretSpec[]; dkimKey?: string; fallback?: string }
+  | { outcome: "refused"; why: string };
+
+/** WHAT THE REPOSITORY DECLARES NOW — the manifest at the delivery branch (or the default branch head as fallback),
+ *  read through the owner's identity, never the params frozen at onboarding: a key added since then is exactly what
+ *  this run kind exists to carry. Refuses in the owner's words where no identity reads the repository or the manifest
+ *  does not parse. */
+export async function readDeclaredSecrets(
+  ports: ManifestReadPorts,
+  owners: OwnerIdentityReader,
+  repoURL: string,
+  stage: string,
+  signal?: AbortSignal,
+): Promise<SecretsReadOutcome> {
+  const read = await readDeclaredManifest(ports, owners, repoURL, stage, signal);
   if (read.outcome === "refused") return read;
   const dkimKey = read.manifest.smtpEntry?.dkimKey;
-  return { outcome: "read", secrets: read.manifest.secrets, ...(dkimKey ? { dkimKey } : {}) };
+  return {
+    outcome: "read",
+    secrets: read.manifest.secrets,
+    ...(dkimKey ? { dkimKey } : {}),
+    ...(read.fallback ? { fallback: read.fallback } : {}),
+  };
 }
 
 /** The repository the consumer was onboarded from — the row's own field, the one this run reads the
@@ -126,9 +157,9 @@ function repoUrlOf(db: Db, appId: string): string {
  *  where it saw the onboarding write it; a consumer onboarded before the book has keys it cannot
  *  speak for, and says so. */
 export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: string, signal?: AbortSignal): Promise<ConsumerSecretOfferView> {
-  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), repoUrlOf(db, appId), signal);
-  if (read.outcome === "refused") throw errValidation(read.why);
   const ac = loadAppCluster(db, appId);
+  const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(db, org), repoUrlOf(db, appId), ac.stage, signal);
+  if (read.outcome === "refused") throw errValidation(read.why);
   const book = new Map(listSecretWrites(db, consumerSecretEntry(ac.stage, ac.name)).map((w) => [w.key, w]));
   const whole = [...book.values()].some((w) => w.act === "seeded");
   return {
@@ -146,6 +177,7 @@ export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: s
         ...(written ? { state: "set" as const, writtenAt: written.writtenAt.getTime() } : { state: whole ? ("never" as const) : ("unknown" as const) }),
       };
     }),
+    ...(read.fallback ? { note: read.fallback } : {}),
   };
 }
 
@@ -287,7 +319,7 @@ export function makeSetSecretsDef(ports: SetSecretsPorts): RunDefinition<SetSecr
       const req = z.object({ appId: z.string().startsWith("app_"), mint: z.array(z.string()).default([]) }).parse(rawParams);
       const ac = loadAppCluster(ctx.db, req.appId);
       const repoURL = repoUrlOf(ctx.db, req.appId);
-      const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(ctx.db, org), repoURL, ctx.signal);
+      const read = await readDeclaredSecrets(ports, (org) => readOwnerIdentity(ctx.db, org), repoURL, ac.stage, ctx.signal);
       if (read.outcome === "refused") {
         return { outcome: "rejected", summary: `The secrets of "${ac.name}" cannot be changed — ${read.why}`, planJson: { consumerName: ac.name } };
       }
@@ -317,8 +349,11 @@ export function makeSetSecretsDef(ports: SetSecretsPorts): RunDefinition<SetSecr
         locks: [{ resource: "master-kube", key: "m" }],
         // The Manager cannot ask Vault whether the entry already holds a key, so every mint is named
         // as the rotation it may be.
-        warnings: mint.map((s) =>
-          `${s.key} (${s.generate}) is minted new. Where ${entry} already holds ${s.key}, this rotates it, and whatever reads the old value breaks until it is updated — another consumer that holds it, or a DNS record that carries its public half.`),
+        warnings: [
+          ...(read.fallback ? [read.fallback] : []),
+          ...mint.map((s) =>
+            `${s.key} (${s.generate}) is minted new. Where ${entry} already holds ${s.key}, this rotates it, and whatever reads the old value breaks until it is updated — another consumer that holds it, or a DNS record that carries its public half.`),
+        ],
         requiredSecrets: [],
         // Every key is OPTIONAL: filling one is changing it, leaving it is keeping it.
         optionalSecrets: offered.map((s) => `${CONSUMER_SECRET_PREFIX}${s.key}`),

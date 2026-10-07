@@ -8,6 +8,7 @@ import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { seedCredentialRow } from "../../security/store.fixture.ts";
 import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 import { redact, unregisterScope } from "../../security/redact.ts";
@@ -251,5 +252,46 @@ smtpEntry:
     const logs: string[] = [];
     await makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL"], mint: [] })[2]!.run(ctx("refetch-secrets", {}, logs));
     expect(logs.some((l) => l.includes("holds no ExternalSecret"))).toBe(true);
+  });
+
+  it("reads the manifest at deploy/<stage> — keys present on the delivery branch but removed at default head are offered and planned", async () => {
+    db.db.insert(servers).values({ id: "srv_test", name: "m_test", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_test", serverId: "srv_test", stage: "test", domain: "test.example", name: "test", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_test", clusterId: "cls_test", name: "swissbookai-test", host: "swissbookai-test", stage: "test", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+
+    const manifestDefault = MANIFEST;
+    const manifestDelivery = `${MANIFEST}  - key: LEGACY_KEY\n    description: on deploy/test only\n    required: true\n`;
+
+    const fakeGh = new FakeGitHubConsumer();
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", manifestDefault);
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", manifestDelivery, "deploy/test");
+
+    const p = ports({ github: fakeGh });
+    const offer = await readSecretOffer(p, db.db, "app_test");
+    expect(offer.keys.map((k) => k.key)).toContain("LEGACY_KEY");
+
+    const def = makeSetSecretsDef(p);
+    const planned = await def.planStream!({ appId: "app_test" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+    if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+    expect(planned.params.keys).toContain("LEGACY_KEY");
+  });
+
+  it("falls back to default head when deploy/<stage> carries no manifest, noting it in offer and plan warnings", async () => {
+    db.db.insert(servers).values({ id: "srv_test2", name: "m_test2", host: "1.2.3.6", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_test2", serverId: "srv_test2", stage: "test", domain: "test2.example", name: "test2", status: "active" }).run();
+    db.db.insert(apps).values({ id: "app_test2", clusterId: "cls_test2", name: "swissbookai-test2", host: "swissbookai-test2", stage: "test", repoUrl: REPO, chartPath: "deploy/chart", provenance: "manager", status: "active" }).run();
+
+    const fakeGh = new FakeGitHubConsumer();
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", MANIFEST);
+    fakeGh.seedFile("ahkutun", "swissbookai", "deploy/platform.yaml", null, "deploy/test");
+
+    const p = ports({ github: fakeGh });
+    const offer = await readSecretOffer(p, db.db, "app_test2");
+    expect(offer.note).toBe("deploy/test carries no deploy/platform.yaml — the manifest was read at the default branch's head");
+
+    const def = makeSetSecretsDef(p);
+    const planned = await def.planStream!({ appId: "app_test2" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+    if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+    expect(planned.plan.warnings).toContain("deploy/test carries no deploy/platform.yaml — the manifest was read at the default branch's head");
   });
 });
