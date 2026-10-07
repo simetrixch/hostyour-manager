@@ -43,6 +43,9 @@ export function RunApproveForm(props: {
           ...secretVals,
           ...Object.fromEntries(requiredInputs.map((i) => [`activation-input:${i.field}`, inputVals[i.field] ?? ""])),
         });
+        // The typed secrets go out with this one request and are kept nowhere: an approve the server
+        // refuses (an ended session) leaves the page standing, and the person types them again.
+        setSecretVals({});
       }}
     >
       <div className="ceremony__head">

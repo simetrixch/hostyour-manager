@@ -27,6 +27,8 @@ export function DeploySlaveApproveForm(props: {
         e.preventDefault();
         if (!readyToApprove(run, supplied)) return;
         props.onApprove(approvePayload(run, supplied, stated));
+        // The typed secrets go out with this one request and are kept nowhere (RunApproveForm says why).
+        setSupplied({});
       }}
     >
       <div className="ceremony__head">
