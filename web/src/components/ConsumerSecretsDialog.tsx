@@ -55,7 +55,9 @@ export function ConsumerSecretsDialog(props: { name: string; appId: string; onCa
                   </td>
                   <td>{secretStateLabel(k)}</td>
                   <td>
-                    {k.kind === undefined ? (
+                    {k.fromStore !== undefined ? (
+                      <span className="muted">from the installation&apos;s store ({k.fromStore})</span>
+                    ) : k.kind === undefined ? (
                       <input
                         type="password"
                         className="input"

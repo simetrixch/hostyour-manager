@@ -16,6 +16,9 @@ export interface ConsumerSecretKeyView {
   mintRefused?: string;
   /** The other half of a keypair: the two are minted together or not at all. */
   pairWith?: string;
+  /** Where the installation's store holds the value the Manager copies in (`<entry>:<field>` below the
+   *  installation's stage); a key with it is neither typed nor minted in the dialog. */
+  fromStore?: string;
   /** What the book of secret writes knows: written by this Manager (`set`, at `writtenAt`), never
    *  written since the onboarding (`never`), or `unknown` for a consumer onboarded before the book. */
   state: "set" | "never" | "unknown";

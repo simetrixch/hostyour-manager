@@ -22,6 +22,8 @@ import { HttpGitHubConsumer } from "./adapters/github-consumer/github-consumer-h
 import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
 import { VaultSelfSeeder } from "./adapters/vault/vault-self-seeder.ts";
 import type { VaultSeeder } from "./adapters/vault/seeder-port.ts";
+import { VaultInstallationStore } from "./adapters/vault/vault-installation-store.ts";
+import type { InstallationStore } from "./adapters/vault/installation-store-port.ts";
 
 /** What the unit plugin provides the families: every port here is ONE instance for both. */
 export interface UnitPorts {
@@ -40,6 +42,9 @@ export interface UnitPorts {
   relocation: { probe: PublicProbe; storageBox?: StorageBoxAccess; dbtoolsImage?: string };
   /** A call to a unit's stage as the Manager itself, with the key it keeps for that stage. */
   unitCall: UnitCall;
+  /** The installation's own store, read as the Manager for a key a manifest declares `store`. Absent
+   *  where the Manager has no Vault login or no installation stage (MASTER_STAGE). */
+  installationStore?: InstallationStore;
 }
 
 export const unitPlugin: Plugin<typeof UnitEnv> = {
@@ -55,9 +60,12 @@ export const unitPlugin: Plugin<typeof UnitEnv> = {
   activate(core, env) {
     const config = unitConfig(env);
     const vault = core.config.vault;
+    const self = vault ? { addr: vault.addr, k8sAuthMount: vault.k8sAuthMount, k8sRole: vault.k8sRole, saTokenPath: vault.saTokenPath } : undefined;
+    const installationStage = core.config.master?.stage;
     const provides: UnitPorts = {
       activator: new HttpActivator(),
-      seeder: new VaultSelfSeeder(vault ? { self: { addr: vault.addr, k8sAuthMount: vault.k8sAuthMount, k8sRole: vault.k8sRole, saTokenPath: vault.saTokenPath } } : {}),
+      seeder: new VaultSelfSeeder(self ? { self } : {}),
+      ...(self && installationStage ? { installationStore: new VaultInstallationStore({ self, stage: installationStage }) } : {}),
       github: new HttpGitHubConsumer(),
       unitCall: new HttpUnitCall(),
       relocation: {

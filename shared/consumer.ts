@@ -263,8 +263,8 @@ export function unitNameFromRepoURL(repoURL: string): string {
 }
 
 /** One manifest secrets[] declaration (contract v1.3). `generate` marks a key the MANAGER
- *  mints at seed time (the operator is NEVER asked for it); a required key WITHOUT `generate` is
- *  operator-supplied. The mint kinds:
+ *  mints at seed time and `store` a key it copies from the installation's own store (the operator
+ *  is asked for neither); a required key with neither is operator-supplied. The mint kinds:
  *    hex32 / hex16 / uuid  — a single crypto-random value.
  *    rsa2048               — generate an RSA-2048 keypair; this key holds the PKCS#8 PEM private half.
  *    rsa2048-public        — this key holds the SPKI PEM public half of the keypair generated for the
@@ -292,8 +292,24 @@ export const ConsumerSecretSpecSchema = z.object({
     .string()
     .regex(/^[A-Z][A-Z0-9_]*$/)
     .optional(),
-});
+  // A value the installer minted into the installation's own store: field `field` of the entry
+  // secret/<installation stage>/<entry>, whatever the consumer's stage, because one installation runs
+  // one identity provider. The Manager checks it when it plans and copies it into the consumer's entry
+  // when it seeds; the installation's Vault policy must grant the Manager that one entry.
+  store: z
+    .object({
+      entry: z.string().regex(/^[a-z0-9-]+(\/[a-z0-9-]+)*$/, "a store path below the installation's stage, such as idp/clients/post"),
+      field: z.string().regex(/^[a-z0-9-]+$/, "one field name of the entry, such as client-secret"),
+    })
+    .strict()
+    .optional(),
+}).refine((s) => !(s.store && s.generate), { message: "a key comes either from the store or from generate, never both", path: ["store"] });
 export type ConsumerSecretSpec = z.infer<typeof ConsumerSecretSpecSchema>;
+
+/** Whether the operator types the key's value: neither minted by the Manager nor read from the store. */
+export function isOperatorSecret(spec: Pick<ConsumerSecretSpec, "generate" | "store">): boolean {
+  return !spec.generate && !spec.store;
+}
 
 /** One operator-supplied dynamic argument for a post-onboard activation call.
  *  `field` is the request-body key (e.g. "email"); `label` is the human prompt the onboard

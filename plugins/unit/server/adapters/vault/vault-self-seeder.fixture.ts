@@ -1,10 +1,12 @@
-// The fake Vault the VaultSelfSeeder tests talk to: an HTTP server that records every request and
-// answers with the status a test sets, and the Manager's own kubernetes-auth scaffold around it.
+// The fake Vault the tests of the unit plugin's Vault adapters talk to: an HTTP server that records
+// every request and answers with the status a test sets, and the Manager's own kubernetes-auth
+// scaffold around it.
 import { createServer, type Server } from "node:http";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { VaultSelfSeeder } from "./vault-self-seeder.ts";
+import type { VaultSelfAuth } from "./vault-self-login.ts";
 
 export interface Recorded {
   method: string;
@@ -19,8 +21,8 @@ export let server: Server;
 /** What the fake Vault answers and what it was asked, reset by every start. A test sets a field to
  *  replay a status: `dataPut` is what the KV-v2 data write answers (200: the entry did not exist and
  *  was created; a test replays Vault's cas-conflict with 400), `metaList` what a metadata LIST answers
- *  (404: no key stands under the folder), and `metaLists` what the LIST of one folder answers
- *  instead, by the folder's path below the mount. */
+ *  (404: no key stands under the folder), `metaLists` what the LIST of one folder answers
+ *  instead, by the folder's path below the mount, and `dataGet` what a KV-v2 data read answers. */
 export const vault = {
   base: "",
   recorded: [] as Recorded[],
@@ -29,10 +31,11 @@ export const vault = {
   dataPut: { status: 200, body: "{}" },
   metaList: { status: 404, body: "{}" },
   metaLists: {} as Record<string, { status: number; body: string }>,
+  dataGet: { status: 404, body: "{}" },
 };
 
 export function startVault(): Promise<void> {
-  Object.assign(vault, { base: "", recorded: [], loginStatus: 200, metaDeleteStatus: 200, dataPut: { status: 200, body: "{}" }, metaList: { status: 404, body: "{}" }, metaLists: {} });
+  Object.assign(vault, { base: "", recorded: [], loginStatus: 200, metaDeleteStatus: 200, dataPut: { status: 200, body: "{}" }, metaList: { status: 404, body: "{}" }, metaLists: {}, dataGet: { status: 404, body: "{}" } });
   server = createServer((req, res) => {
     let raw = "";
     req.on("data", (c) => (raw += c));
@@ -69,6 +72,11 @@ export function startVault(): Promise<void> {
         res.end();
         return;
       }
+      if (req.method === "GET" && req.url?.includes("/data/")) {
+        res.writeHead(vault.dataGet.status, { "content-type": "application/json" });
+        res.end(vault.dataGet.body);
+        return;
+      }
       if (req.method === "POST" && req.url?.includes("/data/")) {
         res.writeHead(vault.dataPut.status, { "content-type": "application/json" });
         res.end(vault.dataPut.body);
@@ -91,12 +99,15 @@ export function stopVault(): Promise<void> {
   return new Promise<void>((r) => server.close(() => r()));
 }
 
-/** Every write rides the Manager's OWN kubernetes-auth identity, so every test needs a real
+/** Every call rides the Manager's OWN kubernetes-auth identity, so every test needs a real
  *  ServiceAccount token file on disk — a scaffold torn down per test. */
-export function withSelf<T>(fn: (seeder: VaultSelfSeeder) => Promise<T>): Promise<T> {
+export function withSelfAuth<T>(fn: (self: VaultSelfAuth) => Promise<T>): Promise<T> {
   const dir = mkdtempSync(join(tmpdir(), "mgr-seeder-sa-"));
   const saTokenPath = join(dir, "token");
   writeFileSync(saTokenPath, "sa-jwt\n", "utf8");
-  const seeder = new VaultSelfSeeder({ self: { addr: vault.base, k8sAuthMount: "kubernetes", k8sRole: "manager", saTokenPath } });
-  return fn(seeder).finally(() => rmSync(dir, { recursive: true, force: true }));
+  return fn({ addr: vault.base, k8sAuthMount: "kubernetes", k8sRole: "manager", saTokenPath }).finally(() => rmSync(dir, { recursive: true, force: true }));
+}
+
+export function withSelf<T>(fn: (seeder: VaultSelfSeeder) => Promise<T>): Promise<T> {
+  return withSelfAuth((self) => fn(new VaultSelfSeeder({ self })));
 }

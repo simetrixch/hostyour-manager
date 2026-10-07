@@ -8,7 +8,7 @@ import { clusters } from "../../db/schema/inventory.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "../../../shared/release.ts";
 import { GateReportSchema } from "../../../shared/gates.ts";
-import { ConsumerSecretSpecSchema, ConsumerServiceSchema, ConsumerActivationSchema, RedisMaxmemoryPolicySchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, isOperatorSecret, ConsumerServiceSchema, ConsumerActivationSchema, RedisMaxmemoryPolicySchema, SmtpEntrySchema, consumerArgoAppName, consumerNamespace, consumerHostLabel, hostLabel } from "../../../shared/consumer.ts";
 import type { Activator } from "#unit/server/adapters/activation/port.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { activateStep } from "./onboard-activate.ts";
@@ -50,6 +50,8 @@ import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import type { GateRunner } from "../../adapters/gate-runner/port.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { sharedDataRefusal } from "./shared-data-guard.ts";
+import type { InstallationStore } from "#unit/server/adapters/vault/installation-store-port.ts";
+import { refuseMissingStoreSecrets } from "#unit/server/store-secrets.ts";
 
 // The "consumer-onboard" Run: check → registration → provision → inject → trigger → watch. The run kind
 // knows TWO forms of ONE step chain, and BOTH take the unit's STAGE as an input, held against the
@@ -165,6 +167,9 @@ export type OnboardParams = z.infer<typeof OnboardParams>;
  *  ArgoCD namespace for the target cluster (p.clusterId) at run time via the resolver, so a consumer
  *  onboarding to a slave reaches that slave while the master stays master-local. */
 export interface OnboardPorts extends BuildPorts {
+  /** The installation's own store, where a key the manifest declares `store` is read; absent, such a
+   *  manifest is refused at the plan. */
+  installationStore?: InstallationStore;
   runner: GateRunner;
   /** Every subdomain a TENANT stands at (TenantRegistrations over the deploy repository — a second repo, hence a
    *  port of its own). G23 refuses a unit name that is one of them: the consumer would serve exactly
@@ -530,14 +535,18 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
       // required non-generate keys. Specs hold key/required/generate, never a secret value, so
       // freezing them into params_json is safe.
       const secretSpecs = outcome.report.manifest?.secrets ?? [];
-      const requiredSecrets = secretSpecs.filter((s) => !s.generate && s.required).map((s) => `consumer-secret:${s.key}`);
+      // A key the installation's store holds is read now, so a missing entry refuses the plan and
+      // names it, and the operator is never asked for it.
+      const storeRefused = await refuseMissingStoreSecrets(ports.installationStore, secretSpecs);
+      if (storeRefused) return { outcome: "rejected", summary: `Onboarding "${req.consumerName}" was rejected — ${storeRefused}`, planJson: outcome.report };
+      const requiredSecrets = secretSpecs.filter((s) => isOperatorSecret(s) && s.required).map((s) => `consumer-secret:${s.key}`);
       // WHAT EACH VALUE IS, IN THE MANIFEST'S OWN WORDS (#244). A key name says what a value is
       // called, never what it is: "SMTP_URL" does not say that a user, a password, a host and a port
       // ride in one URL, and "S3_ACCESS_KEY_ID" does not say the customer's own object-storage
       // account issues it. The manifest's `description` says exactly that, and without this it
       // reached nobody: the operator typed into a list of bare key names.
       const secretHints = Object.fromEntries(
-        secretSpecs.filter((s) => !s.generate && s.required && s.description).map((s) => [`consumer-secret:${s.key}`, s.description as string]),
+        secretSpecs.filter((s) => isOperatorSecret(s) && s.required && s.description).map((s) => [`consumer-secret:${s.key}`, s.description as string]),
       );
       // A manifest-declared activation adds a final `activate` step + asks the operator for its
       // dynamic args at approve (the prompt fields become NON-secret `requiredInputs`, collected in the

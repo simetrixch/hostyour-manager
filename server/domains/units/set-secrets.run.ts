@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RunDefinition, Step, Plan, PlanStreamCtx, PlanStreamResult } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { consumerNamespace } from "../../../shared/consumer.ts";
-import { ConsumerSecretSpecSchema, type ConsumerSecretSpec } from "../../../shared/consumer.ts";
+import { ConsumerSecretSpecSchema, isOperatorSecret, type ConsumerSecretSpec } from "../../../shared/consumer.ts";
 import { loadAppCluster, type LifecyclePorts } from "./lifecycle.ts";
 import type { Db } from "../../db/client.ts";
 import { apps } from "../../db/schema/inventory.ts";
@@ -129,6 +129,7 @@ export async function readSecretOffer(ports: ManifestReadPorts, db: Db, appId: s
         ...(s.generate ? { kind: s.generate } : {}),
         ...(refused ? { mintRefused: refused } : {}),
         ...(partner ? { pairWith: partner } : {}),
+        ...(s.store ? { fromStore: `${s.store.entry}:${s.store.field}` } : {}),
         ...(written ? { state: "set" as const, writtenAt: written.writtenAt.getTime() } : { state: whole ? ("never" as const) : ("unknown" as const) }),
       };
     }),
@@ -249,9 +250,10 @@ function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
 }
 
 /** The keys a plan offers: every declared key the OPERATOR answers — a `generate` key is the
- *  Manager's to mint and is never asked for, at onboarding or here. */
+ *  Manager's to mint and a `store` key the installation's, and neither is asked for, at onboarding
+ *  or here. */
 export function operatorKeys(specs: readonly ConsumerSecretSpec[]): ConsumerSecretSpec[] {
-  return specs.filter((s) => !s.generate);
+  return specs.filter(isOperatorSecret);
 }
 
 export function makeSetSecretsDef(ports: SetSecretsPorts): RunDefinition<SetSecretsParams> {

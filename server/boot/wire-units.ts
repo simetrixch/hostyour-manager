@@ -52,6 +52,7 @@ import { buildTenantOnboarding, type TenantFollowWiring } from "./wire-tenants.t
 import type { Executor } from "../executor/executor.ts";
 import { consumerUnitProbes } from "../domains/units/consumer-unit-probes.ts";
 import type { UnitProbes } from "#unit/server/check-units.ts";
+import type { InstallationStore } from "#unit/server/adapters/vault/installation-store-port.ts";
 
 // The unit composition — the only place the real
 // unit adapters are constructed and handed to the Run families. Kept out of wire.ts to keep that
@@ -275,7 +276,7 @@ export function buildUnits(
   // always walked the families in, and read the consumer onboarding's ports late like the builds do.
   const unitProbes: UnitProbes[] = resolveUnitApex ? [consumerUnitProbes({ onboard: () => lateBuild.onboard, resolveUnitApex, githubApp })] : [];
   const tenant = buildTenantOnboarding(config, store, activator, logger, platformRepo, dns, resolveUnitApex, resolveClusterValueFiles, relocation, seeder, objectStore, kube, () => lateBuild.deps, unitProbes, githubApp, unit.unitCall);
-  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp, unit.github);
+  const consumer = buildConsumerOnboarding(config, store, activator, logger, platformRepo, dns, relocation, tenant.tenantRegistrations, seeder, kube, githubApp, unit.github, unit.installationStore);
   if (consumer.onboardPorts) {
     lateBuild.onboard = consumer.onboardPorts;
     lateBuild.deps = {
@@ -339,6 +340,8 @@ function buildConsumerOnboarding(
    *  + watch. The HMAC secret is fed to the manager as env (config.webhook.secret) because the seeder
    *  is write-only; absent ⇒ the onboard setup-webhook step fails loud (no hook → no build). */
   github: GitHubConsumer,
+  /** The installation's own store, for a key a consumer's manifest declares `store`. */
+  installationStore: InstallationStore | undefined,
 ): Family {
   if (!config.onboarding || !config.github || !platformRepo) return { defs: [], enabled: false };
 
@@ -437,6 +440,7 @@ function buildConsumerOnboarding(
       return tenantRegistrations.listTenantSubdomains();
     },
     seeder,
+    ...(installationStore ? { installationStore } : {}),
     resolver,
     // A CONSTANT, and the report says so rather than calling it a confirmation. Nothing here probes
     // the must-fail targets: this is the Manager's word that they were listening, and the leg is

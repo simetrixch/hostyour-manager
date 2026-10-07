@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind } from "./seeder-port.ts";
 import { TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
+import { vaultRevokeSelf, vaultSelfLogin, type VaultSelfAuth } from "./vault-self-login.ts";
 
 // The concrete VaultSeeder: write-only KV-v2 seed of a consumer's ceremony
 // secrets. Flow: login -> PUT the single "app" entry -> revoke the token. Never reads/lists; the
@@ -23,17 +23,6 @@ import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 //    — the calls here fail closed (403) until they are. That policy is IMPERATIVE (the
 //    deploy-platform-services program's vault seed, hostyour-deploy ansiwise/programs/), not ArgoCD-owned, so
 //    merging hostyour-cloud does not ship it: re-run deploy-platform-services on the master to widen it.
-
-/** The Manager's own Vault login facts (kubernetes-auth) — config.vault, the same surface the
- *  credential store's VaultKvClient authenticates with. Optional rather than required because a
- *  Manager without Vault is a real state (a dev process, the checks); absent ⇒ every write fails
- *  closed with a clear error instead of inventing an identity. */
-export interface VaultSelfAuth {
-  addr: string;
-  k8sAuthMount: string;
-  k8sRole: string;
-  saTokenPath: string;
-}
 
 export interface VaultSeederDeps {
   /** The Manager's own kubernetes-auth identity — the identity of every write in this adapter. */
@@ -332,31 +321,8 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
-  /** The Manager's OWN kubernetes-auth login against ITS Vault — the identity of every write
-   *  here. Fail-closed when the Manager carries no Vault login. */
-  private async login(): Promise<{ addr: string; token: string }> {
-    const self = this.deps.self;
-    if (!self) {
-      throw new VaultError(
-        "no Vault identity for this write: the Manager has no own Vault login (VAULT_ADDR unset) — refusing to continue",
-      );
-    }
-    let jwt: string;
-    try {
-      jwt = readFileSync(self.saTokenPath, "utf8").trim();
-    } catch (err) {
-      throw new VaultError(`manager ServiceAccount token not readable at ${self.saTokenPath}: ${err instanceof Error ? err.message : String(err)}`);
-    }
-    const res = await fetch(`${self.addr}/v1/auth/${self.k8sAuthMount}/login`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ role: self.k8sRole, jwt }),
-    });
-    if (!res.ok) throw new VaultError(`vault kubernetes login failed (${res.status})`, res.status);
-    const body = (await res.json()) as { auth?: { client_token?: string } };
-    const token = body.auth?.client_token;
-    if (!token) throw new VaultError("vault kubernetes login returned no client_token");
-    return { addr: self.addr, token };
+  private login(): Promise<{ addr: string; token: string }> {
+    return vaultSelfLogin(this.deps.self);
   }
 
   /** CREATE-ONLY write of the consumer's app entry (see seeder-port.ts). `cas: 0` tells Vault to
@@ -422,9 +388,8 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
-  private async revoke(addr: string, token: string): Promise<void> {
-    const res = await fetch(`${addr}/v1/auth/token/revoke-self`, { method: "POST", headers: { "x-vault-token": token } });
-    if (!res.ok) throw new VaultError(`vault token revoke-self failed (${res.status})`, res.status);
+  private revoke(addr: string, token: string): Promise<void> {
+    return vaultRevokeSelf(addr, token);
   }
 }
 

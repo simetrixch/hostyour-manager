@@ -25,6 +25,7 @@ import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { consumerSecretEntry, forgetSecretEntry, recordSecretWrites } from "../../db/secret-writes.ts";
+import { readStoreSecrets } from "#unit/server/store-secrets.ts";
 
 // The compensations below are IDEMPOTENT WITHOUT SWALLOWING: each one tolerates exactly the
 // "already absent" outcome (a read-first skip, or a delete that resolves deleted:false) and lets every
@@ -259,9 +260,12 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // excludes it); a required non-generate key MUST have been supplied at approve (fail closed);
       // an optional non-generate key is seeded only when supplied. All of it — including the RSA
       // keypair pairing + the complexity verification — is buildConsumerSecretData (secret-mint.ts).
+      // A `store` key is copied from the installation's store, read again here because no value
+      // rides the plan; the operator typed none of them.
+      const fromStore = await readStoreSecrets(ports.installationStore, p.secretSpecs);
       const { data, minted, publicKeys } = await buildConsumerSecretDataWithDerivations(
         p.secretSpecs,
-        (key) => ctx.secrets.get(`consumer-secret:${key}`)?.toString("utf8"),
+        (key) => fromStore.values[key] ?? ctx.secrets.get(`consumer-secret:${key}`)?.toString("utf8"),
         () => ctx.creds.open(p.repoCredentialId, { purpose: "consumer-onboard:seed-secrets:deploy-git-credentials", runId: ctx.runId }),
       );
       const keys = Object.keys(data);
@@ -312,7 +316,7 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // value in `data` IS the live token, not a re-minted one Vault refused. Never persisted/logged
       // (the manifest schema requires tokenSecret to name a declared secret, so `data` always has it here).
       if (p.activation && runtime) runtime.bootstrapToken = data[p.activation.tokenSecret];
-      ctx.log("meta", `seeded ${keys.length} secret(s) write-only into ${path}` + (minted.length ? `; platform-generated + verified: ${minted.join(", ")}` : ""));
+      ctx.log("meta", `seeded ${keys.length} secret(s) write-only into ${path}` + (minted.length ? `; platform-generated + verified: ${minted.join(", ")}` : "") + (fromStore.read.length ? `; copied from the installation's store: ${fromStore.read.join(", ")}` : ""));
       // A mail sender's DKIM key: the public half stays on the unit's row for the Mail page to publish
       // — only here, on the create that put its private half into Vault, so the two always match.
       const dkimKey = p.smtpEntry?.dkimKey;

@@ -99,6 +99,20 @@ describe("consumer-set-secrets", () => {
     expect(planned.plan.steps.map((s) => s.name)).toEqual(["attest-target", "write-secrets", "refetch-secrets", "restart-workloads"]);
   });
 
+  it("offers a key the installation's store holds as read-only, and plans no typed value for it", async () => {
+    const withStore = `${MANIFEST}  - key: POST_OIDC_CLIENT_SECRET
+    description: the identity provider's client secret of post
+    required: true
+    store: { entry: idp/clients/post, field: client-secret }
+`;
+    const planned = await makeSetSecretsDef(ports({}, withStore)).planStream!({ appId: "app_1" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+    if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+    expect(planned.params.keys).toEqual(["SMTP_URL", "S3_SESSION_TOKEN"]);
+    const offered = (await readSecretOffer(ports({}, withStore), db.db, "app_1")).keys.find((k) => k.key === "POST_OIDC_CLIENT_SECRET");
+    expect(offered).toMatchObject({ fromStore: "idp/clients/post:client-secret" });
+    expect(offered?.kind).toBeUndefined();
+  });
+
   it("refuses where the repository carries no manifest, naming it", async () => {
     const def = makeSetSecretsDef(ports({}, null));
     const out = await def.planStream!({ appId: "app_1" }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
