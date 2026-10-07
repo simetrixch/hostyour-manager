@@ -161,6 +161,38 @@ describe("tenant-set-sender-domain DKIM steps", () => {
     expect(dns.record(DKIM_RECORD_NAME, "TXT")).toBe("v=DKIM1; p=foreign");
   });
 
+  // mutant: standingDkim tolerates a foreign TXT that stands beside the matching key
+  it("refuses at plan when a foreign TXT stands beside the record itself", async () => {
+    const dns = new FakeDnsProvider();
+    dns.zones = [DKIM_ZONE];
+    dns.seed(DKIM_RECORD_NAME, "TXT", DKIM_RECORD_CONTENT, "v=DKIM1; p=foreign");
+    const h = await make({
+      dkim: true,
+      dns,
+      answer: { status: 200, body: JSON.stringify({ domain: DOMAIN, signing: false }) },
+    });
+    await expect(h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" }))
+      .rejects.toThrow("did not write");
+    expect(dns.creates).toHaveLength(0);
+    expect(dns.deletes).toHaveLength(0);
+  });
+
+  // mutant: readDkimRecord accepts a record post names for another domain
+  it("refuses at plan a record post names for another domain", async () => {
+    const dns = new FakeDnsProvider();
+    dns.zones = [DKIM_ZONE, "other.test"];
+    const post = fakePost({ dkimRecord: { name: "sel._domainkey.other.test", type: "TXT", content: DKIM_RECORD_CONTENT } });
+    const h = await make({
+      dkim: true,
+      dns,
+      post,
+      answer: { status: 200, body: JSON.stringify({ domain: DOMAIN, signing: false }) },
+    });
+    await expect(h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" }))
+      .rejects.toThrow(`answered no DKIM record of ${DOMAIN}`);
+    expect(dns.creates).toHaveLength(0);
+  });
+
   // mutant: standingDkim does not distinguish manager-booked TXT with different content
   it("refuses at plan when a booked TXT with another key stands at the name", async () => {
     const dns = new FakeDnsProvider();
