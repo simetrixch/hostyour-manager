@@ -173,22 +173,16 @@ describe("the consumer's public address on the live payload", () => {
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })));
     expect((await live(app, cookie)).unitHost).toBeNull();
   });
-
-  // Mutant: ignoring `quiesced` or hardcoding false yields false/null when registration is quiesced.
   it("answers quiesced: true when the stage registration is quiesced", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", { quiesced: true }));
     expect((await live(app, cookie)).quiesced).toBe(true);
   });
-
-  // Mutant: hardcoding quiesced to true yields true when registration is open.
   it("answers quiesced: false when the stage registration is not quiesced", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", { quiesced: false }));
     expect((await live(app, cookie)).quiesced).toBe(false);
   });
-
-  // Mutant: failing to catch readRegistration errors crashes the route or drops unitHost.
   it("answers quiesced: null while unitHost still answers when registration cannot be read", async () => {
     seedConsumer();
     const { app, cookie } = await makeConsumerLive(liveResolver(SMOKE_OK, threeSourceApp({ targets: SHA, synced: SHA })), apexRegistrations("example.com", "error"));

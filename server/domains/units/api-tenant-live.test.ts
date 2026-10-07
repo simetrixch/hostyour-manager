@@ -143,7 +143,6 @@ async function makeTenantLive(resolver?: FakeClusterKubeResolver, registrations?
 }
 
 describe("tenant live reconciliation (GET /api/tenants/:id/live)", () => {
-  // Mutant: ignoring registrations or omitting quiesced leaves row.quiesced null instead of true.
   it("quiesced: true on the stage registration reaches row.quiesced", async () => {
     seedTenant();
     const registrations = {
