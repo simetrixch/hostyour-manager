@@ -18,6 +18,7 @@ import { buildConsumerSecretData } from "#unit/server/secret-mint.ts";
 import { ConsumerManifestSchema, CONSUMER_MANIFEST_PATH } from "../../../shared/consumer.ts";
 import type { ConsumerSecretOfferView } from "../../../shared/api-types-onboard.ts";
 import { consumerSecretEntry, listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
+import { keepUnitCallKey } from "#unit/server/unit-call-key.ts";
 
 // "consumer-set-secrets" — change a declared secret of a STANDING consumer (hostyour-manager#245).
 //
@@ -191,6 +192,12 @@ function setSecretsSteps(ports: SetSecretsPorts, p: SetSecretsParams): Step[] {
         if (keys.length === 0) throw errValidation("no value was supplied — every box was left empty and no key is minted, so there is nothing to change");
         const ac = loadAppCluster(ctx.db, p.appId);
         await ports.seeder.patchApp({ stage: ac.stage, consumerName: ac.name, data });
+        // A minted key the unit accepts from the Manager alone is kept anew, once the entry holds it.
+        const managerKey = p.mint.find((s) => s.generate === "manager-key");
+        const managerKeyValue = managerKey ? minted[managerKey.key] : undefined;
+        if (managerKey && managerKeyValue !== undefined) {
+          await keepUnitCallKey(ctx.creds, { unit: ac.name, stage: ac.stage, key: managerKey.key, value: managerKeyValue });
+        }
         const entry = consumerSecretEntry(ac.stage, ac.name);
         recordSecretWrites(ctx.db, { entry, keys: keys.filter((k) => !(k in minted)), act: "set", runId: ctx.runId });
         recordSecretWrites(ctx.db, { entry, keys: Object.keys(minted), act: "minted", runId: ctx.runId });

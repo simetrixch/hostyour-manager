@@ -19,6 +19,7 @@ import type { AppProvenance, AppStatus, Stage } from "../../../shared/enums.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { RELAY_NAMESPACE, renderSmtpOpsGrant } from "#unit/server/build-rbac.ts";
 import { buildConsumerSecretDataWithDerivations } from "#unit/server/secret-mint.ts";
+import { dropUnitCallKey, keepUnitCallKey } from "#unit/server/unit-call-key.ts";
 import { consumerRepoCredentialName } from "./repo-credential.ts";
 import { keepUnitRepoCredential } from "./repo-credential-keep.ts";
 import { provisionUnitDns, removeUnitDns, consumerUnitHost } from "#unit/server/unit-dns.ts";
@@ -164,6 +165,7 @@ export function removeCeremonySecretsCleanup(ports: OnboardPorts, p: DeployableO
     run: async (ctx) => {
       await ports.seeder.deleteApp({ stage: p.stage, consumerName: p.consumerName });
       forgetSecretEntry(ctx.db, consumerSecretEntry(p.stage, p.consumerName));
+      if (await dropUnitCallKey(ctx.creds, p.consumerName, p.stage) > 0) ctx.log("meta", `the key ${p.consumerName} (${p.stage}) accepts from the Manager is no longer kept`);
       ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/app deleted (all versions); a later onboard of "${p.consumerName}" mints fresh secrets instead of inheriting this run's`);
     },
   };
@@ -290,6 +292,15 @@ export function seedSecretsStep(ports: OnboardPorts, p: DeployableOnboardParams,
       // then survives an abort and offboard/purge's remove-app-secrets remains its removal.
       ctx.registerCleanup(removeCeremonySecretsCleanup(ports, p));
       recordSecretWrites(ctx.db, { entry: consumerSecretEntry(p.stage, p.consumerName), keys, act: "seeded", runId: ctx.runId });
+      // The key the unit accepts from the Manager alone: the entry above holds it and the Manager may
+      // not read the entry back, so it keeps the same value sealed (unit-call-key.ts). Only on this
+      // create: a re-run over a standing entry discarded its mint, and set-secrets mints it anew.
+      const managerKey = p.secretSpecs.find((s) => s.generate === "manager-key");
+      const managerKeyValue = managerKey ? data[managerKey.key] : undefined;
+      if (managerKey && managerKeyValue !== undefined) {
+        await keepUnitCallKey(ctx.creds, { unit: p.consumerName, stage: p.stage, key: managerKey.key, value: managerKeyValue });
+        ctx.log("meta", `${managerKey.key} is kept sealed under ${p.consumerName} (${p.stage}), so the Manager can call it`);
+      }
       // Keep the freshly-minted bootstrap token in-run memory for a manifest-declared activation
       // call — reachable ONLY on a real create (the create-only re-run returned above), so the
       // value in `data` IS the live token, not a re-minted one Vault refused. Never persisted/logged

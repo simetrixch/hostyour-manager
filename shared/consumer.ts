@@ -260,6 +260,10 @@ export function unitNameFromRepoURL(repoURL: string): string {
  *    rsa2048-public        — this key holds the SPKI PEM public half of the keypair generated for the
  *                            key named in `pairWith` (so the two halves ALWAYS match — a JWT signer +
  *                            its JWKS cannot drift apart).
+ *    manager-key           — a hex32 key the unit accepts from the Manager alone: the Manager mints
+ *                            it, writes it into this entry and keeps the same value sealed under
+ *                            the stage (purpose unit-call-key), so it can call the unit; at most
+ *                            one per manifest.
  *    deploy-git-credentials — DERIVED (not random) from the consumer's OWN repo PAT: the
  *                            https://oauth2:<pat>@github.com git-credentials line a consumer that writes
  *                            to a GitOps repo (e.g. example-plane -> the deploy repository) reuses its ONE PAT
@@ -271,7 +275,7 @@ export const ConsumerSecretSpecSchema = z.object({
   key: z.string().regex(/^[A-Z][A-Z0-9_]*$/),
   description: z.string().optional(),
   required: z.boolean().default(true),
-  generate: z.enum(["hex32", "hex16", "uuid", "rsa2048", "rsa2048-public", "deploy-git-credentials"]).optional(),
+  generate: z.enum(["hex32", "hex16", "uuid", "rsa2048", "rsa2048-public", "deploy-git-credentials", "manager-key"]).optional(),
   // Only with generate:"rsa2048-public": names the sibling generate:"rsa2048" key this public half is
   // derived from. Validated at seed (fail-closed) — a dangling pairWith rejects the run.
   pairWith: z
@@ -508,6 +512,12 @@ export const ConsumerManifestSchema = z.object({
     // The entry names a Service of the unit's own chart, so only a unit that deploys one can declare it.
     if (m.smtpEntry !== undefined && !m.chart) {
       ctx.addIssue({ code: "custom", path: ["smtpEntry"], message: "smtpEntry requires a chart — only a self-contained (deployable) unit runs the MTA whose Service it names" });
+    }
+    // The Manager keeps ONE key per stage of a unit (purpose unit-call-key, subject unit-stage), so
+    // a manifest that declared two would leave the second without its sealed copy.
+    const managerKeys = m.secrets.filter((s) => s.generate === "manager-key");
+    if (managerKeys.length > 1) {
+      ctx.addIssue({ code: "custom", path: ["secrets"], message: `secrets[] declares ${managerKeys.length} generate:"manager-key" keys (${managerKeys.map((s) => s.key).join(", ")}) — the Manager keeps one key per stage of a unit` });
     }
     // The DKIM key is minted as a declared secret, so it must be one: a generate:"rsa2048" key here.
     const dkimKey = m.smtpEntry?.dkimKey;

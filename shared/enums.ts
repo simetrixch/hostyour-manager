@@ -350,9 +350,11 @@ export type CredentialKind = (typeof CREDENTIAL_KIND)[number];
 
 // WHOSE a credential is (hostyour-manager#225): a server's (the machine the Manager reaches), an
 // owner's (its packages reader, its repository PAT), a unit's (the identity a consumer or a
-// tenant's build unit was onboarded under). The subject id is the server's row id, the
-// owner's login as GitHub spells it, the unit's name.
-export const CREDENTIAL_SUBJECT = ["server", "owner", "unit"] as const;
+// tenant's build unit was onboarded under), or one stage of a unit's (a key that stage's service
+// accepts from the Manager, which no other stage of the same unit shares). The subject id is the
+// server's row id, the owner's login as GitHub spells it, the unit's name, and for a stage the name
+// of the unit's Application on that stage (consumerArgoAppName, `<name>-<stage>`).
+export const CREDENTIAL_SUBJECT = ["server", "owner", "unit", "unit-stage"] as const;
 export type CredentialSubjectKind = (typeof CREDENTIAL_SUBJECT)[number];
 
 // WHAT a credential is for — the closed vocabulary a reader asks by, never a label to parse:
@@ -364,7 +366,10 @@ export type CredentialSubjectKind = (typeof CREDENTIAL_SUBJECT)[number];
 //   repository-pat      an owner's repository PAT where the App is not installed (kind pat)
 //   repository-identity a unit's own repository identity: the App's row or the owner PAT
 //                       sealed under the unit's name (kind github-app | pat)
-export const CREDENTIAL_PURPOSE = ["ssh-key", "bootstrap-password", "cluster-bearer", "reviewer-jwt", "packages-reader", "repository-pat", "repository-identity"] as const;
+//   unit-call-key       the key one stage of a unit accepts from the Manager alone: minted by the
+//                       Manager into the unit's own secrets (generate:"manager-key") and kept here
+//                       so the Manager can call it (kind other, subject unit-stage)
+export const CREDENTIAL_PURPOSE = ["ssh-key", "bootstrap-password", "cluster-bearer", "reviewer-jwt", "packages-reader", "repository-pat", "repository-identity", "unit-call-key"] as const;
 export type CredentialPurpose = (typeof CREDENTIAL_PURPOSE)[number];
 
 // Every run kind the Manager can run. A literal with no definition behind it is a run kind the UI offers,

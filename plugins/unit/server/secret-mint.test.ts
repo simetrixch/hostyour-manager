@@ -63,6 +63,17 @@ describe("buildConsumerSecretData — deploy-git-credentials (repo-PAT derived)"
   });
 });
 
+describe("buildConsumerSecretData — manager-key", () => {
+  it("mints a fresh 64-hex key each call and names it as kept by the Manager", () => {
+    const specs = [spec({ key: "POST_MANAGER_KEY", generate: "manager-key" })];
+    const a = buildConsumerSecretData(specs, () => undefined);
+    const b = buildConsumerSecretData(specs, () => undefined);
+    expect(a.data.POST_MANAGER_KEY).toMatch(/^[0-9a-f]{64}$/);
+    expect(a.data.POST_MANAGER_KEY).not.toBe(b.data.POST_MANAGER_KEY);
+    expect(a.minted.join(" ")).toContain("POST_MANAGER_KEY=manager-key");
+  });
+});
+
 describe("buildConsumerSecretData — the public halves of the minted key pairs", () => {
   it("hands back the SPKI public half of every rsa2048 key, matching the private half it put into data", () => {
     const specs: ConsumerSecretSpec[] = [

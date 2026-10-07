@@ -23,6 +23,7 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { removeReleaseKit } from "#unit/server/inject-release-kit.ts";
 import { assertNoOrphans } from "./offboard-orphans.ts";
 import { consumerSecretEntry, forgetSecretEntry } from "../../db/secret-writes.ts";
+import { dropUnitCallKey } from "#unit/server/unit-call-key.ts";
 
 // offboard: mark the registration removing, wait for the master ArgoCD to prune the Application, remove
 // the registration (which takes the AppProject and the admission policy with it), delete the
@@ -357,6 +358,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
           consumerName: ac.name,
         });
         forgetSecretEntry(ctx.db, consumerSecretEntry(ac.stage, ac.name));
+        if (await dropUnitCallKey(ctx.creds, ac.name, ac.stage) > 0) ctx.log("meta", `the key ${ac.name} (${ac.stage}) accepts from the Manager is no longer kept`);
         ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${ac.stage}/consumer/${ac.name}/app deleted (all versions); a re-onboard mints fresh secrets instead of inheriting these`);
       },
     },

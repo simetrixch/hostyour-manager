@@ -130,7 +130,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     dns.seed("acme.dev.s2.example", "CNAME", "s2.example"); // dev's — under the OTHER cluster's apex
     const revoked: string[] = [];
     const creds = {
-      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
+      list: async (filter?: { purpose?: string }) => (filter?.purpose === undefined || filter.purpose === "repository-identity" ? [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }] : []),
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
       revoke: (id: string) => { revoked.push(id); return Promise.resolve(); },
     } as unknown as CredentialStore;
@@ -182,7 +182,7 @@ describe("offboard scope — one stage of a two-stage unit", () => {
     for (const path of KIT_PATHS) consumerRepo.seed(REPO, path, "kit");
     const seeder = new RecordingTeardownSeeder();
     const creds = {
-      list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }],
+      list: async (filter?: { purpose?: string }) => (filter?.purpose === undefined || filter.purpose === "repository-identity" ? [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }] : []),
       open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")),
       revoke: () => Promise.resolve(),
     } as unknown as CredentialStore;

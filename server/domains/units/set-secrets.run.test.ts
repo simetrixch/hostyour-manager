@@ -165,6 +165,23 @@ describe("consumer-set-secrets", () => {
       expect(book).toEqual([["DKIM_KEY_ENCRYPTION_KEY", "minted"], ["SMTP_URL", "set"]]);
     });
 
+    it("keeps a minted manager-key sealed under the stage, the same value the entry now holds", async () => {
+      const withManagerKey = `${MANIFEST}  - key: POST_MANAGER_KEY
+    description: the key the unit accepts from the Manager alone
+    required: true
+    generate: manager-key
+`;
+      const planned = await plan(["POST_MANAGER_KEY"], withManagerKey);
+      if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);
+      const seeder = new FakeSeeder();
+      const sealed: Array<{ plaintext: Buffer; subject: unknown; purpose: string }> = [];
+      const creds = { list: async () => [], seal: async (input: { plaintext: Buffer; subject: unknown; purpose: string }) => { sealed.push(input); return { id: "cred_key" }; } } as unknown as CredentialStore;
+      await makeSetSecretsDef(ports({ seeder }, withManagerKey)).steps(planned.params)[1]!.run({ ...ctx("write-secrets", {}, []), creds });
+      const written = seeder.patchedApps[0]!.data["POST_MANAGER_KEY"];
+      expect(written).toMatch(/^[0-9a-f]{64}$/);
+      expect(sealed.map((x) => [x.plaintext.toString("utf8"), x.subject, x.purpose])).toEqual([[written, { kind: "unit-stage", id: "swissbookai-prod" }, "unit-call-key"]]);
+    });
+
     it("mints no generate key where the request names none", async () => {
       const planned = await plan(undefined);
       if (planned.outcome !== "planned") throw new Error(`refused: ${planned.summary}`);

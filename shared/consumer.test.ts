@@ -174,6 +174,14 @@ describe("smtpEntry (the unit's declared and attested SMTP submission entry)", (
     }
   });
 
+  it("takes one generate:\"manager-key\" secret and refuses a second — the Manager keeps one key per stage of a unit", () => {
+    const withKeys = (secrets: object[]) => ConsumerManifestSchema.safeParse({ ...manifest, secrets });
+    expect(withKeys([{ key: "POST_MANAGER_KEY", generate: "manager-key" }]).success).toBe(true);
+    const r = withKeys([{ key: "POST_MANAGER_KEY", generate: "manager-key" }, { key: "OTHER_KEY", generate: "manager-key" }]);
+    expect(r.success).toBe(false);
+    expect(r.error?.issues.some((i) => i.path.join(".") === "secrets" && i.message.includes("one key per stage"))).toBe(true);
+  });
+
   it("is carried by a stage registration and refused in build.yaml", () => {
     expect(ConsumerRegistrationSchema.parse({ ...stage, smtpEntry: entry }).smtpEntry).toEqual(entry);
     const r = ConsumerRegistrationSchema.safeParse({ name: "acme", repoURL: "https://github.com/x/acme.git", builds: [], smtpEntry: entry });

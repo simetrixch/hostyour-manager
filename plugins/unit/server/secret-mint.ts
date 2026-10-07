@@ -98,7 +98,7 @@ export function generateRsaKeypair(): { privatePem: string; publicPem: string } 
  *  value must never be seeded as a "secret". The floor is each kind's own guarantee. */
 function assertMintComplexity(key: string, kind: string, value: string): void {
   const floor =
-    kind === "hex32" ? 64 : kind === "hex16" ? 32 : kind === "uuid" ? 36 : kind.startsWith("rsa2048") ? 256 : kind === "deploy-git-credentials" ? 24 : 1;
+    kind === "hex32" || kind === "manager-key" ? 64 : kind === "hex16" ? 32 : kind === "uuid" ? 36 : kind.startsWith("rsa2048") ? 256 : kind === "deploy-git-credentials" ? 24 : 1;
   if (value.length < floor) {
     throw new Error(`minted secret ${key} (${kind}) is too weak: ${value.length} chars < required ${floor}`);
   }
@@ -155,6 +155,11 @@ export function buildConsumerSecretData(
         }
         value = pair.publicPem;
         minted.push(`${spec.key}=RSA-2048 public/SPKI (paired with ${spec.pairWith})`);
+      } else if (spec.generate === "manager-key") {
+        // Random like hex32; what sets it apart is who keeps it: the caller seals the same value
+        // under the unit's stage (unit-call-key.ts) once the entry is written.
+        value = mintSecretValue("hex32");
+        minted.push(`${spec.key}=manager-key (kept by the Manager to call the unit)`);
       } else if (spec.generate === "deploy-git-credentials") {
         // DERIVED, not random: the git-credentials-store line the consumer writes verbatim
         // (git credential.helper "store") to push to a GitOps repo. Built from the consumer's OWN

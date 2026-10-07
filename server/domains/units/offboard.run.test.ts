@@ -95,7 +95,8 @@ function appWith(owner: string): FakeGitHubApp {
 /** A credential store for a cleanup: the App's one row listed (security/app-identity.ts appIdentityRowId), the
  *  test's own open/revoke fakes over it. */
 function credsWith(over: Partial<CredentialStore> = {}): CredentialStore {
-  return { list: async () => [{ id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" }], ...over } as unknown as CredentialStore;
+  const app = { id: "cred_app", kind: "github-app" as const, label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner" as const, id: "x" }, purpose: "repository-identity" as const, recordedAt: "2026-01-01T00:00:00.000Z" };
+  return { list: async (filter?: { purpose?: string }) => (filter?.purpose === undefined || filter.purpose === app.purpose ? [app] : []), ...over } as unknown as CredentialStore;
 }
 
 function ctx(stepName: string, logs: string[], creds: CredentialStore = credsWith()): StepCtx {
