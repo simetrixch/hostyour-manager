@@ -57,10 +57,16 @@ const routeOf = async (ports: InstallationDomainIssuerPorts, ctx: StepCtx): Prom
 /** Adds or removes `issuer`'s issuer of one stage at its sender domain, through the post host of the
  *  apex that serves at that moment (`via`); whether post's list changed. */
 async function changeIssuer(ports: InstallationDomainIssuerPorts, ctx: StepCtx, snapshot: InstallationDomainSnapshot, route: SenderDomainIssuers, t: RebindTenant, change: "add" | "remove", issuer: Which, via: Which): Promise<boolean> {
+  const unitApex = apexOf(snapshot, t, via);
   const changed = await changeStageIssuer(
     { store: ctx.creds, unitCall: ports.unitCall },
-    { route, stage: t.stage, unitApex: apexOf(snapshot, t, via), domain: t.senderDomain, issuer: issuerOf(t, issuer), change, runId: ctx.runId, signal: ctx.signal },
-  );
+    { route, stage: t.stage, unitApex, domain: t.senderDomain, issuer: issuerOf(t, issuer), change, runId: ctx.runId, signal: ctx.signal },
+  ).catch((err: unknown) => {
+    // Through the new apex, the call can come before the product's mail service serves there: the move
+    // waits on the tenants' members, not on it. The cause then reads as a refused connection.
+    if (via === "before" || unitApex === apexOf(snapshot, t, "before")) throw err;
+    throw errValidation(`${err instanceof Error ? err.message : String(err)} — right after a move, ${route.unit} may not serve on ${unitApex} yet; retry this step once it does`);
+  });
   ctx.log("meta", `${route.unit} (${t.stage}) ${change === "add" ? "lets" : "no longer lets"} ${issuerOf(t, issuer)} send from ${t.senderDomain}${changed ? "" : " — it stood so already"}`);
   return changed;
 }

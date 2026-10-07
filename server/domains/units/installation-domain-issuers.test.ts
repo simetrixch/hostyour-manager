@@ -3,6 +3,7 @@ import { rmSync } from "node:fs";
 import type { DbHandle } from "../../db/client.ts";
 import type { Cleanup, StepCtx } from "../../executor/types.ts";
 import { makeInstallationDomainDef, makeInstallationDomainRollbackDef } from "../runs/defs/installation-domain.ts";
+import { tenantMemberUrl } from "#unit/shared/unit-host.ts";
 import {
   FROM, TO, OLD_HOST, GUID, SENDER_DOMAIN,
   makeIssuerTestHarness,
@@ -88,6 +89,19 @@ describe("installation domain issuer rebind", () => {
     expect(h.lists[SENDER_DOMAIN]).toEqual([tenant.issuerBefore]);
     expect(h.dns.record(`post.${TO}`, "CNAME")).toBeUndefined();
     expect(h.dns.record(`post.${FROM}`, "CNAME")).toBe(OLD_HOST);
+  });
+
+  it("a new issuer post lists already arms no compensation, so an abort leaves it bound", async () => {
+    const before = tenantMemberUrl("host", "auth", "prod", "shop", FROM, "");
+    const after = tenantMemberUrl("host", "auth", "prod", "shop", TO, "");
+    const h = await makeIssuerTestHarness({ lists: { [SENDER_DOMAIN]: [before, after] } }, handles, dirs);
+    const def = makeInstallationDomainDef(h.actions);
+    const planned = await def.planStream!({ fromDomain: FROM, toDomain: TO, dryRun: false }, { db: h.db.db, log: () => undefined, signal: new AbortController().signal });
+    if (planned.outcome !== "planned") throw new Error("expected planned");
+    const bind = h.makeCtx("run_move", "bind-new-issuers");
+    await def.steps(planned.params).find((s) => s.name === "bind-new-issuers")!.run(bind.ctx);
+    expect(bind.cleanups).toEqual([]);
+    expect(h.lists[SENDER_DOMAIN]).toEqual([before, after]);
   });
 
   it("a tenant without a sender domain: no call to post at all", async () => {
