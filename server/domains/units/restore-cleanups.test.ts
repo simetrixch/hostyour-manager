@@ -64,6 +64,7 @@ describe("restore-cleanups", () => {
     const deleteMongodbSpy = vi.spyOn(ports.seeder, "deleteMongodb");
     const deleteRedisSpy = vi.spyOn(ports.seeder, "deleteRedis");
     const deleteMariadbSpy = vi.spyOn(ports.seeder, "deleteMariadb");
+    const setRemovingSpy = vi.spyOn(ports.registrations, "setRemoving");
     const removeRegSpy = vi.spyOn(ports.registrations, "removeRegistration");
     const deleteAppSpy = vi.spyOn(ports.seeder, "deleteApp");
 
@@ -81,15 +82,50 @@ describe("restore-cleanups", () => {
     expect(deleteMongodbSpy).toHaveBeenCalledWith({ stage: "prod", consumerName: CONSUMER });
     expect(deleteRedisSpy).toHaveBeenCalledWith({ stage: "prod", consumerName: CONSUMER });
     expect(deleteMariadbSpy).toHaveBeenCalledWith({ stage: "prod", consumerName: CONSUMER });
+    expect(setRemovingSpy).toHaveBeenCalledWith("prod", CONSUMER, expect.any(String));
     expect(removeRegSpy).toHaveBeenCalledWith("prod", CONSUMER, expect.any(String));
+    expect(setRemovingSpy.mock.invocationCallOrder[0]!).toBeLessThan(removeRegSpy.mock.invocationCallOrder[0]!);
     expect(deleteAppSpy).toHaveBeenCalledWith({ stage: "prod", consumerName: CONSUMER });
 
     expect(logs.some((l) => l.includes("ArgoCD repository credential for acme at prod deleted on the target"))).toBe(true);
     expect(logs.some((l) => l.includes("database instance credentials removed"))).toBe(true);
+    expect(logs.some((l) => l.includes("marked removing"))).toBe(true);
     expect(logs.some((l) => l.includes("registration for acme (prod) removed"))).toBe(true);
     expect(logs.some((l) => l.includes("Application acme-prod pruned on target"))).toBe(true);
     expect(logs.some((l) => l.includes("namespace acme-prod deleted on the target cluster"))).toBe(true);
     expect(logs.some((l) => l.includes("ceremony secrets removed"))).toBe(true);
+  });
+
+  // Planted defect: calling removeRegistration before the wait makes this test red because the
+  // registration file would be removed instead of still standing with removing: true when the wait times out.
+  it("throws when the Application never reaches pruned, leaves registration standing with removing: true", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    await seedConsumerRegistration(ports.registrations, { name: CONSUMER, stage: "prod", cluster: TARGET.cluster });
+    f.target.argo.setStatus({ syncRevision: null, targetRevision: null, sync: "Unknown", health: "Healthy" });
+
+    const setRemovingSpy = vi.spyOn(ports.registrations, "setRemoving");
+    const removeRegSpy = vi.spyOn(ports.registrations, "removeRegistration");
+
+    const def = makeRestoreDef(ports);
+    const cleanups = def.cleanups!(PARAMS);
+    const targetCleanup = cleanups.find((c) => c.name === "restore-remove-target")!;
+    expect(targetCleanup).toBeDefined();
+
+    const logs: string[] = [];
+    const ctx = { ...stepCtx(db, targetCleanup.name, PARAMS, logs), creds: store };
+
+    await expect(targetCleanup.run(ctx)).rejects.toThrow(/was not pruned/);
+
+    expect(f.target.argo.lastWatchOpts?.timeoutMs).toBe(ports.argoWatchTimeoutMs);
+    expect(setRemovingSpy).toHaveBeenCalledWith("prod", CONSUMER, expect.any(String));
+    expect(removeRegSpy).not.toHaveBeenCalled();
+
+    const standing = await ports.registrations.readRegistration("prod", CONSUMER);
+    expect(standing).not.toBeNull();
+    expect(standing?.entry.removing).toBe(true);
   });
 
   it("compensations do nothing when the app was NOT offboarded", async () => {

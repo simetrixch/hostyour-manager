@@ -23,7 +23,8 @@ export function offboardedApp(db: Db, appId: string, ctx: StepCtx): { name: stri
   return { name: app.name, stage: app.stage };
 }
 
-/** The compensations of a consumer restore, in the order they are REGISTERED (the abort runs them reversed). */
+/** The compensations of a consumer restore. They are armed together by one step, so an abort runs
+ *  them in this order: the executor reverses steps, not a step's own compensations. */
 export function restoreCleanups(ports: ConsumerRelocationPorts, params: { appId: string; targetClusterId: string }): Cleanup[] {
   return [
     {
@@ -67,24 +68,39 @@ export function restoreCleanups(ports: ConsumerRelocationPorts, params: { appId:
         if (!app) return;
         const standing = await ports.registrations.readRegistration(app.stage, app.name);
         if (standing !== null) {
-          const { commit, unitRemoved } = await ports.registrations.removeRegistration(app.stage, app.name, ctx.runId);
-          ctx.log(
-            "meta",
-            `registration for ${app.name} (${app.stage}) removed (${commit}) — the AppProject, the admission policy and the argo-sync grant are rendered from the registration by ApplicationSets and go with it` +
-              (unitRemoved ? "; it was the unit's last stage, so its build.yaml went too" : "; the unit stays registered at its other stages"),
-          );
+          if (!standing.entry.removing) {
+            const { commit } = await ports.registrations.setRemoving(app.stage, app.name, ctx.runId);
+            ctx.log(
+              "meta",
+              `registration for ${app.name} (${app.stage}) marked removing (${commit}) — the Application is pruned while its AppProject still stands`,
+            );
+          } else {
+            ctx.log("meta", `registration for ${app.name} at ${app.stage} already marked removing — skipping`);
+          }
         } else {
           ctx.log("meta", `registration for ${app.name} at ${app.stage} already absent — skipping`);
         }
         const { argoReader, argoNamespace, clusterReader } = await ports.resolver.resolve(params.targetClusterId);
         const appName = consumerArgoAppName(app.name, app.stage);
-        const status = await argoReader.watchApplication(argoNamespace, appName, gone, { signal: ctx.signal, failFast: (s) => s.deletionError !== undefined });
+        const status = await argoReader.watchApplication(argoNamespace, appName, gone, {
+          signal: ctx.signal,
+          timeoutMs: ports.argoWatchTimeoutMs,
+          failFast: (s) => s.deletionError !== undefined,
+        });
         if (!gone(status)) {
           throw errNotFound(
             `Application ${appName} was not pruned — ${status.deletionError ? `ArgoCD reports: ${status.deletionError}` : `last seen health=${status.health}${status.message ? ` (${status.message})` : ""}`}; the registration was removed but the workloads linger on the target`,
           );
         }
         ctx.log("meta", `Application ${appName} pruned on target`);
+        if ((await ports.registrations.readRegistration(app.stage, app.name)) !== null) {
+          const { commit, unitRemoved } = await ports.registrations.removeRegistration(app.stage, app.name, ctx.runId);
+          ctx.log(
+            "meta",
+            `registration for ${app.name} (${app.stage}) removed (${commit}) — the AppProject, the admission policy and the argo-sync grant are rendered from the registration by ApplicationSets and go with it` +
+              (unitRemoved ? "; it was the unit's last stage, so its build.yaml went too" : "; the unit stays registered at its other stages"),
+          );
+        }
         const namespace = consumerNamespace(app.name, app.stage);
         const { deleted } = await clusterReader.deleteNamespace(namespace);
         ctx.log(
