@@ -261,7 +261,10 @@ describe("tenant-set-sender-domain through the Executor", () => {
 
     it("refuses at the plan without a kept key, and fails naming the repair when the product refuses the key or holds none", async () => {
       await expect(set(await make({ issuers: true, kept: false }), DOMAIN)).rejects.toThrow(/keeps no key for post \(prod\).*"Secrets…" on post \(prod\)/);
-      for (const [status, says] of [[401, /refused the key the Manager keeps for it \(401\)/], [503, /holds no Manager key yet \(503\)/], [404, /does not know customer\.test as a sender domain/]] as const) {
+      const clearing = await make({ issuers: true, senderDomain: DOMAIN, kept: false });
+      await expect(set(clearing, "", DOMAIN)).rejects.toThrow(/keeps no key for post \(prod\)/);
+      expect([await clearing.registered(), clearing.row()]).toEqual([DOMAIN, DOMAIN]);
+      for (const [status, says] of [[401, /refused the key the Manager keeps for it \(401\)/], [503, /holds no Manager key yet \(503\)/], [404, /does not know customer\.test as a sender domain/], [200, /answered 200 without "added"/]] as const) {
         const h = await make({ issuers: true, renders: DOMAIN, post: fakePost({}, [status]) });
         const runId = await set(h, DOMAIN);
         expect(getRun(h.db.db, runId)?.status).toBe("failed");
