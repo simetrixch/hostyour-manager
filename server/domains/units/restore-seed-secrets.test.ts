@@ -159,7 +159,7 @@ describe("restore-seed-secrets", () => {
 
     expect(plan.requiredSecrets).toEqual(["consumer-secret:SMTP_PASSWORD"]);
     expect(plan.warnings).toEqual([
-      "the Manager holds no record of secret/test/consumer/acme/app (an offboard removes it) — this restore seeds it where Vault holds none, create-only: 1 typed by you, the rest minted or copied from the installation's store",
+      "the Manager holds no record of secret/test/consumer/acme/app (an offboard removes it) — this restore seeds it where Vault holds none, create-only: 1 typed by you, the rest minted or copied from the installation's store; if Vault holds the entry without a record here, your typed values are discarded and the standing entry stays",
     ]);
   });
 
