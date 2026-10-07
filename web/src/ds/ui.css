@@ -10,7 +10,7 @@
   justify-content: center;
   gap: var(--sp-2);
   height: 2.125rem;
-  padding-inline: 0.875rem;
+  padding-inline: var(--sp-3);
   color: var(--text);
   font: inherit;
   font-size: var(--fs-2);
@@ -96,8 +96,8 @@
 
   display: inline-flex;
   align-items: center;
-  gap: 0.375rem;
-  padding: 0.125rem 0.5625rem;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-2);
   color: var(--c);
   font-size: var(--fs-1);
   font-weight: 500;
@@ -198,7 +198,7 @@
   display: inline-flex;
   align-items: center;
   gap: var(--sp-1);
-  padding: 0.0625rem var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
   color: var(--text-2);
   font-size: var(--fs-0);
   font-weight: 500;
@@ -382,7 +382,7 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: 0.375rem;
+  gap: var(--sp-1);
   min-width: 0;
 }
 
@@ -447,7 +447,7 @@
 .input:focus-visible {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+  box-shadow: var(--ring);
 }
 
 /* Inline validation affordance: only after the user has interacted (:user-invalid),
@@ -462,7 +462,7 @@
 .field textarea:user-invalid:focus-visible,
 .input:user-invalid:focus-visible {
   border-color: var(--down);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--down) 15%, transparent);
+  box-shadow: var(--ring-down);
 }
 
 .form-grid {
