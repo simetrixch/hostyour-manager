@@ -41,7 +41,8 @@ describe("one-stage tenant Move", () => {
     const close = def.steps(legacy).find((s) => s.name === "quiesce")!;
     await close.run(stepCtx(db, close.name, legacy, []));
     expect((await ports.registrations.readTenant("prod", GUID))?.entry.quiesced).toBe(true);
-    expect(def.cleanups?.(legacy)).toHaveLength(1);
+    // A legacy run that resumes still closes the unit, so its abort must resolve the reopen the quiesce arms.
+    expect(def.cleanups?.(legacy).map((c) => c.name)).toEqual(["discard-generation", "reopen-access"]);
   });
 
   it("replays record after its own inventory commit, but refuses a different run or earlier step", async () => {

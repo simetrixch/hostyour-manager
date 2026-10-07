@@ -65,6 +65,8 @@ export interface RelocationWorld {
   homeNamespace: string;
   /** Flip the registration's quiesced field — the enforced access lock, never a prune. */
   setQuiesced(quiesced: boolean, runId: string): Promise<{ commit: string }>;
+  /** The stage registration as it stands now: whether it is quiesced and which cluster it names, or null where none stands. */
+  readStanding(): Promise<{ quiesced: boolean; cluster: string } | null>;
   /** The unit's registration, serialized — what the dump lays into the folder so a restore can
    *  rebuild the unit after the live registration is long gone. */
   readRegistrationYaml(): Promise<string>;
@@ -245,6 +247,12 @@ export function quiesceStep(worldOf: WorldOf): Step {
     title: "Close access (flip the registration to quiesced)",
     run: async (ctx) => {
       const w = await worldOf(ctx);
+      const standing = await w.readStanding();
+      if (standing?.quiesced) {
+        ctx.log("meta", `${w.kindWord} ${w.unit} was already quiesced before this run`);
+      } else {
+        ctx.registerCleanup(reopenAccessCleanup(worldOf));
+      }
       const { commit } = await w.setQuiesced(true, ctx.runId);
       ctx.checkpoint({ commit });
       ctx.log("meta", `${w.kindWord} ${w.unit} flipped to quiesced (${commit}) — the charts now render replicas 0 and no Ingress while every ServiceClaim survives`);
@@ -453,3 +461,34 @@ export function openAccessStep(worldOf: WorldOf, on: "source" | "target", target
     },
   };
 }
+
+/** On abort: reopen the unit this run closed, while its registration still names the source cluster. */
+export function reopenAccessCleanup(worldOf: WorldOf): Cleanup {
+  return {
+    name: "reopen-access",
+    title: "Reopen access this run closed",
+    run: async (ctx) => {
+      const w = await worldOf(ctx);
+      const standing = await w.readStanding();
+      if (!standing) {
+        ctx.log("meta", `no registration stands for ${w.kindWord} ${w.unit} — nothing to reopen`);
+        return;
+      }
+      if (!standing.quiesced) {
+        ctx.log("meta", `${w.kindWord} ${w.unit} is open already`);
+        return;
+      }
+      if (standing.cluster !== w.sourceCluster) {
+        ctx.log(
+          "meta",
+          `${w.kindWord} ${w.unit} points at ${standing.cluster} since this run repointed it; the copy there may be incomplete, so it stays closed — finish the move with Restore, or reopen it once its data is proven`,
+        );
+        return;
+      }
+      const { commit } = await w.setQuiesced(false, ctx.runId);
+      await w.watchConverged(ctx, w.sourceClusterId, "running");
+      ctx.log("meta", `access to ${w.unit} reopened (${commit}) — the unit serves again`);
+    },
+  };
+}
+
