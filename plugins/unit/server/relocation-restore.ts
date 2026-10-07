@@ -59,6 +59,7 @@ export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: Wor
     run: async (ctx) => {
       const w = await worldOf(ctx);
       const target = targetOf(ctx, targetClusterId);
+      w.armRestoreCleanups?.(ctx, target);
       requireStorageBox(ports, "restore");
       const image = requireDbtoolsImage(ports, "restore");
       const g = generationOf(ctx, w);

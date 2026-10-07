@@ -34,15 +34,17 @@ export type ConsumerSecretsSeedPorts = Pick<OnboardPorts, "seeder" | "installati
  *  outcome IS the existence probe, and created:false means the entry belongs to an EARLIER onboard of
  *  this name — a compensation may undo only what this run created, and destroying a live consumer's
  *  standing entry on a re-onboard's abort would strip the very secrets its pods boot from. */
-export function removeCeremonySecretsCleanup(ports: Pick<OnboardPorts, "seeder">, p: { stage: Stage; consumerName: string }): Cleanup {
+export function removeCeremonySecretsCleanup(ports: Pick<OnboardPorts, "seeder">, unitOf: (ctx: StepCtx) => { stage: Stage; consumerName: string } | null): Cleanup {
   return {
     name: "remove-ceremony-secrets",
     title: "Destroy the ceremony secrets this run minted (Vault consumer tier)",
     run: async (ctx) => {
-      await ports.seeder.deleteApp({ stage: p.stage, consumerName: p.consumerName });
-      forgetSecretEntry(ctx.db, consumerSecretEntry(p.stage, p.consumerName));
-      if (await dropUnitCallKey(ctx.creds, p.consumerName, p.stage) > 0) ctx.log("meta", `the key ${p.consumerName} (${p.stage}) accepts from the Manager is no longer kept`);
-      ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/app deleted (all versions); a later onboard of "${p.consumerName}" mints fresh secrets instead of inheriting this run's`);
+      const unit = unitOf(ctx);
+      if (!unit) return;
+      await ports.seeder.deleteApp({ stage: unit.stage, consumerName: unit.consumerName });
+      forgetSecretEntry(ctx.db, consumerSecretEntry(unit.stage, unit.consumerName));
+      if (await dropUnitCallKey(ctx.creds, unit.consumerName, unit.stage) > 0) ctx.log("meta", `the key ${unit.consumerName} (${unit.stage}) accepts from the Manager is no longer kept`);
+      ctx.log("meta", `ceremony secrets removed — ${KV_MOUNT}/${unit.stage}/consumer/${unit.consumerName}/app deleted (all versions); a later onboard of "${unit.consumerName}" mints fresh secrets instead of inheriting this run's`);
     },
   };
 }
@@ -107,7 +109,7 @@ export async function seedConsumerSecrets(
   // reaches created:true again. Registered after the write by necessity — cas=0 is the existence
   // probe — so a crash between the Vault create and this line loses the armed inverse; the entry
   // then survives an abort and offboard/purge's remove-app-secrets remains its removal.
-  ctx.registerCleanup(removeCeremonySecretsCleanup(ports, { stage: input.stage, consumerName: input.consumerName }));
+  ctx.registerCleanup(removeCeremonySecretsCleanup(ports, () => ({ stage: input.stage, consumerName: input.consumerName })));
   recordSecretWrites(ctx.db, { entry: consumerSecretEntry(input.stage, input.consumerName), keys, act: "seeded", runId: ctx.runId });
   // The key the unit accepts from the Manager alone: the entry above holds it and the Manager may
   // not read the entry back, so it keeps the same value sealed (unit-call-key.ts). Only on this

@@ -27,6 +27,7 @@ import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tena
 import { eq } from "drizzle-orm";
 import { apps } from "../../db/schema/inventory.ts";
 import { planRestoreSecrets } from "./restore-seed-secrets.ts";
+import { restoreCleanups, restoreCeremonySecretsCleanup } from "./restore-cleanups.ts";
 
 /** A generation as its folder names it (generationId): the UTC moment it was taken. */
 const Generation = z.string().regex(/^\d{8}T\d{6}Z$/, "a generation is named YYYYMMDDTHHMMSSZ");
@@ -92,6 +93,7 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
       };
     },
     steps: (params) => restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer"),
+    cleanups: (params) => [...restoreCleanups(ports, params), restoreCeremonySecretsCleanup(ports, params)],
   };
 }
 
