@@ -179,6 +179,16 @@ describe("a replaced record is written back as it stood", () => {
     expect(dns.creates).toEqual([{ name: "old.example", type: "CNAME", content: "elsewhere.example", proxied: false, ttl: 1 }]);
   });
 
+  it("PLANTED DEFECT: freezes a proxied CNAME, a www host onto a hoster, and an abort writes it back proxied", async () => {
+    const publicDns = new FakePublicDns();
+    dns.seedStanding("www.shop.example", "CNAME", { content: "shop.hoster.test", proxied: true, ttl: 1 });
+    const replacing = await recordsToReplace(db.db, { dns, publicDns }, GUID, ZONE, ["www.shop.example"]);
+    expect(replacing).toEqual([{ name: "www.shop.example", type: "CNAME", content: "shop.hoster.test", proxied: true, ttl: 1 }]);
+    await dns.deleteRecord({ name: "www.shop.example", type: "CNAME" });
+    await restoreReplacedRecords(ctx(), { dns }, replacing);
+    expect(dns.creates).toEqual([{ name: "www.shop.example", type: "CNAME", content: "shop.hoster.test", proxied: true, ttl: 1 }]);
+  });
+
   it("reads a replaced record frozen before this change as DNS-only with the automatic TTL", () => {
     expect(ReplacedRecord.parse({ name: "shop.example", type: "A", content: "203.0.113.7" })).toEqual({ name: "shop.example", type: "A", content: "203.0.113.7", proxied: false, ttl: 1 });
   });
