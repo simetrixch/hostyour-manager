@@ -640,8 +640,7 @@
 }
 
 /* ---- Modal dialog (typed-confirm destructive actions — the one overlay in the app) ----
-   The scrim is a fixed dark wash in BOTH themes — a modal backdrop is the conventional exception to
-   the token-only rule; the panel itself uses surface/border tokens like every other card. */
+   The backdrop is the theme's scrim; the panel uses surface/border tokens like every other card. */
 
 .dialog-backdrop {
   position: fixed;
@@ -651,7 +650,7 @@
   align-items: center;
   justify-content: center;
   padding: var(--sp-4);
-  background: rgb(0 0 0 / 55%);
+  background: var(--scrim);
 }
 
 .dialog {
