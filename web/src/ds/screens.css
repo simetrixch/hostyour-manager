@@ -334,7 +334,7 @@
   content: "";
   position: absolute;
 
-  /* Constants: the connector's ends sit between this step's marker and the next one's, which the step's own padding sets. */
+  /* The connector's ends follow the step's own padding, so they stay constants. */
   top: 1.75rem;
   bottom: -0.4375rem;
   left: calc(var(--mark-step) / 2);

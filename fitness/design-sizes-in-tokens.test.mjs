@@ -7,11 +7,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-export const REPOSITORY_ROOT = process.cwd();
-export const DS_DIR = join(REPOSITORY_ROOT, "web/src/ds");
+const REPOSITORY_ROOT = process.cwd();
+const DS_DIR = join(REPOSITORY_ROOT, "web/src/ds");
 
 // A constant is one declaration of one file, matched whole, so the same length elsewhere is still refused.
-export const NAMED_CONSTANTS = [
+const NAMED_CONSTANTS = [
   {
     file: "web/src/ds/screens.css",
     declaration: "top: 1.75rem",
@@ -24,17 +24,17 @@ export const NAMED_CONSTANTS = [
   },
 ];
 
-export const LENGTH_LITERAL_REGEX = /(?:^|[^\w-])([-+]?\d*\.?\d+(?:px|rem|em))\b/g;
+const LENGTH_LITERAL_REGEX = /(?:^|[^\w-])([-+]?\d*\.?\d+(?:px|rem|em))\b/g;
 
-export function stripComments(text) {
+function stripComments(text) {
   return text.replace(/\/\*[\s\S]*?\*\//g, (match) => "\n".repeat(match.split("\n").length - 1));
 }
 
-export function describeHit(hit) {
+function describeHit(hit) {
   return `${hit.file}:${hit.line} (${hit.literal}) in "${hit.text}"`;
 }
 
-export function findLengthLiteralsInText(filePath, text, constants = NAMED_CONSTANTS) {
+function findLengthLiteralsInText(filePath, text, constants = NAMED_CONSTANTS) {
   const stripped = stripComments(text);
   const lines = stripped.split("\n");
   const hits = [];
@@ -62,7 +62,7 @@ export function findLengthLiteralsInText(filePath, text, constants = NAMED_CONST
   return hits;
 }
 
-export function findLengthLiterals(constants = NAMED_CONSTANTS) {
+function findLengthLiterals(constants = NAMED_CONSTANTS) {
   const files = readdirSync(DS_DIR).filter((f) => f.endsWith(".css") && f !== "tokens.css");
   const allHits = [];
   for (const f of files.sort()) {
