@@ -119,12 +119,17 @@ async function dkimRouteAt(ports: TenantSetSenderDomainPorts, ctx: StepCtx, p: T
   return { spec, route, tc, apex, key };
 }
 
+/** Why a run publishes no record and waits for no signing; the steps stand in every run's list, so
+ *  their titles say it rather than promise a record. */
+const unsignedNone = (p: TenantSetSenderDomainParams): string =>
+  p.senderDomain === "" ? "the tenant sends from the platform's own domain" : `the product signs mail from ${p.senderDomain} already`;
+
 /** Publishes the record the plan named. It is read from the product again and must be the same, so a
  *  run publishes nothing the product does not want at this moment. */
 export function publishDkimRecordStep(ports: TenantSetSenderDomainPorts, p: TenantSetSenderDomainParams): Step {
   return {
     name: "publish-dkim-record",
-    title: p.dkim ? `Publish TXT ${p.dkim.name} in the zone ${p.dkim.zone}` : "Publish the sender domain's DKIM record",
+    title: p.dkim ? `Publish TXT ${p.dkim.name} in the zone ${p.dkim.zone}` : `No DKIM record to publish: ${unsignedNone(p)}`,
     run: async (ctx) => {
       const want = p.dkim;
       if (!want) {
@@ -179,7 +184,7 @@ export function removeDkimRecordCleanup(ports: TenantSetSenderDomainPorts, p: Te
 export function awaitDkimSigningStep(ports: TenantSetSenderDomainPorts, p: TenantSetSenderDomainParams): Step {
   return {
     name: "await-dkim-signing",
-    title: p.dkim ? `Wait until mail from ${p.senderDomain} is signed` : "Wait until mail from the sender domain is signed",
+    title: p.dkim ? `Wait until mail from ${p.senderDomain} is signed` : `No wait for signing: ${unsignedNone(p)}`,
     run: async (ctx) => {
       const want = p.dkim;
       if (!want) return;

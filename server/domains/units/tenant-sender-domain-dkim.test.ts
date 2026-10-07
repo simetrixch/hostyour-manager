@@ -293,6 +293,11 @@ describe("tenant-set-sender-domain DKIM steps", () => {
     });
     const { runId, plan } = await h.executor.plan("tenant-set-sender-domain", { tenantId: "tnt_1", senderDomain: DOMAIN, previous: "" });
     expect(plan.summary).toContain("mail from customer.test is signed");
+    // The steps stand in every run's list; where nothing is published, their titles say so.
+    expect(plan.steps.map((st) => st.title)).toEqual(expect.arrayContaining([
+      "No DKIM record to publish: the product signs mail from customer.test already",
+      "No wait for signing: the product signs mail from customer.test already",
+    ]));
     expect(getRunParams(h.db.db, runId)?.params.dkim).toBeUndefined();
     expect(h.post.calls.some((c) => c.url.includes("/dkim-record"))).toBe(false);
 
