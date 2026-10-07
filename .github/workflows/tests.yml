@@ -13,7 +13,6 @@ jobs:
     timeout-minutes: 20
     env:
       ANSIWISE_TESTS_MAY_SKIP: '1'
-      HOSTYOUR_DEPLOY_CHECKOUT_MAY_BE_ABSENT: '1'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -26,6 +25,10 @@ jobs:
       # checkout and renders it with Go, as the ApplicationSet controller does; without both it fails.
       - name: Check out hostyour-cloud beside this repository
         run: git clone --depth 1 --branch master https://github.com/simetrixch/hostyour-cloud.git ../hostyour-cloud
+      # The map-writer contract case reads hostyour-deploy's cluster map template, the other writer of
+      # the same file; without the checkout it fails.
+      - name: Check out hostyour-deploy beside this repository
+        run: git clone --depth 1 --branch master https://github.com/simetrixch/hostyour-deploy.git ../hostyour-deploy
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: ../hostyour-cloud/scripts/appset-render/go.mod
@@ -34,5 +37,4 @@ jobs:
       - name: Run test suites
         run: |
           echo 'NOT RUN: ansiwise real-serve suites need the ansiwise binary pair.'
-          echo 'NOT RUN: the cluster-map contract case needs the hostyour-deploy checkout beside this one.'
           npx vitest run
