@@ -198,6 +198,11 @@ export async function runRelocationJob(ports: RelocationPorts, ctx: StepCtx, clu
   for (const line of result.logs.split("\n")) {
     if (line.trim()) ctx.log("stdout", line);
   }
+  // A cancel ends the watch, not the job: what the watch saw last says nothing about how it ended, so
+  // the run is told it was interrupted, as an abort the executor counts as a cancel.
+  if (ctx.signal.aborted) {
+    throw new DOMException(`job ${job.spec.name} in ${job.namespace} was interrupted — the run was cancelled while it ran, so nothing says how it ended`, "AbortError");
+  }
   if (!result.succeeded) {
     const tail = result.logs.trim().split("\n").slice(-5).join(" | ");
     const ended = result.ended !== undefined ? `: ${result.ended}` : "";
