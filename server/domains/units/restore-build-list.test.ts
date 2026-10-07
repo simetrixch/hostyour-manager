@@ -1,7 +1,7 @@
 // Tests that a consumer restore keeps the unit's build list in registrations/<unit>/build.yaml.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DbHandle } from "../../db/client.ts";
-import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
+import { ConsumerRegistrationSchema, type ConsumerRegistration } from "../../../shared/consumer.ts";
 import { parseRegistration, serializePointer } from "#unit/server/registration-laws.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
@@ -16,7 +16,7 @@ let db: DbHandle;
 beforeEach(() => { db = openFixtureDb(); });
 afterEach(() => { db.sqlite.close(); });
 
-const DUMPED = serializePointer(ConsumerRegistrationSchema, {
+const DUMPED_ENTRY: ConsumerRegistration = {
   name: CONSUMER,
   repoURL: "https://github.com/x/acme.git",
   suspended: false,
@@ -30,6 +30,14 @@ const DUMPED = serializePointer(ConsumerRegistrationSchema, {
   size: "small",
   mongodb: "shared",
   quota: seedQuota("small"),
+};
+const DUMPED = serializePointer(ConsumerRegistrationSchema, DUMPED_ENTRY);
+
+// A dump whose unit fields differ from the standing unit file: the restore must keep what stands.
+const DUMPED_OTHER_UNIT = serializePointer(ConsumerRegistrationSchema, {
+  ...DUMPED_ENTRY,
+  repoURL: "https://github.com/old-owner/acme.git",
+  suspended: true,
 });
 
 const MANIFEST_WITH_BUILDS = `
@@ -58,7 +66,7 @@ describe("restore build list", () => {
 
     // Seed dev stage: build.yaml stands with builds: ["acme-api"] and quiesced: false.
     await ports.registrations.commitRegistration({
-      unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
+      unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", owner: "team-acme", onboardedAt: "2026-10-01T08:00:00.000Z", suspended: false, quiesced: false },
       builds: ["acme-api"],
       deploy: {
         stage: "dev", chartPath: "deploy/chart", cluster: SOURCE.cluster, host: "acme-dev",
@@ -72,7 +80,7 @@ describe("restore build list", () => {
     expect(beforeBuild).not.toBeNull();
 
     const world = await consumerWorld(ports, "app_1")(stepCtx(db, "write-reg", {}, []));
-    await world.writeRegistrationFromDump(stepCtx(db, "write-reg", {}, []), DUMPED, { clusterId: TARGET.clusterId, cluster: TARGET.cluster, domain: TARGET.domain });
+    await world.writeRegistrationFromDump(stepCtx(db, "write-reg", {}, []), DUMPED_OTHER_UNIT, { clusterId: TARGET.clusterId, cluster: TARGET.cluster, domain: TARGET.domain });
 
     const afterBuild = await f.platformRepo.withBranch(ports.registrations.branch, (b) => b.readFile(`registrations/${CONSUMER}/build.yaml`));
     expect(afterBuild).toBe(beforeBuild);
