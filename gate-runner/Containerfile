@@ -12,10 +12,12 @@
 ARG HELM_VERSION=3.16.0
 ARG KUBECONFORM_VERSION=0.6.7
 
-FROM node:24 AS build
+# The production-only install, the one node_modules the runtime takes: no test or build tool is a
+# package of the running gate. Native packages are built here, on the full base image.
+FROM node:24 AS prod-deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm ci --omit=dev
 
 FROM node:24-slim AS tools
 ARG HELM_VERSION
@@ -32,7 +34,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=tools /usr/local/bin/helm /usr/local/bin/helm
 COPY --from=tools /usr/local/bin/kubeconform /usr/local/bin/kubeconform
-COPY --from=build /app/node_modules ./node_modules
+COPY --from=prod-deps /app/node_modules ./node_modules
 COPY gate-runner ./gate-runner
 COPY shared ./shared
 # The unit plugin's shared modules, which the gates reach through shared/, at the path they have in
