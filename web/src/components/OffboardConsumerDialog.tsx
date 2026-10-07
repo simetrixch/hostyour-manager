@@ -27,9 +27,9 @@ const named = (stages: readonly Stage[]): string => stages.map((s) => s.toUpperC
 function sharedFate({ standing, provisioning }: SiblingStages): string {
   if (standing.length > 0) return `The unit still stands at ${named(standing)}, so what its stages share stays: the repo PAT, ${SHARED}.`;
   if (provisioning.length > 0) {
-    const [verb, registration] = provisioning.length > 1 ? ["are", "their registrations were"] : ["is", "its registration was"];
-    return `${named(provisioning)} ${verb} still provisioning. What the stages share — the repo PAT, ${SHARED} — ` +
-      `stays only if ${registration} written; if not, it goes with this stage, the repo PAT NOT recoverable.`;
+    const plural = provisioning.length > 1;
+    return `${named(provisioning)} ${plural ? "are" : "is"} still provisioning. What the stages share — the repo PAT, ${SHARED} — ` +
+      `stays only if ${plural ? "their registrations were" : "its registration was"} written; if not, it goes with this stage, the repo PAT NOT recoverable.`;
   }
   return `This is the unit's last stage, so what its stages share goes too: the repo PAT (NOT recoverable), ${SHARED}.`;
 }
