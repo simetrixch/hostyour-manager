@@ -10,19 +10,22 @@ const ZONE = "z1";
 const API = "https://api.invalid/client/v4";
 
 /** A fetch scripted by method and path. Every call is recorded, so a test reads what was sent. */
-function scripted(records: { id: string; content: string }[]) {
+function scripted(records: { id: string; content: string; proxied?: boolean; ttl?: number }[]) {
   const calls: string[] = [];
+  /** The body of every POST, as sent. */
+  const posted: unknown[] = [];
   const fetchImpl = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     const call = `${init?.method ?? "GET"} ${url.pathname}${url.search}`;
     calls.push(call);
+    if (init?.method === "POST") posted.push(JSON.parse(String(init.body)));
     const ok = (result: unknown): Response => new Response(JSON.stringify({ success: true, result }), { status: 200 });
     if (url.pathname === "/client/v4/zones") return ok([{ id: ZONE }]);
     if (url.pathname === `/client/v4/zones/${ZONE}/dns_records`) return ok(records);
     if ((init?.method ?? "GET") === "DELETE") return ok({ id: url.pathname.split("/").at(-1) });
     return new Response(JSON.stringify({ success: false, errors: [{ message: `unscripted ${call}` }] }), { status: 404 });
   }) as unknown as typeof fetch;
-  return { fetchImpl, calls };
+  return { fetchImpl, calls, posted };
 }
 
 const deletes = (calls: string[]): string[] => calls.filter((c) => c.startsWith("DELETE")).map((c) => c.split("/").at(-1)!);
@@ -89,5 +92,25 @@ describe("CloudflareDns.zoneName — the zone that holds a name, as the label wa
     // The walk asks the name, then each suffix, and keeps the answer for the name it asked for.
     expect(calls.slice(0, 3)).toEqual(["/client/v4/zones?name=veloluck.show.simetrix.ch&per_page=1", "/client/v4/zones?name=show.simetrix.ch&per_page=1", "/client/v4/zones?name=simetrix.ch&per_page=1"]);
     await expect(dns.zoneName({ name: "example.org" })).rejects.toThrow(/no Cloudflare zone found/);
+  });
+
+  it("PLANTED DEFECT: writes a record back behind the proxy and with the TTL it stood with, and its own records DNS-only and automatic", async () => {
+    const { fetchImpl, posted } = scripted([]);
+    const dns = new CloudflareDns({ apiToken: "t", apiBase: API, fetchImpl });
+    await dns.createRecord({ name: "shop.example.com", type: "A", content: "203.0.113.7", proxied: true, ttl: 300 });
+    await dns.createRecord({ name: "api.example.com", type: "CNAME", content: "zone.example.net" });
+    expect(posted).toEqual([
+      { type: "A", name: "shop.example.com", content: "203.0.113.7", ttl: 300, proxied: true },
+      { type: "CNAME", name: "api.example.com", content: "zone.example.net", ttl: 1, proxied: false },
+    ]);
+  });
+
+  it("reads each record as it stands, its proxy flag and TTL with it", async () => {
+    const { fetchImpl } = scripted([{ id: "r1", content: "203.0.113.7", proxied: true, ttl: 300 }, { id: "r2", content: "203.0.113.8" }]);
+    const dns = new CloudflareDns({ apiToken: "t", apiBase: API, fetchImpl });
+    expect(await dns.listStandingRecords({ name: "shop.example.com", type: "A" })).toEqual([
+      { content: "203.0.113.7", proxied: true, ttl: 300 },
+      { content: "203.0.113.8", proxied: false, ttl: 1 },
+    ]);
   });
 });

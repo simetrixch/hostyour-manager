@@ -107,7 +107,7 @@ describe("add-app for a website", () => {
     dns.seed("www.example.ch", "A", "192.0.2.10");
     const result = await makeAddAppDef(ports({ dns }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx());
     if (result.outcome !== "planned") throw new Error("the website was not planned");
-    expect(result.params.websiteReplacing).toEqual([{ name: "www.example.ch", type: "A", content: "192.0.2.10" }]);
+    expect(result.params.websiteReplacing).toEqual([{ name: "www.example.ch", type: "A", content: "192.0.2.10", proxied: false, ttl: 1 }]);
     expect(result.plan.summary).toContain("It deletes A www.example.ch → 192.0.2.10, which this installation did not write, and an abort writes it back.");
     const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["www.example.ch", "example.ch"], websiteReplacing: result.params.websiteReplacing });
     // The abort's remove-website-records runs before revert-app-append, so the registration still carries the website.

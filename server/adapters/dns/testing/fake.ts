@@ -4,14 +4,17 @@
 // apex carries other services' TXT beside the SPF — and an upsert leaves exactly one, the way the
 // Cloudflare adapter does. A CNAME stands alone under its name: an upsert that would put one beside
 // another record, or another record beside one, is refused the way Cloudflare refuses it.
-import { DnsZoneUnknownError, type DnsProvider, type DnsRecordType } from "../port.ts";
+import { DnsZoneUnknownError, type DnsProvider, type DnsRecordType, type StandingDnsRecord } from "../port.ts";
 
 export class FakeDnsProvider implements DnsProvider {
   private readonly records = new Map<string, string[]>();
+  /** Per record (`<type> <name> <content>`), its proxy flag and TTL where they are not the platform's
+   *  own DNS-only, automatic-TTL default. */
+  private readonly attributes = new Map<string, { proxied: boolean; ttl: number }>();
   /** Every upsert, in order — a test asserts the one record per unit and its content. */
   readonly upserts: Array<{ name: string; type: DnsRecordType; content: string; created: boolean }> = [];
   /** Every create, in order — the records an abort wrote back. */
-  readonly creates: Array<{ name: string; type: DnsRecordType; content: string }> = [];
+  readonly creates: Array<{ name: string; type: DnsRecordType; content: string; proxied: boolean; ttl: number }> = [];
   /** Every delete call, in order, with the content it was narrowed to and how many records it removed. */
   readonly deletes: Array<{ name: string; type: DnsRecordType; content?: string; deleted: number }> = [];
   /** When set, every call throws it — the API-failure path (an unreachable/refusing provider). */
@@ -45,6 +48,13 @@ export class FakeDnsProvider implements DnsProvider {
    *  of that name and type. */
   seed(name: string, type: DnsRecordType | "MX", ...contents: string[]): void {
     this.records.set(this.key(name, type), contents);
+  }
+
+  /** Seed one record with its proxy flag and TTL, beside any of that name and type. */
+  seedStanding(name: string, type: DnsRecordType, record: StandingDnsRecord): void {
+    const key = this.key(name, type);
+    this.records.set(key, [...(this.records.get(key) ?? []), record.content]);
+    this.attributes.set(`${key} ${record.content}`, { proxied: record.proxied, ttl: record.ttl });
   }
 
   /** The first record's content right now, or undefined — the shape a test asserts against. */
@@ -82,13 +92,21 @@ export class FakeDnsProvider implements DnsProvider {
     return { deleted };
   }
 
-  async createRecord(input: { name: string; type: DnsRecordType; content: string }): Promise<void> {
+  async createRecord(input: { name: string; type: DnsRecordType; content: string; proxied?: boolean; ttl?: number }): Promise<void> {
     if (this.failWith) throw this.failWith;
     this.zoneOf(input.name);
     this.refuseBesideCname(input.name, input.type);
     const key = this.key(input.name, input.type);
+    const proxied = input.proxied ?? false;
+    const ttl = input.ttl ?? 1;
     this.records.set(key, [...(this.records.get(key) ?? []), input.content]);
-    this.creates.push({ name: input.name, type: input.type, content: input.content });
+    this.attributes.set(`${key} ${input.content}`, { proxied, ttl });
+    this.creates.push({ name: input.name, type: input.type, content: input.content, proxied, ttl });
+  }
+
+  async listStandingRecords(input: { name: string; type: DnsRecordType }): Promise<StandingDnsRecord[]> {
+    const key = this.key(input.name, input.type);
+    return (await this.listRecordContents(input)).map((content) => ({ content, ...(this.attributes.get(`${key} ${content}`) ?? { proxied: false, ttl: 1 }) }));
   }
 
   async readRecordContent(input: { name: string; type: DnsRecordType }): Promise<string | null> {

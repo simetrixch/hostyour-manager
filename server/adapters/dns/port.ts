@@ -20,6 +20,14 @@
 import type { DnsRecordType } from "../../../shared/dns.ts";
 export type { DnsRecordType };
 
+/** A record as it stands at the provider: its content, whether the provider's proxy answers for its name,
+ *  and its TTL in seconds, 1 being the provider's automatic one. */
+export interface StandingDnsRecord {
+  content: string;
+  proxied: boolean;
+  ttl: number;
+}
+
 export interface DnsProvider {
   /** Idempotent upsert-by-(name, type): create the record, or overwrite the existing one's content
    *  in place — a move is exactly this call with a new content. Never proxied: the platform
@@ -44,9 +52,14 @@ export interface DnsProvider {
    *  that writes beside a mail domain proves its MX untouched (own-domain-records.ts mailRecordHashes),
    *  answered as `<priority> <host>`. */
   listRecordContents(input: { name: string; type: DnsRecordType | "MX"; signal?: AbortSignal }): Promise<string[]>;
+  /** Every record of that name and type as it stands, its proxy flag and TTL with it: what a run reads
+   *  of a customer's record it replaces, so that an abort can write it back as it stood. */
+  listStandingRecords(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<StandingDnsRecord[]>;
   /** Create ONE record beside any others of that name and type — what an abort writes back where a
-   *  run deleted several address records of a customer's host. Never proxied, as upsertRecord. */
-  createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void>;
+   *  run deleted several address records of a customer's host. DNS-only with the automatic TTL unless
+   *  `proxied` and `ttl` say otherwise: only a customer's record written back as it stood carries its
+   *  own, every record the platform writes for itself must resolve to the cluster. */
+  createRecord(input: { name: string; type: DnsRecordType; content: string; proxied?: boolean; ttl?: number; signal?: AbortSignal }): Promise<void>;
   /** The name of the zone that holds `name` (`simetrix.ch` for `veloluck.show.simetrix.ch`): "our
    *  domain" of a host, before which a dev or test stage stands (unit-host.ts stageHost). THROWS
    *  DnsZoneUnknownError where no zone of this provider holds it. */

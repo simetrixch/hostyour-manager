@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
-import { customerHostProblem, recordsToReplace } from "./own-domain-records.ts";
+import { customerHostProblem, recordsToReplace, replacementSentence, restoreReplacedRecords, ReplacedRecord } from "./own-domain-records.ts";
+import type { StepCtx } from "../../executor/types.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { DohPublicDns } from "../../adapters/dns/public-dns.ts";
@@ -107,7 +108,7 @@ describe("recordsToReplace — the mail answers a replaced CNAME carries", () =>
     dns.seed("own.example", "TXT", "v=spf1 include:spf.protection.outlook.com -all");
     publicDns.seedMx("own.example", "0 own-example.mail.protection.outlook.com");
     publicDns.seedTxt("own.example", "v=spf1 include:spf.protection.outlook.com -all");
-    expect(await recordsToReplace(db.db, { dns, publicDns }, GUID, ZONE, ["own.example"])).toEqual([{ name: "own.example", type: "CNAME", content: "elsewhere.example" }]);
+    expect(await recordsToReplace(db.db, { dns, publicDns }, GUID, ZONE, ["own.example"])).toEqual([{ name: "own.example", type: "CNAME", content: "elsewhere.example", proxied: false, ttl: 1 }]);
   });
 
   it("PLANTED INNOCENT: a CNAME whose name answers no MX or TXT, a www CNAME, and an address record are replaced as today", async () => {
@@ -116,9 +117,9 @@ describe("recordsToReplace — the mail answers a replaced CNAME carries", () =>
     publicDns.seedMx("www.easy.example", "0 mail-example.mail.protection.outlook.com");
     dns.seed("addr.example", "A", "192.0.2.7");
     expect(await recordsToReplace(db.db, { dns, publicDns }, GUID, ZONE, ["quiet.example", "www.easy.example", "addr.example"])).toEqual([
-      { name: "quiet.example", type: "CNAME", content: "site.hoster.test" },
-      { name: "www.easy.example", type: "CNAME", content: "mail.example" },
-      { name: "addr.example", type: "A", content: "192.0.2.7" },
+      { name: "quiet.example", type: "CNAME", content: "site.hoster.test", proxied: false, ttl: 1 },
+      { name: "www.easy.example", type: "CNAME", content: "mail.example", proxied: false, ttl: 1 },
+      { name: "addr.example", type: "A", content: "192.0.2.7", proxied: false, ttl: 1 },
     ]);
   });
 
@@ -140,5 +141,56 @@ describe("recordsToReplace — the mail answers a replaced CNAME carries", () =>
   it("refuses to replace a CNAME where no public DNS reader is wired, because its mail answers cannot be read", async () => {
     dns.seed("easy.example", "CNAME", "mail.example");
     await expect(recordsToReplace(db.db, { dns }, GUID, ZONE, ["easy.example"])).rejects.toThrow(/no public DNS reader is wired on this manager/);
+  });
+});
+
+describe("a replaced record is written back as it stood", () => {
+  const GUID = "a1a1a1a1a1a1";
+  const ZONE = "simetrix.digitacloud.app";
+  let db: DbHandle;
+  let dns: FakeDnsProvider;
+  const logs: string[] = [];
+  const ctx = () => ({ signal: new AbortController().signal, log: (_s: string, line: string) => logs.push(line) }) as unknown as StepCtx;
+
+  beforeEach(() => {
+    db = openDb(":memory:");
+    dns = new FakeDnsProvider();
+    logs.length = 0;
+  });
+
+  it("PLANTED DEFECT: freezes a proxied A record's flag and TTL, and an abort writes it back proxied with that TTL", async () => {
+    dns.seedStanding("shop.example", "A", { content: "203.0.113.7", proxied: true, ttl: 300 });
+    const replacing = await recordsToReplace(db.db, { dns }, GUID, ZONE, ["shop.example"]);
+    expect(replacing).toEqual([{ name: "shop.example", type: "A", content: "203.0.113.7", proxied: true, ttl: 300 }]);
+    await dns.deleteRecord({ name: "shop.example", type: "A", content: "203.0.113.7" });
+    await restoreReplacedRecords(ctx(), { dns }, replacing);
+    expect(dns.creates).toEqual([{ name: "shop.example", type: "A", content: "203.0.113.7", proxied: true, ttl: 300 }]);
+    expect(await dns.listStandingRecords({ name: "shop.example", type: "A" })).toEqual([{ content: "203.0.113.7", proxied: true, ttl: 300 }]);
+  });
+
+  it("writes a hand-made DNS-only CNAME with the automatic TTL back as it stood", async () => {
+    // A name that answers no MX or TXT through its CNAME, so the CNAME may be replaced.
+    const publicDns = new FakePublicDns();
+    dns.seedStanding("old.example", "CNAME", { content: "elsewhere.example", proxied: false, ttl: 1 });
+    const replacing = await recordsToReplace(db.db, { dns, publicDns }, GUID, ZONE, ["old.example"]);
+    expect(replacing).toEqual([{ name: "old.example", type: "CNAME", content: "elsewhere.example", proxied: false, ttl: 1 }]);
+    await dns.deleteRecord({ name: "old.example", type: "CNAME" });
+    await restoreReplacedRecords(ctx(), { dns }, replacing);
+    expect(dns.creates).toEqual([{ name: "old.example", type: "CNAME", content: "elsewhere.example", proxied: false, ttl: 1 }]);
+  });
+
+  it("reads a replaced record frozen before this change as DNS-only with the automatic TTL", () => {
+    expect(ReplacedRecord.parse({ name: "shop.example", type: "A", content: "203.0.113.7" })).toEqual({ name: "shop.example", type: "A", content: "203.0.113.7", proxied: false, ttl: 1 });
+  });
+
+  it("names a proxied record so in the plan sentence", () => {
+    expect(replacementSentence([{ name: "shop.example", type: "A", content: "203.0.113.7", proxied: true, ttl: 300 }])).toContain("A shop.example → 203.0.113.7 (behind the provider's proxy)");
+    expect(replacementSentence([{ name: "old.example", type: "CNAME", content: "elsewhere.example", proxied: false, ttl: 1 }])).not.toContain("proxy");
+  });
+
+  it("PLANTED INNOCENT: the record a run writes for the tenant stays DNS-only with the automatic TTL", async () => {
+    await dns.upsertRecord({ name: "www.shop.example", type: "CNAME", content: ZONE });
+    await dns.createRecord({ name: "api.shop.example", type: "CNAME", content: ZONE });
+    expect(await dns.listStandingRecords({ name: "api.shop.example", type: "CNAME" })).toEqual([{ content: ZONE, proxied: false, ttl: 1 }]);
   });
 });

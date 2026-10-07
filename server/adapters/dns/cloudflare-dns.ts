@@ -9,7 +9,7 @@
 //    label until one matches — `erp.simetrix.example.com` finds the `example.com` zone with no
 //    hardcoding, whatever registrable domain the unit apex sits under.
 // The token rides ONLY in the Authorization header and is never logged.
-import type { DnsProvider, DnsRecordType } from "./port.ts";
+import type { DnsProvider, DnsRecordType, StandingDnsRecord } from "./port.ts";
 import { DnsError, DnsZoneUnknownError } from "./port.ts";
 
 type FetchLike = typeof fetch;
@@ -19,6 +19,8 @@ interface CfRecord {
   id: string;
   content: string;
   priority?: number;
+  proxied?: boolean;
+  ttl?: number;
 }
 
 interface CfEnvelope<T> {
@@ -92,13 +94,18 @@ export class CloudflareDns implements DnsProvider {
     return { deleted: existing.length };
   }
 
-  async createRecord(input: { name: string; type: DnsRecordType; content: string; signal?: AbortSignal }): Promise<void> {
+  async createRecord(input: { name: string; type: DnsRecordType; content: string; proxied?: boolean; ttl?: number; signal?: AbortSignal }): Promise<void> {
     const zone = await this.zoneId(input.name, input.signal);
     await this.send<CfRecord>(`/zones/${zone}/dns_records`, {
       method: "POST",
-      body: { type: input.type, name: input.name, content: input.content, ttl: 1, proxied: false },
+      body: { type: input.type, name: input.name, content: input.content, ttl: input.ttl ?? 1, proxied: input.proxied ?? false },
       ...(input.signal ? { signal: input.signal } : {}),
     });
+  }
+
+  async listStandingRecords(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<StandingDnsRecord[]> {
+    const zone = await this.zoneId(input.name, input.signal);
+    return (await this.listRecords(zone, input.name, input.type, input.signal)).map((r) => ({ content: contentOf(r, input.type), proxied: r.proxied === true, ttl: r.ttl ?? 1 }));
   }
 
   async readRecordContent(input: { name: string; type: DnsRecordType; signal?: AbortSignal }): Promise<string | null> {

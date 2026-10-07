@@ -12,7 +12,7 @@ import { errValidation } from "../../kernel/errors.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { Db } from "../../db/client.ts";
 import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
-import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
+import { DnsZoneUnknownError, type StandingDnsRecord } from "../../adapters/dns/port.ts";
 import type { TenantCluster, TenantLifecyclePorts } from "./lifecycle.ts";
 import { isTenantRecord, removeBookedRecord, tenantZone } from "#unit/server/unit-dns.ts";
 import { prodHostOf, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
@@ -84,8 +84,16 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
 }
 
 /** A record that stood at a customer's host, written by nobody here: what a run replaces with its
- *  CNAME, frozen into the run's params at plan time so that an abort can write it back. */
-export const ReplacedRecord = z.object({ name: publicFqdn, type: z.enum(["A", "AAAA", "CNAME"]), content: z.string().min(1) });
+ *  CNAME, frozen into the run's params at plan time so that an abort can write it back as it stood,
+ *  behind the provider's proxy where it was and with its TTL. A run planned before the flag and the TTL
+ *  were frozen reads them as DNS-only and automatic, which is what it wrote back then. */
+export const ReplacedRecord = z.object({
+  name: publicFqdn,
+  type: z.enum(["A", "AAAA", "CNAME"]),
+  content: z.string().min(1),
+  proxied: z.boolean().default(false),
+  ttl: z.number().int().positive().default(1),
+});
 export type ReplacedRecord = z.infer<typeof ReplacedRecord>;
 
 const ADDRESS_TYPES = ["A", "AAAA"] as const;
@@ -97,24 +105,25 @@ export async function recordsToReplace(db: Db, ports: RecordPorts, guid: string,
   if (!ports.dns) return [];
   const replaced: ReplacedRecord[] = [];
   for (const host of hosts) {
-    let cname: string | null;
+    let standing: StandingDnsRecord | null;
     try {
-      cname = await ports.dns.readRecordContent({ name: host, type: "CNAME", ...(signal ? { signal } : {}) });
+      standing = (await ports.dns.listStandingRecords({ name: host, type: "CNAME", ...(signal ? { signal } : {}) }))[0] ?? null;
     } catch (e) {
       if (e instanceof DnsZoneUnknownError) continue;
       throw e;
     }
-    if (cname !== null && cname !== zone && !isTenantRecord(db, host, guid)) {
+    const cname = standing?.content ?? null;
+    if (standing !== null && cname !== null && cname !== zone && !isTenantRecord(db, host, guid)) {
       const booked = findDnsWrite(db, { name: host, type: "CNAME" });
       if (booked !== null) throw errValidation(`${host} stands as CNAME ${cname}, which this installation wrote for ${booked.owner.kind} ${booked.owner.name} — it is not tenant ${guid}'s to replace`);
       await refuseInheritedMailAnswers(ports, host, cname, signal);
-      replaced.push({ name: host, type: "CNAME", content: cname });
+      replaced.push({ name: host, type: "CNAME", content: cname, proxied: standing.proxied, ttl: standing.ttl });
     }
     for (const type of ADDRESS_TYPES) {
-      for (const content of await ports.dns.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })) {
+      for (const { content, proxied, ttl } of await ports.dns.listStandingRecords({ name: host, type, ...(signal ? { signal } : {}) })) {
         const booked = findDnsWrite(db, { name: host, type });
         if (booked !== null) throw errValidation(`${host} carries the ${type} record ${content}, which this installation wrote for ${booked.owner.kind} ${booked.owner.name} — it is not tenant ${guid}'s to replace`);
-        replaced.push({ name: host, type, content });
+        replaced.push({ name: host, type, content, proxied, ttl });
       }
     }
   }
@@ -176,7 +185,7 @@ export async function hostRecordStates(ports: RecordPorts, hosts: readonly strin
  *  summary is what the run screen shows before the approval. */
 export function replacementSentence(replacing: readonly ReplacedRecord[]): string {
   if (replacing.length === 0) return "";
-  const records = replacing.map((r) => `${r.type} ${r.name} → ${r.content}`).join(", ");
+  const records = replacing.map((r) => `${r.type} ${r.name} → ${r.content}${r.proxied ? " (behind the provider's proxy)" : ""}`).join(", ");
   return ` It deletes ${records}, which this installation did not write, and an abort writes ${replacing.length === 1 ? "it" : "them"} back.`;
 }
 
@@ -246,8 +255,8 @@ export async function restoreReplacedRecords(ctx: StepCtx, ports: RecordPorts, r
       ctx.log("meta", `${r.name} stands as CNAME ${cname} — the replaced ${r.type} record → ${r.content} is not written back beside it; set it at the provider if it is wanted`);
       continue;
     }
-    await ports.dns.createRecord({ name: r.name, type: r.type, content: r.content, signal: ctx.signal });
-    ctx.log("meta", `${r.type} record ${r.name} → ${r.content} written back`);
+    await ports.dns.createRecord({ name: r.name, type: r.type, content: r.content, proxied: r.proxied, ttl: r.ttl, signal: ctx.signal });
+    ctx.log("meta", `${r.type} record ${r.name} → ${r.content} written back${r.proxied ? ", behind the provider's proxy" : ""}${r.ttl === 1 ? "" : `, TTL ${r.ttl} s`}`);
   }
 }
 
