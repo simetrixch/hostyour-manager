@@ -24,13 +24,33 @@ export function stageServiceIssuer(tc: TenantCluster, unitApex: string): string 
   return tenantMemberUrl(tc.routing, tc.identityProvider, tc.stage, tc.subdomain, unitApex, "");
 }
 
-const mintRepair = (route: SenderDomainIssuers, stage: Stage): string =>
-  `mint the key its manifest declares as generate: manager-key with "Secrets…" on ${route.unit} (${stage})`;
+const mintRepair = (unit: string, stage: Stage): string =>
+  `mint the key its manifest declares as generate: manager-key with "Secrets…" on ${unit} (${stage})`;
 
 /** Why the Manager cannot call the route at the stage, or null where it keeps the key for it. */
 export async function refuseWithoutKey(store: Pick<CredentialStore, "list">, route: SenderDomainIssuers, stage: Stage): Promise<string | null> {
   if (await findUnitCallKey(store, route.unit, stage)) return null;
-  return `the Manager keeps no key for ${route.unit} (${stage}), so it cannot bind the issuer there — ${mintRepair(route, stage)}`;
+  return `the Manager keeps no key for ${route.unit} (${stage}), so it cannot bind the issuer there — ${mintRepair(route.unit, stage)}`;
+}
+
+/** A stage route of the product's tenant spec, filled for one domain. */
+export const fillStageUrl = (template: string, stageApexHost: string, domain: string): string =>
+  template.replaceAll("{stageApex}", stageApexHost).replaceAll("{domain}", encodeURIComponent(domain));
+
+/** Opens the key the Manager keeps for a unit's stage. A run's key is masked in its log; a plan has no
+ *  run yet and logs nothing it reads, so it passes no runId. */
+export async function openStageUnitCallKey(
+  store: Pick<CredentialStore, "list" | "open">,
+  unit: string,
+  stage: Stage,
+  purpose: string,
+  runId?: string,
+): Promise<string> {
+  const ref = await findUnitCallKey(store, unit, stage);
+  if (!ref) throw errValidation(`the Manager keeps no key for ${unit} (${stage}) — ${mintRepair(unit, stage)}`);
+  const key = (await store.open(ref.id, { purpose, ...(runId !== undefined ? { runId } : {}) })).toString("utf8");
+  if (runId !== undefined) registerSecret(runId, Buffer.from(key, "utf8"));
+  return key;
 }
 
 /** Adds the issuer at the domain, or removes it; answers whether this call changed the domain's list.
@@ -40,11 +60,8 @@ export async function changeStageIssuer(
   req: { route: SenderDomainIssuers; stage: Stage; unitApex: string; domain: string; issuer: string; change: "add" | "remove"; runId: string; signal?: AbortSignal },
 ): Promise<boolean> {
   const { route, stage } = req;
-  const ref = await findUnitCallKey(deps.store, route.unit, stage);
-  if (!ref) throw errValidation(`the Manager keeps no key for ${route.unit} (${stage}) — ${mintRepair(route, stage)}`);
-  const key = (await deps.store.open(ref.id, { purpose: `tenant-set-sender-domain:${req.change}-issuer`, runId: req.runId })).toString("utf8");
-  registerSecret(req.runId, Buffer.from(key, "utf8"));
-  const url = route.url.replaceAll("{stageApex}", stageApex(req.unitApex, stage)).replaceAll("{domain}", encodeURIComponent(req.domain));
+  const key = await openStageUnitCallKey(deps.store, route.unit, stage, `tenant-set-sender-domain:${req.change}-issuer`, req.runId);
+  const url = fillStageUrl(route.url, stageApex(req.unitApex, stage), req.domain);
   const call = () =>
     deps.unitCall.call({ method: req.change === "add" ? "PUT" : "DELETE", url, key, body: { issuer: req.issuer }, ...(req.signal ? { signal: req.signal } : {}) });
   let answer = await call();
@@ -57,9 +74,9 @@ export async function changeStageIssuer(
     return changed;
   }
   if (answer.status === 401) {
-    throw errValidation(`${at} refused the key the Manager keeps for it (401): it is not the key ${route.unit} holds — ${mintRepair(route, stage)} again, or wait until ${route.unit} has restarted after a mint`);
+    throw errValidation(`${at} refused the key the Manager keeps for it (401): it is not the key ${route.unit} holds — ${mintRepair(route.unit, stage)} again, or wait until ${route.unit} has restarted after a mint`);
   }
-  if (answer.status === 503) throw errValidation(`${at} holds no Manager key yet (503) — ${mintRepair(route, stage)}`);
+  if (answer.status === 503) throw errValidation(`${at} holds no Manager key yet (503) — ${mintRepair(route.unit, stage)}`);
   if (answer.status === 404) throw errValidation(`${at} does not know ${req.domain} as a sender domain (404) — register it in its mail service first`);
   throw errValidation(`${at} did not ${req.change === "add" ? "bind" : "remove"} ${req.issuer}: ${answer.detail}`);
 }

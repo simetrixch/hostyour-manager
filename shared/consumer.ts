@@ -132,6 +132,9 @@ export const TenantMemberSchema = TenantSourceSchema.extend({
 /** An https clone URL ending in `.git` — the shape every repository the deploy repository names has. */
 const gitRepoURL = z.string().regex(/^https:\/\/[^ ]+\.git$/);
 
+/** A route the Manager calls with the key it keeps for a unit's stage, filled for one sender domain. */
+const stageApexDomainUrl = z.string().regex(/^https:\/\/[^/{]*\{stageApex\}\/\S*\{domain\}\S*$/, "an https URL template whose host ends in {stageApex} and whose path contains {domain}");
+
 export const TenantSpecSchema = z.object({
   // The members every tenant always has, one namespace + one AppProject each. No flag and no file
   // gates them: a tenant's apps require these services to exist.
@@ -190,7 +193,17 @@ export const TenantSpecSchema = z.object({
   // stage's apex because the key of a unit's stage goes to that host, and every unit of the stage stands
   // under it. Absent, the sender-domain run binds nothing.
   senderDomainIssuers: z.object({
-    url: z.string().regex(/^https:\/\/[^/{]*\{stageApex\}\/\S*\{domain\}\S*$/, "an https URL template whose host ends in {stageApex} and whose path contains {domain}"),
+    url: stageApexDomainUrl,
+    unit: consumerName,
+  }).strict().optional(),
+  // Where the product's mail service hands a stage's sender domain its DKIM record and checks it, held to
+  // the stage's apex like senderDomainIssuers: `recordUrl` answers GET with { name, type: "TXT", content },
+  // the record the Manager publishes; `checkUrl` answers POST by checking the domain's records now; `unit`,
+  // the consumer whose kept key the Manager presents. Absent, a domain the product does not sign yet is
+  // refused, and its record is published by hand.
+  senderDomainDkim: z.object({
+    recordUrl: stageApexDomainUrl,
+    checkUrl: stageApexDomainUrl,
     unit: consumerName,
   }).strict().optional(),
   // The DNS label under which the Manager marks each tenant's identity provider for the product's mail

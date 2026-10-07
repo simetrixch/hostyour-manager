@@ -74,7 +74,7 @@ import { issuerAddressHost } from "../shared/unit-host.ts";
  *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
 export { consumerUnitHost, issuerAddressHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../shared/unit-host.ts";
 
-function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
+export function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {
     throw errValidation(
       `${runKind} "${unit}" requires the DNS provider but none is wired on this manager (CLOUDFLARE_DNS_API_TOKEN unset) — DNS is a mandatory part of this run kind, never a silent skip`,

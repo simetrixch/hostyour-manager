@@ -156,7 +156,7 @@ async function unitRowsOf(
  *  left behind is on this page for dns-remove to take back. */
 async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[]> {
   const rows: DnsRecordRow[] = [];
-  for (const w of listDnsWrites(db).filter((row) => row.type === "TXT" && row.owner.kind === "tenant" && row.name.startsWith("_"))) {
+  for (const w of listDnsWrites(db).filter((row) => row.type === "TXT" && row.owner.kind === "tenant" && (row.name.startsWith("_") || row.name.includes("._domainkey.")))) {
     const standing = await dns.listRecordContents({ name: w.name, type: "TXT" });
     const stage = w.owner.stage;
     const tenant = stage === undefined ? undefined : db.select({ subdomain: tenants.subdomain }).from(tenants).where(and(eq(tenants.guid, w.owner.name), eq(tenants.stage, stage))).get();
@@ -172,7 +172,7 @@ async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[
     });
     // The issuer host's address record beside a host-routed mark (unit-dns.ts publishIssuerRecord),
     // listed where the book holds it for the mark's tenant, so a removal that failed leaves it here.
-    const address = issuerAddressHost(w.content);
+    const address = w.name.startsWith("_") ? issuerAddressHost(w.content) : null;
     const booked = address === null ? null : findDnsWrite(db, { name: address, type: "CNAME" });
     if (address !== null && booked !== null && booked.owner.kind === "tenant" && booked.owner.name === w.owner.name) {
       rows.push(await unitRow(dns, owner, address, booked.content));

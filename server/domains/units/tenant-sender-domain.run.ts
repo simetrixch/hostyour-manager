@@ -8,8 +8,6 @@ import { errValidation } from "../../kernel/errors.ts";
 import type { ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
-import { unitApexFromChain } from "#unit/server/unit-apex.ts";
-import { stageApex } from "#unit/shared/unit-host.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
 import { memberApplication, rendersTenantValue } from "./tenant-fanout.ts";
@@ -19,6 +17,13 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
 import { changeStageIssuer, refuseWithoutKey, stageServiceIssuer, type SenderDomainIssuers } from "./tenant-sender-domain-issuer.ts";
+import {
+  planDkimRecord,
+  publishDkimRecordStep,
+  awaitDkimSigningStep,
+  removeDkimRecordCleanup,
+  tenantUnitApex,
+} from "./tenant-sender-domain-dkim.ts";
 
 // `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as.
 // A customer sends from its own domain (the company tenant from simetrix.ch) instead of
@@ -48,6 +53,12 @@ export const TenantSetSenderDomainParams = z.object({
   senderDomain,
   /** The sender domain standing when this was asked for. An abort writes it back. */
   previous: senderDomain,
+  /** The stage DKIM record to publish and wait for before binding the issuer. */
+  dkim: z.object({
+    name: z.string(),
+    content: z.string(),
+    zone: z.string(),
+  }).optional(),
 });
 export type TenantSetSenderDomainParams = z.infer<typeof TenantSetSenderDomainParams>;
 
@@ -57,13 +68,12 @@ export type TenantSetSenderDomainPorts = TenantOnboardPorts & {
   /** Calls the product's issuer route as the Manager, with the key it keeps for the unit's stage. */
   unitCall: UnitCall;
   /** Where the plan looks for that key; a step opens it through its own context. */
-  store: Pick<CredentialStore, "list">;
+  store: Pick<CredentialStore, "list" | "open">;
+  /** How long the run waits for the product to sign mail from a domain whose DKIM record it published,
+   *  and how often it asks; DKIM_SIGNING_WAIT_MS and DKIM_POLL_INTERVAL_MS where unset. Tests shorten them. */
+  dkimWaitMs?: number;
+  dkimPollMs?: number;
 };
-
-/** The tenant's public apex, off its cluster's values chain. */
-async function tenantUnitApex(ports: TenantSetSenderDomainPorts, tc: TenantCluster): Promise<string> {
-  return unitApexFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
-}
 
 /** Adds or removes the stage's issuer at `domain` through the product's route; null where the product
  *  declares none. */
@@ -130,23 +140,6 @@ async function refuseSharedSenderDomain(ports: TenantSetSenderDomainPorts, tc: T
   return other ? `tenant ${tc.subdomain} cannot send as ${domain} — tenant ${other.subdomain} of ${tc.stage} already sends from it; a stage's tenants send from different domains` : null;
 }
 
-/** Why the product's check refuses `domain`, or null where mail from it is signed. */
-async function refuseUnsigned(ports: TenantSetSenderDomainPorts, tc: TenantCluster, template: string | undefined, domain: string): Promise<string | null> {
-  if (!template) return "the product declares no senderDomainCheck in its tenant spec, so no tenant of it sends from a domain of its own";
-  const apex = stageApex(await tenantUnitApex(ports, tc), tc.stage);
-  const url = template.replaceAll("{stageApex}", apex).replaceAll("{domain}", encodeURIComponent(domain));
-  const answer = await ports.probe.probe(url, { readBody: true });
-  if (answer.status === 404) return `the product does not know ${domain} as a sender domain (${url} answered 404) — register it in the product's mail service first`;
-  if (answer.status !== 200) return `the product's sender-domain check did not answer (${url}: ${answer.detail}) — nothing says mail from ${domain} is signed`;
-  let signing: unknown;
-  try {
-    signing = (JSON.parse(answer.body ?? "") as { signing?: unknown }).signing;
-  } catch {
-    return `the product's sender-domain check answered no JSON (${url}) — nothing says mail from ${domain} is signed`;
-  }
-  return signing === true ? null : `mail from ${domain} is not signed yet (${url} answered signing: ${String(signing)}) — its key is not active in the product's mail service`;
-}
-
 function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: TenantSetSenderDomainParams): Step[] {
   return [
     {
@@ -159,6 +152,8 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
         ctx.log("meta", `target ${tc.domain} attested for ${tc.guid} at ${tc.stage} — deploy-state generation ${state.generation}`);
       },
     },
+    publishDkimRecordStep(ports, p),
+    awaitDkimSigningStep(ports, p),
     {
       name: "bind-issuer",
       title: `Let the stage's service issuer send from ${p.senderDomain || "the platform's own domain"}`,
@@ -250,9 +245,12 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       if (params.senderDomain !== "") {
         const shared = await refuseSharedSenderDomain(ports, tc, params.senderDomain);
         if (shared) throw errValidation(shared);
-        const refused = await refuseUnsigned(ports, tc, spec?.senderDomainCheck, params.senderDomain);
-        if (refused) throw errValidation(`tenant ${tc.subdomain} cannot send as ${params.senderDomain} — ${refused}`);
       }
+      // The record to publish comes from the plan alone, never from the request: a run writes only what
+      // the product wants for this domain, and the stored params carry what the approve said yes to.
+      delete params.dkim;
+      const dkim = params.senderDomain === "" ? null : await planDkimRecord(ports, db, tc, spec, params.senderDomain);
+      if (dkim) params.dkim = dkim;
       const route = spec?.senderDomainIssuers;
       const unbinds = params.previous !== "" && params.previous !== params.senderDomain;
       let issuerNote = "";
@@ -273,7 +271,8 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
           `Send the mail of tenant ${tc.guid} (${tc.domain}, ${tc.stage}) as ${params.senderDomain ? `no-reply@${params.senderDomain}` : "the platform's own domain"}` +
           `${params.previous === params.senderDomain ? " (unchanged, re-applied)" : `, instead of ${params.previous || "the platform's own domain"}`}` +
           `: record it on the registration and the row, then wait until every member is Synced + Healthy rendering it.` +
-          `${params.senderDomain ? ` The product's check answered that mail from ${params.senderDomain} is signed. The domain's SPF record must allow the platform's mail server, which is the domain owner's to set.` : ""}` +
+          `${params.dkim ? ` The run publishes TXT ${params.dkim.name} in the zone ${params.dkim.zone}, then waits until ${spec?.senderDomainDkim?.unit} signs mail from ${params.senderDomain}.` : params.senderDomain ? ` The product's check answered that mail from ${params.senderDomain} is signed.` : ""}` +
+          `${params.senderDomain ? " The domain's SPF record must allow the platform's mail server, which is the domain owner's to set." : ""}` +
           issuerNote,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
@@ -283,6 +282,6 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       };
     },
     steps: (params) => tenantSetSenderDomainSteps(ports, params),
-    cleanups: (params) => [restoreSenderDomainCleanup(ports, params), unbindIssuerCleanup(ports, params)],
+    cleanups: (params) => [restoreSenderDomainCleanup(ports, params), unbindIssuerCleanup(ports, params), removeDkimRecordCleanup(ports, params)],
   };
 }

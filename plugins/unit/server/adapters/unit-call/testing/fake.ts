@@ -2,7 +2,7 @@
 // key it carried, so a test can assert what the Manager presented and to which URL.
 import type { UnitCall, UnitCallResult } from "../port.ts";
 
-export type UnitCallRequest = { method: "PUT" | "DELETE"; url: string; key: string; body: unknown };
+export type UnitCallRequest = { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; key: string; body?: unknown };
 
 export class FakeUnitCall implements UnitCall {
   readonly calls: UnitCallRequest[] = [];

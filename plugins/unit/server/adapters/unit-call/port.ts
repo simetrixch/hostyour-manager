@@ -11,5 +11,5 @@ export interface UnitCallResult {
 }
 
 export interface UnitCall {
-  call(req: { method: "PUT" | "DELETE"; url: string; key: string; body: unknown; signal?: AbortSignal }): Promise<UnitCallResult>;
+  call(req: { method: "GET" | "POST" | "PUT" | "DELETE"; url: string; key: string; body?: unknown; signal?: AbortSignal }): Promise<UnitCallResult>;
 }

@@ -157,6 +157,27 @@ describe("readDnsInventory", () => {
     ]);
   });
 
+  it("lists a booked tenant DKIM write with its tenant", async () => {
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    recordDnsWrite(db.db, {
+      name: "sel1._domainkey.customer.test",
+      type: "TXT",
+      content: "v=DKIM1; p=MIGf",
+      act: "inserted",
+      owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" },
+      runId: "run_dkim",
+    });
+    dns.seed("sel1._domainkey.customer.test", "TXT", "v=DKIM1; p=MIGf");
+    const view = await readDnsInventory(deps());
+    const row = view.rows.find((r) => r.name === "sel1._domainkey.customer.test");
+    expect(row).toBeDefined();
+    expect(row?.owner).toEqual({ kind: "tenant", name: "acme", stage: "prod" });
+    expect(row?.expected).toBe("v=DKIM1; p=MIGf");
+    expect(row?.found).toBe("v=DKIM1; p=MIGf");
+    expect(row?.verdict).toBe("standing");
+    expect(row?.removable).toBe(true);
+  });
+
   it("PLANTED INNOCENT: a TXT booked for a tenant whose name carries no underscore label is no mark, and is not listed as one", async () => {
     recordDnsWrite(db.db, { name: "acme.example.net", type: "TXT", content: "v=spf1 -all", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
     const view = await readDnsInventory(deps());
