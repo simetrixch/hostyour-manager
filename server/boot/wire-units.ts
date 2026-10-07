@@ -500,6 +500,10 @@ function buildConsumerOnboarding(
     registrations,
     buildRbac,
     repoCredential,
+    seeder,
+    ...(installationStore ? { installationStore } : {}),
+    github,
+    store,
     ...(dns ? { dns } : {}),
   };
 

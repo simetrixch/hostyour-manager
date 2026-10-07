@@ -28,6 +28,11 @@ import { runRelocationJob, type RelocationPorts, type RelocationWorld, type Worl
 import { watchConsumerSwitch } from "./consumer-switch-watch.ts";
 import { servedSharedDatabases, sharedDataRefusal, type SharedDataClaim } from "./shared-data-guard.ts";
 import { targetOf } from "#unit/server/relocation-restore.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { InstallationStore } from "#unit/server/adapters/vault/installation-store-port.ts";
+import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import { seedRestoredSecrets } from "./restore-seed-secrets.ts";
 import {
   consumerDumpJobs, claimsIdentity, tarredClaims,
   consumerRestoreJobs, consumerGenerationClaimsJob, parseClaimLines,
@@ -47,6 +52,10 @@ export interface ConsumerRelocationPorts extends RelocationPorts, LifecyclePorts
   buildRbac?: BuildRbacWriter;
   /** Needed by provision-target for a unit whose repo is private — absent then ⇒ fail loud. */
   repoCredential?: RepoCredentialWriter;
+  seeder: VaultSeeder;
+  installationStore?: InstallationStore;
+  github: GitHubConsumer;
+  store: Pick<CredentialStore, "open" | "list">;
 }
 
 /** The registration's deploy group, read STRICTLY: the relocation of a consumer is meaningless
@@ -229,6 +238,17 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           await clusterReader.annotateNamespace(namespace, { [CLAIM_RELOCATING_ANNOTATION]: null });
         }
         c.log("meta", `target ${target.cluster} provisioned for ${ac.name} — ${access}the isolation AppProject, the admission policy and the argo-sync grant are rendered from the registration and follow the repoint`);
+      },
+      seedSecrets: async (c, registrationYaml) => {
+        const reg = ConsumerRegistrationSchema.parse(parseRegistration(registrationYaml));
+        const repoURL = reg.repoURL;
+        const credentialId = await unitRepoCredentialId({ repoURL, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(c.db, org), store: c.creds, signal: c.signal });
+        await seedRestoredSecrets(
+          ports,
+          c,
+          { stage: ac.stage, consumerName: ac.name, repoURL, services: reg.services ?? [], mongodb: reg.mongodb, redis: reg.redis },
+          credentialId,
+        );
       },
       repoint: async (c, target) => {
         // The mark FIRST, on the SOURCE namespace, because the flip below IS a delete on the source:

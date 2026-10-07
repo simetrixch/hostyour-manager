@@ -1,10 +1,37 @@
 // The onboard `seed-mongodb-instance` step. Split out of onboard.run.ts (like onboard-seed-postgres.ts
 // / plugins/unit/server/seed-repo-pat.ts / plugins/unit/server/build-webhook.ts) so the run file stays a thin orchestrator and the
 // one per-consumer MongoDB credential write is a small, self-contained unit.
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { mintMongodbRootPassword, mintMongodbKeyfile } from "#unit/server/secret-mint.ts";
+
+/** Seeds the per-consumer MongoDB instance credential create-only. */
+export async function seedMongodbInstance(
+  seeder: VaultSeeder,
+  ctx: StepCtx,
+  unit: { stage: Stage; consumerName: string; services: readonly string[]; mongodb?: string | undefined; redis?: string | undefined },
+): Promise<void> {
+  if (unit.mongodb === "shared") {
+    ctx.log("meta", "consumer runs on the cluster's shared MongoDB replica set — no instance credential to seed");
+    return;
+  }
+  const { created } = await seeder.seedMongodb({
+    stage: unit.stage,
+    consumerName: unit.consumerName,
+    rootPassword: mintMongodbRootPassword(),
+    keyfile: mintMongodbKeyfile(),
+  });
+  const path = `${KV_MOUNT}/${unit.stage}/consumer/${unit.consumerName}/mongodb`;
+  ctx.log(
+    "meta",
+    created
+      ? `seeded the MongoDB instance credential write-only into ${path} (create-only) — the root password its "${unit.mongodb}" instance is initialised with, plus the replica-set keyfile`
+      : `MongoDB instance credential already present at ${path} — left untouched (create-only). A re-onboard re-uses the root password its data volume was initialised with; it is never rotated here.`,
+  );
+}
 
 /** The onboard `seed-mongodb-instance` step. MANIFEST-DRIVEN through one word: the consumer's
  *  `mongodb` says whether it runs on the CLUSTER's shared replica set — which every tenant uses and
@@ -31,24 +58,6 @@ export function seedMongodbInstanceStep(ports: OnboardPorts, p: DeployableOnboar
   return {
     name: "seed-mongodb-instance",
     title: "Seed the per-consumer MongoDB instance credential into Vault",
-    run: async (ctx) => {
-      if (p.mongodb === "shared") {
-        ctx.log("meta", "consumer runs on the cluster's shared MongoDB replica set — no instance credential to seed");
-        return;
-      }
-      const { created } = await ports.seeder.seedMongodb({
-        stage: p.stage,
-        consumerName: p.consumerName,
-        rootPassword: mintMongodbRootPassword(),
-        keyfile: mintMongodbKeyfile(),
-      });
-      const path = `${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/mongodb`;
-      ctx.log(
-        "meta",
-        created
-          ? `seeded the MongoDB instance credential write-only into ${path} (create-only) — the root password its "${p.mongodb}" instance is initialised with, plus the replica-set keyfile`
-          : `MongoDB instance credential already present at ${path} — left untouched (create-only). A re-onboard re-uses the root password its data volume was initialised with; it is never rotated here.`,
-      );
-    },
+    run: (ctx) => seedMongodbInstance(ports.seeder, ctx, p),
   };
 }

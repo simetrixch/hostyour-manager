@@ -1,9 +1,31 @@
 // The onboard `seed-mariadb-instance` step, beside onboard-seed-postgres.ts: the one per-consumer
 // MariaDB credential write, as a small unit of its own.
-import type { Step } from "../../executor/types.ts";
+import type { Step, StepCtx } from "../../executor/types.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
+import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { OnboardPorts, DeployableOnboardParams } from "./onboard.run.ts";
 import { mintMariadbRootPassword } from "#unit/server/secret-mint.ts";
+
+/** Seeds the per-consumer MariaDB root password create-only. */
+export async function seedMariadbInstance(
+  seeder: VaultSeeder,
+  ctx: StepCtx,
+  unit: { stage: Stage; consumerName: string; services: readonly string[]; mongodb?: string | undefined; redis?: string | undefined },
+): Promise<void> {
+  if (!unit.services.includes("mariadb")) {
+    ctx.log("meta", "consumer claims no mariadb — no MariaDB of its own to seed a password for");
+    return;
+  }
+  const { created } = await seeder.seedMariadb({ stage: unit.stage, consumerName: unit.consumerName, password: mintMariadbRootPassword() });
+  const path = `${KV_MOUNT}/${unit.stage}/consumer/${unit.consumerName}/mariadb`;
+  ctx.log(
+    "meta",
+    created
+      ? `seeded the MariaDB root password write-only into ${path} (create-only)`
+      : `MariaDB root password already present at ${path} — left untouched (create-only). A re-onboard re-uses the password its data volume was initialised with; it is never rotated here.`,
+  );
+}
 
 /** The onboard `seed-mariadb-instance` step. A consumer that claims `mariadb` runs a MariaDB of its own,
  *  which needs the root password its first start initialises the database with. The write goes to its
@@ -14,19 +36,6 @@ export function seedMariadbInstanceStep(ports: OnboardPorts, p: DeployableOnboar
   return {
     name: "seed-mariadb-instance",
     title: "Seed the per-consumer MariaDB root password into Vault",
-    run: async (ctx) => {
-      if (!p.services.includes("mariadb")) {
-        ctx.log("meta", "consumer claims no mariadb — no MariaDB of its own to seed a password for");
-        return;
-      }
-      const { created } = await ports.seeder.seedMariadb({ stage: p.stage, consumerName: p.consumerName, password: mintMariadbRootPassword() });
-      const path = `${KV_MOUNT}/${p.stage}/consumer/${p.consumerName}/mariadb`;
-      ctx.log(
-        "meta",
-        created
-          ? `seeded the MariaDB root password write-only into ${path} (create-only)`
-          : `MariaDB root password already present at ${path} — left untouched (create-only). A re-onboard re-uses the password its data volume was initialised with; it is never rotated here.`,
-      );
-    },
+    run: (ctx) => seedMariadbInstance(ports.seeder, ctx, p),
   };
 }

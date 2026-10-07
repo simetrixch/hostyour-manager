@@ -100,6 +100,8 @@ export interface RelocationWorld {
   /** Flip the registration's cluster field onto the target — plus, for a tenant, annotate the source
    *  CR relocating and delete it (the annotation makes that delete a release, not a deprovision). */
   repoint(ctx: StepCtx, target: TargetCluster): Promise<void>;
+  /** The secrets an offboard removed, seeded before the registration is committed so the first render finds them. */
+  seedSecrets?(ctx: StepCtx, registrationYaml: string): Promise<void>;
   /** Re-commit the DUMPED registration onto the target, quiesced — how a restore rebuilds a unit
    *  whose live registration is long gone. */
   writeRegistrationFromDump(ctx: StepCtx, registrationYaml: string, target: TargetCluster): Promise<void>;
