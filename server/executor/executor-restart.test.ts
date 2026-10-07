@@ -35,6 +35,8 @@ function twoSteps(requiredSecrets: string[] = []) {
     plan: async () => ({
       kind: "noop", targetKind: "self", targetId: "manager", summary: "two steps",
       steps: [{ name: "first", title: "First" }, { name: "second", title: "Second" }], warnings: [], requiredSecrets,
+      // A lock of its own, so a test can see a cancel release it.
+      locks: [{ resource: "server", key: "planted" }],
     }),
     steps: () => [
       {
@@ -140,11 +142,13 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     steps.release();
     await shutdown;
     expect(getRun(db.db, runId)?.status).toBe("running");
+    const locks = () => (db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id = ?").get(runId) as { n: number }).n;
+    expect(locks()).toBe(1);
 
     await executor.cancel(runId);
     expect(getRun(db.db, runId)?.status).toBe("cancelled");
     expect(log(db, runId)).toContain("✕ cancelled before: Second");
-    expect((db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id = ?").get(runId) as { n: number }).n).toBe(0);
+    expect(locks()).toBe(0);
     await managerOver(db, steps.def).resumeOnBoot();
     expect(steps.seen.second).toBe(0);
   });
