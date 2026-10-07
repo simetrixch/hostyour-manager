@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
-import { apps, tenants } from "../../db/schema/inventory.ts";
+import { apps, tenantApps, tenants } from "../../db/schema/inventory.ts";
+import { renderTenantAppProject } from "./appproject.ts";
+import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { makeMigrateDef, makeTenantMigrateDef } from "./migrate.run.ts";
 import { repointStep } from "#unit/server/relocation-migrate.ts";
@@ -403,6 +405,28 @@ describe("tenant-migrate", () => {
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();
     expect(row?.clusterId).toBe(TARGET.clusterId);
     expect(row?.status).toBe("active");
+  });
+
+  it("PLANTED DEFECT: the move clears on the source the AppProject and admission policy of an app removed before it", async () => {
+    seedMaster(db);
+    seedClusters(db);
+    seedTenantRows(db);
+    // erp was removed from the tenant earlier: its row stays offboarded, the registration no longer names
+    // it, and remove-app kept its AppProject and admission policy on the cluster, as it does on purpose.
+    db.db.insert(tenantApps).values({ id: "tna_erp", tenantId: "tnt_1", name: "erp", status: "offboarded" }).run();
+    const f = makeFakes();
+    const ports = tenantPorts(f);
+    await seedTenantWorld(ports.registrations);
+    const erpProject = renderTenantAppProject({ guid: GUID, member: "erp", stage: "prod", argoNamespace: SOURCE.cluster, deployRepoUrl: "https://github.com/acme/acme-deploy.git", platformRepoURL: "https://github.com/acme/platform.git", cluster: SOURCE.cluster });
+    await f.source.projects.applyAppProject(SOURCE.cluster, erpProject);
+    f.source.reader.setJobResult(`reloc-list-source-${GUID}`, { succeeded: true, logs: `DB ${GUID}_auth_prod\nDB ${GUID}_web_prod` });
+    f.target.reader.setSecretValue(`${GUID}-auth-prod`, "hostyour-app-secrets", "AUTH_JWT_PUBLIC_KEY", "-----BEGIN PUBLIC KEY-----");
+    const def = makeTenantMigrateDef(ports);
+    const params = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
+    await driveSteps(db, f, def.steps(params), params, [], { "verify-source-released": () => f.source.argo.setStatuses(new Map()) });
+
+    expect(f.source.projects.get(SOURCE.cluster, erpProject.metadata.name)).toBeUndefined();
+    expect(f.source.reader.deletedAdmissionPolicies).toContain(tenantMemberAdmissionPolicyName(GUID, "erp", "prod"));
   });
 
   it("journey: an injected restore failure leaves the source fully intact — nothing cleared, nothing recorded, the generation survives", async () => {

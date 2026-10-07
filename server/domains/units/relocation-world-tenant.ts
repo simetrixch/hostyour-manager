@@ -14,7 +14,7 @@ import { localTx } from "../../executor/stepkit.ts";
 import { serializePointer } from "#unit/server/registration-laws.ts";
 import { loadTenantCluster, refreshTenantApplications, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
-import { tenantSelector, allPruned, lingering } from "./tenant-lifecycle.run.ts";
+import { tenantSelector, allPruned, lingering, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { memberAppProject, memberApplication, memberNamespace, tenantApplicationSet, tenantNamespaces } from "./tenant-fanout.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
@@ -241,7 +241,10 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
       },
       clearSourceCluster: async (c) => {
         const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-        const members = allMembers;
+        // Every app row the tenant has or had, as the offboard clears (tenantTeardownMembers): an app
+        // removed earlier keeps its AppProject and admission policy on purpose, and the registration no
+        // longer names it, so a set taken from the registration alone left them on the former cluster.
+        const members = [...new Set([...allMembers, ...tenantTeardownMembers(c.db, tc.guid, tc.stage)])];
         let deleted = 0;
         for (const member of members) {
           if ((await projectWriter.deleteAppProject(argoNamespace, memberAppProject(tc.guid, member, tc.stage))).deleted) deleted++;

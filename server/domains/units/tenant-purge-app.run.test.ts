@@ -144,6 +144,28 @@ describe("tenant-purge-app run", () => {
     expect(logs.some((l) => l.includes(`record of app "web"`))).toBe(true);
   });
 
+  it("PLANTED DEFECT: finds and deletes what a move left of the app on the tenant's former cluster, naming that cluster", async () => {
+    seedTenants();
+    // The tenant moved from s2 to s1 before the fix that clears every app row's objects: web's AppProject
+    // and admission policy still stand on s2, and s1 has none.
+    db.db.insert(servers).values({ id: "srv_2", name: "m2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
+    db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
+    const { ports } = await world({ project: false, policy: false });
+    const former = new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: [memberNamespace(GUID, "web", "prod")] });
+    former.admissionPolicies.set(tenantMemberAdmissionPolicyName(GUID, "web", "prod"), {} as never);
+    const formerProjects = new FakeMasterProjectWriter();
+    await formerProjects.applyAppProject("s2", project(GUID, "web"));
+    (ports.resolver as FakeClusterKubeResolver).set("cls_2", { clusterReader: former, argoReader: new FakeMasterArgoReader({}), projectWriter: formerProjects, argoNamespace: "s2" });
+    const def = makePurgeAppDef(ports);
+    const plan = await def.plan(PARAMS, { db: db.db });
+    expect(plan.summary).toContain(`AppProject ${memberAppProject(GUID, "web", "prod")} on s2.example`);
+    expect(plan.summary).toContain(`admission policy ${tenantMemberAdmissionPolicyName(GUID, "web", "prod")} with its binding on s2.example`);
+    await runAll(def);
+    expect(formerProjects.get("s2", memberAppProject(GUID, "web", "prod"))).toBeUndefined();
+    expect(former.deletedAdmissionPolicies).toEqual([tenantMemberAdmissionPolicyName(GUID, "web", "prod")]);
+    expect(appRow("tnt_1", "web")).toBeUndefined();
+  });
+
   it("names only the record where nothing else of the app stands, and deletes it", async () => {
     seedTenants();
     const { ports } = await world({ project: false, policy: false, vaultKeys: [] });

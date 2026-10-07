@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
-import { tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
@@ -34,10 +34,18 @@ function assertAppOffboarded(db: Db, tc: TenantCluster, app: string): void {
   }
 }
 
-/** What of the app still stands and the purge deletes; an AppProject or policy is named where it stands. */
-interface AppLeftovers {
+/** What of the app still stands on one cluster and the purge deletes there. */
+interface ClusterLeftovers {
+  clusterId: string;
+  /** The cluster's domain, named where it is not the tenant's own cluster. */
+  former?: string;
   project?: string;
   policy?: string;
+}
+
+/** What of the app still stands and the purge deletes: per cluster, and its Vault keys. */
+interface AppLeftovers {
+  clusters: ClusterLeftovers[];
   vaultKeys: string[];
 }
 
@@ -55,28 +63,39 @@ async function readLeftovers(ports: TenantLifecyclePorts, db: Db, tenantId: stri
     throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: the registration still names it — remove the app first`);
   }
   if (!ports.seeder) throw errValidation(`this Manager cannot read Vault, so it cannot see whether app "${app}" of tenant ${tc.guid} still has a key there`);
-  const { clusterReader, argoReader, projectWriter, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-  const deployed: string[] = [];
+  // EVERY active cluster, the tenant's own first: a move before every app row's objects were cleared
+  // left a removed app's AppProject and policy on the former cluster, and nothing records which one.
+  // The names carry the guid, the app and the stage, so on another cluster they are this app's alone.
+  const active = db.select({ id: clusters.id, domain: clusters.domain }).from(clusters).where(eq(clusters.status, "active")).all();
+  const order = [...active.filter((c) => c.id === tc.clusterId), ...active.filter((c) => c.id !== tc.clusterId)];
   const namespace = memberNamespace(tc.guid, app, tc.stage);
-  if (await clusterReader.readNamespaceAnnotations(namespace)) deployed.push(`namespace ${namespace}`);
   const application = memberApplication(tc.guid, app, tc.stage);
-  if (await argoReader.getApplication(argoNamespace, application)) deployed.push(`ArgoCD Application ${application}`);
-  if (deployed.length > 0) throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: ${deployed.join("; ")} — remove the app first`);
   const project = memberAppProject(tc.guid, app, tc.stage);
   const policy = tenantMemberAdmissionPolicyName(tc.guid, app, tc.stage);
-  return {
-    tc,
-    left: {
+  const deployed: string[] = [];
+  const onClusters: ClusterLeftovers[] = [];
+  for (const cluster of order) {
+    const { clusterReader, argoReader, projectWriter, argoNamespace } = await ports.resolver.resolve(cluster.id);
+    const where = cluster.id === tc.clusterId ? "" : ` on ${cluster.domain}`;
+    if (await clusterReader.readNamespaceAnnotations(namespace)) deployed.push(`namespace ${namespace}${where}`);
+    if (await argoReader.getApplication(argoNamespace, application)) deployed.push(`ArgoCD Application ${application}${where}`);
+    const left: ClusterLeftovers = {
+      clusterId: cluster.id,
+      ...(where ? { former: cluster.domain } : {}),
       ...((await projectWriter.appProjectExists(argoNamespace, project)) ? { project } : {}),
       ...((await clusterReader.admissionPolicyExists(policy)) ? { policy } : {}),
-      vaultKeys: await ports.seeder.listTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }),
-    },
-  };
+    };
+    if (left.project || left.policy) onClusters.push(left);
+  }
+  if (deployed.length > 0) throw errValidation(`app "${app}" of tenant ${tc.guid} is still deployed: ${deployed.join("; ")} — remove the app first`);
+  return { tc, left: { clusters: onClusters, vaultKeys: await ports.seeder.listTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) } };
 }
 
 const describeLeftovers = (tc: TenantCluster, left: AppLeftovers): string[] => [
-  ...(left.project ? [`AppProject ${left.project}`] : []),
-  ...(left.policy ? [`admission policy ${left.policy} with its binding`] : []),
+  ...left.clusters.flatMap((c) => {
+    const where = c.former ? ` on ${c.former}` : "";
+    return [...(c.project ? [`AppProject ${c.project}${where}`] : []), ...(c.policy ? [`admission policy ${c.policy} with its binding${where}`] : [])];
+  }),
   ...left.vaultKeys.map((key) => `Vault key ${tc.stage}/tenants/${tc.guid}/${key}`),
 ];
 
@@ -90,9 +109,11 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
       run: async (ctx) => {
         // Read again: the tenant or the app may have changed between the plan and its approval.
         const { tc, left } = await readLeftovers(ports, ctx.db, tenantId, app);
-        const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(tc.clusterId);
-        if (left.project) await projectWriter.deleteAppProject(argoNamespace, left.project);
-        if (left.policy) await clusterReader.deleteAdmissionPolicy(left.policy);
+        for (const c of left.clusters) {
+          const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(c.clusterId);
+          if (c.project) await projectWriter.deleteAppProject(argoNamespace, c.project);
+          if (c.policy) await clusterReader.deleteAdmissionPolicy(c.policy);
+        }
         const { deleted } = left.vaultKeys.length > 0 ? await ports.seeder!.deleteTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) : { deleted: [] };
         const gone = describeLeftovers(tc, { ...left, vaultKeys: deleted });
         ctx.log("meta", gone.length > 0 ? `app "${app}" of tenant ${tc.guid}: deleted ${gone.join(", ")}` : `app "${app}" of tenant ${tc.guid}: nothing but its record stood`);
