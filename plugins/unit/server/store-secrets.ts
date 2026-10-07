@@ -2,7 +2,8 @@
 // plans, copied into the consumer's own entry when it seeds. Its value goes nowhere else: no log, no
 // plan, no frozen parameter.
 import type { ConsumerSecretSpec } from "#core/shared/consumer.ts";
-import { errValidation } from "#core/server/kernel/errors.ts";
+import { AppError, errValidation } from "#core/server/kernel/errors.ts";
+import { VaultError } from "#core/server/adapters/vault/port.ts";
 import type { InstallationStore } from "./adapters/vault/installation-store-port.ts";
 
 type StoreSpec = ConsumerSecretSpec & { store: NonNullable<ConsumerSecretSpec["store"]> };
@@ -29,7 +30,9 @@ function requireStore(store: InstallationStore | undefined, specs: StoreSpec[]):
   return store;
 }
 
-/** Why the plan cannot take the store keys `specs` declare, or null where every one stands. */
+/** Why the plan cannot take the store keys `specs` declare, or null where every one stands. Only the
+ *  installation's state is a reason: a value missing, no store, or a policy refusing the read. A Vault
+ *  that does not answer is no such state and fails the plan as an error, to be planned again. */
 export async function refuseMissingStoreSecrets(store: InstallationStore | undefined, specs: readonly ConsumerSecretSpec[]): Promise<string | null> {
   const wanted = storeSpecs(specs);
   if (wanted.length === 0) return null;
@@ -38,7 +41,8 @@ export async function refuseMissingStoreSecrets(store: InstallationStore | undef
     for (const spec of wanted) await readOne(reader, spec);
     return null;
   } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+    if ((err instanceof AppError && err.code === "VALIDATION") || (err instanceof VaultError && err.status === 403)) return err.message;
+    throw err;
   }
 }
 

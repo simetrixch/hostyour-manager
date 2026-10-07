@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { refuseMissingStoreSecrets, readStoreSecrets } from "./store-secrets.ts";
 import type { InstallationStore } from "./adapters/vault/installation-store-port.ts";
 import type { ConsumerSecretSpec } from "#core/shared/consumer.ts";
+import { VaultError } from "#core/server/adapters/vault/port.ts";
 
 const SPECS: ConsumerSecretSpec[] = [
   { key: "POST_OIDC_CLIENT_SECRET", required: true, store: { entry: "idp/clients/post", field: "client-secret" } },
@@ -23,9 +24,20 @@ describe("store-secrets", () => {
 
   it("refuses the plan with the reason where the store refuses the read, never taking it for absent", async () => {
     const refusing = store(async () => {
-      throw new Error('the Manager may not read secret/prod/idp/clients/post: the installation\'s Vault policy "manager" grants it no read there');
+      throw new VaultError('the Manager may not read secret/prod/idp/clients/post: the installation\'s Vault policy "manager" grants it no read there', 403);
     });
     expect(await refuseMissingStoreSecrets(refusing, SPECS)).toMatch(/grants it no read there/);
     await expect(readStoreSecrets(refusing, SPECS)).rejects.toThrow(/grants it no read there/);
+  });
+
+  it("lets a Vault that does not answer fail the plan as an error, not as a refusal of the request", async () => {
+    const unreachable = store(async () => {
+      throw new TypeError("fetch failed");
+    });
+    await expect(refuseMissingStoreSecrets(unreachable, SPECS)).rejects.toThrow(/fetch failed/);
+    const failing = store(async () => {
+      throw new VaultError("vault kubernetes login failed (500)", 500);
+    });
+    await expect(refuseMissingStoreSecrets(failing, SPECS)).rejects.toThrow(/login failed/);
   });
 });
