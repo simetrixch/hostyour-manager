@@ -25,8 +25,8 @@
   height: var(--topbar-h);
   padding-inline: var(--sp-4);
   background: color-mix(in srgb, var(--bg) 88%, transparent);
-  backdrop-filter: blur(10px);
-  border-bottom: 1px solid var(--border);
+  backdrop-filter: blur(var(--glass-blur));
+  border-bottom: var(--stroke-hairline) solid var(--border);
 }
 
 .topbar__brand {
@@ -34,7 +34,7 @@
   align-items: center;
   gap: var(--sp-2);
   font-size: var(--fs-3);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--track-title);
 }
 
 .topbar__signout {
@@ -59,7 +59,7 @@
   flex: 1;
   margin-inline: auto;
   padding: var(--sp-4);
-  padding-bottom: 5.5rem; /* clearance for the fixed TabBar */
+  padding-bottom: var(--tabbar-clearance); /* clearance for the fixed TabBar */
 }
 
 /* ---- NavRail (desktop only; hidden by default) ---- */
@@ -79,8 +79,8 @@
   padding: var(--sp-1) var(--sp-2);
   padding-bottom: max(var(--sp-1), env(safe-area-inset-bottom));
   background: color-mix(in srgb, var(--surface) 92%, transparent);
-  backdrop-filter: blur(10px);
-  border-top: 1px solid var(--border);
+  backdrop-filter: blur(var(--glass-blur));
+  border-top: var(--stroke-hairline) solid var(--border);
 }
 
 .tabbar__item {
@@ -127,17 +127,17 @@
   color: var(--accent);
   font-size: var(--fs-0);
   font-weight: 600;
-  letter-spacing: 0.07em;
+  letter-spacing: var(--track-eyebrow);
   text-transform: uppercase;
 }
 
 .page__title {
   font-size: var(--fs-5);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--track-title);
 }
 
 .page__desc {
-  max-width: 46rem;
+  max-width: var(--text-measure);
   margin-top: var(--sp-1);
   color: var(--text-2);
   font-size: var(--fs-2);
@@ -175,7 +175,7 @@
     width: var(--rail-w);
     padding: var(--sp-4) var(--sp-3);
     background: var(--surface);
-    border-right: 1px solid var(--border);
+    border-right: var(--stroke-hairline) solid var(--border);
   }
 
   .navrail__brand {
@@ -186,7 +186,7 @@
     margin-bottom: var(--sp-5);
     font-size: var(--fs-3);
     font-weight: 600;
-    letter-spacing: -0.01em;
+    letter-spacing: var(--track-title);
   }
 
   .navrail__items {
@@ -231,7 +231,7 @@
   .navrail__foot {
     margin-top: auto;
     padding-top: var(--sp-3);
-    border-top: 1px solid var(--border);
+    border-top: var(--stroke-hairline) solid var(--border);
   }
 
   .navrail__version {
