@@ -8,6 +8,7 @@ import type { Db } from "../../db/client.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { ReleaseVersionDeps } from "#unit/server/release-version.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 
 // The wizard's PREFILL route, apart from api.ts the way api-unit-sizes.ts is: the version the
 // onboarding will release, read off the repository's release tags before any run exists
@@ -18,15 +19,17 @@ export interface OnboardPrefillApiDeps extends Partial<ReleaseVersionDeps> {
   store: Pick<CredentialStore, "open" | "list">;
   /** The platform's GitHub App — the identity of a repository its installation reaches. */
   githubApp?: GitHubApp;
+  /** The stages a unit stands at, which alone run a release a new stage takes. */
+  registrations?: Pick<Registrations, "readUnitStages">;
 }
 
 export function registerOnboardPrefillRoute(app: Hono<AppEnv>, deps: OnboardPrefillApiDeps): void {
-  const { onboardingEnabled, github, platformGitHub, platformRepo, githubApp, db, store } = deps;
+  const { onboardingEnabled, github, platformGitHub, platformRepo, githubApp, db, store, registrations } = deps;
   app.post("/api/consumers/prefill", async (c) => {
-    if (!onboardingEnabled || !github) throw errNotConfigured("onboarding is not configured on this manager — the gate-runner and git/kube/vault adapters must be wired first");
+    if (!onboardingEnabled || !github || !registrations) throw errNotConfigured("onboarding is not configured on this manager — the gate-runner and git/kube/vault adapters must be wired first");
     const parsed = OnboardPrefillRequest.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) throw errValidation(`invalid onboard prefill request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-    const view = await readOnboardPrefill({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), ...(githubApp ? { githubApp } : {}), owners: (org) => readOwnerIdentity(db, org), store }, parsed.data, c.req.raw.signal);
+    const view = await readOnboardPrefill({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}), ...(githubApp ? { githubApp } : {}), owners: (org) => readOwnerIdentity(db, org), store, registrations }, parsed.data, c.req.raw.signal);
     return c.json(view satisfies OnboardPrefillView);
   });
 }

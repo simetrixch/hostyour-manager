@@ -286,11 +286,12 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
     // naming both; and the owner's packages reader must stand, or the build could install no
     // private package. Fail-closed: a seal failure is a thrown error, no run is created.
     const req = parsed.data;
-    if (!github) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags is not wired");
+    if (!github || !registrations) throw errNotConfigured("onboarding is not configured on this manager — the GitHub client that reads a repository's release tags, or the registrations that say where a unit stands, are not wired");
     const identity = await resolveRepoIdentity({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
     // The release the onboarding puts on the stage, read with the identity's token before it is
     // sealed; nobody types it, so no onboarding names a release that stands at another commit.
-    const { version, channel, existing } = await onboardRelease(github, { ...parseGitHubOwnerRepo(req.repoURL), token: identity.token, signal: c.req.raw.signal }, () => resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal }));
+    // Only a stage the unit stands at runs a release: an offboarded one leaves its delivery branch behind.
+    const { version, channel, existing } = await onboardRelease(github, { ...parseGitHubOwnerRepo(req.repoURL), token: identity.token, signal: c.req.raw.signal }, await registrations.readUnitStages(req.consumerName), () => resolveNextVersion({ github, ...(platformGitHub ? { platformGitHub } : {}), ...(platformRepo ? { platformRepo } : {}) }, { repoURL: req.repoURL, token: identity.token, signal: c.req.raw.signal }));
     // The credential the run opens the repository with: the App's one row or the owner's PAT row,
     // resolved now — no row of the unit's (#226).
     const repoCredentialId = await resolveRepoCredentialId({ repoURL: req.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });

@@ -144,7 +144,7 @@ async function make(onboardingEnabled: boolean, resolver?: FakeClusterKubeResolv
     registerAuth: () => undefined,
     // The live reconciliation read (GET /api/consumers/:id/live) reads the cluster + ArgoCD through
     // the resolver; when absent (or onboarding disabled) it degrades to SQL-only.
-    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, github: new FakeGitHubConsumer(), ...(resolver ? { resolver } : {}), ...(githubApp ? { githubApp } : {}) }),
+    registerProtected: (a) => registerConsumerRoutes(a, { executor, db: db.db, store, onboardingEnabled, github: new FakeGitHubConsumer(), registrations: new Registrations(seededPlatformRepo()), ...(resolver ? { resolver } : {}), ...(githubApp ? { githubApp } : {}) }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, executor, cookie, store };

@@ -18,6 +18,8 @@ function owners(owners: string[], withPat: string[] = []): OwnerIdentityReader {
 }
 /** A store that opens an owner's repository PAT to a token named after it, and lists one recorded
  *  packages reader row per owner the reader names (fingerprint after the owner). */
+/** The unit stands at every stage, so a release any delivery branch carries runs. */
+const registrations = { readUnitStages: async () => ["dev", "test", "prod"] as ("dev" | "test" | "prod")[] };
 const store = {
   open: async (id: string) => Buffer.from(`token-of-${id}`, "utf8"),
   list: async (filter?: { subject?: { kind: string; id: string } }) =>
@@ -28,21 +30,33 @@ describe("readOnboardPrefill", () => {
   it("answers the next number after the repository's release tags, naming the repository", async () => {
     const github = new FakeGitHubConsumer();
     github.seedTags("x", "acme", ["0.1.0-stable-20260909094733", "0.1.2-stable-20260909121415", "0.1.1-beta-20260909114034", "v9"]);
-    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(view).toEqual({ version: "0.1.003", versionSource: "the next number after the release tags of x/acme", channel: "stable", channelSource: "every release is stable", identity: "pat" });
     expect(new Set(github.tagReads.map((r) => `${r.owner}/${r.repo}`))).toEqual(new Set(["x/acme"]));
+  });
+
+  it("PLANTED DEFECT: reads the stages the unit stands at under its repository's name, so an offboarded stage's leftover branch is passed over", async () => {
+    const github = new FakeGitHubConsumer();
+    github.seedTags("x", "acme", [{ name: "0.8.370-stable-20261006220245", commit: "a".repeat(40) }, { name: "0.8.374-stable-20261007003602", commit: "b".repeat(40) }]);
+    github.seedBranch("x", "acme", "deploy/test", { sha: "e".repeat(40), parents: ["a".repeat(40)] });
+    github.seedBranch("x", "acme", "deploy/dev", { sha: "d".repeat(40), parents: ["b".repeat(40)] });
+    const asked: string[] = [];
+    const devOnly = { readUnitStages: async (name: string) => (asked.push(name), ["dev"] as ("dev" | "test" | "prod")[]) };
+    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store, registrations: devOnly }, request(), signal());
+    expect(asked).toEqual(["acme"]);
+    expect(view).toMatchObject({ version: "0.8.374", versionSource: "the release dev runs, 0.8.374-stable-20261007003602, put on the new stage as it stands: nothing is built" });
   });
 
   it("PLANTED DEFECT: answers the release another stage of the unit runs, put on the new stage as it stands", async () => {
     const github = new FakeGitHubConsumer();
     github.seedTags("x", "acme", [{ name: "0.4.007-stable-20261001100000", commit: "a".repeat(40) }, { name: "0.4.008-beta-20261005145138", commit: "b".repeat(40) }]);
     github.seedBranch("x", "acme", "deploy/prod", { sha: "f".repeat(40), parents: ["a".repeat(40)] });
-    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(view).toMatchObject({ version: "0.4.007", versionSource: "the release prod runs, 0.4.007-stable-20261001100000, put on the new stage as it stands: nothing is built", channel: "stable", channelSource: "the release prod runs" });
   });
 
   it("starts a repository with no release tag at 0.1.0", async () => {
-    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"], ["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(view.version).toBe("0.1.000");
   });
 
@@ -53,7 +67,7 @@ describe("readOnboardPrefill", () => {
     github.seedTags("simetrixch", "ansiwise-cli", ["0.8.165-stable-20260911210935"]);
     const platformRepo = { withBranch: async (_b: string, fn: (t: { readFile: (p: string) => Promise<string | null> }) => Promise<string | null>) => fn({ readFile: async () => "cliTools:\n  ansiwise:\n    version: 0.8.165-stable-20260911210935\n    upstream: { kind: github_release, project: simetrixch/ansiwise-cli }\n" }) };
     const view = await readOnboardPrefill(
-      { github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, platformRepo: platformRepo as never, owners: owners(["simetrixch"], ["simetrixch"]), store },
+      { github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, platformRepo: platformRepo as never, owners: owners(["simetrixch"], ["simetrixch"]), store, registrations },
       request({ repoURL: "https://github.com/simetrixch/hostyour-manager.git" }),
       signal(),
     );
@@ -65,7 +79,7 @@ describe("readOnboardPrefill", () => {
     const github = new FakeGitHubConsumer();
     github.seedTags("x", "acme", ["1.4.0-stable-20260909094733"]);
     github.seedTags("simetrixch", "hostyour-cloud", ["0.8.170-stable-20260914032934"]);
-    const view = await readOnboardPrefill({ github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, owners: owners(["x"], ["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github, platformGitHub: { owner: "simetrixch", repo: "hostyour-cloud" }, owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(view.version).toBe("1.4.001");
     expect(github.tagReads).toEqual([{ owner: "x", repo: "acme" }]);
   });
@@ -79,7 +93,7 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
     const github = new FakeGitHubConsumer();
     const githubApp = new FakeGitHubApp();
     github.seedTags(githubApp.org, "acme", ["0.2.0-stable-20260909094733"]);
-    const view = await readOnboardPrefill({ github, githubApp, owners: owners([githubApp.org]), store }, request({ repoURL: `https://github.com/${githubApp.org}/acme.git` }), signal());
+    const view = await readOnboardPrefill({ github, githubApp, owners: owners([githubApp.org]), store, registrations }, request({ repoURL: `https://github.com/${githubApp.org}/acme.git` }), signal());
     expect(view.identity).toBe("github-app");
     expect(view.version).toBe("0.2.001");
     expect(github.tokensSeen).toEqual([githubApp.token]);
@@ -87,7 +101,7 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
 
   it("reads a repository outside the installation with the owner's repository PAT — the external consumer", async () => {
     const github = new FakeGitHubConsumer();
-    const view = await readOnboardPrefill({ github, githubApp: new FakeGitHubApp(), owners: owners(["x"], ["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github, githubApp: new FakeGitHubApp(), owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(view.identity).toBe("pat");
     expect(github.tokensSeen).toEqual(["token-of-cred_pat_x"]);
   });
@@ -96,7 +110,7 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
   // identity and names the owner; nothing is read until the wizard records the PAT.
   it("answers no identity for a repository outside the installation whose owner records no repository PAT, naming the owner and why", async () => {
     const github = new FakeGitHubConsumer();
-    const view = await readOnboardPrefill({ github, githubApp: new FakeGitHubApp(), owners: owners(["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github, githubApp: new FakeGitHubApp(), owners: owners(["x"]), store, registrations }, request(), signal());
     expect(view).toMatchObject({ identity: "none", version: null, repositoryPat: { owner: "x", recorded: null } });
     expect(view.versionSource).toContain("installed in the owner example-org and does not reach x/acme");
     expect(view.versionSource).toContain("consumer wizard");
@@ -105,7 +119,7 @@ describe("readOnboardPrefill — which identity reads the repository", () => {
 
 
   it("says so for a repository on a manager with no App and no repository PAT", async () => {
-    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"]), store }, request(), signal());
+    const view = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"]), store, registrations }, request(), signal());
     expect(view.identity).toBe("none");
     expect(view.versionSource).toContain("is not configured on this manager");
   });
@@ -117,11 +131,11 @@ describe("readOnboardPrefill — the owner's packages reader", () => {
   it("names the reader the build needs — recorded where the owner records one, to be asked where none, absent where no scope is routed", async () => {
     const github = new FakeGitHubConsumer();
     github.seedFile("x", "acme", ".npmrc", "@x:registry=https://npm.pkg.github.com\n@shared:registry=https://npm.pkg.github.com\n");
-    const recorded = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store }, request(), signal());
+    const recorded = await readOnboardPrefill({ github, owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(recorded.packagesReader).toEqual({ owner: "x", scopes: ["x", "shared"], recorded: { fingerprint: "sha256:pkg-x", recordedAt: "2026-09-21T00:00:00.000Z" } });
-    const asked = await readOnboardPrefill({ github, owners: (org) => (org === "x" ? { packagesCredentialId: null, repoCredentialId: "cred_pat_x" } : null), store }, request(), signal());
+    const asked = await readOnboardPrefill({ github, owners: (org) => (org === "x" ? { packagesCredentialId: null, repoCredentialId: "cred_pat_x" } : null), store, registrations }, request(), signal());
     expect(asked.packagesReader).toEqual({ owner: "x", scopes: ["x", "shared"], recorded: null });
-    const none = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"], ["x"]), store }, request(), signal());
+    const none = await readOnboardPrefill({ github: new FakeGitHubConsumer(), owners: owners(["x"], ["x"]), store, registrations }, request(), signal());
     expect(none.packagesReader).toBeUndefined();
   });
 });

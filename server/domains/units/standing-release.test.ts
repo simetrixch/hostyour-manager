@@ -19,18 +19,28 @@ function repository(branches: Record<string, string>): FakeGitHubConsumer {
   return github;
 }
 
+const ALL = ["dev", "test", "prod"] as const;
+
 describe("standingRelease", () => {
   it("PLANTED DEFECT: answers the release prod runs, not the newest release and not the one another stage runs", async () => {
     const github = repository({ prod: commit("a"), test: commit("c") });
-    expect(await standingRelease(github, read)).toEqual({ tag: V7, version: "0.4.007", channel: "stable", from: "prod" });
+    expect(await standingRelease(github, read, ALL)).toEqual({ tag: V7, version: "0.4.007", channel: "stable", from: "prod" });
   });
 
   it("answers the release the most production-near stage runs where prod runs none", async () => {
-    expect(await standingRelease(repository({ test: commit("b") }), read)).toEqual({ tag: V8, version: "0.4.008", channel: "stable", from: "test" });
-    expect(await standingRelease(repository({ dev: commit("c") }), read)).toEqual({ tag: BETA, version: "0.4.009", channel: "beta", from: "dev" });
+    expect(await standingRelease(repository({ test: commit("b") }), read, ALL)).toEqual({ tag: V8, version: "0.4.008", channel: "stable", from: "test" });
+    expect(await standingRelease(repository({ dev: commit("c") }), read, ALL)).toEqual({ tag: BETA, version: "0.4.009", channel: "beta", from: "dev" });
+  });
+
+  it("PLANTED DEFECT: passes over the leftover delivery branch of a stage the unit no longer stands at", async () => {
+    // TEST was offboarded: its deploy/test still carries an older release, but only dev is registered.
+    const github = repository({ test: commit("a"), dev: commit("b") });
+    expect(await standingRelease(github, read, ["dev"])).toEqual({ tag: V8, version: "0.4.008", channel: "stable", from: "dev" });
   });
 
   it("answers none for an app no stage of which runs a release: its first onboarding mints one", async () => {
-    expect(await standingRelease(repository({}), read)).toBeNull();
+    expect(await standingRelease(repository({}), read, ALL)).toBeNull();
+    // A leftover branch of a unit registered nowhere is no running release either.
+    expect(await standingRelease(repository({ prod: commit("a") }), read, [])).toBeNull();
   });
 });

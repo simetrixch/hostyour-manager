@@ -32,12 +32,14 @@ export async function runningRelease(github: ReleaseReads, read: RepositoryRead,
 }
 
 /** The release a new stage of the app is put on without a new build: the one the most
- *  production-near stage runs. Null for an app no stage of which runs a release: its first
- *  onboarding mints one. */
-export async function standingRelease(github: ReleaseReads, read: RepositoryRead): Promise<{ tag: string; version: string; channel: ReleaseChannel; from: Stage } | null> {
+ *  production-near of the `registered` stages runs. A stage counts only where the unit's registration
+ *  stands at it: an offboarded stage leaves its delivery branch behind until its next onboarding
+ *  deletes it, and that branch runs nothing. Null for an app no registered stage of which runs a
+ *  release: its first onboarding mints one. */
+export async function standingRelease(github: ReleaseReads, read: RepositoryRead, registered: readonly Stage[]): Promise<{ tag: string; version: string; channel: ReleaseChannel; from: Stage } | null> {
   // The tags are listed only once a delivery branch stands: a first onboarding reads none.
   let releases: { tag: string; commit: string }[] | undefined;
-  for (const from of SOURCE_STAGES) {
+  for (const from of SOURCE_STAGES.filter((stage) => registered.includes(stage))) {
     const head = await github.readBranchCommit({ ...read, branch: `deploy/${from}` });
     if (!head) continue;
     releases ??= await listReleases(github, read);
@@ -52,8 +54,8 @@ export async function standingRelease(github: ReleaseReads, read: RepositoryRead
 
 /** The release an onboarding puts on its stage: the standing one, put on the stage as it stands,
  *  else the next version, which `nextVersion` reads, on stable. Every release is stable. */
-export async function onboardRelease<N extends { version: string }>(github: ReleaseReads, read: RepositoryRead, nextVersion: () => Promise<N>): Promise<{ version: string; channel: ReleaseChannel; existing: true; standing: { tag: string; from: Stage } } | { version: string; channel: "stable"; existing: false; next: N }> {
-  const standing = await standingRelease(github, read);
+export async function onboardRelease<N extends { version: string }>(github: ReleaseReads, read: RepositoryRead, registered: readonly Stage[], nextVersion: () => Promise<N>): Promise<{ version: string; channel: ReleaseChannel; existing: true; standing: { tag: string; from: Stage } } | { version: string; channel: "stable"; existing: false; next: N }> {
+  const standing = await standingRelease(github, read, registered);
   if (standing) return { version: standing.version, channel: standing.channel, existing: true, standing: { tag: standing.tag, from: standing.from } };
   const next = await nextVersion();
   return { version: next.version, channel: "stable", existing: false, next };

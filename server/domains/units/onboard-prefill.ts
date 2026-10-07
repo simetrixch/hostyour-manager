@@ -16,6 +16,7 @@ import { resolveNextVersion, type ReleaseVersionDeps } from "#unit/server/releas
 import { onboardRelease } from "./standing-release.ts";
 import { judgeRepoIdentity, npmrcPackageScopes, resolveRepoIdentity, type OwnerIdentityReader, type RepoIdentityApp } from "#unit/server/repo-identity.ts";
 import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
+import type { Registrations } from "#unit/server/registrations.ts";
 
 /** What the prefill is asked: the repository. */
 export const OnboardPrefillRequest = z.object({
@@ -23,7 +24,7 @@ export const OnboardPrefillRequest = z.object({
 });
 export type OnboardPrefillRequest = z.infer<typeof OnboardPrefillRequest>;
 
-export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?: RepoIdentityApp; owners: OwnerIdentityReader; store: Pick<CredentialStore, "open" | "list"> }, input: OnboardPrefillRequest, signal: AbortSignal): Promise<OnboardPrefillView> {
+export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?: RepoIdentityApp; owners: OwnerIdentityReader; store: Pick<CredentialStore, "open" | "list">; registrations: Pick<Registrations, "readUnitStages"> }, input: OnboardPrefillRequest, signal: AbortSignal): Promise<OnboardPrefillView> {
   const { owner, repo } = parseGitHubOwnerRepo(input.repoURL);
   // THE REPOSITORY PAT IS ASKED FOR WHERE THE APP DOES NOT REACH (#238): no identity reads the
   // repository yet, so nothing is read — the wizard shows the step and reads again once recorded.
@@ -33,7 +34,8 @@ export async function readOnboardPrefill(deps: ReleaseVersionDeps & { githubApp?
   }
   const identity = await resolveRepoIdentity({ repoURL: input.repoURL, githubApp: deps.githubApp, owners: deps.owners, store: deps.store, signal });
   // The release the onboarding will put on the stage, as it reads it.
-  const read = await onboardRelease(deps.github, { owner, repo, token: identity.token, signal }, () => resolveNextVersion(deps, { repoURL: input.repoURL, token: identity.token, signal }));
+  // Only a stage the unit stands at runs a release; the unit is named as its repository is (G1).
+  const read = await onboardRelease(deps.github, { owner, repo, token: identity.token, signal }, await deps.registrations.readUnitStages(repo), () => resolveNextVersion(deps, { repoURL: input.repoURL, token: identity.token, signal }));
   const release = read.existing
     ? { version: read.version, versionSource: `the release ${read.standing.from} runs, ${read.standing.tag}, put on the new stage as it stands: nothing is built`, channel: read.channel, channelSource: `the release ${read.standing.from} runs` }
     : { version: read.version, versionSource: `the next number after the release tags of ${read.next.readFrom.join(", ")}`, channel: read.channel, channelSource: "every release is stable" };
