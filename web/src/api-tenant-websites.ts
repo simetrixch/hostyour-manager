@@ -1,5 +1,5 @@
 // The website actions of a tenant's page: each only plans its run, which the Runs API approves.
-import { post } from "./api.ts";
+import { post } from "./request.ts";
 
 /** Plan add-app for a website: named after its site (websiteAppName), running the bundle's website folder. */
 export const addTenantWebsite = (tenantId: string, website: { app: string; domain: string; site: string; folder: string }): Promise<{ runId: string }> =>

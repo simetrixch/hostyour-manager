@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { BranchView, ResetResult } from "../../../shared/api-types.ts";
-import { getBranches, resetManager, ApiRequestError } from "../api.ts";
+import { getBranches, resetManager } from "../api.ts";
+import { ApiRequestError } from "../request.ts";
 import { IconLock } from "../components/icons.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
