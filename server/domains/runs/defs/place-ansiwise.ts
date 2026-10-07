@@ -11,12 +11,11 @@ import { ANSIWISE_RUN_ROOT, MANAGER_HANDS_OVER } from "./machine-state.ts";
 //
 // WHY THERE IS NO SCRIPT HERE AND WHY THERE MAY NEVER BE ONE AGAIN. The rebuild that produced
 // ansiwise exists because 580 raw mutation sites in bash could never be proven inert in a dry run —
-// a check written in bash is the same defect in the tool meant to catch defects
-// (simetrix-docs/ansiwise-plugins/CLAUDE.md). The first version of this module composed a bash
-// script and shipped it to a machine: it installed packages, downloaded and installed a binary,
-// cloned two repositories and wrote a systemd unit, and not one of those mutations could be proven
-// inert. What replaced it is two protocol operations and two invocations of a binary that judges
-// itself:
+// a check written in bash is the same defect in the tool meant to catch defects. The first version
+// of this module composed a bash script and shipped it to a machine: it installed packages,
+// downloaded and installed a binary, cloned two repositories and wrote a systemd unit, and not one
+// of those mutations could be proven inert. What replaced it is two protocol operations and two
+// invocations of a binary that judges itself:
 //
 //   THE TRANSFER   `putFile` writes each executable's bytes and sets its mode — SFTP, a file
 //                  transfer and a mode change, with no shell on the machine involved at any point
