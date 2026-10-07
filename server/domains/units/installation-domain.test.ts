@@ -17,6 +17,7 @@ import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrat
 import { testMembers } from "./tenant-members.fixture.ts";
 import { applyInstallationDomain, readInstallationDomain, validateInstallationDomainRollback } from "./installation-domain.ts";
 import { makeInstallationDomainDef, makeInstallationDomainRollbackDef } from "../runs/defs/installation-domain.ts";
+import { createInstallationDomainIssuers } from "./installation-domain-issuers.ts";
 
 const FROM = "old.example", TO = "new.example", OLD_HOST = `s1.${FROM}`, NEW_HOST = `s1.${TO}`, GUID = "zsjs023ctne0";
 let db: DbHandle, cloud: FakePlatformRepo, deploy: FakePlatformRepo, dns: FakeDnsProvider, consumers: Registrations, tenantRegistrations: TenantRegistrations;
@@ -214,7 +215,7 @@ describe("installation domain unit phase", () => {
   });
   it("ignores a caller-supplied snapshot and records the current census", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
-    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => undefined });
+    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => undefined, ...createInstallationDomainIssuers(undefined) });
     const result = await def.planStream!({ fromDomain: FROM, toDomain: TO, dryRun: true, snapshot: { ...snapshot, records: [] } }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
     expect(result.outcome).toBe("planned");
     if (result.outcome === "planned") expect(result.params.snapshot?.records).toHaveLength(3);
@@ -225,7 +226,7 @@ describe("installation domain unit phase", () => {
   it("dry-run rollback validates without writes and refuses a source that restarted after planning", async () => {
     seed("prod"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     const original = { fromDomain: FROM, toDomain: TO, dryRun: false, snapshot };
-    const actions = { read: async () => snapshot, apply: async () => undefined, validateRollback: (context: StepCtx, recorded: typeof snapshot, sourceRunId: string) => validateInstallationDomainRollback(context, ports(), recorded, sourceRunId) };
+    const actions = { ...createInstallationDomainIssuers(undefined), read: async () => snapshot, apply: async () => undefined, validateRollback: (context: StepCtx, recorded: typeof snapshot, sourceRunId: string) => validateInstallationDomainRollback(context, ports(), recorded, sourceRunId) };
     const move = makeInstallationDomainDef(actions);
     const movePlan = await move.planStream!(original, { db: db.db, log: () => undefined, signal: ctx().signal });
     if (movePlan.outcome !== "planned") throw new Error("expected plan");
@@ -241,7 +242,7 @@ describe("installation domain unit phase", () => {
   it("dry-run step cannot reach the writer and apply approval refuses cutover blockers", async () => {
     seed("prod"); dns.seed(`post.${TO}`, "A", "192.0.2.9"); const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     let writes = 0;
-    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => { writes++; } });
+    const def = makeInstallationDomainDef({ read: async () => snapshot, validateRollback: async () => undefined, apply: async () => { writes++; }, ...createInstallationDomainIssuers(undefined) });
     const params = { fromDomain: FROM, toDomain: TO, dryRun: true, snapshot };
     for (const step of def.steps(params)) await step.run(ctx());
     expect(writes).toBe(0); expect(def.steps(params)).toHaveLength(1);

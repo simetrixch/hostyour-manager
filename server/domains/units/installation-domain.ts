@@ -14,6 +14,9 @@ import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
 import { InstallationDomainSnapshotSchema, type InstallationDomainSnapshot } from "../../../shared/installation-domain.ts";
+import type { CredentialStore } from "../../security/store.ts";
+import type { TenantSpec } from "../../../shared/consumer.ts";
+import { refuseWithoutKey } from "./tenant-sender-domain-issuer.ts";
 import { errNotConfigured, errValidation } from "../../kernel/errors.ts";
 
 export interface InstallationDomainPorts {
@@ -21,12 +24,23 @@ export interface InstallationDomainPorts {
   dns?: DnsProvider;
   consumers?: Registrations;
   tenantRegistrations?: TenantRegistrations;
+  /** The kept keys and the product's tenant spec: a stage with a sender domain needs both for its issuer
+   *  to move with the installation. */
+  store?: Pick<CredentialStore, "list">;
+  readTenantSpec?: (signal?: AbortSignal) => Promise<TenantSpec | null>;
 }
 
-export function installationDomainPorts(ports: InstallationDomainPorts): Required<InstallationDomainPorts> {
+export type ConfiguredInstallationDomainPorts = InstallationDomainPorts & {
+  platformRepo: PlatformRepo;
+  dns: DnsProvider;
+  consumers: Registrations;
+  tenantRegistrations: TenantRegistrations;
+};
+
+export function installationDomainPorts(ports: InstallationDomainPorts): ConfiguredInstallationDomainPorts {
   if (!ports.platformRepo || !ports.dns || !ports.consumers || !ports.tenantRegistrations)
     throw errNotConfigured("installation domain plans require the existing Cloud/Deploy books and DNS provider");
-  return ports as Required<InstallationDomainPorts>;
+  return ports as ConfiguredInstallationDomainPorts;
 }
 
 function cookieOverrides(root: unknown, from: string, to: string): { path: string[]; before: string; after: string }[] {
@@ -147,7 +161,9 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
         cookieBefore: entry.ownDomain ? "" : tenantZone(entry.subdomain, stage, cluster.apexBefore),
         cookieAfter: ownDomainAfter ? "" : tenantZone(entry.subdomain, stage, cluster.apexAfter),
         cookieOverrides: cookieOverrides(entry.members, fromDomain, toDomain),
-        ownDomainBefore: entry.ownDomain, ownDomainAfter, redirectsBefore: entry.ownDomainRedirects, redirectsAfter });
+        ownDomainBefore: entry.ownDomain, ownDomainAfter, redirectsBefore: entry.ownDomainRedirects, redirectsAfter,
+        senderDomain: entry.senderDomain, zoneBefore: tenantZone(entry.subdomain, stage, cluster.apexBefore),
+        zoneAfter: tenantZone(entry.subdomain, stage, cluster.apexAfter), clusterId: cluster.id, members: entry.members.map((m) => m.name) });
       snapshot.coverage.tenants++;
       await addRecord(tenantRecordName(entry.routing, entry.subdomain, stage, cluster.apexBefore), "CNAME", cluster.fromFqdn, cluster.toFqdn, owner);
       const marks = book.filter(w => w.type === "TXT" && w.name.startsWith("_") && w.owner.kind === "tenant" && w.owner.name === pointer.guid && w.owner.stage === stage);
@@ -162,6 +178,17 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
   }
   for (const row of db.select().from(tenants).where(eq(tenants.status, "active")).all()) {
     if (!snapshot.tenants.some(t => t.guid === row.guid && t.stage === row.stage)) snapshot.blockers.push(`tenant ${row.guid}/${row.stage}: active inventory has no covered registration`);
+  }
+  // A stage with a sender domain of its own takes its issuer along; the plan refuses the move where it could not.
+  const senders = snapshot.tenants.filter((t) => t.senderDomain);
+  if (senders.length && (!ports.store || !ports.readTenantSpec)) {
+    snapshot.blockers.push(`${senders.length} tenant stage(s) send from a domain of their own, and this Manager cannot read the product's tenant spec or its kept keys to move their issuers`);
+  } else if (senders.length) {
+    const route = (await ports.readTenantSpec!(signal))?.senderDomainIssuers;
+    if (route) for (const t of senders) {
+      const refused = await refuseWithoutKey(ports.store!, route, t.stage);
+      if (refused) snapshot.blockers.push(`tenant ${t.guid}/${t.stage}: ${refused}`);
+    }
   }
   for (const w of book) if (!usedBooks.has(key(w.name, w.type))) {
     snapshot.retainedBooks.push({ name: w.name, type: w.type, reason: "Not an active unit record in this plan; retained unchanged" });

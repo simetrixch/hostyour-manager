@@ -1,3 +1,4 @@
+import type { InstallationDomainIssuerPorts } from "../domains/units/installation-domain-issuers.ts";
 import type { Config } from "../kernel/config.ts";
 import type { VersionsView } from "../../shared/api-types.ts";
 import type { LineMoveView } from "../../shared/api-types-line-move.ts";
@@ -118,6 +119,9 @@ export interface UnitsWiring {
    *  the deploy repository, the way the consumer read asks with the app row's own repoUrl. Undefined exactly
    *  when tenantResolver is — both come from config.deployRepo. */
   deployRepoUrl?: string;
+  /** What an installation domain move needs to take the tenants' service issuers along; undefined exactly
+   *  when tenant onboarding is not configured. */
+  installationIssuers?: InstallationDomainIssuerPorts;
   /** The tenant app catalog provider, threaded to registerTenantRoutes so GET
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
@@ -304,6 +308,7 @@ export function buildUnits(
     ...(consumer.platformGitHub ? { platformGitHub: consumer.platformGitHub } : {}),
     ...(tenant.resolver ? { tenantResolver: tenant.resolver } : {}),
     ...(tenant.deployRepoUrl ? { deployRepoUrl: tenant.deployRepoUrl } : {}),
+    ...(tenant.installationIssuers ? { installationIssuers: tenant.installationIssuers } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
