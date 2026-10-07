@@ -98,6 +98,7 @@ function secretsOf(pod: Record<string, unknown>): { name: string; fieldPath: str
 }
 
 const label = (doc: RenderedDoc): string => `${doc.kind}/${doc.name || `#${doc.docIndex}`}`;
+const writer = (doc: RenderedDoc): string => (doc.kind === "ExternalSecret" ? "ESO" : "the service-provisioner");
 
 export const secretSyncOrderingGate: CheckGate = {
   id: ID,
@@ -129,7 +130,7 @@ export const secretSyncOrderingGate: CheckGate = {
           : `${label(doc)} (wave ${waveOf(doc)}) uses Secret "${name}" of ${label(owner)} (wave ${waveOf(owner)}).`;
         const reason = preSync
           ? `${label(doc)} runs before every sync wave, so the Secret "${name}" of ${label(owner)} does not exist yet; take the hook off PreSync or stop it using that Secret.`
-          : `${label(doc)} stands in the same or an earlier sync wave than ${label(owner)}, so its pod starts before the provisioner has written "${name}"; ` +
+          : `${label(doc)} stands in the same or an earlier sync wave than ${label(owner)}, so its pod starts before ${writer(owner)} has written "${name}"; ` +
             `put ${label(owner)} in a wave below ${waveOf(doc)} (${WAVE_ANNOTATION}).`;
         return fail({ id: ID, title: TITLE, severity: SEVERITY, expected: EXPECTED, found, reason, evidence: [evidence] });
       }

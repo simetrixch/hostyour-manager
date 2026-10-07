@@ -88,6 +88,7 @@ describe("secretSyncOrderingGate G30", () => {
     const r = secretSyncOrderingGate.check(makeCtx([external("app", "acme-app"), deployment(env("acme-app"))]));
     expect(r.status).toBe("fail");
     expect(r.found).toContain("ExternalSecret/app");
+    expect(r.reason).toContain("before ESO has written");
     expect(secretSyncOrderingGate.check(makeCtx([external("acme-app", undefined), deployment(env("acme-app"))])).status).toBe("fail");
     expect(secretSyncOrderingGate.check(makeCtx([external("app", "acme-app", -1), deployment(env("acme-app"))])).status).toBe("pass");
   });
@@ -97,7 +98,8 @@ describe("secretSyncOrderingGate G30", () => {
       expect(secretSyncOrderingGate.check(makeCtx([claim("redis", "s"), deployment(pulls("s"), 0, hook)])).status, hook).toBe("pass");
     }
     expect(secretSyncOrderingGate.check(makeCtx([claim("redis", "s"), deployment(pulls("s"), 0, "Sync")])).status).toBe("fail");
-    expect(secretSyncOrderingGate.check(makeCtx([claim("redis", "s"), deployment(pulls("s"), 0, "PreSync,PostSync")])).status).toBe("fail");
+    // A hook that also runs PreSync runs before every wave, whatever its wave says.
+    expect(secretSyncOrderingGate.check(makeCtx([claim("redis", "s", -5), deployment(pulls("s"), 0, "PreSync,PostSync")])).status).toBe("fail");
   });
 
   it("reads a wave as Argo CD's Atoi does: a sign is allowed, a space is not", () => {
