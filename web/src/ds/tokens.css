@@ -82,6 +82,53 @@
   --topbar-h: 3.25rem;
   --rail-w: 14.5rem;
   --content-max: 68rem;
+
+  /* Strokes: the width of a line */
+  --stroke-hairline: 1px;      /* every border, rule and divider */
+  --stroke-indicator: 2px;     /* a tab's underline and the spinner's ring */
+  --stroke-dot: 1.5px;         /* the outline of a hollow status dot */
+
+  /* Controls: the height of a field, a tab and a button */
+  --control-h: 2.25rem;
+  --button-h: 2.125rem;
+  --button-h-sm: 1.875rem;
+
+  /* Marks: dots, icons and markers beside text */
+  --mark-dot: 0.4375rem;       /* a badge's status dot */
+  --mark-pulse: 0.375rem;      /* the pulse inside a running step's marker */
+  --mark-icon: 1rem;           /* a small icon, a checkbox, a stage dot, the spinner */
+  --mark-step: 1.25rem;        /* a step's marker */
+  --mark-tile: 2.25rem;        /* an icon tile */
+  --mark-offset: 0.125rem;     /* centres a mark on the first line of its text */
+  --connector-w: 1rem;         /* the line between two lifecycle stages */
+
+  /* Columns and fields */
+  --field-min-w: 14rem;        /* a field in an action bar */
+  --col-seq-w: 2.25rem;        /* a log line's sequence number */
+  --col-label-w: 4rem;         /* a label column */
+  --col-short-w: 4.5rem;       /* a form column for a short value */
+  --steps-w: 17rem;            /* the steps beside a run's log */
+  --card-min-w: 17rem;         /* the narrowest card of a card grid */
+
+  /* Widths and heights of content */
+  --text-measure: 46rem;       /* a readable line of prose */
+  --panel-w: 30rem;            /* a dialog, a wizard card, a ceremony */
+  --panel-w-wide: 52rem;
+  --callout-w: 34rem;
+  --dangercard-w: 40rem;
+  --log-max-h: 38rem;
+  --patch-max-h: 24rem;
+  --tabbar-clearance: 5.5rem;  /* keeps content clear of the fixed tab bar */
+
+  /* Tracking: letter spacing per type role */
+  --track-display: -0.02em;
+  --track-title: -0.01em;
+  --track-label: 0.02em;
+  --track-eyebrow: 0.07em;
+  --track-caps: 0.08em;
+
+  /* Glass */
+  --glass-blur: 10px;
 }
 
 @media (prefers-color-scheme: dark) {
