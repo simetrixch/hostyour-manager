@@ -32,10 +32,12 @@ export function OwnerCredentialStep({ owner, need, onRecord, subject }: Props) {
     setError(null);
     try {
       await onRecord(owner, token);
-      setToken("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
+      // The token goes out with this one request and is kept nowhere, whatever the answer: a request
+      // refused for an ended session leaves the page standing (request.ts).
+      setToken("");
       setRecording(false);
     }
   };

@@ -60,6 +60,8 @@ export function FailedRunActions(props: {
       if (v) filled[`activation-input:${inp.field}`] = v;
     }
     props.onRetry(Object.keys(filled).length > 0 ? filled : undefined);
+    // The re-entered secrets go out with this one request and are kept nowhere (RunApproveForm says why).
+    setSecrets({});
   }
 
   return (
@@ -121,6 +123,7 @@ export function FailedRunActions(props: {
           onConfirm={() => {
             setConfirmAbort(false);
             props.onAbort(filledSecrets());
+            setSecrets({});
           }}
         >
           <p>
