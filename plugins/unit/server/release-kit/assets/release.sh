@@ -124,12 +124,15 @@ stamp_manifest_version() {
     return 0
   fi
   stamped=""
+  versioned=""
   while IFS= read -r rel; do
     file="$ROOT/$rel"
     if ! grep -qE '^[[:space:]]*"version":[[:space:]]*"' "$file"; then
       say "$rel declares no version - nothing to stamp"
       continue
     fi
+    versioned="$versioned$rel
+"
     declared="$PACKAGE_VERSION"
     DECLARED="$declared" perl -0pi -e 's/^([ \t]*)"version":[ \t]*"[^"]*"/$1"version": "$ENV{DECLARED}"/m' "$file"
     git diff --quiet -- "$file" && continue
@@ -141,9 +144,48 @@ stamp_manifest_version() {
   done <<EOF
 $manifests
 EOF
-  [ -z "$stamped" ] && return 0
+  stamp_lockfile_version
+  [ -z "$stamped$locked" ] && return 0
   git commit --quiet -m "release: $TAG" || die "the version bump to $VERSION could not be committed"
   printf '%s' "$stamped" | while IFS=' ' read -r declared rel; do say "$rel declares ${declared}"; done
+  printf '%s' "$locked" | while IFS= read -r lock; do say "$lock declares ${PACKAGE_VERSION}"; done
+}
+
+# AN NPM LOCKFILE REPEATS EVERY VERSION THE STAMP WROTE: the "version" of its top-level object and
+# of packages[""] repeat the package.json beside it, and packages["<dir>"] a workspace member's below
+# it. They move in the release commit, or the next `npm install` carries the difference into an
+# unrelated change. Each pattern stays inside the one object it names ([^{}] crosses no nested
+# object), so a version of an installed package is never touched; an entry npm did not write is left
+# as it is. Every package.json that declares a version counts, a changed one or not, so a lockfile
+# an earlier install left behind is set right too. pnpm-lock.yaml records no package's own version.
+stamp_lockfile_version() {
+  locked=""
+  [ -n "$versioned" ] || return 0
+  locks=$(git -c core.quotePath=false -C "$ROOT" ls-files -- 'package-lock.json' '*/package-lock.json')
+  [ -n "$locks" ] || return 0
+  while IFS= read -r lock; do
+    dir="${lock%package-lock.json}"
+    file="$ROOT/$lock"
+    printf '%s' "$versioned" | while IFS= read -r rel; do
+      at="${rel%package.json}"
+      if [ "$at" = "$dir" ]; then
+        DECLARED="$PACKAGE_VERSION" perl -0pi -e 's/\A((?:\xEF\xBB\xBF)?\{[^{}]*?"version":\s*)"[^"]*"/$1"$ENV{DECLARED}"/; s/("packages":\s*\{\s*"":\s*\{[^{}]*?"version":\s*)"[^"]*"/$1"$ENV{DECLARED}"/' "$file"
+        continue
+      fi
+      case "$at" in
+        "$dir"?*)
+          member="${at#"$dir"}"
+          DECLARED="$PACKAGE_VERSION" MEMBER="${member%/}" perl -0pi -e 's/("\Q$ENV{MEMBER}\E":\s*\{[^{}]*?"version":\s*)"[^"]*"/$1"$ENV{DECLARED}"/' "$file"
+          ;;
+      esac
+    done
+    git diff --quiet -- "$file" && continue
+    git add --force -- "$file" || die "the version bump to $VERSION could not be staged"
+    locked="$locked$lock
+"
+  done <<EOF
+$locks
+EOF
 }
 
 # Does this unit run on a cluster whose role is $1? A role names every PART the cluster carries —

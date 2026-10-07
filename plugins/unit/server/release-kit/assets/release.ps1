@@ -296,6 +296,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
   }
   $rx = [regex]'(?m)^(\s*)"version":\s*"[^"]*"'
   $stamped = @()
+  $versioned = @()
   foreach ($rel in $manifests) {
     $file = Join-Path $Root $rel
     $bytes = [System.IO.File]::ReadAllBytes($file)
@@ -305,6 +306,7 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
       Say "$rel declares no version - nothing to stamp"
       continue
     }
+    $versioned += $rel
     $declared = $packageVersion
     $bumped = $rx.Replace($text, '$1"version": "' + $declared + '"', 1)
     if ($bumped -eq $text) { continue }
@@ -315,12 +317,53 @@ function Set-ManifestVersion($Root, $Version, $Tag) {
     if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be staged" }
     $stamped += "$declared $rel"
   }
-  if ($stamped.Count -eq 0) { return }
+  $locked = @(Set-LockfileVersion $Root $Version $packageVersion $versioned)
+  if ($stamped.Count -eq 0 -and $locked.Count -eq 0) { return }
   git commit --quiet -m "release: $Tag"
   if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be committed" }
   foreach ($line in $stamped) {
     $declared, $rel = $line -split ' ', 2
     Say "$rel declares $declared"
+  }
+  foreach ($lock in $locked) { Say "$lock declares $packageVersion" }
+}
+
+# AN NPM LOCKFILE REPEATS EVERY VERSION THE STAMP WROTE: the "version" of its top-level object and
+# of packages[""] repeat the package.json beside it, and packages["<dir>"] a workspace member's below
+# it. They move in the release commit, or the next `npm install` carries the difference into an
+# unrelated change. Each pattern stays inside the one object it names ([^{}] crosses no nested
+# object), so a version of an installed package is never touched; an entry npm did not write is left
+# as it is. Every package.json that declares a version counts, a changed one or not, so a lockfile
+# an earlier install left behind is set right too. pnpm-lock.yaml records no package's own version.
+# Returns the lockfiles it staged.
+function Set-LockfileVersion($Root, $Version, $packageVersion, $versioned) {
+  if ($versioned.Count -eq 0) { return }
+  $locks = @(git -c core.quotePath=false -C $Root ls-files -- 'package-lock.json' '*/package-lock.json')
+  $value = '${1}"' + $packageVersion + '"'
+  $ownVersion = [regex]'\A(﻿?\{[^{}]*?"version":\s*)"[^"]*"'
+  $rootEntry = [regex]'("packages":\s*\{\s*"":\s*\{[^{}]*?"version":\s*)"[^"]*"'
+  foreach ($lock in $locks) {
+    $dir = $lock.Substring(0, $lock.Length - 'package-lock.json'.Length)
+    $file = Join-Path $Root $lock
+    $bytes = [System.IO.File]::ReadAllBytes($file)
+    $hasBom = $bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+    $text = [System.IO.File]::ReadAllText($file)
+    $bumped = $text
+    foreach ($rel in $versioned) {
+      $at = $rel.Substring(0, $rel.Length - 'package.json'.Length)
+      if ($at -ceq $dir) {
+        $bumped = $rootEntry.Replace($ownVersion.Replace($bumped, $value, 1), $value, 1)
+      } elseif ($at.Length -gt $dir.Length -and $at.StartsWith($dir, [System.StringComparison]::Ordinal)) {
+        $member = $at.Substring($dir.Length).TrimEnd('/')
+        $entry = [regex]('("' + [regex]::Escape($member) + '":\s*\{[^{}]*?"version":\s*)"[^"]*"')
+        $bumped = $entry.Replace($bumped, $value, 1)
+      }
+    }
+    if ($bumped -ceq $text) { continue }
+    [System.IO.File]::WriteAllText($file, $bumped, [System.Text.UTF8Encoding]::new($hasBom))
+    $null = git add --force -- $file
+    if ($LASTEXITCODE -ne 0) { Die "the version bump to $Version could not be staged" }
+    $lock
   }
 }
 

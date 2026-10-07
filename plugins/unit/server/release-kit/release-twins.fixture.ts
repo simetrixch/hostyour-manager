@@ -134,7 +134,40 @@ export function normalise(text: string, root: string): string {
  *  difference between two runs is which spelling performed it. `core.autocrlf false` keeps git's own
  *  normalisation warnings — a property of the developer's global configuration, not of these
  *  scripts — out of a comparison that is about what the two spellings print. */
-export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; origin?: boolean; originPreReceive?: string; dirty?: boolean; afterRelease?: { sh?: string; ps1?: string } }): Fixture {
+/** A package-lock.json as npm writes it for the workspace fixture, at the versions before a release. */
+export const PACKAGE_LOCK = `{
+  "name": "probe",
+  "version": "0.0.1",
+  "lockfileVersion": 3,
+  "requires": true,
+  "packages": {
+    "": {
+      "name": "probe",
+      "version": "0.0.1",
+      "workspaces": [
+        "packages/*"
+      ]
+    },
+    "node_modules/a": {
+      "resolved": "packages/a",
+      "link": true
+    },
+    "node_modules/x": {
+      "version": "1.0.0",
+      "resolved": "https://registry.example.invalid/x/-/x-1.0.0.tgz"
+    },
+    "packages/a": {
+      "name": "a",
+      "version": "0.1.0",
+      "dependencies": {
+        "x": "1.0.0"
+      }
+    }
+  }
+}
+`;
+
+export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; privateRoot?: boolean; workspace?: boolean; ignoredPackage?: boolean; packageLock?: string; pnpmLock?: boolean; origin?: boolean; originPreReceive?: string; dirty?: boolean; afterRelease?: { sh?: string; ps1?: string } }): Fixture {
   const base = tempDir();
   const work = join(base, "work");
   mkdirSync(work);
@@ -164,6 +197,10 @@ export function fixtureRepo(opts: { manifest?: string; packageJson?: boolean; pr
     mkdirSync(join(work, "packages", "ü"), { recursive: true });
     writeFileSync(join(work, "packages", "ü", "package.json"), '﻿{\r\n  "name": "u",\r\n  "version": "0.2.0"\r\n}\r\n');
   }
+  // npm's lockfile keeps the root's version twice and a workspace member's once more, beside the
+  // versions of the packages it installs, which no release moves.
+  if (opts.packageLock !== undefined) writeFileSync(join(work, "package-lock.json"), opts.packageLock);
+  if (opts.pnpmLock) writeFileSync(join(work, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n");
   if (opts.ignoredPackage) {
     // A package tracked inside a directory a .gitignore names: added with force once, as a
     // repository whose `storage/` rule also matches packages/storage/ carries it.

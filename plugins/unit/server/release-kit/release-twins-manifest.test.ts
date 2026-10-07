@@ -1,7 +1,7 @@
 import { describe, it, expect, afterAll } from "vitest";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { BOTH, MANIFEST, RUNS, bothSpellings, expectSameBytes, fixtureRepo, removeTempDirs, run } from "./release-twins.fixture.ts";
+import { BOTH, MANIFEST, PACKAGE_LOCK, RUNS, bothSpellings, expectSameBytes, fixtureRepo, removeTempDirs, run } from "./release-twins.fixture.ts";
 
 // How the two spellings of the release kit stamp the version into every package.json the repository
 // tracks, run against each other: a published package in npm's strict form beside a private one as
@@ -71,5 +71,42 @@ describe.skipIf(!BOTH)("both release-kit assets, stamping package.json", () => {
     expect(stdout).toContain("release: minted 1.2.003-stable-<ts14>\n");
     expect(stdout).not.toContain("declares");
     for (const f of [o.sh, o.ps1]) expect(run("git", ["log", "-1", "--format=%s"], f.cwd).stdout.trim()).toBe("at the version");
+  });
+
+  it("PLANTED DEFECT: stamps package-lock.json in the same commit: its root twice and the member's entry, and nothing else", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, workspace: true, packageLock: PACKAGE_LOCK, origin: true }), ["0.3.000", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout.split("\n").slice(0, 5)).toEqual([
+      "release: packages/b/package.json declares no version - nothing to stamp",
+      "release: package.json declares 0.3.0",
+      "release: packages/a/package.json declares 0.3.0",
+      "release: packages/ü/package.json declares 0.3.0",
+      "release: package-lock.json declares 0.3.0",
+    ]);
+    const stamped = PACKAGE_LOCK
+      .replace('"name": "probe",\n  "version": "0.0.1"', '"name": "probe",\n  "version": "0.3.0"')
+      .replace('"name": "probe",\n      "version": "0.0.1"', '"name": "probe",\n      "version": "0.3.0"')
+      .replace('"name": "a",\n      "version": "0.1.0"', '"name": "a",\n      "version": "0.3.0"');
+    for (const f of [o.sh, o.ps1]) {
+      expect(readFileSync(join(f.cwd, "package-lock.json"), "utf8")).toBe(stamped);
+      const shown = run("git", ["-c", "core.quotePath=false", "show", "--name-only", "--format=%s", "HEAD"], f.cwd).stdout;
+      expect(shown.split("\n").filter(Boolean)).toContain("package-lock.json");
+    }
+  });
+
+  it("sets right a lockfile an earlier install left behind, where every package.json already declares the version", RUNS, async () => {
+    const behind = PACKAGE_LOCK.replaceAll('"name": "probe",\n  "version": "0.0.1"', '"name": "probe",\n  "version": "0.0.0"').replace('"name": "probe",\n      "version": "0.0.1"', '"name": "probe",\n      "version": "0.0.0"');
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, packageLock: behind, origin: true }), ["0.0.001", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout.split("\n").slice(0, 2)).toEqual(["release: package-lock.json declares 0.0.1", "release: minted 0.0.001-stable-<ts14>"]);
+    // packages/a has no package.json here, so its entry is no release's to move.
+    for (const f of [o.sh, o.ps1]) expect(readFileSync(join(f.cwd, "package-lock.json"), "utf8")).toBe(PACKAGE_LOCK);
+  });
+
+  it("PLANTED INNOCENT: a repository without an npm lockfile, or with pnpm's, stamps as before", RUNS, async () => {
+    const o = await bothSpellings(() => fixtureRepo({ manifest: MANIFEST, packageJson: true, pnpmLock: true, origin: true }), ["0.3.000", "stable", "dev"]);
+    const { stdout } = expectSameBytes(o);
+    expect(stdout.split("\n").slice(0, 2)).toEqual(["release: package.json declares 0.3.0", "release: minted 0.3.000-stable-<ts14>"]);
+    for (const f of [o.sh, o.ps1]) expect(readFileSync(join(f.cwd, "pnpm-lock.yaml"), "utf8")).toBe("lockfileVersion: '9.0'\n\nimporters:\n\n  .: {}\n");
   });
 });
