@@ -171,7 +171,7 @@ export function releaseSteps(ports: BuildPorts, p: BuildParams, runtime: Release
  *  (ctx.signal) is the only limit. A run that never appeared, a cancelled watch and a failed run are
  *  each refused with what to read. */
 async function settledReleaseRun(ctx: StepCtx, buildPlane: BuildPlane, ports: BuildPorts, p: ReleaseOnStage, query: ReleaseRunQuery): Promise<ReleaseRunOutcome> {
-  const outcome = await buildPlane.awaitReleaseRun(query, { appearMs: ports.releaseBuildAppearMs, signal: ctx.signal });
+  const outcome = await buildPlane.awaitReleaseRun(query, { appearMs: ports.releaseBuildAppearMs, signal: ctx.signal, onQueueNote: (line) => ctx.log("meta", line) });
   const ns = `${p.consumerName}-build`;
   if (outcome === null) {
     throw errValidation(

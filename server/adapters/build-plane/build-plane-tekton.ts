@@ -9,6 +9,7 @@ import { AppError, errUpstream } from "../../kernel/errors.ts";
 
 const TEKTON = { group: "tekton.dev", version: "v1", plural: "pipelineruns" } as const;
 const DEFAULT_POLL_MS = 10_000; // a release run takes minutes — a 10s tick is plenty and easy on the API server
+const QUEUED_BEHIND = "image-builder.io/queued-behind";
 /** How long a release watch that failed waits before it lists and watches again. */
 const WATCH_RETRY_MS = 30_000;
 /** The shortest pass a watch loop makes before it lists again: a connection a proxy closes at once
@@ -51,6 +52,13 @@ export interface PipelineRunOutcome {
   imageTag?: string;
 }
 
+/** A release PipelineRun as the release watch reads it: held by the release queue (with the release
+ *  it waits for, once the queue noted one), running, or settled. */
+export type PipelineRunState =
+  | { phase: "pending"; queuedBehind?: string }
+  | { phase: "running" }
+  | { phase: "settled"; outcome: PipelineRunOutcome };
+
 /** One PipelineRun as a watch sees it: its params and, once it settled, how and when. */
 export interface WatchedPipelineRun {
   name: string;
@@ -66,9 +74,10 @@ export interface WatchedPipelineRun {
  *  production. Every call names the unit's OWN `<unit>-build` namespace; there is no default. */
 export interface BuildPlaneCluster {
   listPipelineRuns(labelSelector: string, namespace: string): Promise<ListedPipelineRun[]>;
-  /** null while the PipelineRun is still running; {succeeded, imageTag} once its Succeeded condition
-   *  settles — imageTag is the run's `image-tag` result, absent when the run states none. */
-  pipelineRunOutcome(name: string, namespace: string): Promise<PipelineRunOutcome | null>;
+  /** pending while the release queue holds the PipelineRun, running until its Succeeded condition
+   *  settles, then settled with {succeeded, imageTag} — imageTag is the run's `image-tag` result,
+   *  absent when the run states none. */
+  pipelineRunState(name: string, namespace: string): Promise<PipelineRunState>;
   /** Hand every PipelineRun under the selector in `namespace` to `onRun` as it is listed, added or
    *  changed, until the answered function is called; an error goes to `onError`. */
   watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void, onError: (err: unknown) => void): () => void;
@@ -184,16 +193,24 @@ export class KubeBuildPlaneCluster implements BuildPlaneCluster {
       }));
   }
 
-  async pipelineRunOutcome(name: string, namespace: string): Promise<PipelineRunOutcome | null> {
+  async pipelineRunState(name: string, namespace: string): Promise<PipelineRunState> {
     const raw = (await this.custom.getNamespacedCustomObject({ ...TEKTON, namespace, name })) as {
+      metadata?: { annotations?: Record<string, string> };
+      spec?: { status?: string };
       status?: { conditions?: Array<{ type?: string; status?: string }>; results?: Array<{ name?: string; value?: unknown }> };
     };
     const cond = (raw.status?.conditions ?? []).find((c) => c.type === "Succeeded");
-    if (!cond || cond.status === undefined || cond.status === "Unknown") return null; // still running
+    if (!cond || cond.status === undefined || cond.status === "Unknown") {
+      // The release queue (hostyour-cloud image-builder release-queue.jq) creates every release run
+      // pending, notes the release it waits behind, and starts it by removing both.
+      if (raw.spec?.status !== "PipelineRunPending") return { phase: "running" };
+      const queuedBehind = raw.metadata?.annotations?.[QUEUED_BEHIND];
+      return { phase: "pending", ...(typeof queuedBehind === "string" && queuedBehind.length > 0 ? { queuedBehind } : {}) };
+    }
     // The pipeline's own `image-tag` result: `<release tag>-<sha7>`, the tag every build of the run
     // was pushed and pinned under (consumer-build pipeline-release.yaml, results).
     const imageTag = (raw.status?.results ?? []).find((r) => r.name === "image-tag")?.value;
-    return { succeeded: cond.status === "True", ...(typeof imageTag === "string" && imageTag.length > 0 ? { imageTag } : {}) };
+    return { phase: "settled", outcome: { succeeded: cond.status === "True", ...(typeof imageTag === "string" && imageTag.length > 0 ? { imageTag } : {}) } };
   }
 
   watchPipelineRuns(namespace: string, labelSelector: string, onRun: (run: WatchedPipelineRun) => void, onError: (err: unknown) => void): () => void {
@@ -242,13 +259,15 @@ export class TektonBuildPlane implements BuildPlane {
     this.pollMs = cfg.pollMs ?? DEFAULT_POLL_MS;
   }
 
-  async awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal }): Promise<ReleaseRunOutcome | null> {
+  async awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal; onQueueNote?: (line: string) => void }): Promise<ReleaseRunOutcome | null> {
     // The run lives in the UNIT's own build namespace and was created by the EventListener when the
     // release script pushed the deploy ref — this is a pure watch, nothing is created. The match:
     // the ownership label and the release-tag param's `<version>-<channel>-` prefix (the ts14 half
     // of the tag is minted repo-side and the manager never computes it). The deadline bounds the
     // APPEARANCE only: once the run exists, it is followed to its end without a clock.
     const appearBy = Date.now() + opts.appearMs;
+    // What the run's log was last told about the release queue, for the run it was told about.
+    let noted: { runName: string; waitsFor?: string; held: boolean } | undefined;
     for (;;) {
       const { ns, runs } = await this.releaseRuns(query);
       const match = runs
@@ -256,13 +275,26 @@ export class TektonBuildPlane implements BuildPlane {
         .sort((a, b) => a.creationTimestamp.localeCompare(b.creationTimestamp))
         .at(-1);
       if (match) {
-        let outcome: PipelineRunOutcome | null;
+        let state: PipelineRunState;
         try {
-          outcome = await this.cluster.pipelineRunOutcome(match.name, ns);
+          state = await this.cluster.pipelineRunState(match.name, ns);
         } catch (e) {
           throw upstream(`could not read PipelineRun ${ns}/${match.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
-        if (outcome !== null) return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", ...outcome };
+        if (noted?.runName !== match.name) noted = { runName: match.name, held: false };
+        if (state.phase === "pending") {
+          // A pending run with no note yet says nothing: the queue either starts it at its next tick
+          // or notes the release it waits behind.
+          noted.held = true;
+          if (state.queuedBehind !== undefined && state.queuedBehind !== noted.waitsFor) {
+            noted.waitsFor = state.queuedBehind;
+            opts.onQueueNote?.(`release PipelineRun ${ns}/${match.name} waits for release ${state.queuedBehind}`);
+          }
+        } else if (noted.held) {
+          noted.held = false;
+          opts.onQueueNote?.(`release PipelineRun ${ns}/${match.name} started`);
+        }
+        if (state.phase === "settled") return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", ...state.outcome };
       } else if (Date.now() >= appearBy) {
         return null; // nothing appeared — the caller decides
       }

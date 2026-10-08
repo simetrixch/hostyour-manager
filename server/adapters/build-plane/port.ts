@@ -52,8 +52,10 @@ export interface BuildPlane {
    *  namespace is resolved PER UNIT (`<unit>-build`) — the run was created by the EventListener,
    *  never by the manager, so this is a pure watch. Polls until a matching run EXISTS — null when
    *  none has appeared within appearMs (the caller decides that is a failure) — and then until it
-   *  settles, however long that takes; null also when the signal aborts. */
-  awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal }): Promise<ReleaseRunOutcome | null>;
+   *  settles, however long that takes; null also when the signal aborts. While the run waits in the
+   *  release queue, each change of the release it waits behind, and its start, is handed to
+   *  onQueueNote as one line for the run's log. */
+  awaitReleaseRun(query: ReleaseRunQuery, opts: { appearMs: number; signal?: AbortSignal; onQueueNote?: (line: string) => void }): Promise<ReleaseRunOutcome | null>;
   /** The names of the release runs matching the query that stand now — what a trigger records as
    *  `standing` before it fires a run the watch must tell apart from them. */
   listReleaseRuns(query: ReleaseRunQuery): Promise<string[]>;

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { TektonBuildPlane, watchLoop, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type TektonBuildPlaneConfig, type WatchedPipelineRun, type WatchSource } from "./build-plane-tekton.ts";
+import { TektonBuildPlane, watchLoop, type BuildPlaneCluster, type ListedPipelineRun, type PipelineRunOutcome, type PipelineRunState, type TektonBuildPlaneConfig, type WatchedPipelineRun, type WatchSource } from "./build-plane-tekton.ts";
 import type { ReleaseRunSucceeded } from "./port.ts";
 
 // The Tekton BuildPlane over a scripted cluster seam — no cluster, no network (the same test
@@ -14,18 +14,18 @@ interface Rec {
 
 class FakeCluster implements BuildPlaneCluster {
   rec: Rec = { listSelectors: [], listNamespaces: [] };
-  private outcomes: Array<PipelineRunOutcome | null>;
-  constructor(private script: { runs?: ListedPipelineRun[]; outcomes?: Array<PipelineRunOutcome | null> } = {}) {
-    this.outcomes = [...(script.outcomes ?? [])];
+  private states: PipelineRunState[];
+  constructor(private script: { runs?: ListedPipelineRun[]; states?: PipelineRunState[] } = {}) {
+    this.states = [...(script.states ?? [])];
   }
   async listPipelineRuns(labelSelector: string, namespace: string): Promise<ListedPipelineRun[]> {
     this.rec.listSelectors.push(labelSelector);
     this.rec.listNamespaces.push(namespace);
     return this.script.runs ?? [];
   }
-  async pipelineRunOutcome(): Promise<PipelineRunOutcome | null> {
-    // Consume the scripted outcome sequence; the last entry repeats (models a settled run).
-    return this.outcomes.length > 1 ? (this.outcomes.shift() ?? null) : (this.outcomes[0] ?? null);
+  async pipelineRunState(): Promise<PipelineRunState> {
+    // Consume the scripted state sequence; the last entry repeats (models a settled run).
+    return (this.states.length > 1 ? this.states.shift() : this.states[0]) ?? { phase: "running" };
   }
   /** The standing watches by namespace; `see` hands one a run the way the informer would. */
   readonly watches = new Map<string, { selector: string; onRun: (run: WatchedPipelineRun) => void }>();
@@ -44,6 +44,8 @@ function cfg(over: Partial<TektonBuildPlaneConfig> = {}): TektonBuildPlaneConfig
   return { pollMs: 1, ...over };
 }
 
+const settled = (outcome: PipelineRunOutcome): PipelineRunState => ({ phase: "settled", outcome });
+
 /** The release most scenarios watch: acme's 1.0.0 on the stable channel. */
 const RELEASE_100 = { unit: "acme", version: "1.0.0", channel: "stable" };
 
@@ -55,7 +57,7 @@ describe("TektonBuildPlane", () => {
         { name: "acme-release-old", creationTimestamp: "2026-07-28T09:00:00Z", params: { "release-tag": "0.9.0-beta-20260728090000", stage: "dev" } },
         { name: "acme-release-7", creationTimestamp: "2026-07-28T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000", stage: "prod" } },
       ],
-      outcomes: [{ succeeded: true }],
+      states: [settled({ succeeded: true })],
     });
     const plane = new TektonBuildPlane(cfg(), c);
     const out = await plane.awaitReleaseRun(RELEASE_100, { appearMs: 100 });
@@ -66,9 +68,9 @@ describe("TektonBuildPlane", () => {
 
   it("carries the run's image-tag result — the immutable <release tag>-<sha7> every build was pushed under — when the run states one", async () => {
     const runs = [{ name: "acme-release-8", creationTimestamp: "2026-07-28T11:00:00Z", params: { "release-tag": "1.1.0-stable-20260728110000" } }];
-    const stated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, outcomes: [{ succeeded: true, imageTag: "1.1.0-stable-20260728110000-abc1234" }] }));
+    const stated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, states: [settled({ succeeded: true, imageTag: "1.1.0-stable-20260728110000-abc1234" })] }));
     expect(await stated.awaitReleaseRun({ unit: "acme", version: "1.1.0", channel: "stable" }, { appearMs: 100 })).toMatchObject({ succeeded: true, imageTag: "1.1.0-stable-20260728110000-abc1234" });
-    const unstated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, outcomes: [{ succeeded: true }] }));
+    const unstated = new TektonBuildPlane(cfg(), new FakeCluster({ runs, states: [settled({ succeeded: true })] }));
     expect(await unstated.awaitReleaseRun({ unit: "acme", version: "1.1.0", channel: "stable" }, { appearMs: 100 })).not.toHaveProperty("imageTag");
   });
 
@@ -93,15 +95,61 @@ describe("TektonBuildPlane", () => {
   });
 
   it("PLANTED DEFECT: takes no run that stood before the trigger, and none of another stage, however finished it is", async () => {
-    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: again(), outcomes: [{ succeeded: true }] }));
+    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: again(), states: [settled({ succeeded: true })] }));
     await expect(plane.awaitReleaseRun({ ...RELEASE_100, stage: "prod", standing: ["acme-release-7"] }, { appearMs: 5 })).resolves.toBeNull();
   });
 
   it("THE INNOCENT NEIGHBOUR: takes the run the trigger fired on that stage once it appears", async () => {
     const fired = { name: "acme-release-12", creationTimestamp: "2026-07-30T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000", stage: "prod" } };
-    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: [...again(), fired], outcomes: [{ succeeded: true }] }));
+    const plane = new TektonBuildPlane(cfg(), new FakeCluster({ runs: [...again(), fired], states: [settled({ succeeded: true })] }));
     expect(await plane.awaitReleaseRun({ ...RELEASE_100, stage: "prod", standing: ["acme-release-7"] }, { appearMs: 100 }))
       .toEqual({ runName: "acme-release-12", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
+  });
+
+  // THE RELEASE QUEUE holds a release run pending while another release builds. The run's log says
+  // what it waits behind, again only when that changes, and once that it started.
+  describe("the release queue", () => {
+    const runs = [{ name: "acme-release-7", creationTimestamp: "2026-07-28T10:00:10Z", params: { "release-tag": "1.0.0-stable-20260728100000" } }];
+    const behind = (queuedBehind: string): PipelineRunState => ({ phase: "pending", queuedBehind });
+    const pending: PipelineRunState = { phase: "pending" };
+    const running: PipelineRunState = { phase: "running" };
+    const waited = (): PipelineRunState[] => [
+      behind("digita-platform-build/0.5.010-stable-1"), behind("digita-platform-build/0.5.010-stable-1"),
+      behind("digita-auth-build/0.2.001-stable-2"), pending, running, running, settled({ succeeded: true }),
+    ];
+    const watch = async (states: PipelineRunState[]) => {
+      const lines: string[] = [];
+      const out = await new TektonBuildPlane(cfg(), new FakeCluster({ runs, states })).awaitReleaseRun(RELEASE_100, { appearMs: 100, onQueueNote: (l) => lines.push(l) });
+      return { lines, out };
+    };
+
+    it("notes each release the run waits behind once, and its start once", async () => {
+      const { lines, out } = await watch(waited());
+      expect(lines).toEqual([
+        "release PipelineRun acme-build/acme-release-7 waits for release digita-platform-build/0.5.010-stable-1",
+        "release PipelineRun acme-build/acme-release-7 waits for release digita-auth-build/0.2.001-stable-2",
+        "release PipelineRun acme-build/acme-release-7 started",
+      ]);
+      expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
+    });
+
+    it("THE INNOCENT NEIGHBOUR: a run the queue never held notes nothing", async () => {
+      expect((await watch([running, settled({ succeeded: true })])).lines).toEqual([]);
+    });
+
+    it("notes the start of a held run that settles between two ticks", async () => {
+      const { lines, out } = await watch([behind("digita-platform-build/0.5.010-stable-1"), settled({ succeeded: false })]);
+      expect(lines).toEqual([
+        "release PipelineRun acme-build/acme-release-7 waits for release digita-platform-build/0.5.010-stable-1",
+        "release PipelineRun acme-build/acme-release-7 started",
+      ]);
+      expect(out).toMatchObject({ succeeded: false });
+    });
+
+    it("waits the same way when nobody listens for the notes", async () => {
+      const out = await new TektonBuildPlane(cfg(), new FakeCluster({ runs, states: waited() })).awaitReleaseRun(RELEASE_100, { appearMs: 100 });
+      expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
+    });
   });
 
   describe("watchReleaseRuns", () => {
