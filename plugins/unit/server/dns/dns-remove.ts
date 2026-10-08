@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RunDefinition, Step } from "#core/server/executor/types.ts";
 import { ATTEST_TARGET_STEP } from "#core/server/executor/guards.ts";
 import { DNS_RECORD_TYPE, type DnsRecordType } from "#core/shared/dns.ts";
-import { deleteRecord, ownedRecords, ownerSentence, removableRecord, removableRecords, requireDnsProvider, withBookedRows, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
+import { deleteRecord, ownedRecords, ownerSentence, providerRemoval, removableRecord, removableRecords, removalSentence, requireDnsProvider, withBookedRows, type DnsRecordPorts } from "./dns-record.kit.ts";
 
 // dns-remove: take records of this installation back at the DNS provider, one run for the whole
 // list — the records an abandoned installation leaves in the zone when its machines are restored
@@ -65,7 +65,7 @@ function dnsRemoveSteps(params: DnsRemoveParams, ports: DnsRecordPorts): Step[] 
     },
     ...records.map((record): Step => ({
       name: removeStepName(record),
-      title: `Remove the ${record.type} record ${record.name} at the DNS provider`,
+      title: `Take back the ${record.type} record ${record.name}: delete at the DNS provider only what the plan names`,
       // Resolved in the inventory AGAIN rather than deleted by the params: a TXT goes by the content
       // this platform owns, which the row and the book decide (dns-record.kit.ts), never the name.
       run: async (ctx) => {
@@ -77,14 +77,6 @@ function dnsRemoveSteps(params: DnsRemoveParams, ports: DnsRecordPorts): Step[] 
   ];
 }
 
-/** ONE record's line of the plan summary: whose it is, what stands, what the owner expects. */
-function recordSentence(row: RemovableRecordRow): string {
-  return (
-    `the ${row.type} record ${row.name} — the record of ${ownerSentence(row)}, standing at ` +
-    `${row.found ?? "nothing (it is already absent, and the removal is then a no-op)"}, where that owner's state says ${row.expected}`
-  );
-}
-
 export function makeDnsRemoveDef(ports: DnsRecordPorts): RunDefinition<DnsRemoveParams> {
   return {
     kind: "dns-remove",
@@ -93,17 +85,25 @@ export function makeDnsRemoveDef(ports: DnsRecordPorts): RunDefinition<DnsRemove
     plan: async (params, deps) => {
       const dns = requireDnsProvider(ports);
       const rows = removableRecords(await withBookedRows(deps.db, dns, await ownedRecords(ports), params.records), params.records);
+      // What each step deletes, decided by the rule the step carries out, against what stands now:
+      // the plan is what the DNS page's confirm shows, so it names what goes, never only what stands.
+      const removals = await Promise.all(rows.map(async (row) => {
+        const standing = await dns.listRecordContents({ name: row.name, type: row.type });
+        return { row, standing, removal: providerRemoval(deps.db, row, standing) };
+      }));
+      const deleting = removals.filter((r) => r.removal.content !== null).length;
       return {
         kind: "dns-remove",
         targetKind: "self",
         targetId: "manager",
         summary:
-          `Remove ${rows.length === 1 ? "one record" : `${rows.length} records`} at the DNS provider, one step each: ${rows.map(recordSentence).join("; ")}. ` +
-          "Nothing on any machine is touched: the records are in the zone, and what stood at each is written into this run's log before it goes.",
+          `Take back ${rows.length === 1 ? "one record" : `${rows.length} records`}, one step each; ${deleting === 0 ? "nothing is deleted at the DNS provider" : `${deleting === 1 ? "one is" : `${deleting} are`} deleted at the DNS provider`}: ` +
+          `${removals.map((r) => removalSentence(r.row, r.standing, r.removal)).join("; ")}. ` +
+          "Nothing on any machine is touched, and what stood at each record is written into this run's log before it goes.",
         steps: dnsRemoveSteps(params, ports).map((s) => ({ name: s.name, title: s.title })),
-        warnings: rows
-          .filter((row) => row.verdict === "standing")
-          .map((row) => `${row.name} answers with exactly what ${ownerSentence(row)} needs — removing it takes a name that is in use right now out of DNS.`),
+        warnings: removals
+          .filter((r) => r.removal.content !== null && r.row.verdict === "standing")
+          .map((r) => `${r.row.name} answers with exactly what ${ownerSentence(r.row)} needs — removing it takes a name that is in use right now out of DNS.`),
         requiredSecrets: [],
       };
     },

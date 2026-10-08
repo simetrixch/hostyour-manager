@@ -27,7 +27,7 @@ import type { AppsManifest, TenantAppCatalogView } from "../../shared/apps-manif
 // The DNS inventory the /dns page renders and the one act it offers. Declared ONCE in shared/dns.ts
 // and answered in that shape by the server's own domain module, for the reason the block above
 // states: there is no browser-side twin left to fall behind a server change.
-import type { DnsInventoryView, DnsRemoveInput, DnsWritesView } from "../../shared/dns.ts";
+import type { DnsInventoryView, DnsWritesView } from "../../shared/dns.ts";
 // The tenant reads project three server enums verbatim; importing them (rather than restating the
 // literals here) is what makes a rename in shared/enums.ts break THIS build — the same rule
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
@@ -144,20 +144,6 @@ export const publishMailDmarc = (input: MailDmarcPublishInput): Promise<{ runId:
 export const getDnsInventory = (): Promise<DnsInventoryView> => req("/api/dns");
 /** The book of the records a run of this Manager actually wrote, each read at the provider now. */
 export const getDnsWrites = (): Promise<DnsWritesView> => req("/api/dns/writes");
-/** Take the listed records back in ONE run. The run refuses the whole list on any name the
- *  inventory does not carry as removable, so what this sends is always rows the page listed. */
-/** Plans the dns-remove run AND approves it in one call: the confirm on the DNS page — every record,
- *  what stands at it, whose it is — IS the reading of the plan, so a second Approve on the run page
- *  asked the same question twice (#181). A rejected plan throws out of planRun before any approve.
- *  Injectable for the test; the page calls it with the real client. */
-export async function removeDnsRecords(
-  input: DnsRemoveInput,
-  client: { planRun: typeof planRun; approveRun: typeof approveRun } = { planRun, approveRun },
-): Promise<{ runId: string }> {
-  const { runId } = await client.planRun("dns-remove", input as unknown as Record<string, unknown>);
-  await client.approveRun(runId);
-  return { runId };
-}
 /** Take a slave OUT of the installation: the master's whole per-slave management plane, the
  *  cluster's map, then the rows. It takes ONLY the server for the same reason redeploy does. Every
  *  act runs on the MASTER and the slave is not reached at all, which is what makes it the run kind

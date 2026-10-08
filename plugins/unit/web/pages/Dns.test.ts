@@ -12,7 +12,10 @@ const hooks = vi.hoisted(() => ({
 const api = vi.hoisted(() => ({
   getDnsWrites: vi.fn(),
   getDnsInventory: vi.fn(),
-  removeDnsRecords: vi.fn(),
+  planRun: vi.fn(),
+  getRun: vi.fn(),
+  approveRun: vi.fn(),
+  cancelRun: vi.fn(),
 }));
 const nav = vi.hoisted(() => vi.fn());
 
@@ -42,7 +45,6 @@ vi.mock("react-router", async (original) => ({
 vi.mock("#core/web/api.ts", () => api);
 
 const { Dns } = await import("./Dns.tsx");
-const { recordKey } = await import("./DnsWrites.tsx");
 
 function evaluate(node: ReactNode): ReactNode {
   if (Array.isArray(node)) return node.map(evaluate);
@@ -134,142 +136,94 @@ describe("DNS page in-page confirmation", () => {
     });
   });
 
-  it("pressing 'Remove selected (2)' with two rows ticked opens ConfirmDialog listing both records; cancel does not remove; confirm calls removeDnsRecords", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm");
-    api.getDnsWrites.mockResolvedValue(sampleWrites);
-    api.getDnsInventory.mockResolvedValue(sampleInventory);
-    api.removeDnsRecords.mockResolvedValue({ runId: "run_removal" });
-
-    // Initial render and load effects
+  /** Load both tabs, tick the written tab's two rows and press "Remove selected (2)". */
+  async function pressRemoveOnBothRows(): Promise<void> {
     hooks.cursor = 0;
     evaluate(createElement(Dns));
     for (const effect of hooks.effects.splice(0)) effect();
     await vi.waitFor(() => expect(hooks.states[1]).toEqual(sampleWrites));
-
-    // Render loaded state
-    hooks.cursor = 0;
-    let tree = evaluate(createElement(Dns));
-
-    // Tick both checkboxes in the writes table
-    const writtenPanel = findElements<{ id?: string }>(tree, (el) => el.props.id === "panel-written")[0]!;
+    const written = () => {
+      hooks.cursor = 0;
+      return findElements<{ id?: string }>(evaluate(createElement(Dns)), (el) => el.props.id === "panel-written")[0]!;
+    };
     const checkboxes = findElements<{ type?: string; "aria-label"?: string; onChange?: () => void }>(
-      writtenPanel,
+      written(),
       (el) => el.type === "input" && el.props.type === "checkbox" && Boolean(el.props["aria-label"]?.startsWith("Select CNAME")),
     );
     expect(checkboxes).toHaveLength(2);
     checkboxes[0]!.props.onChange!();
     checkboxes[1]!.props.onChange!();
-
-    // Re-render with ticked checkboxes and click "Remove selected (2)"
-    hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    const newWrittenPanel = findElements<{ id?: string }>(tree, (el) => el.props.id === "panel-written")[0]!;
-    const buttonText = (el: ReactElement<{ children?: ReactNode }>) =>
-      Array.isArray(el.props.children) ? el.props.children.join("") : String(el.props.children ?? "");
-    const removeBtn = findElements<{ type?: string; className?: string; onClick?: () => void; children?: ReactNode }>(
-      newWrittenPanel,
-      (el) => el.type === "button" && buttonText(el).startsWith("Remove selected"),
-    )[0]!;
+    const removeBtn = findElements<{ onClick?: () => void; children?: ReactNode }>(written(), (el) => el.type === "button" && buttonText(el).startsWith("Remove selected"))[0]!;
     expect(buttonText(removeBtn)).toBe("Remove selected (2)");
-
     removeBtn.props.onClick!();
+  }
 
-    // The in-page ConfirmDialog is now open
+  const buttonText = (el: ReactElement<{ children?: ReactNode }>) =>
+    Array.isArray(el.props.children) ? el.props.children.join("") : String(el.props.children ?? "");
+  const dialogs = () => {
     hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    const dialogs = findElements<{
-      title: string;
-      confirmLabel: string;
-      destructive?: boolean;
-      onCancel: () => void;
-      onConfirm: () => void;
-      children: ReactNode;
-    }>(tree, (el) => el.type === ConfirmDialog);
-    expect(dialogs).toHaveLength(1);
-    const dialog = dialogs[0]!;
+    return findElements<{ title: string; confirmLabel: string; destructive?: boolean; onCancel: () => void; onConfirm: () => void; children: ReactNode }>(
+      evaluate(createElement(Dns)),
+      (el) => el.type === ConfirmDialog,
+    );
+  };
+  const RECORDS = [{ name: "app1.example.com", type: "CNAME" }, { name: "app2.example.com", type: "CNAME" }];
+  const SUMMARY = "Take back 2 records, one step each; nothing is deleted at the DNS provider: the CNAME record app1.example.com: NOTHING is deleted at the provider";
 
-    expect(dialog.props.title).toBe("Remove these 2 records at the DNS provider, in one run?");
-    expect(dialog.props.confirmLabel).toBe("Remove");
+  it("'Remove selected' plans the run and the dialog shows the plan's own summary and steps; nothing is approved before the confirm", async () => {
+    const confirmSpy = vi.spyOn(window, "confirm");
+    api.getDnsWrites.mockResolvedValue(sampleWrites);
+    api.getDnsInventory.mockResolvedValue(sampleInventory);
+    api.planRun.mockResolvedValue({ runId: "run_removal" });
+    api.getRun.mockResolvedValue({ summary: SUMMARY, steps: [{ title: "Attest the 2 records" }, { title: "Take back the CNAME record app1.example.com" }] });
+    api.approveRun.mockResolvedValue({});
+    await pressRemoveOnBothRows();
+
+    await vi.waitFor(() => expect(dialogs()).toHaveLength(1));
+    expect(api.planRun).toHaveBeenCalledWith("dns-remove", { records: RECORDS });
+    expect(api.getRun).toHaveBeenCalledWith("run_removal");
+    const dialog = dialogs()[0]!;
+    expect(dialog.props.title).toBe("Take back these 2 records, as planned below?");
+    expect(dialog.props.confirmLabel).toBe("Approve the removal");
     expect(dialog.props.destructive).toBe(true);
+    const markup = renderToStaticMarkup(createElement("div", null, dialog.props.children));
+    expect(markup).toContain(SUMMARY);
+    expect(markup).toContain("<li>Take back the CNAME record app1.example.com</li>");
+    expect(api.approveRun).not.toHaveBeenCalled();
 
-    const dialogMarkup = renderToStaticMarkup(dialog.props.children as ReactElement);
-    expect(dialogMarkup).toContain(recordKey(sampleWrites.rows[0]!));
-    expect(dialogMarkup).toContain(recordKey(sampleWrites.rows[1]!));
-    expect(dialogMarkup).toContain("cluster1.example.com");
-    expect(dialogMarkup).toContain("consumer app1 (prod)");
-    expect(dialogMarkup).toContain("consumer app2 (test)");
-
-    // never window.confirm
-    expect(confirmSpy).not.toHaveBeenCalled();
-
-    // "Cancel" closes the dialog and calls removeDnsRecords never
-    dialog.props.onCancel();
-    hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    expect(findElements(tree, (el) => el.type === ConfirmDialog)).toHaveLength(0);
-    expect(api.removeDnsRecords).not.toHaveBeenCalled();
-
-    // Open dialog again and click "Remove"
-    removeBtn.props.onClick!();
-    hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    const confirmDialog = findElements<{ onConfirm: () => void }>(tree, (el) => el.type === ConfirmDialog)[0]!;
-    confirmDialog.props.onConfirm();
-
-    await vi.waitFor(() => {
-      expect(api.removeDnsRecords).toHaveBeenCalledTimes(1);
-      expect(api.removeDnsRecords).toHaveBeenCalledWith({
-        records: [
-          { name: "app1.example.com", type: "CNAME" },
-          { name: "app2.example.com", type: "CNAME" },
-        ],
-      });
-      expect(nav).toHaveBeenCalledWith("/runs/run_removal");
-    });
-
-    // never window.confirm throughout
+    dialog.props.onConfirm();
+    await vi.waitFor(() => expect(nav).toHaveBeenCalledWith("/runs/run_removal"));
+    expect(api.approveRun).toHaveBeenCalledWith("run_removal");
+    expect(api.cancelRun).not.toHaveBeenCalled();
+    expect(dialogs()).toHaveLength(0);
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
-  it("a removal asked from the derived tab reads that tab's rows, and a long value is listed whole", async () => {
-    const longKey = `v=DKIM1; k=rsa; p=${"A".repeat(380)}`;
-    const inventory: DnsInventoryView = {
-      ...sampleInventory,
-      rows: [{ ...sampleInventory.rows[0]!, owner: { kind: "tenant", name: "t1", stage: "prod" }, found: longKey }],
-    };
+  it("Cancel cancels the planned run and approves nothing", async () => {
     api.getDnsWrites.mockResolvedValue(sampleWrites);
-    api.getDnsInventory.mockResolvedValue(inventory);
+    api.getDnsInventory.mockResolvedValue(sampleInventory);
+    api.planRun.mockResolvedValue({ runId: "run_removal" });
+    api.getRun.mockResolvedValue({ summary: SUMMARY, steps: [] });
+    api.cancelRun.mockResolvedValue({});
+    await pressRemoveOnBothRows();
+    await vi.waitFor(() => expect(dialogs()).toHaveLength(1));
 
-    hooks.cursor = 0;
-    evaluate(createElement(Dns));
-    for (const effect of hooks.effects.splice(0)) effect();
-    await vi.waitFor(() => expect(hooks.states[2]).toEqual(inventory));
+    dialogs()[0]!.props.onCancel();
+    await vi.waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith("run_removal"));
+    expect(api.approveRun).not.toHaveBeenCalled();
+    expect(nav).not.toHaveBeenCalled();
+    expect(dialogs()).toHaveLength(0);
+  });
 
-    hooks.cursor = 0;
-    let tree = evaluate(createElement(Dns));
-    const derived = () => findElements<{ id?: string }>(tree, (el) => el.props.id === "panel-derived")[0]!;
-    const checkbox = findElements<{ type?: string; "aria-label"?: string; onChange?: () => void }>(
-      derived(),
-      (el) => el.type === "input" && el.props["aria-label"] === "Select CNAME app1.example.com",
-    )[0]!;
-    checkbox.props.onChange!();
+  it("a refused plan shows its sentence, opens no dialog and approves nothing", async () => {
+    api.getDnsWrites.mockResolvedValue(sampleWrites);
+    api.getDnsInventory.mockResolvedValue(sampleInventory);
+    api.planRun.mockRejectedValue(new Error("1 of the 2 record(s) cannot be taken back, so none is"));
+    await pressRemoveOnBothRows();
 
-    hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    const buttonText = (el: ReactElement<{ children?: ReactNode }>) =>
-      Array.isArray(el.props.children) ? el.props.children.join("") : String(el.props.children ?? "");
-    const removeBtn = findElements<{ onClick?: () => void; children?: ReactNode }>(
-      derived(),
-      (el) => el.type === "button" && buttonText(el).startsWith("Remove selected"),
-    )[0]!;
-    removeBtn.props.onClick!();
-
-    hooks.cursor = 0;
-    tree = evaluate(createElement(Dns));
-    const dialog = findElements<{ title: string; children: ReactNode }>(tree, (el) => el.type === ConfirmDialog)[0]!;
-    expect(dialog.props.title).toBe("Remove this record at the DNS provider, in one run?");
-    const markup = renderToStaticMarkup(dialog.props.children as ReactElement);
-    expect(markup).toContain(`${longKey} · tenant t1 (prod)`);
-    expect(markup).not.toContain("consumer app1");
+    await vi.waitFor(() => expect(hooks.states[3]).toBe("1 of the 2 record(s) cannot be taken back, so none is"));
+    expect(dialogs()).toHaveLength(0);
+    expect(api.getRun).not.toHaveBeenCalled();
+    expect(api.approveRun).not.toHaveBeenCalled();
   });
 });

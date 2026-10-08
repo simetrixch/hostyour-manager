@@ -19,9 +19,11 @@
 // (name, type) would take them all. The content this platform owns is what the book of DNS writes
 // says it wrote; for a record published before the book existed, it is the record the mail
 // record's tag picks among those standing at the provider now. Where neither names a record,
-// nothing is deleted and the log says what stands and stays. A CNAME the book names is deleted by
-// its booked content too: the book proves only what this Manager wrote, and a name re-pointed since
+// nothing is deleted and the log says what stands and stays. Every record the book names is deleted
+// by its booked content, and where that content stands nowhere the provider is not asked to delete
+// at all: the book proves only what this Manager wrote, and a name that carries other content since
 // is somebody else's now. Any other A or CNAME is a unit's own name and is deleted by name.
+// `providerRemoval` is that rule, and the plan states its answer for each record.
 import type { Db } from "#core/server/db/client.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
@@ -147,49 +149,64 @@ export async function withBookedRows(
 const isPublished = (record: DnsRecordRow["record"]): record is MailTxtRecord =>
   record !== undefined && (MAIL_TXT_RECORD as readonly string[]).includes(record);
 
-/** The content of OUR record under a TXT name, or null where none of ours stands: what the book says
- *  this Manager wrote, else the record the mail record's tag picks among `standing` — a record
- *  published before the book existed. */
-function ownedTxtContent(ctx: StepCtx, row: RemovableRecordRow, standing: string[]): { content: string; booked: boolean } | null {
-  const booked = findDnsWrite(ctx.db, { name: row.name, type: row.type });
-  if (booked) return { content: booked.content, booked: true };
+/** What taking ONE record back deletes at the provider, the one rule the plan states and the remove
+ *  step carries out, read against what stands at the name now (`standing`):
+ *  - a booked record: exactly the booked content where it stands, and NOTHING where it stands nowhere,
+ *    because whatever stands at the name then is content no run here wrote; the book only forgets
+ *    its row;
+ *  - an unbooked TXT: the record its mail record's tag picks, a record published before the book
+ *    existed, or nothing where none carries the tag;
+ *  - an unbooked A or CNAME: every record of the name, which is the unit's own.
+ *  `content` is what goes; undefined goes by name; null deletes nothing. */
+export interface ProviderRemoval {
+  content: string | null | undefined;
+  booked: boolean;
+}
+
+export function providerRemoval(db: Db, row: RemovableRecordRow, standing: string[]): ProviderRemoval {
+  const write = findDnsWrite(db, { name: row.name, type: row.type });
+  if (write) return { content: standing.includes(write.content) ? write.content : null, booked: true };
+  if (standing.length === 0) return { content: null, booked: false };
+  if (row.type !== "TXT") return { content: undefined, booked: false };
   if (!isPublished(row.record)) {
     throw errValidation(
       `the inventory does not say which mail record TXT ${row.name} is, so nothing here can pick this installation's own among the records of the name — refusing to delete by name alone`,
     );
   }
-  const tag = standing.find(MAIL_RECORD_TAG[row.record]) ?? null;
-  return tag === null ? null : { content: tag, booked: false };
+  return { content: standing.find(MAIL_RECORD_TAG[row.record]) ?? null, booked: false };
+}
+
+/** The plan's sentence for what taking the record back does at the provider, from `providerRemoval`. */
+export function removalSentence(row: RemovableRecordRow, standing: string[], removal: ProviderRemoval): string {
+  const record = `the ${row.type} record ${row.name} (${ownerSentence(row)})`;
+  if (removal.content === null) {
+    if (standing.length === 0) return `${record}: nothing stands there, so nothing is deleted${removal.booked ? " and the book forgets its row" : ""}`;
+    return `${record}: NOTHING is deleted at the provider — what stands there (${standing.join(" | ")}) is content no run here wrote, and it stays${removal.booked ? "; the book forgets its row" : ""}`;
+  }
+  if (removal.content === undefined) return `${record}: deletes every ${row.type} record of the name (${standing.join(" | ")})`;
+  const left = standing.filter((c) => c !== removal.content);
+  return `${record}: deletes ${removal.content}${left.length > 0 ? `, and ${left.join(" | ")} stays` : ""}`;
 }
 
 /** Delete ONE record and say what stood there. What stands is read BEFORE the deletion, because
  *  afterwards nothing anywhere can say what the zone carried — the run log is the only record of it.
- *  Absent is the idempotent no-op (a delete resolves 0), so a resumed run is safe. A TXT is deleted
- *  by the content this platform owns, and so is a booked CNAME (the header states the rule); the other records of the
- *  name are counted and left. The book of DNS writes loses its row on every removal, because the
- *  operator asked to take the write back and a write whose content stands nowhere is gone either
- *  way; the other records of the name stay and the log names them. */
+ *  What goes is `providerRemoval`'s answer; where it deletes nothing, the provider is not asked to
+ *  delete at all, so a resumed run is safe. The book of DNS writes loses its row on every removal,
+ *  because the operator asked to take the write back and a write whose content stands nowhere is
+ *  gone either way; the other records of the name stay and the log names them. */
 export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, row: RemovableRecordRow): Promise<void> {
   const standing = await dns.listRecordContents({ name: row.name, type: row.type, signal: ctx.signal });
-  let content: string | undefined;
-  let booked = false;
-  if (row.type === "TXT") {
-    const owned = ownedTxtContent(ctx, row, standing);
-    if (owned === null) {
-      ctx.checkpoint({ record: row.name, type: row.type, standing, deleted: 0 });
-      ctx.log("meta", standing.length === 0
-        ? `no TXT record ${row.name} to remove — already absent`
-        : `no TXT record ${row.name} of this installation's to remove — the ${standing.length} record(s) of the name carry content no run here wrote and stay`);
-      return;
-    }
-    content = owned.content;
-    booked = owned.booked;
-  } else if (row.type === "CNAME") {
-    const write = findDnsWrite(ctx.db, { name: row.name, type: row.type });
-    if (write) {
-      content = write.content;
-      booked = true;
-    }
+  const { content, booked } = providerRemoval(ctx.db, row, standing);
+  if (content === null) {
+    forgetDnsWrite(ctx.db, { name: row.name, type: row.type });
+    ctx.checkpoint({ record: row.name, type: row.type, standing, deleted: 0 });
+    ctx.log(
+      "meta",
+      standing.length === 0
+        ? `no ${row.type} record ${row.name} to remove — already absent${booked ? "; the book forgets the write" : ""}`
+        : `no ${row.type} record ${row.name} of this installation's to remove — the ${standing.length} record(s) of the name (${standing.join(", ")}) carry content no run here wrote and stay, and the provider was not asked to delete anything${booked ? "; the book forgets the write" : ""}`,
+    );
+    return;
   }
   const { deleted } = await dns.deleteRecord({ name: row.name, type: row.type, ...(content === undefined ? {} : { content }), signal: ctx.signal });
   const left = standing.length - deleted;
@@ -199,10 +216,6 @@ export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, row: Removabl
     "meta",
     deleted > 0
       ? `${row.type} ${row.name} stood at ${content ?? standing[0] ?? "content the provider did not answer"} and is gone (${deleted} removed${left > 0 ? `, ${left} other record(s) of the name left standing` : ""})`
-      : left > 0
-        ? booked
-          ? `${row.type} ${row.name} no longer stood at ${content} — the ${left} record(s) of the name stay (${standing.join(", ")}); the book forgets the write`
-          : `no ${row.type} record ${row.name} at ${content} to remove — the ${left} record(s) of the name carry other content and stay`
-        : `no ${row.type} record ${row.name} to remove — already absent`,
+      : `no ${row.type} record ${row.name} to remove — it went between the reading and the deletion`,
   );
 }
