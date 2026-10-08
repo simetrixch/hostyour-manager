@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { EncryptJWT, jwtDecrypt } from "jose";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { meta } from "../../db/schema/meta.ts";
+import { revokedSessions } from "../../db/schema/revoked-sessions.ts";
 import type { Config } from "../../kernel/config.ts";
-import { bootEpochMs, isRevoked } from "./revocation.ts";
 
 export const SESSION_COOKIE = "__Host-manager";
 
@@ -54,8 +54,9 @@ export function loadOrCreateKey(db: Db, metaKey: string): Uint8Array {
 
 /**
  * Sealed JWE session cookie. `dir` + `A256GCM`
- * with the algorithms allowlisted on decrypt; jti + in-memory revocation + bootEpoch
- * fail-close; idle + absolute lifetime enforced.
+ * with the algorithms allowlisted on decrypt; jti + persisted revocation;
+ * idle + absolute lifetime enforced. A session survives a restart within its idle and absolute
+ * lifetimes, and a revoked one stays revoked across a restart.
  *
  * The two lifetimes are carried by two different claims. `iat` is the LAST-ACTIVITY moment:
  * the chokepoint re-mints the cookie on every authenticated request (refresh), so the idle
@@ -68,7 +69,7 @@ export class SessionCodec {
   private readonly key: Uint8Array;
 
   constructor(
-    db: Db,
+    private readonly db: Db,
     private readonly config: Config,
   ) {
     this.key = loadOrCreateKey(db, "session.key");
@@ -79,7 +80,6 @@ export class SessionCodec {
     return new EncryptJWT({
       groups: session.groups,
       via: session.via,
-      be: bootEpochMs(),
       aa: session.authAt,
       ...(session.email ? { email: session.email } : {}),
     })
@@ -109,19 +109,29 @@ export class SessionCodec {
     return this.seal(session);
   }
 
+  revoke(session: OperatorSession): void {
+    const now = Math.floor(Date.now() / 1000);
+    const expiresAt = session.authAt + this.config.session.absoluteSeconds;
+    this.db.insert(revokedSessions).values({ jti: session.jti, expiresAt }).onConflictDoNothing().run();
+    this.db.delete(revokedSessions).where(lt(revokedSessions.expiresAt, now)).run();
+  }
+
+  /** Verify a session cookie: ensures valid signature, idle and absolute lifetimes, and that the
+   *  session has not been revoked. A session survives a restart within its idle and absolute lifetimes,
+   *  and a revoked one stays revoked across a restart. */
   async verify(cookie: string): Promise<SessionVerdict> {
     try {
       const { payload } = await jwtDecrypt(cookie, this.key, {
         keyManagementAlgorithms: [ALG],
         contentEncryptionAlgorithms: [ENC],
       });
-      // jose already enforced exp (= authAt + absolute). Now: bootEpoch, idle, revocation.
-      if (payload.be !== bootEpochMs()) return { kind: "invalid" };
+      // jose already enforced exp (= authAt + absolute). Now: idle lifetime and persisted revocation.
       const iat = typeof payload.iat === "number" ? payload.iat : 0;
       if (Date.now() / 1000 - iat > this.config.session.idleSeconds) return { kind: "invalid" };
       const jti = payload.jti;
       const sub = payload.sub;
-      if (typeof jti !== "string" || typeof sub !== "string" || isRevoked(jti)) return { kind: "invalid" };
+      if (typeof jti !== "string" || typeof sub !== "string") return { kind: "invalid" };
+      if (this.db.select().from(revokedSessions).where(eq(revokedSessions.jti, jti)).get()) return { kind: "invalid" };
       if (typeof payload.aa !== "number") return { kind: "invalid" }; // no absolute anchor — refresh could not cap it
       const groups = Array.isArray(payload.groups) ? payload.groups.filter((g): g is string => typeof g === "string") : [];
       const email = typeof payload.email === "string" ? payload.email : undefined;

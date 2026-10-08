@@ -7,7 +7,6 @@ import { parseConfig, type Config } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { EncryptJWT } from "jose";
 import { SessionCodec, loadOrCreateKey } from "./session.ts";
-import { revokeJti, bootEpochMs, __setBootEpochForTest } from "./revocation.ts";
 
 const config = parseConfig({
   ...REQUIRED_ENV,
@@ -20,7 +19,6 @@ const config = parseConfig({
   ADMIN_SOCKET_PATH: "/run/manager/admin.sock",
   LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv);
-const ORIGINAL_BOOT_EPOCH = bootEpochMs();
 
 describe("SessionCodec — sealed JWE session", () => {
   const handles: DbHandle[] = [];
@@ -33,7 +31,6 @@ describe("SessionCodec — sealed JWE session", () => {
     return new SessionCodec(db.db, cfg);
   }
   afterEach(() => {
-    __setBootEpochForTest(ORIGINAL_BOOT_EPOCH);
     for (const h of handles.splice(0)) h.sqlite.close();
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
@@ -62,7 +59,7 @@ describe("SessionCodec — sealed JWE session", () => {
     handles.push(db);
     const c = new SessionCodec(db.db, config);
     const now = Math.floor(Date.now() / 1000);
-    const forged = await new EncryptJWT({ groups: ["admins"], via: "socket", be: bootEpochMs(), aa: now })
+    const forged = await new EncryptJWT({ groups: ["admins"], via: "socket", aa: now })
       .setProtectedHeader({ alg: "dir", enc: "A256GCM" })
       .setSubject("op_1")
       .setJti("j")
@@ -80,20 +77,72 @@ describe("SessionCodec — sealed JWE session", () => {
     expect((await c.verify(`${token.slice(0, -3)}AAA`)).kind).toBe("invalid");
   });
 
-  it("rejects a revoked jti", async () => {
+  it("rejects a revoked session", async () => {
     const c = codec();
     const token = await c.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
     const v = await c.verify(token);
     if (v.kind !== "ok") throw new Error("expected ok");
-    revokeJti(v.session.jti);
+    c.revoke(v.session);
     expect((await c.verify(token)).kind).toBe("invalid");
   });
 
-  it("fail-closes any session minted before the current process bootEpoch (restart)", async () => {
-    const c = codec();
+  it("survives a restart: a session minted by one SessionCodec is valid when verified by a new SessionCodec over the same database", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ses-restart-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "manager.db"));
+    handles.push(db);
+    const c1 = new SessionCodec(db.db, config);
+    const token = await c1.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
+    const c2 = new SessionCodec(db.db, config);
+    const v = await c2.verify(token);
+    expect(v.kind).toBe("ok");
+  });
+
+  it("a session revoked through one codec is invalid when verified by a new codec over the same database", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ses-rev-restart-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "manager.db"));
+    handles.push(db);
+    const c1 = new SessionCodec(db.db, config);
+    const token = await c1.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
+    const v = await c1.verify(token);
+    if (v.kind !== "ok") throw new Error("expected ok");
+    c1.revoke(v.session);
+    const c2 = new SessionCodec(db.db, config);
+    expect((await c2.verify(token)).kind).toBe("invalid");
+  });
+
+  it("revoke deletes a row whose expires_at has passed, and keeps one that has not", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-ses-prune-"));
+    dirs.push(dir);
+    const db = openDb(join(dir, "manager.db"));
+    handles.push(db);
+    const c = new SessionCodec(db.db, config);
+    const now = Math.floor(Date.now() / 1000);
+    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at) VALUES (?, ?)").run("jti_past", now - 10);
+    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at) VALUES (?, ?)").run("jti_future", now + 1000);
+
     const token = await c.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
-    __setBootEpochForTest(ORIGINAL_BOOT_EPOCH + 5_000); // simulate a restart
-    expect((await c.verify(token)).kind).toBe("invalid");
+    const v = await c.verify(token);
+    if (v.kind !== "ok") throw new Error("expected ok");
+    c.revoke(v.session);
+
+    const remaining = (db.sqlite.prepare("SELECT jti FROM revoked_sessions ORDER BY jti").all() as { jti: string }[]).map((r) => r.jti);
+    expect(remaining).toContain("jti_future");
+    expect(remaining).toContain(v.session.jti);
+    expect(remaining).not.toContain("jti_past");
+  });
+
+  it("planted innocent: revoking session A leaves session B valid", async () => {
+    const c = codec();
+    const tokenA = await c.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
+    const tokenB = await c.mint({ sub: "op_2", groups: ["admins"], via: "oidc" });
+    const vA = await c.verify(tokenA);
+    const vB = await c.verify(tokenB);
+    if (vA.kind !== "ok" || vB.kind !== "ok") throw new Error("expected ok");
+    c.revoke(vA.session);
+    expect((await c.verify(tokenA)).kind).toBe("invalid");
+    expect((await c.verify(tokenB)).kind).toBe("ok");
   });
 
   it("rejects a session past its idle window", async () => {

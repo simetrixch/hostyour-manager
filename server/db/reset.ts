@@ -45,6 +45,8 @@ const WIPE_ORDER = [
 //     Clusters page reports the keystore as; wiping either signs the operator out mid-reset and
 //     makes the page read "plaintext" whatever mode the keystore is really in until the next boot
 //     rewrites the row.
+//   revoked_sessions — keeps revoked operator sessions revoked across a reset, because meta.session.key
+//     is kept and wiping them would resurrect them.
 //   __drizzle_migrations — the migrator's own ledger. Emptied, the next openDb replays the baseline
 //     against tables that already exist and the Manager stops booting.
 // Every compiled plugin adds its own: the tables its `keep` names, and its ledger
@@ -53,7 +55,7 @@ const WIPE_ORDER = [
 // These lists, WIPE_ORDER and every compiled plugin's tables together must name EVERY table in the
 // database. reset.test.ts checks them against sqlite_master, so a table a later migration adds falls
 // into none and goes red instead of quietly surviving every wipe.
-export const KEPT_TABLES = ["operators", "meta", "__drizzle_migrations"] as const;
+export const KEPT_TABLES = ["operators", "meta", "revoked_sessions", "__drizzle_migrations"] as const;
 
 /** The compiled plugins as a reset reads them: their names, tables and the tables they keep. */
 export type ResetPlugin = Pick<Plugin, "name" | "schema" | "keep">;

@@ -22,8 +22,8 @@ export interface LoginTx {
 /**
  * The short-lived, sealed login transaction. Carries the PKCE verifier + state
  * + returnTo across the IdP round-trip in a cookie, so no server-side session store is needed
- * and a restart mid-login just costs one retry. Separate key from the session; no bootEpoch/
- * idle (this is pre-login state, not an authenticated session).
+ * and a restart mid-login just costs one retry. Separate key from the session; no
+ * idle window (this is pre-login state, not an authenticated session).
  */
 export class LoginTxCodec {
   private readonly key: Uint8Array;
