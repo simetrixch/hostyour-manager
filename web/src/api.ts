@@ -77,6 +77,8 @@ export const approveRun = (id: string, secrets?: Record<string, string>): Promis
  *  pointer and goes on running, and removing a thing is the separate offboard or remove run. */
 export const deleteRun = (id: string): Promise<unknown> => req(`/api/runs/${id}`, { method: "DELETE" });
 export const cancelRun = (id: string): Promise<unknown> => post(`/api/runs/${id}/cancel`);
+/** Park a run that was planned and never approved at `cancelled`, so nobody can approve it later. */
+export const discardRun = (id: string): Promise<unknown> => post(`/api/runs/${id}/discard`);
 export const retryRun = (id: string, stepName?: string, secrets?: Record<string, string>): Promise<unknown> =>
   post(`/api/runs/${id}/retry`, { ...(stepName ? { stepName } : {}), ...encodeSecrets(secrets) });
 export const skipRun = (id: string, stepName: string, reason: string): Promise<unknown> => post(`/api/runs/${id}/skip`, { stepName, reason });
