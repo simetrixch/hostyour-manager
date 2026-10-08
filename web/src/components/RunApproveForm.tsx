@@ -21,7 +21,8 @@ export function RunApproveForm(props: {
   secretHints: SecretHints;
   /** Values a dialog already took for this run (heldSecrets.ts), filled in and still editable. */
   initialSecrets?: Record<string, string> | undefined;
-  onApprove: (payload: Record<string, string>) => void;
+  /** Resolves when the approve was accepted, rejects when it was refused. */
+  onApprove: (payload: Record<string, string>) => Promise<void>;
   onDelete: () => void;
 }): ReactNode {
   const [secretVals, setSecretVals] = useState<Record<string, string>>(() => props.initialSecrets ?? {});
@@ -39,13 +40,15 @@ export function RunApproveForm(props: {
         if (!allFilled) return;
         // One merged approve payload — secrets keep their keys; each activation input rides
         // `activation-input:<field>` (NON-secret, decoded server-side into the run, never sealed).
-        props.onApprove({
-          ...secretVals,
-          ...Object.fromEntries(requiredInputs.map((i) => [`activation-input:${i.field}`, inputVals[i.field] ?? ""])),
-        });
-        // The typed secrets go out with this one request and are kept nowhere: an approve the server
-        // refuses (an ended session) leaves the page standing, and the person types them again.
-        setSecretVals({});
+        // The typed secrets go out with this one request and are dropped once it is accepted. A refused
+        // approve (a held lock) leaves the plan planned and the form standing, so they stay in this
+        // form's memory for the next approve and nowhere else.
+        props
+          .onApprove({
+            ...secretVals,
+            ...Object.fromEntries(requiredInputs.map((i) => [`activation-input:${i.field}`, inputVals[i.field] ?? ""])),
+          })
+          .then(() => setSecretVals({}), () => undefined);
       }}
     >
       <div className="ceremony__head">

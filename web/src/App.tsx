@@ -13,6 +13,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard.tsx").then((m) => ({ defa
 const Servers = lazy(() => import("./pages/Servers.tsx").then((m) => ({ default: m.Servers })));
 const InstallationDomain = lazy(() => import("./pages/InstallationDomain.tsx").then(m => ({ default: m.InstallationDomain })));
 const OperatorKeys = lazy(() => import("./pages/OperatorKeys.tsx").then((m) => ({ default: m.OperatorKeys })));
+const Runs = lazy(() => import("./pages/Runs.tsx").then((m) => ({ default: m.Runs })));
 const RunDetail = lazy(() => import("./pages/RunDetail.tsx").then((m) => ({ default: m.RunDetail })));
 const Branches = lazy(() => import("./pages/Branches.tsx").then((m) => ({ default: m.Branches })));
 const Mail = lazy(() => import("./pages/Mail.tsx").then((m) => ({ default: m.Mail })));
@@ -77,8 +78,7 @@ export function App() {
               <Route path="/tenants" element={<Tenants />} />
               <Route path="/tenants/create" element={<TenantCreate />} />
               <Route path="/tenants/:id" element={<TenantDetailOfRow />} />
-              {/* The global /runs list was removed; each section owns its runs. The
-                  detail route stays — every plan-then-approve and "Last run →" navigates here. */}
+              <Route path="/runs" element={<Runs />} />
               <Route path="/runs/:id" element={<RunDetail />} />
               <Route path="/branches" element={<Branches />} />
               <Route path="/mail" element={<Mail />} />

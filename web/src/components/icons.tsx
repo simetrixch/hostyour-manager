@@ -12,11 +12,12 @@ const stroke = {
   strokeLinejoin: "round",
 } as const;
 
-export type NavIconName = "clusters" | "servers" | "branches" | "reset" | "consumers" | "tenants" | "mail";
+export type NavIconName = "clusters" | "servers" | "branches" | "reset" | "consumers" | "tenants" | "mail" | "runs";
 
 /** Nav glyphs, keyed by the NAV config's icon id (clusters = overview grid, servers = rack,
  *  branches = git-branch, reset = restore arrow, consumers = package box,
- *  tenants = stacked layers — one pointer fanning out to a multi-app package, mail = an envelope). */
+ *  tenants = stacked layers — one pointer fanning out to a multi-app package, mail = an envelope,
+ *  runs = a list beside a play mark). */
 /** A menu entry's icon: the core's drawn by name, a plugin's as the plugin brought it. */
 export function MenuIcon({ item, size = 18 }: { item: MenuItem; size?: number }): ReactNode {
   return "plugin" in item ? item.icon : <NavIcon name={item.icon} size={size} />;
@@ -64,6 +65,13 @@ export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number 
         <>
           <path d="M21 16V8a2 2 0 0 0-1-1.7l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.7l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
           <path d="m3.3 7 8.7 5 8.7-5M12 22V12" />
+        </>
+      )}
+      {name === "runs" && (
+        <>
+          <path d="M10 6h11M10 12h11M10 18h11" />
+          <path d="m3 4.5 4 3-4 3Z" />
+          <path d="M4 15.5h.01M4 18.5h.01" />
         </>
       )}
       {name === "tenants" && (

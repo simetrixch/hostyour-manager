@@ -9,6 +9,7 @@ const run = (over: { id?: string; kind?: RunKind; status?: RunStatus; targetId?:
   targetKind: "server",
   targetId: over.targetId ?? "srv_1",
   status: over.status ?? "planned",
+  startedBy: "System",
   summary: "",
   steps: [],
   requiredSecrets: [],

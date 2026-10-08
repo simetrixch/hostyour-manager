@@ -12,7 +12,8 @@ import { IconLock } from "./icons.tsx";
  *  as long as this form is on screen and go out with the approve. */
 export function DeploySlaveApproveForm(props: {
   run: RunView;
-  onApprove: (payload: Record<string, string>) => void;
+  /** Resolves when the approve was accepted, rejects when it was refused. */
+  onApprove: (payload: Record<string, string>) => Promise<void>;
   onDelete: () => void;
 }): ReactNode {
   const [supplied, setSupplied] = useState<Record<string, string>>({});
@@ -26,9 +27,8 @@ export function DeploySlaveApproveForm(props: {
       onSubmit={(e) => {
         e.preventDefault();
         if (!readyToApprove(run, supplied)) return;
-        props.onApprove(approvePayload(run, supplied, stated));
-        // The typed secrets go out with this one request and are kept nowhere (RunApproveForm says why).
-        setSupplied({});
+        // The typed secrets are dropped once the approve is accepted (RunApproveForm says why).
+        props.onApprove(approvePayload(run, supplied, stated)).then(() => setSupplied({}), () => undefined);
       }}
     >
       <div className="ceremony__head">

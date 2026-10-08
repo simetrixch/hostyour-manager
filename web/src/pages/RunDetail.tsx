@@ -9,6 +9,8 @@ import { abortOffer, recoverable, runOnScreen } from "../runScreen.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { RunApproveForm } from "../components/RunApproveForm.tsx";
+import { ResourceBusyCallout } from "../components/ResourceBusyCallout.tsx";
+import { busyHolderOf, type BusyHolder } from "../runsBoard.ts";
 import { dropSecrets, heldSecrets } from "../heldSecrets.ts";
 import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
@@ -40,6 +42,7 @@ export function RunDetail() {
   const [loaded, setLoaded] = useState<RunView | null>(null); // what the last GET returned — see `run` below
   const [lines, setLines] = useState<RunEventView[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<BusyHolder | null>(null); // the lock a refused approve collided with
   const [confirmDelete, setConfirmDelete] = useState(false); // delete-run confirm (our dialog, never window.confirm)
   const [showSkip, setShowSkip] = useState(false); // skip-step dialog (our dialog, never window.prompt)
   // What the tenant a FAILED create-tenant minted IS right now, resolved SERVER-SIDE from the tenants row
@@ -126,6 +129,21 @@ export function RunDetail() {
     fn()
       .then(refresh)
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
+  }
+
+  /** An approve that a held lock refused keeps this page and its form, and names the holder; any other
+   *  failure takes the page like every act. Rejects when refused, so the form keeps what was typed. */
+  function approve(payload?: Record<string, string>): Promise<void> {
+    setBusy(null);
+    return approveRun(runId, payload).then(
+      () => refresh(),
+      (e: unknown) => {
+        const holder = busyHolderOf(e);
+        if (holder) setBusy(holder);
+        else setError(e instanceof Error ? e.message : String(e));
+        throw e;
+      },
+    );
   }
 
   /** Soft-delete this run ("Delete run" on a planned, failed, or cancelled run): it
@@ -233,10 +251,12 @@ export function RunDetail() {
           world's answers before handing anything over (executor/probe.ts). */}
       {run.deletedAt === null && run.status === "planned" && <PlanFindings findings={run.findings} />}
 
+      {run.deletedAt === null && run.status === "planned" && busy && <ResourceBusyCallout busy={busy} />}
+
       {run.deletedAt === null && run.status === "planned" && run.kind === "cluster-deploy-slave" && (
         <DeploySlaveApproveForm
           run={run}
-          onApprove={(payload) => act(() => approveRun(runId, payload))}
+          onApprove={approve}
           onDelete={() => setConfirmDelete(true)}
         />
       )}
@@ -251,13 +271,13 @@ export function RunDetail() {
             requiredInputs={run.requiredInputs}
             secretHints={run.secretHints}
             initialSecrets={heldSecrets(runId)}
-            onApprove={(payload) => { dropSecrets(runId); void act(() => approveRun(runId, payload)); }}
+            onApprove={(payload) => { dropSecrets(runId); return approve(payload); }}
             onDelete={() => setConfirmDelete(true)}
           />
         ) : (
           <div className="actionbar">
             <span className="actionbar__text">This plan is waiting for your approval — approving starts the steps listed below.</span>
-            <button type="button" className="btn btn--primary" onClick={() => act(() => approveRun(runId))}>
+            <button type="button" className="btn btn--primary" onClick={() => void approve().catch(() => undefined)}>
               Approve
             </button>
             <button type="button" className="btn" onClick={() => setConfirmDelete(true)}>

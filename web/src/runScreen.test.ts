@@ -12,6 +12,7 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   targetKind: "cluster",
   targetId: "cls_1",
   status,
+  startedBy: "System",
   summary: `${kind} ${id}`,
   steps: [],
   requiredSecrets: [],

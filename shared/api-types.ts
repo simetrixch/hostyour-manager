@@ -260,6 +260,8 @@ export interface RunView extends RunApproveView {
   targetId: string;
   status: RunStatus;
   summary: string;
+  /** The display name of the operator who planned the run; the Manager's own runs name its system operator. */
+  startedBy: string;
   steps: StepView[];
   createdAt: number;
   startedAt: number | null;
@@ -274,6 +276,13 @@ export interface RunView extends RunApproveView {
    *  as opposed to one interrupted mid-flight, which is resumed from the step the cancel hit.
    *  Nothing is left to resume: Delete run is what remains. */
   aborted: boolean;
+}
+
+/** How long the recent succeeded runs of one kind took: the median, and how many runs it is taken from. */
+export interface RunDurationView {
+  kind: string;
+  typicalMs: number;
+  sampleSize: number;
 }
 
 export interface RunEventView {

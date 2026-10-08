@@ -5,7 +5,7 @@ import type { Config } from "../../kernel/config.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { RunEventBus } from "../../executor/bus.ts";
-import { listRuns, getRun, readEvents } from "../../executor/read.ts";
+import { listRuns, listRunDurations, getRun, readEvents } from "../../executor/read.ts";
 import { isTerminalRun } from "../../executor/transitions.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import type { RunEventView } from "../../../shared/api-types.ts";
@@ -46,6 +46,7 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
   const { executor, db, bus } = deps;
 
   app.get("/api/runs", (c) => c.json(listRuns(db)));
+  app.get("/api/runs/durations", (c) => c.json(listRunDurations(db)));
 
   app.get("/api/runs/:id", (c) => {
     const run = getRun(db, c.req.param("id"));

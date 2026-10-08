@@ -6,10 +6,9 @@ import { IconChevronRight } from "./icons.tsx";
 const fmtWhen = (ts: number): string =>
   new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 
-/** The shared runs row list — lifted verbatim from the (now removed) global Runs page so every
- *  section that shows runs renders ONE identical row block instead of a hand-copied one. Dumb: it
- *  renders the runs it is given; the caller does the filtering and supplies the empty state. Each
- *  row links to RunDetail at /runs/:id (the only surviving runs route). */
+/** The shared runs row list, so the Runs page and every section that shows runs render ONE identical
+ *  row block. Dumb: it renders the runs it is given; the caller does the filtering and supplies the
+ *  empty state. Each row links to RunDetail at /runs/:id. */
 export function RunRows({ runs, empty }: { runs: RunView[]; empty: ReactNode }): ReactNode {
   if (runs.length === 0) return empty;
   return (

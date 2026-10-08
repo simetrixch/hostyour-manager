@@ -3,7 +3,8 @@ import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
 import { runs, steps, events } from "../db/schema/runs.ts";
 import type { RunStatus, StepStatus } from "../../shared/enums.ts";
-import type { RunView, RunEventView } from "../../shared/api-types.ts";
+import type { RunView, RunEventView, RunDurationView } from "../../shared/api-types.ts";
+import { getOperatorDisplayName } from "../db/operator-names.ts";
 
 // The sanctioned read path for runs/steps/events. Routes read runs
 // ONLY through here — the dep-cruiser rule `only-executor-touches-runs-schema` makes any
@@ -30,6 +31,7 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     targetId: r.targetId,
     status: r.status,
     summary: summaryOf(r),
+    startedBy: getOperatorDisplayName(db, r.startedBy),
     steps: rows.map((s) => ({ name: s.name, title: s.title, status: s.status, startedAt: ms(s.startedAt), endedAt: ms(s.finishedAt) })),
     requiredSecrets: (r.planJson as { requiredSecrets?: string[] } | null)?.requiredSecrets ?? [],
     secretHints: (r.planJson as { secretHints?: Record<string, string> } | null)?.secretHints ?? {},
@@ -49,6 +51,33 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
  *  the run leaves your view). Their rows + logs stay in the DB; see getRun. */
 export function listRuns(db: Db, limit = 100): RunView[] {
   return db.select().from(runs).where(isNull(runs.deletedAt)).orderBy(desc(runs.createdAt)).limit(limit).all().map((r) => toRunView(db, r));
+}
+
+/** How long the last runs of each kind took, from start to end. Only succeeded runs count: a failed
+ *  or cancelled run stopped early, so it would make the usual time look shorter than it is. The
+ *  window is the newest `window` runs of a kind, so a change that makes a kind faster or slower shows
+ *  within that many runs. */
+export function listRunDurations(db: Db, window = 20): RunDurationView[] {
+  const rows = db
+    .select({ kind: runs.kind, startedAt: runs.startedAt, finishedAt: runs.finishedAt })
+    .from(runs)
+    .where(and(eq(runs.status, "succeeded"), isNull(runs.deletedAt)))
+    .orderBy(desc(runs.finishedAt))
+    .all();
+  const byKind = new Map<string, number[]>();
+  for (const r of rows) {
+    if (!r.startedAt || !r.finishedAt) continue;
+    const taken = byKind.get(r.kind) ?? [];
+    if (taken.length < window) taken.push(r.finishedAt.getTime() - r.startedAt.getTime());
+    byKind.set(r.kind, taken);
+  }
+  return [...byKind].map(([kind, taken]) => ({ kind, typicalMs: median(taken), sampleSize: taken.length }));
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
 }
 
 /** By-id STILL resolves a soft-deleted run (deletedAt set on the view): a direct or

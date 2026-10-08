@@ -1,14 +1,18 @@
 // The one way the SPA talks to the Manager's API: same-origin fetch, JSON in and out, the server's error
 // code kept, and what a lapsed session does to a read and to a write.
 
+import type { ApiError } from "../../shared/api-types.ts";
+
 /** Carries the server's error CODE (not just the message) so a caller can branch on it —
  *  e.g. the Reset wizard renders a DB-only form on NOT_CONFIGURED instead of a dead end. */
 export class ApiRequestError extends Error {
   readonly code: string | undefined;
-  constructor(message: string, code?: string) {
+  readonly detail: Record<string, unknown> | undefined;
+  constructor(message: string, code?: string, detail?: Record<string, unknown>) {
     super(message);
     this.name = "ApiRequestError";
     this.code = code;
+    this.detail = detail;
   }
 }
 
@@ -30,8 +34,8 @@ export async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error("Not signed in");
   }
   if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { message?: string; code?: string } | null;
-    throw new ApiRequestError(body?.message ?? `Request failed (${res.status})`, body?.code);
+    const body = (await res.json().catch(() => null)) as ApiError | null;
+    throw new ApiRequestError(body?.message ?? `Request failed (${res.status})`, body?.code, body?.detail);
   }
   return (await res.json()) as T;
 }
