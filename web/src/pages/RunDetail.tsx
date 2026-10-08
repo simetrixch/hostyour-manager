@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import type { RunView, RunEventView, RunTenantStateView } from "../../../shared/api-types.ts";
+import type { QueuedRunView, RunView, RunEventView, RunTenantStateView } from "../../../shared/api-types.ts";
 import { ACTIVATION_RESULT_MARKER } from "../../../shared/api-types.ts";
-import { getRun, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
+import { getRun, listQueue, approveRun, deleteRun, cancelRun, retryRun, skipRun, abortRun, getRunTenantState } from "../api.ts";
 import { coalesced, RUN_REFRESH_WINDOW_MS } from "../coalesce.ts";
 import { followRunLog } from "../runLogFollow.ts";
 import { abortOffer, recoverable, runOnScreen } from "../runScreen.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SkipStepDialog } from "../components/SkipStepDialog.tsx";
 import { RunApproveForm } from "../components/RunApproveForm.tsx";
-import { ResourceBusyCallout } from "../components/ResourceBusyCallout.tsx";
-import { busyHolderOf, type BusyHolder } from "../runsBoard.ts";
 import { dropSecrets, heldSecrets } from "../heldSecrets.ts";
 import { DeploySlaveApproveForm } from "../components/DeploySlaveApproveForm.tsx";
 import { FailedRunActions } from "../components/FailedRunActions.tsx";
@@ -18,6 +16,7 @@ import { FailedCreateTenantCallout } from "../components/FailedCreateTenantCallo
 import { PlanFindings } from "../components/PlanFindings.tsx";
 import { RunUnitCardLink } from "../components/RunUnitCardLink.tsx";
 import { AnsiText, stripAnsi } from "../components/AnsiText.tsx";
+import { queueLine } from "../runsBoard.ts";
 
 // "ephemeral" is the live-only stream: the server publishes it to this SSE stream and never writes
 // an events row, so such a line (the activate_url) exists only while this screen stays open.
@@ -42,7 +41,7 @@ export function RunDetail() {
   const [loaded, setLoaded] = useState<RunView | null>(null); // what the last GET returned — see `run` below
   const [lines, setLines] = useState<RunEventView[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<BusyHolder | null>(null); // the lock a refused approve collided with
+  const [queued, setQueued] = useState<QueuedRunView | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false); // delete-run confirm (our dialog, never window.confirm)
   const [showSkip, setShowSkip] = useState(false); // skip-step dialog (our dialog, never window.prompt)
   // What the tenant a FAILED create-tenant minted IS right now, resolved SERVER-SIDE from the tenants row
@@ -65,7 +64,15 @@ export function RunDetail() {
 
   function refresh() {
     getRun(runId)
-      .then(setLoaded)
+      .then((r) => {
+        setLoaded(r);
+        if (r.status === "queued") {
+          return listQueue().then((items) => {
+            setQueued(items.find((q) => q.runId === runId) ?? null);
+          });
+        }
+        setQueued(null);
+      })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }
 
@@ -76,6 +83,7 @@ export function RunDetail() {
     // reset the new run's header would sit above the previous run's log. The run OBJECT needs no reset:
     // `run` is derived from the id, so a stale one cannot render (runScreen.ts).
     setLines([]);
+    setQueued(null);
     refresh();
     // ONE READ FOR A BURST OF REASONS. A meta line means the run's status has likely moved, which is
     // true while a run is happening and misleading the moment this screen opens: the stream REPLAYS
@@ -131,16 +139,12 @@ export function RunDetail() {
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }
 
-  /** An approve that a held lock refused keeps this page and its form, and names the holder; any other
-   *  failure takes the page like every act. Rejects when refused, so the form keeps what was typed. */
+  /** Rejects on failure so the form keeps what was typed. */
   function approve(payload?: Record<string, string>): Promise<void> {
-    setBusy(null);
     return approveRun(runId, payload).then(
       () => refresh(),
       (e: unknown) => {
-        const holder = busyHolderOf(e);
-        if (holder) setBusy(holder);
-        else setError(e instanceof Error ? e.message : String(e));
+        setError(e instanceof Error ? e.message : String(e));
         throw e;
       },
     );
@@ -251,20 +255,27 @@ export function RunDetail() {
           world's answers before handing anything over (executor/probe.ts). */}
       {run.deletedAt === null && run.status === "planned" && <PlanFindings findings={run.findings} />}
 
-      {run.deletedAt === null && run.status === "planned" && busy && <ResourceBusyCallout busy={busy} />}
-
-      {run.deletedAt === null && run.status === "planned" && run.kind === "cluster-deploy-slave" && (
-        <DeploySlaveApproveForm
-          run={run}
-          onApprove={approve}
-          onDelete={() => setConfirmDelete(true)}
-        />
+      {run.deletedAt === null && run.status === "queued" && queued && (
+        <p role="alert" className="alert alert--info">
+          Queued at place {queued.place}: {queueLine(queued)}.
+        </p>
       )}
 
       {run.deletedAt === null &&
-        run.status === "planned" &&
+        (run.status === "planned" || (run.status === "queued" && queued?.needsSecrets)) &&
+        run.kind === "cluster-deploy-slave" && (
+          <DeploySlaveApproveForm
+            run={run}
+            onApprove={approve}
+            onDelete={run.status === "planned" ? () => setConfirmDelete(true) : undefined}
+          />
+        )}
+
+      {run.deletedAt === null &&
         run.kind !== "cluster-deploy-slave" &&
-        (run.requiredSecrets.length > 0 || run.optionalSecrets.length > 0 || run.requiredInputs.length > 0 ? (
+        ((run.status === "planned" &&
+          (run.requiredSecrets.length > 0 || run.optionalSecrets.length > 0 || run.requiredInputs.length > 0)) ||
+          (run.status === "queued" && queued?.needsSecrets)) && (
           <RunApproveForm
             requiredSecrets={run.requiredSecrets}
             optionalSecrets={run.optionalSecrets}
@@ -272,9 +283,16 @@ export function RunDetail() {
             secretHints={run.secretHints}
             initialSecrets={heldSecrets(runId)}
             onApprove={(payload) => { dropSecrets(runId); return approve(payload); }}
-            onDelete={() => setConfirmDelete(true)}
+            onDelete={run.status === "planned" ? () => setConfirmDelete(true) : undefined}
           />
-        ) : (
+        )}
+
+      {run.deletedAt === null &&
+        run.status === "planned" &&
+        run.kind !== "cluster-deploy-slave" &&
+        run.requiredSecrets.length === 0 &&
+        run.optionalSecrets.length === 0 &&
+        run.requiredInputs.length === 0 && (
           <div className="actionbar">
             <span className="actionbar__text">This plan is waiting for your approval — approving starts the steps listed below.</span>
             <button type="button" className="btn btn--primary" onClick={() => void approve().catch(() => undefined)}>
@@ -284,11 +302,11 @@ export function RunDetail() {
               Delete run
             </button>
           </div>
-        ))}
+        )}
 
-      {run.status === "running" && (
+      {(run.status === "running" || run.status === "queued") && (
         <div className="actionbar">
-          <span className="actionbar__text">The run is executing.</span>
+          <span className="actionbar__text">{run.status === "queued" ? "The run is queued." : "The run is executing."}</span>
           <button type="button" className="btn" onClick={() => act(() => cancelRun(runId))}>
             Cancel
           </button>

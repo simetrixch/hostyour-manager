@@ -1,10 +1,9 @@
-import type { LockView, RunDurationView, RunView } from "../../shared/api-types.ts";
-import { ApiRequestError } from "./request.ts";
+import type { LockView, QueuedRunView, RunDurationView, RunView } from "../../shared/api-types.ts";
 
-// What the Runs page and a refused approve say about a run: which runs are still open, where a run
-// stands, which locks it holds, and when a run of its kind usually ends.
+// What the Runs page and a run's page say about a run: which runs are still open, where a run
+// stands or waits in the queue, which locks it holds, and when a run of its kind usually ends.
 
-const OPEN_STATUSES: ReadonlySet<string> = new Set(["planning", "planned", "approved", "running"]);
+const OPEN_STATUSES: ReadonlySet<string> = new Set(["planning", "planned", "queued", "approved", "running"]);
 
 /** A run still in play: not yet ended, or ended `failed` while it keeps its locks for a retry. */
 export function isOpenRun(run: RunView, locks: readonly LockView[]): boolean {
@@ -20,6 +19,7 @@ export function locksHeldBy(runId: string, locks: readonly LockView[]): string[]
 export function currentStepOf(run: RunView): string {
   if (run.status === "planning") return "planning";
   if (run.status === "planned") return "waiting for approval";
+  if (run.status === "queued") return "queued";
   const running = run.steps.find((s) => s.status === "running");
   if (running) return running.title;
   const failed = run.steps.find((s) => s.status === "failed");
@@ -44,15 +44,9 @@ export function formatElapsed(ms: number): string {
   return m < 60 ? `${m}m` : `${Math.floor(m / 60)}h ${m % 60}m`;
 }
 
-/** The claim a refused approve collided with, or null for any other failure. */
-export interface BusyHolder {
-  resource: string;
-  key: string;
-  holderRunId: string;
-}
-
-export function busyHolderOf(e: unknown): BusyHolder | null {
-  if (!(e instanceof ApiRequestError) || e.code !== "RESOURCE_BUSY" || !e.detail) return null;
-  const { resource, key, holderRunId } = e.detail;
-  return typeof resource === "string" && typeof key === "string" && typeof holderRunId === "string" ? { resource, key, holderRunId } : null;
+/** What a queued run is waiting for, or whether its credentials must be supplied again. */
+export function queueLine(q: QueuedRunView): string {
+  if (q.needsSecrets) return "needs its password again on its run page";
+  if (q.waitsFor.length === 0) return "starts now";
+  return "waits for " + q.waitsFor.map((w) => `${w.resource} ${w.key} (run ${w.holderRunId})`).join(", ");
 }
