@@ -34,7 +34,7 @@ describe("the runs board", () => {
     const durations = [{ kind: "noop", typicalMs: 7 * 60_000 + 20_000, sampleSize: 12 }];
     expect(usualDurationOf("noop", durations)).toBe("usually ~7 min (from 12 earlier runs)");
     expect(usualDurationOf("noop", [{ kind: "noop", typicalMs: 10_000, sampleSize: 1 }])).toBe("usually ~1 min (from 1 earlier run)");
-    expect(usualDurationOf("cluster-redeploy", durations)).toBe("no earlier run of this kind has finished, so there is no usual time yet");
+    expect(usualDurationOf("cluster-redeploy", durations)).toBe("no earlier run of this kind has succeeded, so there is no usual time yet");
   });
 
   it("formats elapsed time", () => {

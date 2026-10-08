@@ -31,7 +31,7 @@ export function currentStepOf(run: RunView): string {
 /** When a run of `kind` usually ends, from the measured runs before it. Never a promise. */
 export function usualDurationOf(kind: string, durations: readonly RunDurationView[]): string {
   const d = durations.find((x) => x.kind === kind);
-  if (!d) return "no earlier run of this kind has finished, so there is no usual time yet";
+  if (!d) return "no earlier run of this kind has succeeded, so there is no usual time yet";
   const minutes = Math.max(1, Math.round(d.typicalMs / 60_000));
   return `usually ~${minutes} min (from ${d.sampleSize} earlier ${d.sampleSize === 1 ? "run" : "runs"})`;
 }

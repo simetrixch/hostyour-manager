@@ -1,7 +1,7 @@
-import { eq, gt, and, desc, inArray, isNull } from "drizzle-orm";
+import { eq, gt, and, or, desc, inArray, isNull } from "drizzle-orm";
 import type { PreflightCheck } from "../../shared/preflight.ts";
 import type { Db } from "../db/client.ts";
-import { runs, steps, events } from "../db/schema/runs.ts";
+import { runs, steps, events, runLocks } from "../db/schema/runs.ts";
 import type { RunStatus, StepStatus } from "../../shared/enums.ts";
 import type { RunView, RunEventView, RunDurationView } from "../../shared/api-types.ts";
 import { getOperatorDisplayName } from "../db/operator-names.ts";
@@ -9,6 +9,9 @@ import { getOperatorDisplayName } from "../db/operator-names.ts";
 // The sanctioned read path for runs/steps/events. Routes read runs
 // ONLY through here — the dep-cruiser rule `only-executor-touches-runs-schema` makes any
 // other reader a lint failure.
+
+/** The statuses of a run that has not ended. */
+const OPEN_RUN_STATUSES: RunStatus[] = ["planning", "planned", "approved", "running"];
 
 const ms = (d: Date | null): number | null => (d ? d.getTime() : null);
 
@@ -48,9 +51,18 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
 }
 
 /** The operator's list — soft-deleted runs are honestly gone from it ("Delete run" means
- *  the run leaves your view). Their rows + logs stay in the DB; see getRun. */
+ *  the run leaves your view). Their rows + logs stay in the DB; see getRun. The newest `limit`
+ *  runs, plus every run that has not ended or still holds a lock, whatever its age: a failed run
+ *  that keeps its locks is what blocks every later approve, and it must not fall out of the list
+ *  behind newer runs. */
 export function listRuns(db: Db, limit = 100): RunView[] {
-  return db.select().from(runs).where(isNull(runs.deletedAt)).orderBy(desc(runs.createdAt)).limit(limit).all().map((r) => toRunView(db, r));
+  const holders = db.select({ runId: runLocks.runId }).from(runLocks).all().map((l) => l.runId);
+  const rows = [
+    ...db.select().from(runs).where(isNull(runs.deletedAt)).orderBy(desc(runs.createdAt)).limit(limit).all(),
+    ...db.select().from(runs).where(and(isNull(runs.deletedAt), holders.length > 0 ? or(inArray(runs.status, OPEN_RUN_STATUSES), inArray(runs.id, holders)) : inArray(runs.status, OPEN_RUN_STATUSES))).all(),
+  ];
+  const unique = [...new Map(rows.map((r) => [r.id, r])).values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  return unique.map((r) => toRunView(db, r));
 }
 
 /** How long the last runs of each kind took, from start to end. Only succeeded runs count: a failed

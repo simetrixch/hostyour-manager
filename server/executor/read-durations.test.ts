@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { runs } from "../db/schema/runs.ts";
+import { runs, runLocks } from "../db/schema/runs.ts";
 import type { RunStatus } from "../../shared/enums.ts";
 import { listRunDurations, listRuns } from "./read.ts";
 
@@ -8,10 +8,12 @@ let db: DbHandle;
 afterEach(() => db?.sqlite.close());
 
 let seq = 0;
-function seedRun(o: { kind: string; status: RunStatus; minutes?: number; endedAt?: number; deleted?: boolean; startedBy?: string }): void {
+function seedRun(o: { kind: string; status: RunStatus; minutes?: number; endedAt?: number; deleted?: boolean; startedBy?: string }): string {
   const endedAt = o.endedAt ?? 1_700_000_000_000 + seq * 1000;
+  const id = `run_${++seq}`;
   db.db.insert(runs).values({
-    id: `run_${++seq}`,
+    id,
+    createdAt: new Date(endedAt),
     kind: o.kind,
     targetKind: "server",
     targetId: "srv_1",
@@ -23,6 +25,7 @@ function seedRun(o: { kind: string; status: RunStatus; minutes?: number; endedAt
     finishedAt: o.minutes === undefined ? null : new Date(endedAt),
     deletedAt: o.deleted ? new Date(endedAt) : null,
   }).run();
+  return id;
 }
 
 describe("listRunDurations", () => {
@@ -64,5 +67,18 @@ describe("listRuns", () => {
     seedRun({ kind: "noop", status: "planned", startedBy: "op_sample" });
     seedRun({ kind: "noop", status: "planned" });
     expect(listRuns(db.db).map((r) => r.startedBy).sort()).toEqual(["Sample Operator", "System"]);
+  });
+
+  it("keeps a run that holds a lock or has not ended in the list, however many runs came after it", () => {
+    db = openDb(":memory:");
+    const holder = seedRun({ kind: "tenant-line-move", status: "failed", minutes: 3, endedAt: 1_000_000 });
+    db.db.insert(runLocks).values({ resource: "master-kube", key: "m", runId: holder }).run();
+    const waiting = seedRun({ kind: "noop", status: "planned", endedAt: 2_000_000 });
+    seedRun({ kind: "noop", status: "failed", minutes: 1, endedAt: 3_000_000 });
+    for (let i = 0; i < 3; i++) seedRun({ kind: "noop", status: "succeeded", minutes: 1, endedAt: 9_000_000 + i });
+    const listed = listRuns(db.db, 2).map((r) => r.id);
+    expect(listed).toContain(holder);
+    expect(listed).toContain(waiting);
+    expect(listed).toHaveLength(4);
   });
 });

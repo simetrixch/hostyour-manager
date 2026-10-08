@@ -19,7 +19,7 @@ interface Board {
  *  finished ones, newest first. Reads only; every act on a run stays on its run page. */
 export function Runs(): ReactNode {
   const [board, setBoard] = useState<Board | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null); // the last read failed; the last good board stays
   const [kind, setKind] = useState("");
   const [status, setStatus] = useState("");
   const [now, setNow] = useState(() => Date.now());
@@ -29,6 +29,7 @@ export function Runs(): ReactNode {
       .then(([runs, locks, durations]) => {
         setBoard({ runs, locks, durations });
         setNow(Date.now());
+        setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : String(e)));
   }, []);
@@ -39,12 +40,12 @@ export function Runs(): ReactNode {
     return () => clearInterval(timer);
   }, [load]);
 
-  if (error)
-    return (
-      <p role="alert" className="alert alert--danger">
-        {error}
-      </p>
-    );
+  const failure = error && (
+    <p role="alert" className="alert alert--danger">
+      {board ? `The last refresh failed, so this list may be out of date: ${error}` : error}
+    </p>
+  );
+  if (!board && failure) return failure;
   if (!board)
     return (
       <div className="loading">
@@ -63,12 +64,13 @@ export function Runs(): ReactNode {
       <header className="page__head">
         <div>
           <h2 className="page__title">Runs</h2>
-          <p className="page__desc">Every run of every kind, the newest {board.runs.length} of them. Open runs come first.</p>
+          <p className="page__desc">Every open run of every kind, then the newest finished ones.</p>
         </div>
         <button type="button" className="btn" onClick={load}>
           Refresh
         </button>
       </header>
+      {failure}
 
       <header className="panel__head">
         <h3 className="panel__title">Open</h3>
@@ -95,7 +97,7 @@ export function Runs(): ReactNode {
             </thead>
             <tbody>
               {open.map((r) => {
-                const since = r.startedAt ?? r.createdAt;
+                const since = r.startedAt;
                 const held = locksHeldBy(r.id, board.locks);
                 return (
                   <tr key={r.id}>
@@ -105,8 +107,8 @@ export function Runs(): ReactNode {
                     </td>
                     <td className="mono">{r.targetKind} {r.targetId}</td>
                     <td>{r.startedBy}</td>
-                    <td>{fmtWhen(since)}</td>
-                    <td>{formatElapsed(now - since)}</td>
+                    <td>{since === null ? `not started, planned ${fmtWhen(r.createdAt)}` : fmtWhen(since)}</td>
+                    <td>{since === null ? "" : formatElapsed(now - since)}</td>
                     <td>{currentStepOf(r)}</td>
                     <td className="mono">{held.length > 0 ? held.join(", ") : "nothing"}</td>
                     <td>{r.status === "running" ? usualDurationOf(r.kind, board.durations) : ""}</td>
