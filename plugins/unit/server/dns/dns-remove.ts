@@ -2,7 +2,7 @@ import { z } from "zod";
 import type { RunDefinition, Step } from "#core/server/executor/types.ts";
 import { ATTEST_TARGET_STEP } from "#core/server/executor/guards.ts";
 import { DNS_RECORD_TYPE, type DnsRecordType } from "#core/shared/dns.ts";
-import { deleteRecord, ownedRecords, ownerSentence, removableRecord, removableRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
+import { deleteRecord, ownedRecords, ownerSentence, removableRecord, removableRecords, requireDnsProvider, withBookedRows, type DnsRecordPorts, type RemovableRecordRow } from "./dns-record.kit.ts";
 
 // dns-remove: take records of this installation back at the DNS provider, one run for the whole
 // list — the records an abandoned installation leaves in the zone when its machines are restored
@@ -55,7 +55,8 @@ function dnsRemoveSteps(params: DnsRemoveParams, ports: DnsRecordPorts): Step[] 
       name: ATTEST_TARGET_STEP,
       title: `Attest the ${records.length === 1 ? "record is" : `${records.length} records are`} this installation's and may be taken back`,
       run: async (ctx) => {
-        const rows = removableRecords(await ownedRecords(ports), records);
+        const dns = requireDnsProvider(ports);
+        const rows = removableRecords(await withBookedRows(ctx.db, dns, await ownedRecords(ports), records, ctx.signal), records);
         ctx.checkpoint({ records: rows.map((row) => ({ record: row.name, type: row.type, owner: row.owner, found: row.found, verdict: row.verdict })) });
         for (const row of rows) {
           ctx.log("meta", `${row.type} ${row.name} belongs to ${ownerSentence(row)} and stands at ${row.found ?? "nothing — it is already absent"}`);
@@ -67,7 +68,11 @@ function dnsRemoveSteps(params: DnsRemoveParams, ports: DnsRecordPorts): Step[] 
       title: `Remove the ${record.type} record ${record.name} at the DNS provider`,
       // Resolved in the inventory AGAIN rather than deleted by the params: a TXT goes by the content
       // this platform owns, which the row and the book decide (dns-record.kit.ts), never the name.
-      run: async (ctx) => deleteRecord(ctx, requireDnsProvider(ports), removableRecord(await ownedRecords(ports), record.name, record.type)),
+      run: async (ctx) => {
+        const dns = requireDnsProvider(ports);
+        const rows = await withBookedRows(ctx.db, dns, await ownedRecords(ports), [record], ctx.signal);
+        return deleteRecord(ctx, dns, removableRecord(rows, record.name, record.type));
+      },
     })),
   ];
 }
@@ -85,9 +90,9 @@ export function makeDnsRemoveDef(ports: DnsRecordPorts): RunDefinition<DnsRemove
     kind: "dns-remove",
     paramsSchema: DnsRemoveParams,
     mutating: true,
-    plan: async (params) => {
-      const rows = removableRecords(await ownedRecords(ports), params.records);
-      requireDnsProvider(ports);
+    plan: async (params, deps) => {
+      const dns = requireDnsProvider(ports);
+      const rows = removableRecords(await withBookedRows(deps.db, dns, await ownedRecords(ports), params.records), params.records);
       return {
         kind: "dns-remove",
         targetKind: "self",

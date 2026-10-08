@@ -69,7 +69,7 @@ const one = (name: string, type: "A" | "TXT"): DnsRemoveParams => ({ records: [{
 const PARAMS = one("post.example.net", "A");
 const THREE: DnsRemoveParams = { records: [{ name: "post.example.net", type: "A" }, { name: "_dmarc.example.com", type: "TXT" }, { name: "auth.example.net", type: "A" }] };
 const THREE_ROWS = [CONSUMER_ROW, INSTALLER_ROW, DMARC_ROW, AUTH_ROW];
-const deps = { db: {} as unknown as StepCtx["db"] };
+const deps = { get db() { return db.db; } };
 
 describe("dns-remove params", () => {
   it("takes the list, and still accepts the one-record shape from before #172 as the list of one", () => {
@@ -229,5 +229,141 @@ describe("dns-remove steps", () => {
     const step = makeDnsRemoveDef(ports(dns, [INSTALLER_ROW, DMARC_ROW, AUTH_ROW])).steps(THREE)[1]!;
     await expect(step.run(ctx([], THREE))).rejects.toThrow(/this installation owns no A record post\.example\.net/);
     expect(dns.deletes).toEqual([]);
+  });
+
+  it("booked TXT X whose booked content no longer stands while Y stands: deletes nothing, forgets the book row, and logs X as no longer standing and Y as staying", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("_dmarc.example.com", "TXT", "v=DMARC1; p=reject");
+    recordDnsWrite(db.db, {
+      name: "_dmarc.example.com",
+      type: "TXT",
+      content: "v=DMARC1; p=none",
+      act: "inserted",
+      owner: { kind: "mail", name: "example.com" },
+      runId: "run_test",
+    });
+    const params = one("_dmarc.example.com", "TXT");
+    const logs: string[] = [];
+    await makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)[1]!.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 0 }]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["v=DMARC1; p=reject"]);
+    expect(logs).toEqual([
+      "TXT _dmarc.example.com no longer stood at v=DMARC1; p=none — the 1 record(s) of the name stay (v=DMARC1; p=reject); the book forgets the write",
+    ]);
+  });
+
+  it("planted innocent: booked X with standing [X, Y] deletes X, leaves Y, and forgets the book row", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("_dmarc.example.com", "TXT", "v=DMARC1; p=none", "v=DMARC1; p=reject");
+    recordDnsWrite(db.db, {
+      name: "_dmarc.example.com",
+      type: "TXT",
+      content: "v=DMARC1; p=none",
+      act: "inserted",
+      owner: { kind: "mail", name: "example.com" },
+      runId: "run_test",
+    });
+    const params = one("_dmarc.example.com", "TXT");
+    const logs: string[] = [];
+    await makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)[1]!.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 }]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["v=DMARC1; p=reject"]);
+    expect(logs).toEqual([
+      "TXT _dmarc.example.com stood at v=DMARC1; p=none and is gone (1 removed, 1 other record(s) of the name left standing)",
+    ]);
+  });
+
+  it("book-only row: a booked TXT whose name the inventory does not carry is accepted at plan, passes attest, deletes at remove, and forgets the book row", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("mail.digitaplatform.com", "TXT", "v=spf1 ip4:157.90.201.186 -all");
+    recordDnsWrite(db.db, {
+      name: "mail.digitaplatform.com",
+      type: "TXT",
+      content: "v=spf1 ip4:157.90.201.186 -all",
+      act: "inserted",
+      owner: { kind: "mail", name: "digitaplatform.com" },
+      runId: "run_test",
+    });
+    const params = one("mail.digitaplatform.com", "TXT");
+    const def = makeDnsRemoveDef(ports(dns, []));
+    const plan = await def.plan(params, deps);
+    expect(plan.summary).toContain("the TXT record mail.digitaplatform.com");
+    expect(plan.summary).toContain('the mail "digitaplatform.com"');
+    const steps = def.steps(params);
+    const logs: string[] = [];
+    await steps[0]!.run(ctx(logs, params));
+    expect(logs[0]).toContain('TXT mail.digitaplatform.com belongs to the mail "digitaplatform.com" and stands at v=spf1 ip4:157.90.201.186 -all');
+    await steps[1]!.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "mail.digitaplatform.com", type: "TXT", content: "v=spf1 ip4:157.90.201.186 -all", deleted: 1 }]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(await dns.listRecordContents({ name: "mail.digitaplatform.com", type: "TXT" })).toEqual([]);
+    expect(logs[1]).toContain("TXT mail.digitaplatform.com stood at v=spf1 ip4:157.90.201.186 -all and is gone (1 removed)");
+  });
+
+  it("book-only row variant: booked content no longer stands so nothing is deleted and the book row is forgotten", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("mail.digitaplatform.com", "TXT", "v=spf1 include:spf.protection.outlook.com -all");
+    recordDnsWrite(db.db, {
+      name: "mail.digitaplatform.com",
+      type: "TXT",
+      content: "v=spf1 ip4:157.90.201.186 -all",
+      act: "inserted",
+      owner: { kind: "mail", name: "digitaplatform.com" },
+      runId: "run_test",
+    });
+    const params = one("mail.digitaplatform.com", "TXT");
+    const steps = makeDnsRemoveDef(ports(dns, [])).steps(params);
+    const logs: string[] = [];
+    await steps[0]!.run(ctx(logs, params));
+    await steps[1]!.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "mail.digitaplatform.com", type: "TXT", content: "v=spf1 ip4:157.90.201.186 -all", deleted: 0 }]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(logs[1]).toContain("TXT mail.digitaplatform.com no longer stood at v=spf1 ip4:157.90.201.186 -all — the 1 record(s) of the name stay (v=spf1 include:spf.protection.outlook.com -all); the book forgets the write");
+  });
+
+  it("planted defect kept: a name neither the inventory nor the book names is refused at the plan with the refusal sentence", async () => {
+    const params = one("unheardof.example.org", "A");
+    await expect(makeDnsRemoveDef(ports(new FakeDnsProvider(), [])).plan(params, deps)).rejects.toThrow(
+      "1 of the 1 record(s) cannot be taken back, so none is: this installation owns no A record unheardof.example.org. " +
+        "The DNS inventory names 0 record(s); a name neither the inventory nor the book of DNS writes names belongs to somebody — the installer, the customer's own mail " +
+        "service, or an installation this one knows nothing about — and a read-only row is one this Manager may not take back: the sender " +
+        "domain's address record is the installer's, the reverse DNS is set where the egress address is rented, and the platform domain's apex " +
+        "SPF and DMARC are kept by its own mail service",
+    );
+  });
+
+  it("planted defect kept: a TXT in the inventory with no book row and no mail record tag is refused by ownedTxtContent", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("custom.example.net", "TXT", "random-val");
+    const customTxtRow: DnsRecordRow = {
+      owner: { kind: "consumer", name: "custom", stage: "prod" },
+      name: "custom.example.net",
+      type: "TXT",
+      expected: "something",
+      found: "random-val",
+      verdict: "standing",
+      removable: true,
+    };
+    const params = one("custom.example.net", "TXT");
+    const step = makeDnsRemoveDef(ports(dns, [customTxtRow])).steps(params)[1]!;
+    await expect(step.run(ctx([], params))).rejects.toThrow(
+      "the inventory does not say which mail record TXT custom.example.net is, so nothing here can pick this installation's own among the records of the name — refusing to delete by name alone",
+    );
+  });
+
+  it("an inventory row that is read-only with a book row of the same name and type stays refused", async () => {
+    recordDnsWrite(db.db, {
+      name: "example.com",
+      type: "TXT",
+      content: "v=spf1 include:spf.protection.outlook.com -all",
+      act: "inserted",
+      owner: { kind: "mail-service", name: "example.com" },
+      runId: "run_test",
+    });
+    const params = one("example.com", "TXT");
+    await expect(makeDnsRemoveDef(ports(new FakeDnsProvider(), [SERVICE_SPF_ROW])).plan(params, deps))
+      .rejects.toThrow(/the TXT record example\.com is listed read-only: it is the mail-service "example\.com"'s/);
   });
 });

@@ -133,15 +133,15 @@ describe("mail-dns-unpublish steps", () => {
     expect(await dns.listRecordContents({ name: "example.com", type: "TXT" })).toEqual([NEIGHBOUR]);
   });
 
-  it("a record a hand changed since the publish is left standing with its row — the content the book holds is not there to take", async () => {
+  it("a record a hand changed since the publish is left standing, but the book row is forgotten as requested", async () => {
     const dns = published();
     booked();
     dns.seed("_dmarc.example.com", "TXT", "v=DMARC1; p=reject; rua=mailto:somebody@example.org");
     const logs: string[] = [];
     await makeMailDnsUnpublishDef(ports(dns)).steps(PARAMS)[1]!.run(ctx(logs, PARAMS));
     expect(dns.record("_dmarc.example.com", "TXT")).toBe("v=DMARC1; p=reject; rua=mailto:somebody@example.org");
-    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual(["_dmarc.example.com"]);
-    expect(logs.some((l) => l.includes("no TXT record _dmarc.example.com at v=DMARC1; p=none to remove — the 1 record(s) of the name carry other content and stay"))).toBe(true);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(logs.some((l) => l.includes("TXT _dmarc.example.com no longer stood at v=DMARC1; p=none — the 1 record(s) of the name stay (v=DMARC1; p=reject; rua=mailto:somebody@example.org); the book forgets the write"))).toBe(true);
   });
 
   it("with nothing of ours under a name and no book row, nothing is deleted and the neighbour is named", async () => {

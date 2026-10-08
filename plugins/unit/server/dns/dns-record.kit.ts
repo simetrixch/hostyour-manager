@@ -6,7 +6,9 @@
 // from the registrations, the cluster rows and the sender domains, and everything else in the zone
 // belongs to somebody — the installer, the customer's own mail service, another installation. So
 // both defs resolve their target IN the inventory, at the plan and again at the run's fail-closed
-// first step, and refuse anything the inventory does not carry as removable.
+// first step, and refuse anything the inventory does not carry as removable. The book of DNS writes
+// is the second permission: a record this Manager's own run wrote may be taken back after the
+// inventory stopped deriving its name.
 //
 // It arrives as a FUNCTION rather than as an import: the run definitions are assembled in this
 // domain and the inventory lives in the DNS domain, which no module of another domain may import
@@ -19,12 +21,15 @@
 // record's tag picks among those standing at the provider now. Where neither names a record,
 // nothing is deleted and the log says what stands and stays. An A record is a unit's own name and
 // is deleted as before.
+import type { Db } from "#core/server/db/client.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import { findDnsWrite, forgetDnsWrite } from "#core/server/db/dns-writes.ts";
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
-import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRowType } from "#core/shared/dns.ts";
+import { DNS_WRITE_OWNER_KIND } from "#core/shared/enums.ts";
+import type { DnsInventoryView, DnsOwner, DnsOwnerKind, DnsRecordRow, DnsRecordType, DnsRowType } from "#core/shared/dns.ts";
 import { MAIL_RECORD_TAG, MAIL_TXT_RECORD, type MailTxtRecord } from "#core/shared/mail.ts";
+import { judge } from "./dns-writes-view.ts";
 
 /** A row of the inventory this Manager may take back — never a PTR, which stands where the egress
  *  address is rented rather than in the zone. */
@@ -80,7 +85,7 @@ export function removableRecords(rows: DnsRecordRow[], records: ReadonlyArray<{ 
   if (refused.length > 0) {
     throw errValidation(
       `${refused.length} of the ${records.length} record(s) cannot be taken back, so none is: ${refused.join("; ")}. ` +
-        `The DNS inventory names ${rows.length} record(s); a name not among them belongs to somebody — the installer, the customer's own mail ` +
+        `The DNS inventory names ${rows.length} record(s); a name neither the inventory nor the book of DNS writes names belongs to somebody — the installer, the customer's own mail ` +
         "service, or an installation this one knows nothing about — and a read-only row is one this Manager may not take back: the sender " +
         "domain's address record is the installer's, the reverse DNS is set where the egress address is rented, and the platform domain's apex " +
         "SPF and DMARC are kept by its own mail service",
@@ -94,33 +99,79 @@ export function removableRecord(rows: DnsRecordRow[], name: string, type: DnsRow
   return removableRecords(rows, [{ name, type }])[0]!;
 }
 
+function asOwnerKind(kind: string): DnsOwnerKind {
+  if ((DNS_WRITE_OWNER_KIND as readonly string[]).includes(kind)) {
+    return kind as DnsOwnerKind;
+  }
+  throw errValidation(`unknown DNS write owner kind "${kind}" in the book of DNS writes`);
+}
+
+/** The booked write is the proof that this installation wrote the record, so a record whose name the
+ *  inventory no longer derives is still this installation's to take back; a name neither the
+ *  inventory nor the book names stays refused. */
+export async function withBookedRows(
+  db: Db,
+  dns: DnsProvider,
+  rows: DnsRecordRow[],
+  records: ReadonlyArray<{ name: string; type: DnsRowType }>,
+  signal?: AbortSignal,
+): Promise<DnsRecordRow[]> {
+  const result = [...rows];
+  for (const { name, type } of records) {
+    if (type === "PTR") continue;
+    if (result.some((r) => r.name === name && r.type === type)) continue;
+    const write = findDnsWrite(db, { name, type });
+    if (!write) continue;
+    const standing = await dns.listRecordContents({ name, type, ...(signal === undefined ? {} : { signal }) });
+    const found = standing.length === 0 ? null : standing.join(" | ");
+    const verdict = judge(standing, write.content);
+    const owner: DnsOwner = {
+      kind: asOwnerKind(write.owner.kind),
+      name: write.owner.name,
+      ...(write.owner.stage === undefined ? {} : { stage: write.owner.stage }),
+    };
+    result.push({
+      owner,
+      name,
+      type,
+      expected: write.content,
+      found,
+      verdict,
+      removable: true,
+    });
+  }
+  return result;
+}
+
 const isPublished = (record: DnsRecordRow["record"]): record is MailTxtRecord =>
   record !== undefined && (MAIL_TXT_RECORD as readonly string[]).includes(record);
 
 /** The content of OUR record under a TXT name, or null where none of ours stands: what the book says
  *  this Manager wrote, else the record the mail record's tag picks among `standing` — a record
  *  published before the book existed. */
-function ownedTxtContent(ctx: StepCtx, row: RemovableRecordRow, standing: string[]): string | null {
+function ownedTxtContent(ctx: StepCtx, row: RemovableRecordRow, standing: string[]): { content: string; booked: boolean } | null {
   const booked = findDnsWrite(ctx.db, { name: row.name, type: row.type });
-  if (booked) return booked.content;
+  if (booked) return { content: booked.content, booked: true };
   if (!isPublished(row.record)) {
     throw errValidation(
       `the inventory does not say which mail record TXT ${row.name} is, so nothing here can pick this installation's own among the records of the name — refusing to delete by name alone`,
     );
   }
-  return standing.find(MAIL_RECORD_TAG[row.record]) ?? null;
+  const tag = standing.find(MAIL_RECORD_TAG[row.record]) ?? null;
+  return tag === null ? null : { content: tag, booked: false };
 }
 
 /** Delete ONE record and say what stood there. What stands is read BEFORE the deletion, because
  *  afterwards nothing anywhere can say what the zone carried — the run log is the only record of it.
  *  Absent is the idempotent no-op (a delete resolves 0), so a resumed run is safe. A TXT is deleted
  *  by the content this platform owns (the header states the rule), and the other records of the
- *  name are counted and left. The book of DNS writes loses its row here, the one place both run
- *  kinds delete through — unless the name still carries content this Manager did not write, in
- *  which case the row stays and the DNS page keeps showing what became of the write. */
+ *  name are counted and left. The book of DNS writes loses its row on every removal, because the
+ *  operator asked to take the write back and a write whose content stands nowhere is gone either
+ *  way; the other records of the name stay and the log names them. */
 export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, row: RemovableRecordRow): Promise<void> {
   const standing = await dns.listRecordContents({ name: row.name, type: row.type, signal: ctx.signal });
   let content: string | undefined;
+  let booked = false;
   if (row.type === "TXT") {
     const owned = ownedTxtContent(ctx, row, standing);
     if (owned === null) {
@@ -130,18 +181,21 @@ export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, row: Removabl
         : `no TXT record ${row.name} of this installation's to remove — the ${standing.length} record(s) of the name carry content no run here wrote and stay`);
       return;
     }
-    content = owned;
+    content = owned.content;
+    booked = owned.booked;
   }
   const { deleted } = await dns.deleteRecord({ name: row.name, type: row.type, ...(content === undefined ? {} : { content }), signal: ctx.signal });
   const left = standing.length - deleted;
-  if (deleted > 0 || left === 0) forgetDnsWrite(ctx.db, { name: row.name, type: row.type });
+  forgetDnsWrite(ctx.db, { name: row.name, type: row.type });
   ctx.checkpoint({ record: row.name, type: row.type, stood: content ?? standing[0] ?? null, deleted, left });
   ctx.log(
     "meta",
     deleted > 0
       ? `${row.type} ${row.name} stood at ${content ?? standing[0] ?? "content the provider did not answer"} and is gone (${deleted} removed${left > 0 ? `, ${left} other record(s) of the name left standing` : ""})`
       : left > 0
-        ? `no ${row.type} record ${row.name} at ${content} to remove — the ${left} record(s) of the name carry other content and stay`
+        ? booked
+          ? `${row.type} ${row.name} no longer stood at ${content} — the ${left} record(s) of the name stay (${standing.join(", ")}); the book forgets the write`
+          : `no ${row.type} record ${row.name} at ${content} to remove — the ${left} record(s) of the name carry other content and stay`
         : `no ${row.type} record ${row.name} to remove — already absent`,
   );
 }

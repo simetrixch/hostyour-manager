@@ -18,7 +18,7 @@ export interface DnsWritesDeps {
 
 /** Standing where the recorded content is among the records of the name; absent where none stands;
  *  other where records stand and none of them is the one this Manager wrote. */
-function judge(found: string[], content: string): DnsVerdict {
+export function judge(found: string[], content: string): DnsVerdict {
   return found.length === 0 ? "absent" : found.includes(content) ? "standing" : "other";
 }
 
