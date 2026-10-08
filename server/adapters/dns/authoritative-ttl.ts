@@ -12,6 +12,13 @@ export interface AuthoritativeTtlResult {
   server: string;
 }
 
+export class NotAuthoritativeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "NotAuthoritativeError";
+  }
+}
+
 /** Encode a standard DNS A-record query with RD bit off. */
 export function encodeDnsQuery(id: number, name: string): Buffer {
   const cleanName = name.replace(/\.$/, "");
@@ -113,8 +120,15 @@ export function answerTtl(response: Buffer, id: number, name: string): number {
     throw new Error(`DNS message for ${name} is a query, not a response`);
   }
   const rcode = flags & 0x000f;
+  if (rcode === 5) {
+    throw new NotAuthoritativeError(`DNS query for ${name} refused by nameserver (rcode 5)`);
+  }
   if (rcode !== 0) {
     throw new Error(`DNS query for ${name} failed with rcode ${rcode}`);
+  }
+  const aa = (flags & 0x0400) !== 0;
+  if (!aa) {
+    throw new NotAuthoritativeError(`DNS response for ${name} is not authoritative (AA bit not set)`);
   }
 
   const qdcount = response.readUInt16BE(4);
@@ -157,56 +171,28 @@ export function answerTtl(response: Buffer, id: number, name: string): number {
   throw new Error(`no answer record for ${name} in DNS response`);
 }
 
-/** Look up the authoritative nameserver for name and query it over UDP for the served TTL. */
-export async function readAuthoritativeTtl(
+/** Query one nameserver address over UDP for name's TTL, within timeoutMs. */
+export async function queryAuthoritative(
+  serverIp: string,
+  port: number,
   name: string,
   signal: AbortSignal,
-): Promise<AuthoritativeTtlResult> {
-  const cleanName = name.replace(/\.$/, "");
-  const labels = cleanName ? cleanName.split(".") : [];
-  let nsName: string | undefined;
-
-  for (let i = 0; i < labels.length; i++) {
-    const candidate = labels.slice(i).join(".");
-    try {
-      const nsList = await dns.promises.resolveNs(candidate);
-      if (nsList && nsList.length > 0) {
-        nsName = nsList[0];
-        break;
-      }
-    } catch (err: unknown) {
-      const code = (err as { code?: string })?.code;
-      if (code === "ENODATA" || code === "ENOTFOUND") {
-        continue;
-      }
-      throw err;
-    }
+  timeoutMs: number,
+): Promise<number> {
+  if (signal.aborted) {
+    throw signal.reason ?? new Error("Aborted");
   }
-
-  if (!nsName) {
-    throw new Error(`no authoritative nameserver found for ${name}`);
-  }
-
-  const ips = await dns.promises.resolve4(nsName);
-  if (!ips || ips.length === 0) {
-    throw new Error(`no IPv4 address for nameserver ${nsName}`);
-  }
-  const serverIp = ips[0]!;
 
   const id = crypto.randomInt(0, 65536);
   const query = encodeDnsQuery(id, name);
 
-  const ttlSeconds = await new Promise<number>((resolve, reject) => {
-    if (signal.aborted) {
-      return reject(signal.reason ?? new Error("Aborted"));
-    }
-
+  return new Promise<number>((resolve, reject) => {
     const socket = dgram.createSocket("udp4");
     let settled = false;
 
     const timer = setTimeout(() => {
-      settleReject(new Error(`authoritative DNS query for ${name} to ${serverIp} (${nsName}) timed out after ${AUTHORITATIVE_QUERY_TIMEOUT_MS} ms`));
-    }, AUTHORITATIVE_QUERY_TIMEOUT_MS);
+      settleReject(new Error(`authoritative DNS query for ${name} to ${serverIp}:${port} timed out after ${timeoutMs} ms`));
+    }, timeoutMs);
 
     const cleanup = () => {
       clearTimeout(timer);
@@ -238,7 +224,11 @@ export async function readAuthoritativeTtl(
       settleReject(err);
     });
 
-    socket.on("message", (msg) => {
+    socket.on("message", (msg, rinfo) => {
+      // A forged answer needs the 16-bit id and the ephemeral port inside the timeout, accepted.
+      if (rinfo.address !== serverIp || rinfo.port !== port || msg.length < 2 || msg.readUInt16BE(0) !== (id & 0xffff)) {
+        return;
+      }
       try {
         const ttl = answerTtl(msg, id, name);
         settleResolve(ttl);
@@ -247,12 +237,83 @@ export async function readAuthoritativeTtl(
       }
     });
 
-    socket.send(query, 53, serverIp, (err) => {
+    socket.send(query, port, serverIp, (err) => {
       if (err) {
         settleReject(err);
       }
     });
   });
-
-  return { ttlSeconds, server: nsName };
 }
+
+/** Look up the authoritative nameserver for name and query it over UDP for the served TTL. */
+export async function readAuthoritativeTtl(
+  name: string,
+  signal: AbortSignal,
+): Promise<AuthoritativeTtlResult> {
+  const deadline = Date.now() + AUTHORITATIVE_QUERY_TIMEOUT_MS;
+  const cleanName = name.replace(/\.$/, "");
+  const labels = cleanName ? cleanName.split(".") : [];
+
+  const serversTried: string[] = [];
+  let lastError: Error | undefined;
+
+  labelLoop: for (let i = 0; i < labels.length; i++) {
+    const candidate = labels.slice(i).join(".");
+    let nsList: string[];
+    try {
+      nsList = await dns.promises.resolveNs(candidate);
+    } catch (err: unknown) {
+      const code = (err as { code?: string })?.code;
+      if (code === "ENODATA" || code === "ENOTFOUND") {
+        continue;
+      }
+      throw err;
+    }
+    if (!nsList || nsList.length === 0) {
+      continue;
+    }
+
+    for (const nsName of nsList) {
+      let ips: string[];
+      try {
+        ips = await dns.promises.resolve4(nsName);
+      } catch (err: unknown) {
+        serversTried.push(`${nsName} (resolve4 failed)`);
+        lastError = err instanceof Error ? err : new Error(String(err));
+        continue;
+      }
+      if (!ips || ips.length === 0) {
+        continue;
+      }
+
+      for (const serverIp of ips) {
+        serversTried.push(`${nsName} (${serverIp})`);
+        const remainingMs = deadline - Date.now();
+        if (remainingMs <= 0) {
+          throw new Error(`authoritative DNS query for ${name} timed out after ${AUTHORITATIVE_QUERY_TIMEOUT_MS} ms; tried [${serversTried.join(", ")}]`);
+        }
+
+        try {
+          const ttl = await queryAuthoritative(serverIp, 53, name, signal, remainingMs);
+          return { ttlSeconds: ttl, server: nsName };
+        } catch (err: unknown) {
+          if (signal.aborted) {
+            throw signal.reason ?? err;
+          }
+          if (err instanceof NotAuthoritativeError) {
+            lastError = err;
+            continue labelLoop;
+          }
+          lastError = err instanceof Error ? err : new Error(String(err));
+        }
+      }
+    }
+  }
+
+  if (serversTried.length === 0) {
+    throw new Error(`no authoritative nameserver found for ${name}`);
+  }
+
+  throw new Error(`failed to query authoritative TTL for ${name}: tried [${serversTried.join(", ")}]; last error: ${lastError?.message ?? "unknown"}`);
+}
+

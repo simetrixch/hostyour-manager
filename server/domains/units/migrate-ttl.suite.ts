@@ -16,9 +16,13 @@ export function migrateTtlSuite(getDb: () => DbHandle): void {
         seedClusters(db);
         seedConsumerRow(db);
         const f = makeFakes();
+        let provisionedAtReadTime: boolean | undefined;
         const ports = {
           ...consumerPorts(f),
-          authoritativeTtl: async () => ({ ttlSeconds: 300, server: "ns1.example.org" }),
+          authoritativeTtl: async () => {
+            provisionedAtReadTime = f.dns.upserts.length > 0;
+            return { ttlSeconds: 300, server: "ns1.example.org" };
+          },
         };
         await seedConsumerRegistration(ports.registrations);
         const params = { appId: "app_1", targetClusterId: TARGET.clusterId };
@@ -28,6 +32,8 @@ export function migrateTtlSuite(getDb: () => DbHandle): void {
 
         const switchLogs: string[] = [];
         await switchDns.run(stepCtx(db, switchDns.name, params, switchLogs));
+        expect(provisionedAtReadTime).toBe(false);
+        expect(f.dns.upserts.length).toBeGreaterThan(0);
         expect(switchLogs.some((l) => l.includes(`${CONSUMER}.${TARGET.domain} serves TTL 300 s at its authoritative server ns1.example.org`))).toBe(true);
 
         // Advance clock by 10 s (started 10 s after the switch)
