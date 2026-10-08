@@ -54,15 +54,16 @@ function world(input: { approved: Record<string, string>; appsImageTag: string; 
   return { ports, entry };
 }
 
-const read = (w: { ports: LineMovePorts; entry: TenantRegistration }, line?: string) =>
-  readLineMove(w.ports, { stage: "prod", entry: w.entry, registryHost: "zot.m1.example", ...(line ? { line } : {}), log: () => undefined, signal: new AbortController().signal });
+const read = (w: { ports: LineMovePorts; entry: TenantRegistration }, line?: string, log: (l: string) => void = () => undefined) =>
+  readLineMove(w.ports, { stage: "prod", entry: w.entry, registryHost: "zot.m1.example", ...(line ? { line } : {}), log, signal: new AbortController().signal });
 
 const ON_03 = { approved: { "example-engine": P03, "example-app": P03 }, appsImageTag: `${B03}-aaaaaaa` };
 const BOTH_RELEASED = [{ ...PART, "example-engine": P03, "example-app": P03 }, { "example-engine": P04_OLD, "example-app": P04_OLD }, { "example-engine": P04, "example-app": P04 }, { "example-engine": P03_FIX, "example-app": P03_FIX }];
 
 describe("readLineMove", () => {
   it("offers the newer line of the newest bundle release, with the bundle release on it and one tag for every build of the engine's part", async () => {
-    const answer = await read(world({ ...ON_03, pins: BOTH_RELEASED }));
+    const logs: string[] = [];
+    const answer = await read(world({ ...ON_03, pins: BOTH_RELEASED }), undefined, (l) => logs.push(l));
     expect(answer).toEqual({
       line: "0.3",
       toLine: "0.4",
@@ -73,6 +74,12 @@ describe("readLineMove", () => {
         approvedTags: { erp: { "example-engine": P04, "example-app": P04 } },
       },
     });
+    expect(logs.some((l) => l.startsWith("engine of the running release "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("releases of "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("engine of the newest release "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("parts and their released tags: "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("registry probes: "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("pins of the stage: "))).toBe(true);
   });
 
   it("PLANTED DEFECT: refuses where a build of the engine's part has no release on the line at the stage, rather than move the engine alone", async () => {

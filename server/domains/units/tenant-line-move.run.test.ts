@@ -273,22 +273,32 @@ describe("tenant-line-move's abort", () => {
 
 describe("the Versions dialog's offer", () => {
   it("is the move the plan would write: the newer line, both bundles and the part's tag", async () => {
-    expect(await readTenantLineMoves(world().ports, db.db, "tnt_1")).toEqual({
+    const logs: string[] = [];
+    expect(await readTenantLineMoves(world().ports, db.db, "tnt_1", undefined, (l) => logs.push(l))).toEqual({
       line: "0.3",
       offer: { line: "0.4", fromBundle: ON_03.appsImageTag, toBundle: ON_04.appsImageTag, part: "example-platform", partTag: P04, builds: ["example-engine", "example-app"], refusals: [] },
     });
+    expect(logs.some((l) => l.startsWith("engine of the running release "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("releases of "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("engine of the newest release "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("parts and their released tags: "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("registry probes: "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("pins of the stage: "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("line-move read of tenant "))).toBe(true);
   });
 
   it("PLANTED INNOCENT: offers nothing to a tenant already on the newest line, and names no line for a tenant without a bundle", async () => {
-    expect(await readTenantLineMoves(world(ON_04).ports, db.db, "tnt_1")).toEqual({ line: "0.4", offer: null });
+    const logs: string[] = [];
+    expect(await readTenantLineMoves(world(ON_04).ports, db.db, "tnt_1", undefined, (l) => logs.push(l))).toEqual({ line: "0.4", offer: null });
+    expect(logs.some((l) => l.startsWith("line-move read of tenant "))).toBe(true);
     const { ports, registrations } = world();
     await registrations.clearTenantAppsRepo("prod", GUID, "run_x");
-    expect(await readTenantLineMoves(ports, db.db, "tnt_1")).toEqual({ line: null, offer: null });
+    expect(await readTenantLineMoves(ports, db.db, "tnt_1", undefined, () => undefined)).toEqual({ line: null, offer: null });
   });
 
   it("PLANTED DEFECT: names no line and offers nothing for a bundle that declares no engine, rather than show an error", async () => {
     const { ports } = world();
     (ports.repo as FakeRepoReader).scriptFor(`${REPO}@${B03}`, { files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n" } });
-    expect(await readTenantLineMoves(ports, db.db, "tnt_1")).toEqual({ line: null, offer: null });
+    expect(await readTenantLineMoves(ports, db.db, "tnt_1", undefined, () => undefined)).toEqual({ line: null, offer: null });
   });
 });

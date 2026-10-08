@@ -19,7 +19,8 @@ export function TenantLineMoveOffer(props: { tenantId: string; busy: boolean; on
   }, [tenantId]);
 
   if (error) return <p role="alert" className="alert alert--danger">{error}</p>;
-  if (view === null || view.line === null) return null;
+  if (view === null) return <p className="muted">Reading the engine line…</p>;
+  if (view.line === null) return null;
   const offer = view.offer;
   return (
     <div>

@@ -71,10 +71,13 @@ export async function readLineMove(
   };
 
   const runningRelease = bundleReleaseTag(entry.appsImageTag);
+  const tRunning = performance.now();
   const running = await engineOf(runningRelease);
+  input.log(`engine of the running release ${runningRelease}: ${Math.round(performance.now() - tRunning)} ms`);
   if (running === undefined) {
     return { line: null, toLine: null, target: null, refusals: [`the apps bundle of tenant ${entry.subdomain} at ${runningRelease} declares no engine, so the line it runs is unknown`], standing: false };
   }
+  const tReleases = performance.now();
   const channels = await ports.channelStages();
   const runningTs14 = parseReleaseTag(runningRelease)?.ts14 ?? "";
   // The bundle releases the stage takes, from the one the tenant runs on, newest first.
@@ -84,10 +87,16 @@ export async function readLineMove(
       return parsed && parsed.ts14 >= runningTs14 && (channels[parsed.channel] ?? []).includes(stage) ? [{ release: t.name, commit: t.commit, ts14: parsed.ts14 }] : [];
     })
     .sort((a, b) => b.ts14.localeCompare(a.ts14));
+  input.log(`releases of ${appsRepo}: ${releases.length} at ${stage}, ${Math.round(performance.now() - tReleases)} ms`);
 
   let line = input.line;
   if (line === undefined) {
-    const newest = releases[0] ? await engineOf(releases[0].release) : undefined;
+    let newest: AppsEngine | undefined;
+    if (releases[0]) {
+      const tNewest = performance.now();
+      newest = await engineOf(releases[0].release);
+      input.log(`engine of the newest release ${releases[0].release}: ${Math.round(performance.now() - tNewest)} ms`);
+    }
     if (newest === undefined || !isNewerLine(newest.line, running.line)) return { line: running.line, toLine: null, target: null, refusals: [], standing: false };
     line = newest.line;
   }
@@ -106,7 +115,9 @@ export async function readLineMove(
   }
   if (!bundle) return { line: running.line, toLine: line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
 
+  const tParts = performance.now();
   const parts = await tenantVersionParts(ports, stage, entry.members, entry.approvedTags);
+  input.log(`parts and their released tags: ${Math.round(performance.now() - tParts)} ms`);
   const part = parts.find((p) => p.builds.some((b) => b.name === bundle.engine.build));
   if (!part) return { line: running.line, toLine: line, target: null, refusals: [`no member of tenant ${entry.subdomain} renders ${bundle.engine.build}, the engine ${bundle.release} is written for`], standing: false };
   // versionRefusal holds a tag to every build of the part having released it at the stage.
@@ -123,12 +134,16 @@ export async function readLineMove(
 
   const appsImageTag = `${bundle.release}-${bundle.commit.slice(0, 7)}`;
   const images = [{ repo: entry.appsImage, tag: appsImageTag }, ...part.builds.map((b) => ({ repo: b.image, tag: partTag }))];
+  const tProbes = performance.now();
   for (const image of images) {
     if (!(await ports.registryProbe.imageExists({ registryHost: input.registryHost, ...image }, { signal: input.signal }))) {
       refusals.push(`${input.registryHost}/${image.repo}:${image.tag} is not in the registry`);
     }
   }
+  input.log(`registry probes: ${images.length} images, ${Math.round(performance.now() - tProbes)} ms`);
+  const tPins = performance.now();
   const pins = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(stage, chart), entry.members);
+  input.log(`pins of the stage: ${Math.round(performance.now() - tPins)} ms`);
   const approvedTags = withChosenVersions(entry.approvedTags, pins, Object.fromEntries(part.builds.map((b) => [b.name, partTag])));
   const mismatch = engineLineRefusal(bundle.engine, approvedTags);
   if (mismatch !== null) refusals.push(mismatch);
@@ -146,25 +161,32 @@ export async function readTenantLineMoves(
   ports: LineMovePorts & Pick<TenantOnboardPorts, "resolveClusterValueFiles">,
   db: Db,
   tenantId: string,
-  signal?: AbortSignal,
+  signal: AbortSignal | undefined,
+  log: (line: string) => void,
 ): Promise<LineMoveView> {
+  const started = performance.now();
   const tc = loadTenantCluster(db, tenantId);
-  const read = await ports.registrations.readTenant(tc.stage, tc.guid);
-  if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
-  if (!read.entry.appsImage) return { line: null, offer: null };
-  const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
-  const reading = await readLineMove(ports, { stage: tc.stage, entry: read.entry, registryHost, log: () => undefined, signal: signal ?? new AbortController().signal });
-  if (reading.toLine === null || reading.standing) return { line: reading.line, offer: null };
-  return {
-    line: reading.line,
-    offer: {
-      line: reading.toLine,
-      fromBundle: read.entry.appsImageTag ?? "",
-      toBundle: reading.target?.appsImageTag ?? null,
-      part: reading.target?.part ?? null,
-      partTag: reading.target?.partTag ?? null,
-      builds: reading.target?.builds ?? [],
-      refusals: reading.refusals,
-    },
-  };
+  // Logged on every path, a refused or failed read included, because the time is what tells which read is slow.
+  try {
+    const read = await ports.registrations.readTenant(tc.stage, tc.guid);
+    if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
+    if (!read.entry.appsImage) return { line: null, offer: null };
+    const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
+    const reading = await readLineMove(ports, { stage: tc.stage, entry: read.entry, registryHost, log, signal: signal ?? new AbortController().signal });
+    if (reading.toLine === null || reading.standing) return { line: reading.line, offer: null };
+    return {
+      line: reading.line,
+      offer: {
+        line: reading.toLine,
+        fromBundle: read.entry.appsImageTag ?? "",
+        toBundle: reading.target?.appsImageTag ?? null,
+        part: reading.target?.part ?? null,
+        partTag: reading.target?.partTag ?? null,
+        builds: reading.target?.builds ?? [],
+        refusals: reading.refusals,
+      },
+    };
+  } finally {
+    log(`line-move read of tenant ${tc.guid} took ${Math.round(performance.now() - started)} ms`);
+  }
 }
