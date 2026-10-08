@@ -90,7 +90,11 @@ describe("dns-remove params", () => {
 
 describe("dns-remove plan", () => {
   it("plans attest-target and one step per record against this manager itself, in the order asked", async () => {
-    const plan = await makeDnsRemoveDef(ports(new FakeDnsProvider(), THREE_ROWS)).plan(THREE, deps);
+    const dns = new FakeDnsProvider();
+    dns.seed("post.example.net", "A", "198.51.100.4");
+    dns.seed("_dmarc.example.com", "TXT", "somebody-else=verification", "v=DMARC1; p=none");
+    dns.seed("auth.example.net", "A", "203.0.113.9");
+    const plan = await makeDnsRemoveDef(ports(dns, THREE_ROWS)).plan(THREE, deps);
     expect(plan.steps.map((s) => s.name)).toEqual([
       "attest-target",
       "remove-record:A post.example.net",
@@ -98,8 +102,11 @@ describe("dns-remove plan", () => {
       "remove-record:A auth.example.net",
     ]);
     expect(plan).toMatchObject({ targetKind: "self", targetId: "manager", requiredSecrets: [] });
-    expect(plan.summary).toMatch(/^Remove 3 records at the DNS provider, one step each: /);
-    expect(plan.summary).toContain('the A record post.example.net — the record of the consumer "post" at prod, standing at 198.51.100.4');
+    expect(plan.summary).toMatch(/^Take back 3 records, one step each; 3 are deleted at the DNS provider: /);
+    // Each sentence says what GOES, by the rule the step carries out, never only what stands.
+    expect(plan.summary).toContain('the A record post.example.net (the consumer "post" at prod): deletes every A record of the name (198.51.100.4)');
+    expect(plan.summary).toContain('the TXT record _dmarc.example.com (the mail "example.com"): deletes v=DMARC1; p=none, and somebody-else=verification stays');
+    expect(plan.summary).toContain('the A record auth.example.net (the consumer "auth" at prod): deletes every A record of the name (203.0.113.9)');
     // Only the records in use right now warn: post answers with an address its owner does not expect.
     expect(plan.warnings).toEqual([
       '_dmarc.example.com answers with exactly what the mail "example.com" needs — removing it takes a name that is in use right now out of DNS.',
@@ -110,8 +117,8 @@ describe("dns-remove plan", () => {
   it("a list of one plans the two steps the single removal always had", async () => {
     const plan = await makeDnsRemoveDef(ports(new FakeDnsProvider())).plan(PARAMS, deps);
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-record:A post.example.net"]);
-    expect(plan.summary).toMatch(/^Remove one record at the DNS provider/);
-    expect(plan.summary).toContain('the record of the consumer "post" at prod');
+    expect(plan.summary).toMatch(/^Take back one record, one step each; nothing is deleted at the DNS provider: /);
+    expect(plan.summary).toContain('the A record post.example.net (the consumer "post" at prod): nothing stands there, so nothing is deleted');
     expect(plan.warnings).toEqual([]);
   });
 
@@ -158,14 +165,15 @@ describe("dns-remove steps", () => {
     ]);
     // Step by step: after the first remove the other two records still stand and their rows are still in the book.
     await steps[1]!.run(ctx(logs, THREE));
-    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", deleted: 1 }]);
+    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", content: "198.51.100.4", deleted: 1 }]);
     expect(listDnsWrites(db.db).map((r) => r.name).sort()).toEqual(["_dmarc.example.com", "auth.example.net", "mail.example.net"]);
     await steps[2]!.run(ctx(logs, THREE));
     await steps[3]!.run(ctx(logs, THREE));
     expect(dns.deletes).toEqual([
-      { name: "post.example.net", type: "A", deleted: 1 },
-      { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 }, // the TXT by the content the book holds
-      { name: "auth.example.net", type: "A", deleted: 1 },
+      // Every booked record by the content the book holds.
+      { name: "post.example.net", type: "A", content: "198.51.100.4", deleted: 1 },
+      { name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 1 },
+      { name: "auth.example.net", type: "A", content: "203.0.113.9", deleted: 1 },
     ]);
     expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["somebody-else=verification"]);
     expect(logs.slice(3)).toEqual([
@@ -185,7 +193,7 @@ describe("dns-remove steps", () => {
     const logs: string[] = [];
     for (const step of makeDnsRemoveDef(ports(dns)).steps(PARAMS)) await step.run(ctx(logs, PARAMS));
     expect(dns.record("post.example.net", "A")).toBeUndefined();
-    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", deleted: 1 }]); // by name and type, no content: the name is the unit's own
+    expect(dns.deletes).toEqual([{ name: "post.example.net", type: "A", content: "198.51.100.4", deleted: 1 }]); // by the content the book holds
     expect(logs[0]).toContain('belongs to the consumer "post" at prod');
     expect(logs[1]).toBe("A post.example.net stood at 198.51.100.4 and is gone (1 removed)");
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual(["_dmarc.example.com"]);
@@ -245,11 +253,11 @@ describe("dns-remove steps", () => {
     const params = one("_dmarc.example.com", "TXT");
     const logs: string[] = [];
     await makeDnsRemoveDef(ports(dns, [DMARC_ROW])).steps(params)[1]!.run(ctx(logs, params));
-    expect(dns.deletes).toEqual([{ name: "_dmarc.example.com", type: "TXT", content: "v=DMARC1; p=none", deleted: 0 }]);
+    expect(dns.deletes).toEqual([]); // the provider is not asked to delete at all
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
     expect(await dns.listRecordContents({ name: "_dmarc.example.com", type: "TXT" })).toEqual(["v=DMARC1; p=reject"]);
     expect(logs).toEqual([
-      "TXT _dmarc.example.com no longer stood at v=DMARC1; p=none — the 1 record(s) of the name stay (v=DMARC1; p=reject); the book forgets the write",
+      "no TXT record _dmarc.example.com of this installation's to remove — the 1 record(s) of the name (v=DMARC1; p=reject) carry content no run here wrote and stay, and the provider was not asked to delete anything; the book forgets the write",
     ]);
   });
 
@@ -289,8 +297,7 @@ describe("dns-remove steps", () => {
     const params = one("mail.digitaplatform.com", "TXT");
     const def = makeDnsRemoveDef(ports(dns, []));
     const plan = await def.plan(params, deps);
-    expect(plan.summary).toContain("the TXT record mail.digitaplatform.com");
-    expect(plan.summary).toContain('the mail "digitaplatform.com"');
+    expect(plan.summary).toContain('the TXT record mail.digitaplatform.com (the mail "digitaplatform.com"): deletes v=spf1 ip4:157.90.201.186 -all');
     const steps = def.steps(params);
     const logs: string[] = [];
     await steps[0]!.run(ctx(logs, params));
@@ -318,9 +325,28 @@ describe("dns-remove steps", () => {
     const logs: string[] = [];
     await steps[0]!.run(ctx(logs, params));
     await steps[1]!.run(ctx(logs, params));
-    expect(dns.deletes).toEqual([{ name: "mail.digitaplatform.com", type: "TXT", content: "v=spf1 ip4:157.90.201.186 -all", deleted: 0 }]);
+    expect(dns.deletes).toEqual([]);
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
-    expect(logs[1]).toContain("TXT mail.digitaplatform.com no longer stood at v=spf1 ip4:157.90.201.186 -all — the 1 record(s) of the name stay (v=spf1 include:spf.protection.outlook.com -all); the book forgets the write");
+    expect(logs[1]).toBe("no TXT record mail.digitaplatform.com of this installation's to remove — the 1 record(s) of the name (v=spf1 include:spf.protection.outlook.com -all) carry content no run here wrote and stay, and the provider was not asked to delete anything; the book forgets the write");
+  });
+
+  it("planted: a book row under a foreign record of its name plans NOTHING deleted and asks the provider to delete nothing — the PROD case of 2026-10-08", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("digitaplatform.com", "TXT", "v=spf1 include:spf.protection.outlook.com -all");
+    recordDnsWrite(db.db, {
+      name: "digitaplatform.com", type: "TXT", content: "v=spf1 ip4:157.90.201.186 -all", act: "inserted",
+      owner: { kind: "mail", name: "digitaplatform.com" }, runId: "run_test",
+    });
+    const params = one("digitaplatform.com", "TXT");
+    const def = makeDnsRemoveDef(ports(dns, []));
+    const plan = await def.plan(params, deps);
+    expect(plan.summary).toMatch(/^Take back one record, one step each; nothing is deleted at the DNS provider: /);
+    expect(plan.summary).toContain('the TXT record digitaplatform.com (the mail "digitaplatform.com"): NOTHING is deleted at the provider — what stands there (v=spf1 include:spf.protection.outlook.com -all) is content no run here wrote, and it stays; the book forgets its row');
+    expect(plan.warnings).toEqual([]);
+    for (const step of def.steps(params)) await step.run(ctx([], params));
+    expect(dns.deletes).toEqual([]);
+    expect(await dns.listRecordContents({ name: "digitaplatform.com", type: "TXT" })).toEqual(["v=spf1 include:spf.protection.outlook.com -all"]);
+    expect(listDnsWrites(db.db)).toEqual([]);
   });
 
   it("a book-only CNAME whose name was re-pointed since is not deleted, and the book forgets the write", async () => {
@@ -339,10 +365,10 @@ describe("dns-remove steps", () => {
     const logs: string[] = [];
     await steps[0]!.run(ctx(logs, params));
     await steps[1]!.run(ctx(logs, params));
-    expect(dns.deletes).toEqual([{ name: "shop.example.com", type: "CNAME", content: "apps1.digitacloud.app", deleted: 0 }]);
+    expect(dns.deletes).toEqual([]);
     expect(await dns.listRecordContents({ name: "shop.example.com", type: "CNAME" })).toEqual(["customer.elsewhere.net"]);
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
-    expect(logs[1]).toContain("CNAME shop.example.com no longer stood at apps1.digitacloud.app — the 1 record(s) of the name stay (customer.elsewhere.net); the book forgets the write");
+    expect(logs[1]).toBe("no CNAME record shop.example.com of this installation's to remove — the 1 record(s) of the name (customer.elsewhere.net) carry content no run here wrote and stay, and the provider was not asked to delete anything; the book forgets the write");
   });
 
   it("planted innocent: a book-only CNAME that still points where this Manager wrote it is deleted", async () => {

@@ -141,7 +141,8 @@ describe("mail-dns-unpublish steps", () => {
     await makeMailDnsUnpublishDef(ports(dns)).steps(PARAMS)[1]!.run(ctx(logs, PARAMS));
     expect(dns.record("_dmarc.example.com", "TXT")).toBe("v=DMARC1; p=reject; rua=mailto:somebody@example.org");
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
-    expect(logs.some((l) => l.includes("TXT _dmarc.example.com no longer stood at v=DMARC1; p=none — the 1 record(s) of the name stay (v=DMARC1; p=reject; rua=mailto:somebody@example.org); the book forgets the write"))).toBe(true);
+    expect(dns.deletes.filter((d) => d.name === "_dmarc.example.com")).toEqual([]);
+    expect(logs).toContain("no TXT record _dmarc.example.com of this installation's to remove — the 1 record(s) of the name (v=DMARC1; p=reject; rua=mailto:somebody@example.org) carry content no run here wrote and stay, and the provider was not asked to delete anything; the book forgets the write");
   });
 
   it("with nothing of ours under a name and no book row, nothing is deleted and the neighbour is named", async () => {
@@ -150,7 +151,7 @@ describe("mail-dns-unpublish steps", () => {
     const logs: string[] = [];
     await makeMailDnsUnpublishDef(ports(dns)).steps(PARAMS)[1]!.run(ctx(logs, PARAMS));
     expect(dns.deletes).toEqual([]);
-    expect(logs[0]).toBe("no TXT record example.com of this installation's to remove — the 1 record(s) of the name carry content no run here wrote and stay");
+    expect(logs[0]).toBe(`no TXT record example.com of this installation's to remove — the 1 record(s) of the name (${NEIGHBOUR}) carry content no run here wrote and stay, and the provider was not asked to delete anything`);
     expect(logs[1]).toBe("no TXT record prod._domainkey.example.com to remove — already absent");
   });
 
