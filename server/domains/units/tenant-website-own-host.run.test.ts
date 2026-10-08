@@ -135,9 +135,9 @@ describe("a website moving onto the tenant's own domain", () => {
   });
 });
 
-// The TEST move from the example.org zone into simplidigita.ai, both zones on the
+// The TEST move from the example.org zone into example.net, both zones on the
 // installation's provider: the own domain first, then each website, every old name a redirect.
-describe("a TEST move from the example.org zone into the simplidigita.ai zone", () => {
+describe("a TEST move from the example.org zone into the example.net zone", () => {
   const NEW_OWN = "show.test.example.net";
   const registration = (own: string, ownDomainAliases: string[], apps: Parameters<typeof at>[0]): TenantRegistrations => {
     const repo = new FakePlatformRepo();
@@ -152,7 +152,7 @@ describe("a TEST move from the example.org zone into the simplidigita.ai zone", 
   };
   const crossZone = (): FakeDnsProvider => {
     const dns = atTest();
-    dns.zones = ["example.org", "simplidigita.ai"];
+    dns.zones = ["example.org", "example.net"];
     return dns;
   };
   const CYCLESHOP = { name: "cycleshop", site: "shop", domain: "test.cycleshop.show.example.org" };

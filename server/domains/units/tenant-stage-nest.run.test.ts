@@ -18,7 +18,7 @@ import { WEBSITE_APPS, seedWebsiteTenant } from "./tenant-website.fixture.ts";
 
 useMemoryDb();
 
-const ZONE = "simplidigita.ai";
+const ZONE = "example.net";
 const SITE = { name: "simetrix-ch", site: "main" };
 
 function registered(stage: Stage, own: string, site: { domain: string }): TenantRegistrations {
@@ -52,34 +52,34 @@ const plan = (dns: FakeDnsProvider, registrations: TenantRegistrations, domain: 
 
 describe("one tenant at two stages under one zone", () => {
   it("PLANTED DEFECT: moves the prod company site onto the zone's apex while its test stage stands under it", async () => {
-    const dns = world("prod", "hub.simplidigita.ai", { guid: GUID, stage: "test", own: "hub.test.simplidigita.ai" });
-    const planned = await plan(dns, registered("prod", "hub.simplidigita.ai", { domain: "example.org" }), ZONE);
+    const dns = world("prod", "hub.example.net", { guid: GUID, stage: "test", own: "hub.test.example.net" });
+    const planned = await plan(dns, registered("prod", "hub.example.net", { domain: "example.org" }), ZONE);
     expect(planned.outcome === "planned" ? planned.params.domain : planned.summary).toBe(ZONE);
   });
 
   it("PLANTED DEFECT: moves a test site under the zone while its prod stage stands at the apex", async () => {
-    const dns = world("test", "hub.test.simplidigita.ai", { guid: GUID, stage: "prod", own: ZONE });
-    const planned = await plan(dns, registered("test", "hub.test.simplidigita.ai", { domain: "web.test.example.org" }), "site.test.simplidigita.ai");
-    expect(planned.outcome === "planned" ? planned.params.domain : planned.summary).toBe("site.test.simplidigita.ai");
+    const dns = world("test", "hub.test.example.net", { guid: GUID, stage: "prod", own: ZONE });
+    const planned = await plan(dns, registered("test", "hub.test.example.net", { domain: "web.test.example.org" }), "site.test.example.net");
+    expect(planned.outcome === "planned" ? planned.params.domain : planned.summary).toBe("site.test.example.net");
   });
 
   it("PLANTED INNOCENT: still refuses another tenant's test host under the apex", async () => {
-    const dns = world("prod", "hub.simplidigita.ai", { guid: "zzzzzzzzzzzz", stage: "test", own: "hub.test.simplidigita.ai" });
-    await expect(plan(dns, registered("prod", "hub.simplidigita.ai", { domain: "example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant other \(hub\.test\.simplidigita\.ai\)/);
+    const dns = world("prod", "hub.example.net", { guid: "zzzzzzzzzzzz", stage: "test", own: "hub.test.example.net" });
+    await expect(plan(dns, registered("prod", "hub.example.net", { domain: "example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant other \(hub\.test\.example\.net\)/);
   });
 
   it("PLANTED INNOCENT: still refuses the same tenant's nest that is not shaped by the stage rule", async () => {
-    const dns = world("prod", "hub.simplidigita.ai", { guid: GUID, stage: "test", own: "legacy.simplidigita.ai" });
-    await expect(plan(dns, registered("prod", "hub.simplidigita.ai", { domain: "example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant simetrix at test \(legacy\.simplidigita\.ai\)/);
+    const dns = world("prod", "hub.example.net", { guid: GUID, stage: "test", own: "legacy.example.net" });
+    await expect(plan(dns, registered("prod", "hub.example.net", { domain: "example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant simetrix at test \(legacy\.example\.net\)/);
   });
 
   it("PLANTED INNOCENT: still refuses a host the same tenant holds at its other stage", async () => {
-    const dns = world("prod", "hub.simplidigita.ai", { guid: GUID, stage: "test", own: "site.simplidigita.ai" });
-    await expect(plan(dns, registered("prod", "hub.simplidigita.ai", { domain: "example.org" }), "site.simplidigita.ai")).rejects.toThrow(/site\.simplidigita\.ai is already a host of tenant simetrix at test/);
+    const dns = world("prod", "hub.example.net", { guid: GUID, stage: "test", own: "site.example.net" });
+    await expect(plan(dns, registered("prod", "hub.example.net", { domain: "example.org" }), "site.example.net")).rejects.toThrow(/site\.example\.net is already a host of tenant simetrix at test/);
   });
 
   it("PLANTED INNOCENT: still refuses a test host above the same tenant's prod host, which no stage rule nests", async () => {
-    const dns = world("test", "hub.test.simplidigita.ai", { guid: GUID, stage: "prod", own: "hub.simplidigita.ai" });
-    await expect(plan(dns, registered("test", "hub.test.simplidigita.ai", { domain: "web.test.example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant simetrix at prod \(hub\.simplidigita\.ai\)/);
+    const dns = world("test", "hub.test.example.net", { guid: GUID, stage: "prod", own: "hub.example.net" });
+    await expect(plan(dns, registered("test", "hub.test.example.net", { domain: "web.test.example.org" }), ZONE)).rejects.toThrow(/overlaps a host of tenant simetrix at prod \(hub\.example\.net\)/);
   });
 });

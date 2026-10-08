@@ -46,7 +46,7 @@ function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
   seedWebsiteTenant();
   db.db.update(tenants).set({ ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
-  dns.zones = ["example.org", "simplidigita.ai"];
+  dns.zones = ["example.org", "example.net"];
   const repo = new FakePlatformRepo();
   const registrations = at(repo, opts.showAliases);
   const urls = ["https://show.example.net/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`, `https://${ZONE}/auth/`, `https://${ZONE}/`];
