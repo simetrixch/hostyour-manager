@@ -5,7 +5,7 @@ import { FakeDnsProvider } from "#core/server/adapters/dns/testing/fake.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
 import type { Logger } from "#core/server/kernel/logger.ts";
-import type { DnsInventoryView, DnsRecordRow } from "#core/shared/dns.ts";
+import type { DnsInventoryView, DnsRecordRow, DnsRecordType } from "#core/shared/dns.ts";
 import { DnsRemoveParams, makeDnsRemoveDef } from "./dns-remove.ts";
 import type { DnsRecordPorts } from "./dns-record.kit.ts";
 
@@ -65,7 +65,7 @@ function ctx(logs: string[], params: DnsRemoveParams): StepCtx {
   };
 }
 
-const one = (name: string, type: "A" | "TXT"): DnsRemoveParams => ({ records: [{ name, type }] });
+const one = (name: string, type: DnsRecordType): DnsRemoveParams => ({ records: [{ name, type }] });
 const PARAMS = one("post.example.net", "A");
 const THREE: DnsRemoveParams = { records: [{ name: "post.example.net", type: "A" }, { name: "_dmarc.example.com", type: "TXT" }, { name: "auth.example.net", type: "A" }] };
 const THREE_ROWS = [CONSUMER_ROW, INSTALLER_ROW, DMARC_ROW, AUTH_ROW];
@@ -321,6 +321,48 @@ describe("dns-remove steps", () => {
     expect(dns.deletes).toEqual([{ name: "mail.digitaplatform.com", type: "TXT", content: "v=spf1 ip4:157.90.201.186 -all", deleted: 0 }]);
     expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
     expect(logs[1]).toContain("TXT mail.digitaplatform.com no longer stood at v=spf1 ip4:157.90.201.186 -all — the 1 record(s) of the name stay (v=spf1 include:spf.protection.outlook.com -all); the book forgets the write");
+  });
+
+  it("a book-only CNAME whose name was re-pointed since is not deleted, and the book forgets the write", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("shop.example.com", "CNAME", "customer.elsewhere.net");
+    recordDnsWrite(db.db, {
+      name: "shop.example.com",
+      type: "CNAME",
+      content: "apps1.digitacloud.app",
+      act: "inserted",
+      owner: { kind: "tenant", name: "shop", stage: "prod" },
+      runId: "run_test",
+    });
+    const params = one("shop.example.com", "CNAME");
+    const steps = makeDnsRemoveDef(ports(dns, [])).steps(params);
+    const logs: string[] = [];
+    await steps[0]!.run(ctx(logs, params));
+    await steps[1]!.run(ctx(logs, params));
+    expect(dns.deletes).toEqual([{ name: "shop.example.com", type: "CNAME", content: "apps1.digitacloud.app", deleted: 0 }]);
+    expect(await dns.listRecordContents({ name: "shop.example.com", type: "CNAME" })).toEqual(["customer.elsewhere.net"]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
+    expect(logs[1]).toContain("CNAME shop.example.com no longer stood at apps1.digitacloud.app — the 1 record(s) of the name stay (customer.elsewhere.net); the book forgets the write");
+  });
+
+  it("planted innocent: a book-only CNAME that still points where this Manager wrote it is deleted", async () => {
+    const dns = new FakeDnsProvider();
+    dns.seed("shop.example.com", "CNAME", "apps1.digitacloud.app");
+    recordDnsWrite(db.db, {
+      name: "shop.example.com",
+      type: "CNAME",
+      content: "apps1.digitacloud.app",
+      act: "inserted",
+      owner: { kind: "tenant", name: "shop", stage: "prod" },
+      runId: "run_test",
+    });
+    const params = one("shop.example.com", "CNAME");
+    const steps = makeDnsRemoveDef(ports(dns, [])).steps(params);
+    const logs: string[] = [];
+    await steps[0]!.run(ctx(logs, params));
+    await steps[1]!.run(ctx(logs, params));
+    expect(await dns.listRecordContents({ name: "shop.example.com", type: "CNAME" })).toEqual([]);
+    expect(listDnsWrites(db.db).map((r) => r.name)).toEqual([]);
   });
 
   it("planted defect kept: a name neither the inventory nor the book names is refused at the plan with the refusal sentence", async () => {

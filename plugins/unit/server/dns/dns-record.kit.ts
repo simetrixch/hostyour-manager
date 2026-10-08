@@ -19,8 +19,9 @@
 // (name, type) would take them all. The content this platform owns is what the book of DNS writes
 // says it wrote; for a record published before the book existed, it is the record the mail
 // record's tag picks among those standing at the provider now. Where neither names a record,
-// nothing is deleted and the log says what stands and stays. An A record is a unit's own name and
-// is deleted as before.
+// nothing is deleted and the log says what stands and stays. A CNAME the book names is deleted by
+// its booked content too: the book proves only what this Manager wrote, and a name re-pointed since
+// is somebody else's now. Any other A or CNAME is a unit's own name and is deleted by name.
 import type { Db } from "#core/server/db/client.ts";
 import type { StepCtx } from "#core/server/executor/types.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
@@ -164,7 +165,7 @@ function ownedTxtContent(ctx: StepCtx, row: RemovableRecordRow, standing: string
 /** Delete ONE record and say what stood there. What stands is read BEFORE the deletion, because
  *  afterwards nothing anywhere can say what the zone carried — the run log is the only record of it.
  *  Absent is the idempotent no-op (a delete resolves 0), so a resumed run is safe. A TXT is deleted
- *  by the content this platform owns (the header states the rule), and the other records of the
+ *  by the content this platform owns, and so is a booked CNAME (the header states the rule); the other records of the
  *  name are counted and left. The book of DNS writes loses its row on every removal, because the
  *  operator asked to take the write back and a write whose content stands nowhere is gone either
  *  way; the other records of the name stay and the log names them. */
@@ -183,6 +184,12 @@ export async function deleteRecord(ctx: StepCtx, dns: DnsProvider, row: Removabl
     }
     content = owned.content;
     booked = owned.booked;
+  } else if (row.type === "CNAME") {
+    const write = findDnsWrite(ctx.db, { name: row.name, type: row.type });
+    if (write) {
+      content = write.content;
+      booked = true;
+    }
   }
   const { deleted } = await dns.deleteRecord({ name: row.name, type: row.type, ...(content === undefined ? {} : { content }), signal: ctx.signal });
   const left = standing.length - deleted;
