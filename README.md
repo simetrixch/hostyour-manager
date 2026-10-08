@@ -34,6 +34,22 @@ The tests run here before every push (the pre-push hook runs `scripts/check.sh`)
 (`.github/workflows/tests.yml`). The ansiwise real-serve suites run when the ansiwise binary pair
 is on the machine; without it they skip, and the script names each suite it did not run.
 
+## Operating
+
+### Sign every operator out at once
+
+A session survives a Manager restart until its idle or absolute lifetime ends, and a logout revokes
+only its own session. To end every session, the emergency ones included, delete the session key and
+restart the Manager. Every cookie then fails to decrypt, and the next start mints a new key:
+
+```
+kubectl exec -n manager deploy/manager -c manager -- node -e 'const Db = require("better-sqlite3"); console.log(new Db(process.env.DATA_DIR + "/manager.db").prepare("DELETE FROM meta WHERE key = ?").run("session.key").changes)'
+kubectl rollout restart -n manager deploy/manager
+```
+
+The first command prints `1` when it deleted the key. Until the restart, the running Manager still
+accepts the old cookies, because it holds the key in memory.
+
 ## License
 
 **Elastic License 2.0.** Run it, change it, onboard your own consumers and tenants with it. What

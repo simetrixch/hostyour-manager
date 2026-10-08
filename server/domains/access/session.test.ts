@@ -190,4 +190,23 @@ describe("SessionCodec — sealed JWE session", () => {
       vi.useRealTimers();
     }
   });
+
+  it("a shortened absolute lifetime caps a cookie minted under the longer one, so it cannot outlive its revocation row", async () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000, toFake: ["Date"] });
+    try {
+      const dir = mkdtempSync(join(tmpdir(), "mgr-ses-cap-"));
+      dirs.push(dir);
+      const db = openDb(join(dir, "manager.db"));
+      handles.push(db);
+      const before = new SessionCodec(db.db, { ...config, session: { idleSeconds: 3600, absoluteSeconds: 43200 } });
+      const token = await before.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
+      const after = new SessionCodec(db.db, { ...config, session: { idleSeconds: 3600, absoluteSeconds: 600 } });
+      vi.setSystemTime(1_700_000_300_000); // inside both lifetimes
+      expect((await after.verify(token)).kind).toBe("ok");
+      vi.setSystemTime(1_700_000_601_000); // past the new cap, long before the exp sealed at mint
+      expect((await after.verify(token)).kind).toBe("invalid");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

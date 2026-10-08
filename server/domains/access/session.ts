@@ -57,6 +57,8 @@ export function loadOrCreateKey(db: Db, metaKey: string): Uint8Array {
  * with the algorithms allowlisted on decrypt; jti + persisted revocation;
  * idle + absolute lifetime enforced. A session survives a restart within its idle and absolute
  * lifetimes, and a revoked one stays revoked across a restart.
+ * Signing every operator out at once: delete the `session.key` row of `meta` and restart; every
+ * cookie then fails to decrypt, and the next boot mints a new key.
  *
  * The two lifetimes are carried by two different claims. `iat` is the LAST-ACTIVITY moment:
  * the chokepoint re-mints the cookie on every authenticated request (refresh), so the idle
@@ -133,6 +135,9 @@ export class SessionCodec {
       if (typeof jti !== "string" || typeof sub !== "string") return { kind: "invalid" };
       if (this.db.select().from(revokedSessions).where(eq(revokedSessions.jti, jti)).get()) return { kind: "invalid" };
       if (typeof payload.aa !== "number") return { kind: "invalid" }; // no absolute anchor — refresh could not cap it
+      // The cap follows the CURRENT config, not the exp sealed at mint: a revocation row lives until
+      // authAt + absoluteSeconds, so a cookie minted under a longer lifetime must not outlive its row.
+      if (Date.now() / 1000 > payload.aa + this.config.session.absoluteSeconds) return { kind: "invalid" };
       const groups = Array.isArray(payload.groups) ? payload.groups.filter((g): g is string => typeof g === "string") : [];
       const email = typeof payload.email === "string" ? payload.email : undefined;
       // "oidc" is the PRIVILEGED word — reset/api.ts refuses "emergency" and admits everything else
