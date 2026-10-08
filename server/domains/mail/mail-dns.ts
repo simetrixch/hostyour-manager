@@ -4,7 +4,7 @@ import { apps, clusters, servers } from "../../db/schema/inventory.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { errNotConfigured, errNotFound } from "../../kernel/errors.ts";
 import { MASTER_ROLES, type Stage } from "../../../shared/enums.ts";
-import { MAIL_RECORD_TAG, dmarcRecordName, envelopeDomainOf, mailRecordNames, platformDomainRefusal, type FormerDmarcView, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
+import { MAIL_RECORD_TAG, dmarcRecordName, envelopeDomainOf, mailRecordNames, platformDomainRefusal, spfHostMechanism, type FormerDmarcView, type MailDnsDomainView, type MailDnsRow, type MailDnsView, type MailEgress, type SenderRole } from "../../../shared/mail.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { resolveClusterMarking } from "../inventory/cluster-marking.ts";
@@ -30,6 +30,9 @@ export interface MailDnsNeed {
   /** The address that name resolves to — null where it resolves to none, which paints every
    *  address-bound row red with that one reason. */
   egress: string | null;
+  /** The host an SPF record names the sender by: the one name the reverse DNS of `egress` gives,
+   *  forward-confirmed (MailEgress.host); null where there is none. */
+  egressHost: string | null;
   /** The key the sender signs THIS domain with, as the base64 a DKIM record carries in `p=` — where the
    *  Manager holds it (the platform domain of a unit that sends); null where the relay's own key is it. */
   dkimPublicKey: string | null;
@@ -51,26 +54,37 @@ export function dkimRecordKey(spkiPem: string): string {
   return spkiPem.replace(/-----(BEGIN|END) PUBLIC KEY-----/g, "").replace(/\s+/g, "");
 }
 
-/** The SPF row of one name: one v=spf1 record that names the egress address, or the act that makes it
- *  so — `publish` names the run that writes it. */
-function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly string[], egress: string | null, egressName: string, publish: string): MailDnsRow {
-  // The address as a mechanism of its own, never as a prefix of a longer one (ip4:1.2.3.4 in ip4:1.2.3.45).
-  const names = (txt: string): boolean => txt.trim().split(/\s+/).some((term) => term === `ip4:${egress}` || term === `ip4:${egress}/32`);
+/** The SPF row of one name: one v=spf1 record that names the sender by its host and not by its
+ *  address, or the act that makes it so — `publish` names the run that writes it. No SPF record of ours
+ *  names an address, so a change of the egress address never touches one. */
+function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly string[], egress: string | null, egressName: string, egressHost: string | null, publish: string): MailDnsRow {
+  const mechanism = egressHost === null ? null : spfHostMechanism(name, egressHost);
+  // Each mechanism as a term of its own, never as a prefix of a longer one (ip4:1.2.3.4 in ip4:1.2.3.45).
+  const terms = (txt: string): string[] => txt.trim().split(/\s+/);
+  // The host's own name may carry the bare `a` or spell itself out; without a host no term names it.
+  const hostTerms = mechanism === null ? [] : [mechanism, `a:${egressHost}`];
+  const namesHost = (txt: string): boolean => terms(txt).some((term) => hostTerms.includes(term));
+  const namesAddress = (txt: string): boolean => terms(txt).some((term) => term === `ip4:${egress}` || term === `ip4:${egress}/32`);
+  const holds = (txt: string): boolean => namesHost(txt) && !namesAddress(txt);
   return {
     record,
     name,
-    expected: egress === null ? `one v=spf1 record naming the address ${egressName} resolves to` : `one v=spf1 record naming ip4:${egress}`,
+    expected: mechanism === null ? `one v=spf1 record naming the host the reverse DNS of ${egressName}'s address gives` : `one v=spf1 record naming the host ${egressHost} (${mechanism}), and no address`,
     found: joined(found),
-    ok: egress !== null && found.length === 1 && names(found[0]!),
+    ok: found.length === 1 && holds(found[0]!),
     ...(egress === null
       ? noEgressNote(egressName)
-      : found.length === 0
-        ? { note: publish }
-        : found.length > 1
-          ? { note: `remove ${found.length - 1} of the ${found.length} v=spf1 records by hand, then ${publish}` }
-          : names(found[0]!)
-            ? {}
-            : { note: `${publish}; the address is merged into the record that stands` }),
+      : mechanism === null
+        ? { note: "set the reverse DNS first; the name it gives must resolve back to the address" }
+        : found.length === 0
+          ? { note: publish }
+          : found.length > 1
+            ? { note: `remove ${found.length - 1} of the ${found.length} v=spf1 records by hand, then ${publish}` }
+            : holds(found[0]!)
+              ? {}
+              : namesAddress(found[0]!)
+                ? { note: `${publish}; it replaces ip4:${egress} with ${mechanism}` }
+                : { note: `${publish}; ${mechanism} is merged into the record that stands` }),
   };
 }
 
@@ -85,7 +99,7 @@ function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly st
  *  and that name must resolve back to the address — the forward confirmation receivers check. The
  *  sender domain's apex is not asked to answer the address; it stays free for whatever it serves. */
 export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<MailDnsRow[]> {
-  const { domain, stage, egress, egressName, dkimPublicKey, envelopeDomain, ownMailService } = need;
+  const { domain, stage, egress, egressName, egressHost, dkimPublicKey, envelopeDomain, ownMailService } = need;
   const noEgress = noEgressNote(egressName);
   const publish = { note: "publish" };
   // A red row of a domain whose mail runs on its own mail service points at no run here for its apex SPF
@@ -106,10 +120,10 @@ export async function mailDnsRows(need: MailDnsNeed, dns: PublicDns): Promise<Ma
   // at the envelope name. What it must be is one record, the rule of SPF itself.
   const spf: MailDnsRow = ownMailService
     ? { record: "spf", name: names.spf, expected: "one v=spf1 record, kept by the domain's own mail service", found: joined(apexSpf), ok: apexSpf.length === 1, ...(apexSpf.length === 1 ? {} : serviceNote) }
-    : spfRow("spf", names.spf, apexSpf, egress, egressName, "publish");
+    : spfRow("spf", names.spf, apexSpf, egress, egressName, egressHost, "publish");
   const envelope = envelopeDomain === null
     ? []
-    : [spfRow("envelope-spf", envelopeDomain, (await dns.txt(envelopeDomain)).filter(MAIL_RECORD_TAG["envelope-spf"]), egress, egressName, "publish the envelope SPF")];
+    : [spfRow("envelope-spf", envelopeDomain, (await dns.txt(envelopeDomain)).filter(MAIL_RECORD_TAG["envelope-spf"]), egress, egressName, egressHost, "publish the envelope SPF")];
 
   // The reverse DNS and its forward confirmation, the same for every sender domain: one address, one name.
   const ptrNames = egress === null ? [] : await dns.ptr(egress);
@@ -241,7 +255,7 @@ export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
       ...s,
       rows: await mailDnsRows(
         {
-          ...s, stage: cluster.stage, egressName: out.name, egress: out.address, dkimPublicKey: platform ? out.dkimPublicKey : null,
+          ...s, stage: cluster.stage, egressName: out.name, egress: out.address, egressHost: out.host, dkimPublicKey: platform ? out.dkimPublicKey : null,
           envelopeDomain: platform ? envelopeDomainOf(s.domain) : null, ownMailService: platform,
         },
         deps.publicDns,

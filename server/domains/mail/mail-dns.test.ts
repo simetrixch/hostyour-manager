@@ -18,14 +18,14 @@ const MAIL_NAME = "mail.example.com";
 const PEM = "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0B\nAQEFAAOCAQ8A\n-----END PUBLIC KEY-----\n";
 const KEY = "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8A";
 const need = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => ({
-  domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, dkimPublicKey: KEY, envelopeDomain: null, ownMailService: false, ...over,
+  domain: "example.com", role: "customer mail", stage: "prod", egressName: "a1.example.net", egress: EGRESS, egressHost: MAIL_NAME, dkimPublicKey: KEY, envelopeDomain: null, ownMailService: false, ...over,
 });
 /** The platform domain's need: its envelope sender's name, and its mail on its own mail service. */
 const platformNeed = (over: Partial<MailDnsNeed> = {}): MailDnsNeed => need({ envelopeDomain: MAIL_NAME, ownMailService: true, ...over });
 
 function published(): FakePublicDns {
   const dns = new FakePublicDns();
-  dns.seedTxt("example.com", `v=spf1 ip4:${EGRESS} include:spf.protection.outlook.com -all`, "MS=ms123");
+  dns.seedTxt("example.com", `v=spf1 a:${MAIL_NAME} include:spf.protection.outlook.com -all`, "MS=ms123");
   dns.seedPtr(EGRESS, MAIL_NAME);
   dns.seedA(MAIL_NAME, EGRESS);
   dns.seedTxt("prod._domainkey.example.com", `v=DKIM1; h=sha256; k=rsa; p=${KEY}`);
@@ -87,7 +87,7 @@ describe("mailDnsRows", () => {
     const dns = published();
     const rows = await mailDnsRows(need(), dns);
     expect(rows.map((r) => `${r.record}:${r.ok}`)).toEqual(["spf:true", "a:true", "dkim:true", "dmarc:true", "ptr:true"]);
-    expect(rows.find((r) => r.record === "spf")?.found).toBe(`v=spf1 ip4:${EGRESS} include:spf.protection.outlook.com -all`); // the MS= record is not SPF
+    expect(rows.find((r) => r.record === "spf")?.found).toBe(`v=spf1 a:${MAIL_NAME} include:spf.protection.outlook.com -all`); // the MS= record is not SPF
     expect(rows.find((r) => r.record === "a")).toMatchObject({ name: MAIL_NAME, expected: EGRESS }); // the mail name resolves back
     expect(rows.find((r) => r.record === "ptr")).toMatchObject({ name: EGRESS, found: MAIL_NAME });
     expect(rows.find((r) => r.record === "dkim")?.name).toBe("prod._domainkey.example.com"); // the selector is the stage
@@ -101,11 +101,11 @@ describe("mailDnsRows", () => {
     dns.seedTxt("_dmarc.example.com");
     dns.seedA(MAIL_NAME, "198.51.100.7");
     const rows = await mailDnsRows(need(), dns);
-    expect(rows.find((r) => r.record === "spf")).toMatchObject({ ok: false, note: "publish; the address is merged into the record that stands" });
+    expect(rows.find((r) => r.record === "spf")).toMatchObject({ ok: false, note: `publish; a:${MAIL_NAME} is merged into the record that stands` });
     expect(rows.find((r) => r.record === "a")).toMatchObject({ ok: false, note: `point ${MAIL_NAME} at ${EGRESS}` });
     expect(rows.find((r) => r.record === "dmarc")).toMatchObject({ ok: false, note: "publish" });
     for (const row of rows) expect(row.note ?? "x").not.toMatch(/\. /); // one sentence
-    dns.seedTxt("example.com", "v=spf1 ip4:198.51.100.7 -all", `v=spf1 ip4:${EGRESS} -all`);
+    dns.seedTxt("example.com", "v=spf1 ip4:198.51.100.7 -all", `v=spf1 a:${MAIL_NAME} -all`);
     expect((await mailDnsRows(need(), dns)).find((r) => r.record === "spf")).toMatchObject({ ok: false, note: "remove 1 of the 2 v=spf1 records by hand, then publish" });
   });
 
@@ -129,34 +129,52 @@ describe("mailDnsRows", () => {
 
   it("the platform domain: the envelope sender's SPF is a row of its own after the apex SPF, asked at the envelope name", async () => {
     const dns = published();
-    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS} -all`);
+    dns.seedTxt(MAIL_NAME, "v=spf1 a -all");
     const rows = await mailDnsRows(platformNeed(), dns);
     expect(rows.map((r) => `${r.record}:${r.ok}`)).toEqual(["spf:true", "envelope-spf:true", "a:true", "dkim:true", "dmarc:true", "ptr:true"]);
     expect(rows.every((r) => r.note === undefined)).toBe(true); // a green row carries no act
-    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ name: MAIL_NAME, expected: `one v=spf1 record naming ip4:${EGRESS}`, found: `v=spf1 ip4:${EGRESS} -all` });
+    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ name: MAIL_NAME, expected: `one v=spf1 record naming the host ${MAIL_NAME} (a), and no address`, found: "v=spf1 a -all" });
     expect(dns.asked).toContain(`TXT ${MAIL_NAME}`);
   });
 
   it("a missing or doubled envelope SPF names the envelope publish as the act", async () => {
     const dns = published();
     expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, found: null, note: "publish the envelope SPF" });
-    dns.seedTxt(MAIL_NAME, "v=spf1 ip4:198.51.100.7 -all", `v=spf1 ip4:${EGRESS} -all`);
+    dns.seedTxt(MAIL_NAME, "v=spf1 ip4:198.51.100.7 -all", "v=spf1 a -all");
     expect((await mailDnsRows(platformNeed(), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "remove 1 of the 2 v=spf1 records by hand, then publish the envelope SPF" });
   });
 
-  it("PLANTED DEFECT: an address that is a prefix of the egress is not read as the egress, in the apex SPF and the envelope SPF alike", async () => {
+  it("PLANTED DEFECT: a record that names the egress address is red, even beside the host, and the publish replaces it", async () => {
     const dns = published();
-    dns.seedTxt("example.com", "v=spf1 ip4:203.0.113.95 -all");
-    dns.seedTxt(MAIL_NAME, "v=spf1 ip4:203.0.113.90 -all");
+    dns.seedTxt("example.com", `v=spf1 a:${MAIL_NAME} ip4:${EGRESS} -all`);
+    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS}/32 -all`);
     const rows = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
-    expect(rows.find((r) => r.record === "spf")?.ok).toBe(false);
-    expect(rows.find((r) => r.record === "envelope-spf")?.ok).toBe(false);
-    // PLANTED INNOCENT: the address as its own term, bare or with /32, is the egress.
-    dns.seedTxt("example.com", `v=spf1 ip4:${EGRESS}/32 -all`);
-    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:203.0.113.95 ip4:${EGRESS} -all`);
+    expect(rows.find((r) => r.record === "spf")).toMatchObject({ ok: false, note: `publish; it replaces ip4:${EGRESS} with a:${MAIL_NAME}` });
+    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: `publish the envelope SPF; it replaces ip4:${EGRESS} with a` });
+    // PLANTED INNOCENT: an address that only starts like the egress is not it, and the host's own name may carry the explicit form.
+    dns.seedTxt("example.com", `v=spf1 a:${MAIL_NAME} ip4:203.0.113.95 -all`);
+    dns.seedTxt(MAIL_NAME, `v=spf1 a:${MAIL_NAME} -all`);
     const again = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
     expect(again.find((r) => r.record === "spf")?.ok).toBe(true);
     expect(again.find((r) => r.record === "envelope-spf")?.ok).toBe(true);
+  });
+
+  it("PLANTED DEFECT: a record that names another host, or a host that only starts like the egress host, is red", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", "v=spf1 a:other.example.net -all");
+    dns.seedTxt(MAIL_NAME, `v=spf1 a:${MAIL_NAME}.example.net -all`);
+    const rows = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
+    expect(rows.find((r) => r.record === "spf")).toMatchObject({ ok: false, note: `publish; a:${MAIL_NAME} is merged into the record that stands` });
+    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "publish the envelope SPF; a is merged into the record that stands" });
+  });
+
+  it("without a forward-confirmed host every SPF row is red and asks for the reverse DNS, never for the address", async () => {
+    const dns = published();
+    dns.seedTxt(MAIL_NAME, "v=spf1 a -all"); // PLANTED DEFECT: the bare `a` names no host when there is none
+    const rows = await mailDnsRows(platformNeed({ ownMailService: false, egressHost: null }), dns);
+    for (const record of ["spf", "envelope-spf"] as const) {
+      expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, expected: "one v=spf1 record naming the host the reverse DNS of a1.example.net's address gives", note: "set the reverse DNS first; the name it gives must resolve back to the address" });
+    }
   });
 
   it("the platform domain's apex SPF is judged as its mail service's one record, whatever addresses it names", async () => {
@@ -193,7 +211,7 @@ describe("mailDnsRows", () => {
 
   it("where the name mail leaves by resolves to no address, every address-bound row is red for that ONE reason", async () => {
     const dns = published();
-    const rows = await mailDnsRows(need({ egress: null }), dns);
+    const rows = await mailDnsRows(need({ egress: null, egressHost: null }), dns);
     for (const record of ["spf", "a", "ptr"] as const) {
       expect(rows.find((r) => r.record === record)).toMatchObject({ ok: false, note: "give a1.example.net an address record first" });
     }
@@ -249,7 +267,7 @@ describe("readMailDns", () => {
     db.db.insert(apps).values({ id: "app_post", clusterId: "cls_a", name: "post", stage: "prod", host: "post", dkimPublicKey: PEM }).run();
     const dns = published();
     dns.seedA("a1.example.com", EGRESS);
-    dns.seedTxt(MAIL_NAME, `v=spf1 ip4:${EGRESS} -all`); // the envelope sender's SPF, under the platform domain
+    dns.seedTxt(MAIL_NAME, "v=spf1 a -all"); // the envelope sender's SPF, under the platform domain
     const view = await readMailDns({ db: db.db, platformRepo, publicDns: dns, smtpSenders: async () => [{ unit: "post", cluster: "a1" }] });
     expect(view.sender).toEqual({ unit: "post", cluster: "a1.example.com" });
     expect(view.egress).toEqual({ name: "a1.example.com", address: EGRESS });
