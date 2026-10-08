@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mapArgoStatus, claimUsersOf } from "./kube-map.ts";
+import { mapArgoStatus, claimUsersOf, mapExternalSecrets } from "./kube-map.ts";
 
 // What an Application's last comparison rendered, read off its status: the run that rewrites a
 // standing tenant's member entries waits on these to tell the new entries from the old.
@@ -55,5 +55,12 @@ describe("claimUsersOf (who a claim's files belong to, off the workload template
 
   it("THE INNOCENT NEIGHBOUR: a container stating no user gives no row, rather than a guessed one", () => {
     expect(claimUsersOf([deployment({ fsGroup: 999 }, {})])).toEqual([]);
+  });
+});
+
+describe("mapExternalSecrets, the entries it reads", () => {
+  it("names every distinct Vault entry the spec reads, once, in spec order", () => {
+    const data = [{ remoteRef: { key: "test/tenants/g/google-translation" } }, { remoteRef: { key: "test/tenants/g" } }, { remoteRef: { key: "test/tenants/g/google-translation" } }, {}];
+    expect(mapExternalSecrets([{ metadata: { name: "es" }, spec: { data } }])[0]?.remoteKeys).toEqual(["test/tenants/g/google-translation", "test/tenants/g"]);
   });
 });

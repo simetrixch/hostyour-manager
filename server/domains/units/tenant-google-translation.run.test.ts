@@ -19,12 +19,14 @@ import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 
-// tenant-set-google-translation through the real Executor: the typed settings written whole, ESO asked
-// to write the Secret again, the restart only once it has, and no typed value anywhere but Vault.
+// tenant-set-google-translation through the real Executor: the typed settings written whole into the
+// tenant's one entry, ESO asked to write every app's Secret again, the restarts only once it has, and
+// no typed value anywhere but Vault.
 
 const GUID = "zsjs023ctne0";
-const NS = `${GUID}-show-prod`;
-const ENTRY = `prod/tenants/${GUID}/google-translation/show`;
+const SHOW = `${GUID}-show-prod`;
+const SHOP = `${GUID}-shop-prod`;
+const ENTRY = `prod/tenants/${GUID}/google-translation`;
 const PROJECT = "acme-translate-42";
 const PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\\nplanted-key-body\\n-----END PRIVATE KEY-----\\n";
 const ACCOUNT = JSON.stringify({ type: "service_account", client_email: "t@acme-translate-42.iam.gserviceaccount.com", private_key: PRIVATE_KEY });
@@ -34,14 +36,17 @@ const logger = createLogger(parseConfig({
   MANAGER_VERSION: "test", DATA_DIR: "/data", ADMIN_SOCKET_PATH: "/run/manager/admin.sock", LOG_LEVEL: "silent",
 } as NodeJS.ProcessEnv));
 
-/** ESO as the live cluster answers: a refresh request moves refreshTime, unless `answers` is false. */
+const googleRow = (refreshTime: string, key = ENTRY) =>
+  ({ name: GOOGLE_TRANSLATION_EXTERNAL_SECRET, ready: true, reason: "SecretSynced", targetSecret: GOOGLE_TRANSLATION_EXTERNAL_SECRET, refreshTime, remoteKeys: [key] });
+
+/** ESO as the live cluster answers: a refresh request moves refreshTime, except in `silent`. */
 class EsoClusterReader extends FakeClusterReader {
-  answers = true;
-  restartsAtRefresh: number | null = null;
+  silent = new Set<string>();
+  restartsAtRefresh: number[] = [];
   override async refreshExternalSecret(namespace: string, name: string): Promise<void> {
     await super.refreshExternalSecret(namespace, name);
-    this.restartsAtRefresh = this.restarted.length;
-    if (this.answers) this.setExternalSecrets(namespace, [{ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: "2026-10-08T12:00:05Z" }]);
+    this.restartsAtRefresh.push(this.restarted.length);
+    if (!this.silent.has(namespace)) this.setExternalSecrets(namespace, [googleRow("2026-10-08T12:00:05Z")]);
   }
 }
 
@@ -53,18 +58,25 @@ describe("tenant-set-google-translation through the Executor", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  function make(opts: { externalSecret?: boolean; showStatus?: "active" | "offboarded" } = {}) {
+  /** A tenant with the members auth, show and shop, and an offboarded app old. Show's and shop's charts
+   *  render the ExternalSecret; auth's does not. */
+  function make(opts: { externalSecret?: boolean; shopKey?: string } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-google-translation-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "show"], identityProvider: "auth", status: "active" }).run();
-    db.db.insert(tenantApps).values({ id: "tna_show", tenantId: "tnt_1", name: "show", status: opts.showStatus ?? "active" }).run();
-    const kube = new EsoClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, workloadsPerNamespace: { [NS]: 2 } });
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenantApps).values([
+      { id: "tna_show", tenantId: "tnt_1", name: "show", status: "active" },
+      { id: "tna_shop", tenantId: "tnt_1", name: "shop", status: "active" },
+      { id: "tna_old", tenantId: "tnt_1", name: "old", status: "offboarded" },
+    ]).run();
+    const kube = new EsoClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 }, workloadsPerNamespace: { [SHOW]: 2, [SHOP]: 3, [`${GUID}-auth-prod`]: 1 } });
     if (opts.externalSecret ?? true) {
-      kube.setExternalSecrets(NS, [{ name: GOOGLE_TRANSLATION_EXTERNAL_SECRET, ready: true, reason: "SecretSynced", targetSecret: GOOGLE_TRANSLATION_EXTERNAL_SECRET, refreshTime: "2026-10-08T12:00:00Z" }]);
+      kube.setExternalSecrets(SHOW, [googleRow("2026-10-08T12:00:00Z")]);
+      kube.setExternalSecrets(SHOP, [googleRow("2026-10-08T12:00:00Z", opts.shopKey)]);
     }
     const writes: GoogleTranslationWriteInput[] = [];
     const def = makeTenantSetGoogleTranslationDef({
@@ -89,22 +101,35 @@ describe("tenant-set-google-translation through the Executor", () => {
   }
 
   async function type(h: ReturnType<typeof make>, typed: Record<string, string>): Promise<string> {
-    const { runId } = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1", app: "show" });
+    const { runId } = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1" });
     await h.executor.approve(runId, Object.fromEntries(Object.entries(typed).map(([k, v]) => [`google-translation:${k}`, Buffer.from(v, "utf8")])));
     await h.executor.settle(runId);
     return runId;
   }
 
-  it("writes all four properties, a blank one as the empty text, refreshes, and restarts only once ESO has written the Secret", async () => {
+  it("writes all four properties into the tenant's entry, refreshes every app that reads it, and restarts them only once ESO has written every Secret", async () => {
     const h = make();
     const runId = await type(h, { project: ` ${PROJECT}\n`, "service-account": ACCOUNT });
     expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
-    expect(h.writes).toEqual([{ stage: "prod", guid: GUID, app: "show", data: { project: PROJECT, "service-account": ACCOUNT, location: "", glossary: "" } }]);
+    expect(h.writes).toEqual([{ stage: "prod", guid: GUID, data: { project: PROJECT, "service-account": ACCOUNT, location: "", glossary: "" } }]);
     expect(listSecretWrites(h.db.db, ENTRY).map((w) => [w.key, w.act, w.runId]).sort()).toEqual(
       ["glossary", "location", "project", "service-account"].map((k) => [k, "set", runId]));
-    expect(h.kube.refreshedExternalSecrets).toEqual([`${NS}/${GOOGLE_TRANSLATION_EXTERNAL_SECRET}`]);
-    expect(h.kube.restartsAtRefresh).toBe(0);
-    expect(h.kube.restarted.map((r) => r.namespace)).toEqual([NS]);
+    expect(h.kube.refreshedExternalSecrets.sort()).toEqual([`${SHOP}/${GOOGLE_TRANSLATION_EXTERNAL_SECRET}`, `${SHOW}/${GOOGLE_TRANSLATION_EXTERNAL_SECRET}`]);
+    expect(h.kube.restartsAtRefresh).toEqual([0, 0]);
+    // The identity provider's chart renders no Google settings, so it is not rolled.
+    expect(h.kube.restarted.map((r) => r.namespace).sort()).toEqual([SHOP, SHOW]);
+    expect(new Set(h.kube.restarted.map((r) => r.stampedAt)).size).toBe(1);
+  });
+
+  it("PLANTED DEFECT: an app whose ExternalSecret still reads its own entry — refused before the write, naming it", async () => {
+    const h = make({ shopKey: `prod/tenants/${GUID}/google-translation/shop` });
+    const runId = await type(h, { project: PROJECT, "service-account": ACCOUNT });
+    expect(getRun(h.db.db, runId)?.status).toBe("failed");
+    expect(h.stepError(runId)).toContain(`${SHOP} reads prod/tenants/${GUID}/google-translation/shop`);
+    expect(h.stepError(runId)).not.toContain(SHOW);
+    expect(h.writes).toEqual([]);
+    expect(h.kube.refreshedExternalSecrets).toEqual([]);
+    expect(h.kube.restarted).toEqual([]);
   });
 
   it("leaves no typed value in the plan, the log, a checkpoint or an error", async () => {
@@ -116,12 +141,13 @@ describe("tenant-set-google-translation through the Executor", () => {
     expect(h.writes[0]?.data).toMatchObject({ location: "europe-west1", glossary: "shop-terms" });
   });
 
-  it("PLANTED DEFECT: ESO never writes the Secret again — the step fails and the engine is not restarted", async () => {
+  it("PLANTED DEFECT: ESO never writes one app's Secret again — the step fails naming it, and no engine is restarted", async () => {
     const h = make();
-    h.kube.answers = false;
+    h.kube.silent.add(SHOP);
     const runId = await type(h, { project: PROJECT, "service-account": ACCOUNT });
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(h.stepError(runId)).toContain("was not written again");
+    expect(h.stepError(runId)).toContain(`was not written again within 0s of the refresh request in ${SHOP} (Ready)`);
+    expect(h.stepError(runId)).not.toContain(SHOW);
     expect(h.writes).toHaveLength(1);
     expect(h.kube.restarted).toEqual([]);
   });
@@ -130,7 +156,8 @@ describe("tenant-set-google-translation through the Executor", () => {
     const h = make({ externalSecret: false });
     const runId = await type(h, { project: PROJECT, "service-account": ACCOUNT });
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect(h.stepError(runId)).toContain(`holds no ExternalSecret ${GOOGLE_TRANSLATION_EXTERNAL_SECRET}`);
+    expect(h.stepError(runId)).toContain(`no member namespace of tenant ${GUID} holds the ExternalSecret ${GOOGLE_TRANSLATION_EXTERNAL_SECRET}`);
+    expect(h.writes).toEqual([]);
     expect(h.kube.refreshedExternalSecrets).toEqual([]);
     expect(h.kube.restarted).toEqual([]);
   });
@@ -145,18 +172,15 @@ describe("tenant-set-google-translation through the Executor", () => {
     }
   });
 
-  it("names whether settings were typed before, and refuses an app that does not stand", async () => {
+  it("names whether settings were typed before", async () => {
     const h = make();
-    const first = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1", app: "show" });
-    expect(getRun(h.db.db, first.runId)?.summary).toContain("No settings were typed for this app yet");
+    const first = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1" });
+    expect(getRun(h.db.db, first.runId)?.summary).toContain("No settings were typed for this tenant yet");
     expect(getRun(h.db.db, first.runId)?.requiredSecrets).toEqual(["google-translation:project", "google-translation:service-account"]);
     await h.executor.deleteRun(first.runId);
     const typed = await type(h, { project: PROJECT, "service-account": ACCOUNT });
-    const again = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1", app: "show" });
+    const again = await h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1" });
     expect(getRun(h.db.db, again.runId)?.summary).toContain(`typed by run ${typed}`);
-    await expect(h.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1", app: "erp" })).rejects.toThrow(/no standing app "erp"/);
-    const gone = make({ showStatus: "offboarded" });
-    await expect(gone.executor.plan("tenant-set-google-translation", { tenantId: "tnt_1", app: "show" })).rejects.toThrow(/no standing app "show"/);
   });
 });
 

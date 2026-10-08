@@ -354,8 +354,8 @@ describe("mapExternalSecrets", () => {
 
   it("carries the name, the Ready verdict, its reason, the Secret the spec targets and the moment ESO last wrote it — a refreshTime served as null reads as never", () => {
     expect(mapExternalSecrets([raw("repo-platform", "False", "SecretSyncedError", "repo-platform-creds", "2026-09-17T10:00:00Z"), raw("nulled", "True", "SecretSynced", "x", null)])).toEqual([
-      { name: "repo-platform", ready: false, reason: "SecretSyncedError", targetSecret: "repo-platform-creds", refreshTime: "2026-09-17T10:00:00Z" },
-      { name: "nulled", ready: true, reason: "SecretSynced", targetSecret: "x", refreshTime: "" },
+      { name: "repo-platform", ready: false, reason: "SecretSyncedError", targetSecret: "repo-platform-creds", refreshTime: "2026-09-17T10:00:00Z", remoteKeys: [] },
+      { name: "nulled", ready: true, reason: "SecretSynced", targetSecret: "x", refreshTime: "", remoteKeys: [] },
     ]);
   });
 
@@ -363,20 +363,20 @@ describe("mapExternalSecrets", () => {
     // ESO has not looked at it yet. Fail closed: reading it as ready would let a gate pass on a
     // credential that has never been fetched.
     expect(mapExternalSecrets([{ metadata: { name: "fresh" } }])).toEqual([
-      { name: "fresh", ready: false, reason: "", targetSecret: "", refreshTime: "" },
+      { name: "fresh", ready: false, reason: "", targetSecret: "", refreshTime: "", remoteKeys: [] },
     ]);
   });
 
   it("drops an item with no name, because a row nobody can name tells an operator nothing", () => {
     expect(mapExternalSecrets([{ status: { conditions: [] } }, raw("cluster-slave", "True", "SecretSynced")])).toEqual([
-      { name: "cluster-slave", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" },
+      { name: "cluster-slave", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "", remoteKeys: [] },
     ]);
   });
 });
 
 describe("externalSecretsAllReady", () => {
-  const ready = { name: "a", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" };
-  const notReady = { name: "b", ready: false, reason: "SecretSyncedError", targetSecret: "", refreshTime: "" };
+  const ready = { name: "a", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "", remoteKeys: [] };
+  const notReady = { name: "b", ready: false, reason: "SecretSyncedError", targetSecret: "", refreshTime: "", remoteKeys: [] };
 
   it("zero ExternalSecrets is ready", () => {
     expect(externalSecretsAllReady([])).toBe(true);

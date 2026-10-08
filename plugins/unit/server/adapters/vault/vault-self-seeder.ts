@@ -1,5 +1,5 @@
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind, GoogleTranslationWriteInput } from "./seeder-port.ts";
-import { TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
+import { GOOGLE_TRANSLATION_PROPERTIES, TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 import { vaultRevokeSelf, vaultSelfLogin, type VaultSelfAuth } from "./vault-self-login.ts";
@@ -277,18 +277,48 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
-  async replaceGoogleTranslation(input: GoogleTranslationWriteInput): Promise<void> {
-    // The app name is a path segment here, held to the rule seedTenantAppKey holds it to.
-    if (!appName.safeParse(input.app).success) throw new VaultError(`"${input.app}" is no tenant app name, so no settings path is composed from it`, 400);
+  async seedTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<VaultSeedOutcome> {
     const { addr, token } = await this.login();
     try {
-      const path = tenantAppKeyPath(input.stage, input.guid, "google-translation", input.app);
+      const path = tenantGoogleTranslationPath(input.stage, input.guid);
+      const data = Object.fromEntries(GOOGLE_TRANSLATION_PROPERTIES.map((p) => [p, ""]));
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "POST",
+        headers: { "x-vault-token": token, "content-type": "application/json" },
+        body: JSON.stringify({ data, options: { cas: 0 } }),
+      });
+      if (res.ok) return { created: true };
+      const detail = await res.text().catch(() => "");
+      if (res.status === 400 && detail.includes("check-and-set")) return { created: false };
+      throw new VaultError(`vault Google translation settings seed put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async replaceGoogleTranslation(input: GoogleTranslationWriteInput): Promise<void> {
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantGoogleTranslationPath(input.stage, input.guid);
       const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
         method: "POST",
         headers: { "x-vault-token": token, "content-type": "application/json" },
         body: JSON.stringify({ data: input.data }),
       });
       if (!res.ok) throw new VaultError(`vault Google translation settings put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async deleteTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<void> {
+    // METADATA delete for the reason deleteTenantCrypto gives: a tenant minted later with this guid
+    // must not inherit the settings, and its create-only seed needs the leaf without versions.
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantGoogleTranslationPath(input.stage, input.guid);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${path}`, { method: "DELETE", headers: { "x-vault-token": token } });
+      if (!res.ok && res.status !== 404) throw new VaultError(`vault Google translation settings delete failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
     } finally {
       await this.revoke(addr, token).catch(() => undefined);
     }
@@ -414,4 +444,10 @@ export class VaultSelfSeeder implements VaultSeeder {
  *  written create-only and takes no property later. */
 export function tenantAppKeyPath(stage: string, guid: string, kind: TenantAppKeyKind, app: string): string {
   return `${stage}/tenants/${guid}/${kind}/${app}`;
+}
+
+/** Where a tenant's Google translation settings stand: beside the key folders, one entry every app
+ *  of the tenant reads. */
+export function tenantGoogleTranslationPath(stage: string, guid: string): string {
+  return `${stage}/tenants/${guid}/google-translation`;
 }

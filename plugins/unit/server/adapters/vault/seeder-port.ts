@@ -238,21 +238,15 @@ export interface TenantCryptoDeleteInput {
  *    the form's post against.
  *  - `service-key`: what an app's engine proves itself with to its tenant's identity provider, which
  *    hands it a short-lived token for digita-post in exchange; every app has one, website or not.
- *  - `google-translation`: the Google Cloud Translation settings of an app's localization plugin,
- *    which an operator types. Unlike the others it is not minted: the Manager first writes it with
- *    every property empty, because the app's ExternalSecret reads each property by name and a
- *    missing entry fails the sync of the app's engine; a typed value then replaces it.
  *  The tenant's members read every one through the same templated policy as the entry above it. */
-export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key", "google-translation"] as const;
-/** The properties of a `google-translation` entry, as the engine chart reads them. */
+export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key"] as const;
+/** The properties of a tenant's Google translation entry, as the engine chart reads them. */
 export const GOOGLE_TRANSLATION_PROPERTIES = ["project", "service-account", "location", "glossary"] as const;
 export type GoogleTranslationProperty = (typeof GOOGLE_TRANSLATION_PROPERTIES)[number];
 
 export interface GoogleTranslationWriteInput {
   stage: Stage;
   guid: string;
-  /** The app's name as `tenant_apps.name` spells it. */
-  app: string;
   /** Every property, the empty text for one the operator left blank. */
   data: Record<GoogleTranslationProperty, string>;
 }
@@ -347,11 +341,19 @@ export interface VaultSeeder {
    *  with its Password field key alone, and a renderer and its engine agree only while their revalidate
    *  secret stays the same, so neither is ever overwritten. */
   seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome>;
-  /** REPLACE one tenant app's Google translation settings with what an operator typed: created where
+  /** Create a tenant's Google translation settings, <stage>/tenants/<guid>/google-translation, ONCE
+   *  (cas=0) with every property empty, which the localization plugin reads as not set: every app of
+   *  the tenant reads that one entry through its ExternalSecret, which fails its sync while the entry
+   *  or a property is missing. An entry that stands, typed or not, is left as it is. */
+  seedTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<VaultSeedOutcome>;
+  /** REPLACE a tenant's Google translation settings with what an operator typed: created where
    *  absent, replaced where it stands, no check-and-set, because these are the operator's to change.
-   *  Every property rides every write, since the app's ExternalSecret fails on one that is missing.
+   *  Every property rides every write, since the ExternalSecret fails on one that is missing.
    *  Write-only: nothing is read. */
   replaceGoogleTranslation(input: GoogleTranslationWriteInput): Promise<void>;
+  /** Remove a tenant's Google translation settings, all versions (purge). An absent entry (404) is
+   *  ok; every other non-2xx fails the run. */
+  deleteTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<void>;
   /** Remove every tenant app key of one tenant, of every kind (purge), found by listing the key names
    *  under it, so the key of an app this manager no longer knows goes too; with `app`, that app's keys
    *  only (the purge of one removed app). Answers what it removed, each as <kind>/<app>. */

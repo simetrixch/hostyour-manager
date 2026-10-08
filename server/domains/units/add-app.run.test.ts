@@ -25,7 +25,7 @@ describe("add-app run definition", () => {
     const def = makeAddAppDef(ports());
     expect(def.mutating).toBe(true);
     expect(def.steps({} as AddAppParams).map((s) => s.name)).toEqual([
-      "attest-target", "ensure-images", "apply-appproject", "provision-argo-sync", "seed-password-field-key", "seed-service-key", "seed-google-translation", "append-app", "watch-sync-set", "smoke", "record-inventory",
+      "attest-target", "ensure-images", "apply-appproject", "provision-argo-sync", "seed-password-field-key", "seed-service-key", "append-app", "watch-sync-set", "smoke", "record-inventory",
     ]);
     expect(() => def.plan({} as AddAppParams, { db: db.db })).toThrow(/planStream/);
   });
