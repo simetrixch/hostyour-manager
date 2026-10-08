@@ -125,14 +125,14 @@ describe("a tenant identity provider's DNS mark — the issuer under the zone", 
 describe("a stage host — the stage stands directly before the zone that holds the host", () => {
   it("composes a dev or test host as <labels below the zone>.<stage>.<zone>, and keeps a prod host as it is", () => {
     expect(stageHost("show.example.org", "example.org", "test")).toBe("show.test.example.org");
-    expect(stageHost("veloluck.show.example.org", "example.org", "test")).toBe("veloluck.show.test.example.org");
+    expect(stageHost("cycleshop.show.example.org", "example.org", "test")).toBe("cycleshop.show.test.example.org");
     expect(stageHost("example.org", "example.org", "dev")).toBe("dev.example.org");
     expect(stageHost("show.example.co.uk", "example.co.uk", "test")).toBe("show.test.example.co.uk");
     expect(stageHost("show.example.org", "example.org", "prod")).toBe("show.example.org");
   });
 
   it("reads the prod host back off a stage host, and nothing off a host without the stage before the zone", () => {
-    expect(prodHostOf("veloluck.show.test.example.org", "example.org", "test")).toBe("veloluck.show.example.org");
+    expect(prodHostOf("cycleshop.show.test.example.org", "example.org", "test")).toBe("cycleshop.show.example.org");
     expect(prodHostOf("test.example.org", "example.org", "test")).toBe("example.org");
     expect(prodHostOf("test.show.example.org", "example.org", "test")).toBeNull();
     expect(prodHostOf("show.example.org", "example.org", "prod")).toBe("show.example.org");
@@ -140,7 +140,7 @@ describe("a stage host — the stage stands directly before the zone that holds 
 
   it("PLANTED DEFECT: refuses a test host with the stage in front of the whole name, naming the host it is", () => {
     expect(stageHostProblem("test.show.example.org", "example.org", "test")).toBe("test.show.example.org is no test host: the stage stands directly before the zone example.org, so it is show.test.example.org");
-    expect(stageHostProblem("test.veloluck.show.example.org", "example.org", "test")).toMatch(/so it is veloluck\.show\.test\.example\.org$/);
+    expect(stageHostProblem("test.cycleshop.show.example.org", "example.org", "test")).toMatch(/so it is cycleshop\.show\.test\.example\.org$/);
     expect(stageHostProblem("show.example.org", "example.org", "test")).toMatch(/so it is show\.test\.example\.org$/);
     expect(stageHostProblem("show.test.example.org", "example.org", "dev")).toMatch(/is no dev host: .* so it is show\.dev\.example\.org$/);
   });
@@ -152,7 +152,7 @@ describe("a stage host — the stage stands directly before the zone that holds 
   it("PLANTED INNOCENT: passes a host that keeps the rule at its stage", () => {
     expect(stageHostProblem("show.test.example.org", "example.org", "test")).toBeNull();
     expect(stageHostProblem("test.example.org", "example.org", "test")).toBeNull();
-    expect(stageHostProblem("veloluck.show.dev.example.org", "example.org", "dev")).toBeNull();
+    expect(stageHostProblem("cycleshop.show.dev.example.org", "example.org", "dev")).toBeNull();
     expect(stageHostProblem("show.example.org", "example.org", "prod")).toBeNull();
     expect(stageHostProblem("example.org", "example.org", "prod")).toBeNull();
   });

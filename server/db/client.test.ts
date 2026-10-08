@@ -174,11 +174,11 @@ describe("openDb — migration phase + append-only invariants", () => {
     standing.prepare("INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'root')").run();
     standing.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cls_1', 'srv_1', 'prod', 's1.example', 's1')").run();
     standing.prepare("INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) VALUES ('tnt_1', 'cls_1', 'zsjs023ctne0', 'show', 'prod', 'auth', '[\"auth\"]')").run();
-    standing.prepare("INSERT INTO tenant_apps (id, tenant_id, name, status) VALUES ('tna_web', 'tnt_1', 'veloluck-show-digitapla-a9665c', 'offboarded'), ('tna_app', 'tnt_1', 'workshop', 'active')").run();
+    standing.prepare("INSERT INTO tenant_apps (id, tenant_id, name, status) VALUES ('tna_web', 'tnt_1', 'cycleshop-show-digitapla-a9665c', 'offboarded'), ('tna_app', 'tnt_1', 'workshop', 'active')").run();
     const run = standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES (?, 'tenant-add-app', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', ?)");
     // The newest add-app run of the row wins: an older one named another site.
-    run.run("run_web_old", JSON.stringify({ tenantId: "tnt_1", app: "veloluck-show-digitapla-a9665c", website: { folder: "web", site: "old-site", domain: "old.show.example" } }), 1);
-    run.run("run_web", JSON.stringify({ tenantId: "tnt_1", app: "veloluck-show-digitapla-a9665c", website: { folder: "web", site: "veloluck", domain: "veloluck.show.example" } }), 3);
+    run.run("run_web_old", JSON.stringify({ tenantId: "tnt_1", app: "cycleshop-show-digitapla-a9665c", website: { folder: "web", site: "old-site", domain: "old.show.example" } }), 1);
+    run.run("run_web", JSON.stringify({ tenantId: "tnt_1", app: "cycleshop-show-digitapla-a9665c", website: { folder: "web", site: "cycleshop", domain: "cycleshop.show.example" } }), 3);
     run.run("run_app", JSON.stringify({ tenantId: "tnt_1", app: "workshop" }), 2);
     // Neither a run of another kind nor another tenant's website of the same name marks the app's row.
     standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-domain', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
@@ -188,7 +188,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     handles.push(h);
     expect(h.sqlite.prepare("SELECT id, site FROM tenant_apps ORDER BY id").all()).toEqual([
       { id: "tna_app", site: null },
-      { id: "tna_web", site: "veloluck" },
+      { id: "tna_web", site: "cycleshop" },
     ]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });

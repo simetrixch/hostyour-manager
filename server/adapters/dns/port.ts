@@ -60,7 +60,7 @@ export interface DnsProvider {
    *  `proxied` and `ttl` say otherwise: only a customer's record written back as it stood carries its
    *  own, every record the platform writes for itself must resolve to the cluster. */
   createRecord(input: { name: string; type: DnsRecordType; content: string; proxied?: boolean; ttl?: number; signal?: AbortSignal }): Promise<void>;
-  /** The name of the zone that holds `name` (`example.org` for `veloluck.show.example.org`): "our
+  /** The name of the zone that holds `name` (`example.org` for `cycleshop.show.example.org`): "our
    *  domain" of a host, before which a dev or test stage stands (unit-host.ts stageHost). THROWS
    *  DnsZoneUnknownError where no zone of this provider holds it. */
   zoneName(input: { name: string; signal?: AbortSignal }): Promise<string>;

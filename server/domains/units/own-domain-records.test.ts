@@ -43,7 +43,7 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
   it("lets a host lie under the host of the tenant it nests under: confirmed in the plan, then recorded on the row, a website host of it included", () => {
     expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, [], "tnt_sim")).toBeNull();
     nest("tnt_show", "tnt_sim");
-    expect(customerHostProblem(db.db, "tnt_show", "veloluck.show.digitaplatform.com", APEX)).toBeNull();
+    expect(customerHostProblem(db.db, "tnt_show", "cycleshop.show.digitaplatform.com", APEX)).toBeNull();
     expect(customerHostProblem(db.db, "tnt_show", "www.show.digitaplatform.com", APEX, [{ host: "digitaplatform.com", subdomain: "simetrix", guid: "a1a1a1a1a1a1" }])).toBeNull();
   });
 
