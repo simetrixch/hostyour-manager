@@ -93,6 +93,15 @@ export function getRunStepStatus(db: Db, runId: string, stepName: string): StepS
   return db.select({ status: steps.status }).from(steps).where(and(eq(steps.runId, runId), eq(steps.name, stepName))).get()?.status;
 }
 
+export function getRunStepCheckpoint<T>(db: Db, runId: string, stepName: string): T | undefined {
+  const row = db
+    .select({ checkpointJson: steps.checkpointJson })
+    .from(steps)
+    .where(and(eq(steps.runId, runId), eq(steps.name, stepName)))
+    .get();
+  return (row?.checkpointJson as { data?: T } | null)?.data;
+}
+
 /** A run on ONE target that has started and not settled — approved, running, or failed (a failed
  *  run is retried or aborted, never left as it stands) — or undefined. The narrow read a run kind
  *  refuses its target with while another run is changing it. A deleted run has let its target go. */

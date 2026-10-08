@@ -146,7 +146,7 @@ export function buildTenantOnboarding(
   dns: DnsProvider | undefined,
   resolveUnitApex: ((domain: string, stage: Stage) => Promise<string>) | undefined,
   resolveClusterValueFiles: ((domain: string, stage: Stage) => Promise<ClusterValueFile[]>) | undefined,
-  relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage">,
+  relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage" | "authoritativeTtl">,
   /** The SAME VaultSelfSeeder the consumer family writes through — one Vault, one identity. create-tenant
    *  seeds the tenant's crypto entry with it and tenant-purge destroys the same entry, so the writer and
    *  the destroyer are provably the same object. */

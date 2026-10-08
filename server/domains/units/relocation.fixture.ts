@@ -125,6 +125,7 @@ export interface RelocationFakes {
   buildRbac: FakeBuildRbacWriter;
   repoCredential: FakeRepoCredentialWriter;
   platformRepo: FakePlatformRepo;
+  authoritativeTtl?: ((name: string, signal: AbortSignal) => Promise<{ ttlSeconds: number; server: string }>) | undefined;
 }
 
 export function makeFakes(): RelocationFakes {
@@ -152,6 +153,7 @@ export function makeFakes(): RelocationFakes {
     buildRbac: new FakeBuildRbacWriter(),
     repoCredential: new FakeRepoCredentialWriter(),
     platformRepo: seededProvisionerValues(new FakePlatformRepo()),
+    authoritativeTtl: async () => ({ ttlSeconds: 0, server: "ns1.example.org" }),
   };
 }
 
@@ -186,6 +188,7 @@ export function consumerPorts(f: RelocationFakes): ConsumerRelocationPorts & { r
       open: async () => Buffer.from("ghp_owner"),
       list: async () => [{ id: "cred_pat_x", kind: "pat", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" }],
     } as unknown as Pick<CredentialStore, "open" | "list">,
+    ...(f.authoritativeTtl ? { authoritativeTtl: f.authoritativeTtl } : {}),
   };
 }
 
@@ -206,6 +209,7 @@ export function tenantPorts(f: RelocationFakes): TenantRelocationPorts & { regis
     platformRepoURL: "https://github.com/simetrixch/hostyour-cloud.git",
     buildRbac: f.buildRbac,
     resolveUnitApex: async () => "example.com",
+    ...(f.authoritativeTtl ? { authoritativeTtl: f.authoritativeTtl } : {}),
   };
 }
 
@@ -253,7 +257,26 @@ export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<strin
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
-    log: (_s, t) => logs.push(t), checkpoint: () => undefined, readCheckpoint: () => undefined, registerCleanup: () => undefined,
+    log: (_s, t) => logs.push(t),
+    checkpoint: (data) => {
+      db.sqlite.prepare("INSERT OR IGNORE INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?, 'noop', 'server', 'srv_seed', '{}', '{}', 'running', 'op_system')").run(runId);
+      const row = db.sqlite.prepare("SELECT checkpoint_json FROM steps WHERE run_id = ? AND name = ?").get(runId, stepName) as { checkpoint_json: string | null } | undefined;
+      const current = row?.checkpoint_json ? JSON.parse(row.checkpoint_json) : {};
+      const updated = JSON.stringify({ ...current, data });
+      if (row !== undefined) {
+        db.sqlite.prepare("UPDATE steps SET checkpoint_json = ? WHERE run_id = ? AND name = ?").run(updated, runId, stepName);
+      } else {
+        const stepId = `step_${stepName}_${Math.random().toString(36).slice(2, 8)}`;
+        const count = (db.sqlite.prepare("SELECT COUNT(*) as c FROM steps WHERE run_id = ?").get(runId) as { c: number }).c;
+        db.sqlite.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, checkpoint_json) VALUES (?, ?, ?, ?, ?, ?)").run(stepId, runId, count, stepName, stepName, updated);
+      }
+    },
+    readCheckpoint: () => {
+      const row = db.sqlite.prepare("SELECT checkpoint_json FROM steps WHERE run_id = ? AND name = ?").get(runId, stepName) as { checkpoint_json: string | null } | undefined;
+      if (!row?.checkpoint_json) return undefined;
+      return JSON.parse(row.checkpoint_json)?.data;
+    },
+    registerCleanup: () => undefined,
   };
 }
 

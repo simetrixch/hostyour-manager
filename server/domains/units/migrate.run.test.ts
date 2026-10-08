@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { migrateTtlSuite } from "./migrate-ttl.suite.ts";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
 import { apps, tenantApps, tenants } from "../../db/schema/inventory.ts";
@@ -454,4 +455,7 @@ describe("tenant-migrate", () => {
     expect(row?.clusterId).toBe(SOURCE.clusterId);
     expect(listBackups(db.db, { kind: "tenant", unit: GUID, stage: "prod" }).map((b) => b.state)).toEqual(["ok"]);
   });
+
+  migrateTtlSuite(() => db);
 });
+

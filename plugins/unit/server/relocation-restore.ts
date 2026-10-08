@@ -141,9 +141,20 @@ export function switchDnsStep(ports: RelocationPorts, worldOf: WorldOf, targetCl
       const target = targetOf(ctx, targetClusterId);
       // The one caller that repoints a record from another cluster of this installation: the record
       // points at the SOURCE cluster until this step, and moving it onto the target is the whole of the switch.
-      for (const recordName of await w.dnsRecordNames(ctx, target)) {
+      const recordNames = await w.dnsRecordNames(ctx, target);
+      for (const recordName of recordNames) {
         await provisionUnitDns(ctx, { dns: ports.dns, unit: w.unit, kind: w.kindWord, stage: w.stage, recordName, clusterFqdn: target.domain, runKind, repoint: true });
       }
+      if (!ports.authoritativeTtl) {
+        throw errValidation("cannot read authoritative TTL: port authoritativeTtl is missing; the source would be cleared while resolvers still answer it");
+      }
+      const records: { name: string; ttlSeconds: number }[] = [];
+      for (const recordName of recordNames) {
+        const { ttlSeconds, server } = await ports.authoritativeTtl(recordName, ctx.signal);
+        records.push({ name: recordName, ttlSeconds });
+        ctx.log("meta", `${recordName} serves TTL ${ttlSeconds} s at its authoritative server ${server}`);
+      }
+      ctx.checkpoint({ switchedAt: Date.now(), records });
     },
   };
 }

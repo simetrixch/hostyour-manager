@@ -43,6 +43,7 @@ import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import type { UnitPorts } from "#unit/server/plugin.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
+import { readAuthoritativeTtl } from "../adapters/dns/authoritative-ttl.ts";
 import type { ConsumerRelocationPorts } from "../domains/units/relocation-world-consumer.ts";
 import { makeBackupDef } from "../domains/units/backup.run.ts";
 import { makeConsumerNightlyBackupDef } from "../domains/units/nightly-backup.run.ts";
@@ -262,9 +263,10 @@ export function buildUnits(
   // The relocation surface both families' backup/restore/migrate defs share: the public
   // probe verify-quiesced measures with, the per-Job budget, the storage box and the dbtools image
   // pin. Box + image are optional in the WIRING — the steps that need them fail loud when absent.
-  const relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage" | "platformAppValues"> = {
+  const relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage" | "platformAppValues" | "authoritativeTtl"> = {
     probe: unit.relocation.probe,
     jobTimeoutMs: RELOCATION_JOB_TIMEOUT_MS,
+    authoritativeTtl: readAuthoritativeTtl,
     ...(platformRepo ? { platformAppValues: (app: string, domain: string, stage: Stage) => readPlatformAppValues(platformRepo, app, domain, stage) } : {}),
     ...(unit.relocation.storageBox ? { storageBox: unit.relocation.storageBox } : {}),
     ...(unit.relocation.dbtoolsImage ? { dbtoolsImage: unit.relocation.dbtoolsImage } : {}),
@@ -331,7 +333,7 @@ function buildConsumerOnboarding(
   logger: Logger,
   platformRepo: PlatformRepo | undefined,
   dns: DnsProvider | undefined,
-  relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage">,
+  relocation: Pick<RelocationPorts, "probe" | "jobTimeoutMs" | "storageBox" | "dbtoolsImage" | "authoritativeTtl">,
   tenantRegistrations: TenantRegistrations | undefined,
   /** The SAME seeder the tenant family writes through — the unit plugin's, because there is
    *  one Vault and one Manager identity. */

@@ -38,6 +38,9 @@ export interface RelocationPorts {
    *  which a job reads the cluster's shared Mongo. Optional in the wiring: a job that dials the shared
    *  Mongo fails loud without it. */
   platformAppValues?: (app: string, domain: string, clusterStage: Stage) => Promise<ClusterValueFile[]>;
+  /** The TTL the zone's authoritative server serves for a name, which is how long a resolver may keep
+   *  answering the source after the switch. */
+  authoritativeTtl?: (name: string, signal: AbortSignal) => Promise<{ ttlSeconds: number; server: string }>;
 }
 
 /** ONE unit as the relocation steps see it — the whole per-kind difference, in data and closures.
