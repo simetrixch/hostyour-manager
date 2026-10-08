@@ -502,7 +502,7 @@ export const RUN_KIND = [
   "tenant-create", "tenant-add-app", "tenant-remove-app",       // tenant (multi-app) onboarding
   // One removed app of a standing tenant, purged by hand: what remove-app kept, then its record.
   "tenant-purge-app",
-  // One app's Google translation settings, typed at approve and brought into its engine.
+  // A tenant's Google translation settings, typed at approve and brought into the engine of every app of it.
   "tenant-set-google-translation",
   // The tenant's OWN apps repository: created in the customer's owner from the deploy repository's
   // apps bundle with the chosen apps, registered build-only and built once — before create-tenant

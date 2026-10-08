@@ -19,7 +19,7 @@ import type { PreflightCheck } from "./preflight.ts";
  *  spelled twice is a key that can disagree with itself. */
 export const MACHINE_PASSWORD_SECRET = "ansiwise-elevation";
 
-/** The prefix the Google translation settings of a tenant app ride under at approve
+/** The prefix the Google translation settings of a tenant ride under at approve
  *  (`google-translation:<property>`): declared by the plan that asks for them, labelled by the card. */
 export const GOOGLE_TRANSLATION_SECRET_PREFIX = "google-translation:";
 

@@ -23,7 +23,7 @@ export const argoRow = (name: string, sync = "Synced", health = "Healthy"): Argo
 
 /** An ExternalSecret row as a namespace holds it — the shape listExternalSecrets answers with. */
 export const externalSecretRow = (name: string, ready = true, reason = ready ? "SecretSynced" : "SecretSyncedError"): ExternalSecretRow => ({
-  name, ready, reason, targetSecret: `${name}-creds`, refreshTime: ready ? "2026-01-01T00:00:00Z" : "",
+  name, ready, reason, targetSecret: `${name}-creds`, refreshTime: ready ? "2026-01-01T00:00:00Z" : "", remoteKeys: [],
 });
 
 export interface MasterKubeFakes {

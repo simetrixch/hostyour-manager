@@ -38,23 +38,39 @@ describe("VaultSelfSeeder tenant app keys", () => {
     });
   });
 
-  it("PLANTED DEFECT: replaces an app's Google translation settings whole and without check-and-set, so a typed entry overwrites the seeded one", async () => {
+  it("PLANTED DEFECT: replaces the tenant's Google translation settings whole and without check-and-set, so a typed entry overwrites the seeded one", async () => {
     const data = { project: "p", "service-account": "{}", location: "", glossary: "" };
     await withSelf(async (seeder) => {
-      await seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show", data });
+      await seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", data });
       const put = vault.recorded.find((r) => r.method === "POST" && r.url.includes("/data/"));
-      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/google-translation/show" });
+      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/google-translation" });
       expect(put!.body).toEqual({ data });
     });
     vault.dataPut = { status: 403, body: "permission denied" };
-    await withSelf(async (seeder) => expect(seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show", data })).rejects.toThrow(/Google translation settings put failed/));
+    await withSelf(async (seeder) => expect(seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", data })).rejects.toThrow(/Google translation settings put failed/));
   });
 
-  it("PLANTED DEFECT: composes no settings path from an app name that would reach another path", async () => {
+  it("PLANTED DEFECT: seeds the tenant's Google translation settings create-only with every property empty, and leaves a standing entry", async () => {
     await withSelf(async (seeder) => {
-      await expect(seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show/../../other", data: { project: "", "service-account": "", location: "", glossary: "" } })).rejects.toThrow(/is no tenant app name/);
-      expect(vault.recorded.filter((r) => r.url.includes("/data/"))).toEqual([]);
+      expect(await seeder.seedTenantGoogleTranslation({ stage: "prod", guid: "g1" })).toEqual({ created: true });
+      const put = vault.recorded.find((r) => r.method === "POST" && r.url.includes("/data/"));
+      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/google-translation", body: { data: { project: "", "service-account": "", location: "", glossary: "" }, options: { cas: 0 } } });
     });
+    vault.dataPut = { status: 400, body: JSON.stringify({ errors: ["check-and-set parameter did not match the current version"] }) };
+    await withSelf(async (seeder) => expect(await seeder.seedTenantGoogleTranslation({ stage: "prod", guid: "g1" })).toEqual({ created: false }));
+    vault.dataPut = { status: 403, body: "permission denied" };
+    await withSelf(async (seeder) => expect(seeder.seedTenantGoogleTranslation({ stage: "prod", guid: "g1" })).rejects.toThrow(/Google translation settings seed put failed/));
+  });
+
+  it("purges the tenant's Google translation settings with a metadata delete, and takes an absent entry as gone", async () => {
+    await withSelf(async (seeder) => {
+      await seeder.deleteTenantGoogleTranslation({ stage: "prod", guid: "g1" });
+      expect(vault.recorded.filter((r) => r.method === "DELETE").map((r) => r.url)).toEqual(["/v1/secret/metadata/prod/tenants/g1/google-translation"]);
+    });
+    vault.metaDeleteStatus = 404;
+    await withSelf(async (seeder) => expect(seeder.deleteTenantGoogleTranslation({ stage: "prod", guid: "g1" })).resolves.toBeUndefined());
+    vault.metaDeleteStatus = 403;
+    await withSelf(async (seeder) => expect(seeder.deleteTenantGoogleTranslation({ stage: "prod", guid: "g1" })).rejects.toThrow(/Google translation settings delete failed/));
   });
 
   it("purges every key of every kind it lists under the tenant, including an app the manager no longer knows", async () => {

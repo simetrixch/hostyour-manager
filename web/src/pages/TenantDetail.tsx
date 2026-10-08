@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, setTenantFollowReleases, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants,
+  setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants, planRun,
   type TenantDetailView, type TenantView,
 } from "../api.ts";
 import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
@@ -263,6 +263,13 @@ export function TenantDetail() {
           )}
           {/* Offered whatever the pause state: a ceiling is a property of the member namespaces, and a
               suspended tenant still owns them. */}
+          {/* Plans the run whose approve form takes the settings, so they are typed once, on the run
+              page, for every app and website of the tenant. */}
+          {!unfinished && (
+            <button type="button" className="btn" disabled={busy} onClick={() => void act(() => planRun("tenant-set-google-translation", { tenantId }))}>
+              Google translation
+            </button>
+          )}
           {!unfinished && (
             <button type="button" className="btn" disabled={busy} onClick={() => setSizeT(t)}>
               Set size…

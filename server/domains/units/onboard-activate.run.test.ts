@@ -93,6 +93,8 @@ class FakeSeeder implements VaultSeeder {
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async listTenantAppKeys(): Promise<string[]> { return []; }
   async replaceGoogleTranslation(): Promise<void> {}
+  async seedTenantGoogleTranslation(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async deleteTenantGoogleTranslation(): Promise<void> {}
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }
@@ -323,7 +325,7 @@ describe("the activation waits for the unit's host, and a retry activates with a
     const seeder = new FakeSeeder();
     const clusterReader = new FakeClusterReader({
       deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
-      externalSecretsByNamespace: { acme: [{ name: "acme-app", ready: true, reason: "", targetSecret: "acme-app-env", refreshTime: "" }] },
+      externalSecretsByNamespace: { acme: [{ name: "acme-app", ready: true, reason: "", targetSecret: "acme-app-env", refreshTime: "", remoteKeys: [] }] },
       rollingFor: 2,
     });
     const resolver = new FakeClusterKubeResolver({ clusterReader, argoReader: new FakeMasterArgoReader({ status: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" }, everyName: { syncRevision: SHA, targetRevision: null, sync: "Synced", health: "Healthy" } }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });

@@ -20,7 +20,7 @@ import type { ScannedTenant } from "./tenant-registrations.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
-import { forgetSecretEntry, tenantAppSecretEntry } from "../../db/secret-writes.ts";
+import { forgetSecretEntry, tenantGoogleTranslationEntry } from "../../db/secret-writes.ts";
 import { tenantBucketName, tenantKeyName } from "./tenant-storage.ts";
 
 export type TenantPurgePorts = TenantLifecyclePorts & {
@@ -422,12 +422,14 @@ function tenantDeprovisionSteps(ports: TenantPurgePorts, p: TenantPurgeParams): 
         // And every app's keys below it, of every kind, found by listing, so the key of an app removed
         // earlier goes too (tenant-app-keys.ts).
         const { deleted: appKeys } = await ports.seeder.deleteTenantAppKeys({ stage: c.stage, guid: c.guid });
-        for (const key of appKeys) forgetSecretEntry(ctx.db, tenantAppSecretEntry(c.stage, c.guid, key));
+        await ports.seeder.deleteTenantGoogleTranslation({ stage: c.stage, guid: c.guid });
+        forgetSecretEntry(ctx.db, tenantGoogleTranslationEntry(c.stage, c.guid));
         ctx.checkpoint({ tenantCrypto: c.guid, deleted: true, appKeys });
         ctx.log("meta", `crypto entry ${c.stage}/tenants/${c.guid} destroyed (all versions) — the tenant's identity is gone, and a future tenant of this guid gets a fresh one`);
         ctx.log("meta", appKeys.length > 0
           ? `tenant app keys destroyed (all versions) under ${c.stage}/tenants/${c.guid}/: ${appKeys.join(", ")}`
           : `no tenant app key stood under ${c.stage}/tenants/${c.guid}/`);
+        ctx.log("meta", `Google translation settings ${tenantGoogleTranslationEntry(c.stage, c.guid)} destroyed (all versions), or none stood`);
       },
     },
     {

@@ -29,6 +29,8 @@ export class RecordingTeardownSeeder implements VaultSeeder {
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async listTenantAppKeys(): Promise<string[]> { return []; }
   async replaceGoogleTranslation(): Promise<void> {}
+  async seedTenantGoogleTranslation(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async deleteTenantGoogleTranslation(): Promise<void> {}
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }

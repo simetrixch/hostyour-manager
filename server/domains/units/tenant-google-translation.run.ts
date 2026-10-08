@@ -1,19 +1,19 @@
-import { and, eq, notInArray } from "drizzle-orm";
-import type { RunDefinition, Step } from "../../executor/types.ts";
-import { tenantApps } from "../../db/schema/inventory.ts";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
+import type { RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { GOOGLE_TRANSLATION_SECRET_PREFIX } from "../../../shared/approve.ts";
 import { errValidation } from "../../kernel/errors.ts";
-import { listSecretWrites, recordSecretWrites, tenantAppSecretEntry } from "../../db/secret-writes.ts";
+import { listSecretWrites, recordSecretWrites, tenantGoogleTranslationEntry } from "../../db/secret-writes.ts";
 import { GOOGLE_TRANSLATION_PROPERTIES, type GoogleTranslationProperty, type VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
-import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
-import { memberNamespace } from "./tenant-fanout.ts";
-import { RemoveAppParams, tenantLocks } from "./tenant-lifecycle.run.ts";
-import type { Db } from "../../db/client.ts";
+import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { TenantLifecycleParams, tenantLocks, tenantWatchNamespaces } from "./tenant-lifecycle.run.ts";
 
-// `tenant-set-google-translation` — write the Google translation settings an operator types for one
-// app of a tenant, and bring them into the app's engine.
+// `tenant-set-google-translation` — write the Google translation settings an operator types for a
+// tenant, and bring them into the engine of every app and website of it.
+//
+// ONE ENTRY PER TENANT. Every app's ExternalSecret reads the same entry,
+// <stage>/tenants/<guid>/google-translation, so one typed key serves the whole tenant. The run reaches
+// the namespaces whose chart renders that ExternalSecret, and refuses while one of them still reads
+// another entry, because the engine there would restart on the settings it read before.
 //
 // THE VALUES ARE TYPED AT APPROVE. The plan asks for the four properties as run secrets, so the run
 // page's approve form is the form: the values travel once, are held in memory for the run, are masked
@@ -30,8 +30,8 @@ import type { Db } from "../../db/client.ts";
 
 export const GOOGLE_TRANSLATION_EXTERNAL_SECRET = "hostyour-google-translation";
 
-export const TenantSetGoogleTranslationParams = RemoveAppParams;
-export type TenantSetGoogleTranslationParams = RemoveAppParams;
+export const TenantSetGoogleTranslationParams = TenantLifecycleParams;
+export type TenantSetGoogleTranslationParams = TenantLifecycleParams;
 
 export interface TenantSetGoogleTranslationPorts extends TenantLifecyclePorts {
   seeder: VaultSeeder;
@@ -68,28 +68,37 @@ export function readGoogleTranslationSettings(typed: (key: string) => string | u
   return data;
 }
 
-/** The app's entry, from the tenant's standing app of that name, or a refusal. */
-function standingApp(db: Db, tenantId: string, app: string): TenantCluster {
-  const tc = loadTenantCluster(db, tenantId);
-  const row = db.select({ name: tenantApps.name }).from(tenantApps)
-    .where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, app), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).get();
-  if (!row) throw errValidation(`tenant ${tc.guid} has no standing app "${app}" — only a standing app's engine reads Google translation settings`);
-  return tc;
+/** The member namespaces of the tenant whose chart renders the Google translation ExternalSecret,
+ *  with its row as ESO answers it now. Refuses when none does, and when one reads an entry other
+ *  than the tenant's, naming each such namespace and the entry it reads. */
+async function readerNamespaces(ports: TenantSetGoogleTranslationPorts, ctx: Pick<StepCtx, "db">, tenantId: string) {
+  const tc = loadTenantCluster(ctx.db, tenantId);
+  const entry = tenantGoogleTranslationEntry(tc.stage, tc.guid);
+  const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
+  const readers: { namespace: string; refreshTime: string }[] = [];
+  const elsewhere: string[] = [];
+  for (const namespace of tenantWatchNamespaces(ctx.db, tenantId, tc.guid, tc.stage)) {
+    const row = (await clusterReader.listExternalSecrets(namespace)).find((r) => r.name === GOOGLE_TRANSLATION_EXTERNAL_SECRET);
+    if (!row) continue;
+    const other = row.remoteKeys.filter((k) => k !== entry);
+    if (other.length > 0) elsewhere.push(`${namespace} reads ${other.join(", ")}`);
+    readers.push({ namespace, refreshTime: row.refreshTime });
+  }
+  if (readers.length === 0) throw errValidation(`no member namespace of tenant ${tc.guid} holds the ExternalSecret ${GOOGLE_TRANSLATION_EXTERNAL_SECRET} — no app's chart renders the settings yet, so they would reach no engine`);
+  if (elsewhere.length > 0) throw errValidation(`${elsewhere.join("; ")} — not the tenant's entry ${entry}, so an engine restarted there would translate with the settings it read before. The app's chart reads the tenant's entry once digita-deploy renders it so; run this again then.`);
+  return { tc, entry, clusterReader, readers };
 }
-
-const entryOf = (tc: TenantCluster, app: string): string => tenantAppSecretEntry(tc.stage, tc.guid, `google-translation/${app}`);
 
 function tenantSetGoogleTranslationSteps(ports: TenantSetGoogleTranslationPorts, p: TenantSetGoogleTranslationParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
     {
       name: "write-settings",
-      title: "Write the typed Google translation settings into the app's Vault entry",
+      title: "Write the typed Google translation settings into the tenant's Vault entry",
       run: async (ctx) => {
-        const tc = standingApp(ctx.db, p.tenantId, p.app);
         const data = readGoogleTranslationSettings((key) => ctx.secrets.get(key)?.toString("utf8"));
-        await ports.seeder.replaceGoogleTranslation({ stage: tc.stage, guid: tc.guid, app: p.app, data });
-        const entry = entryOf(tc, p.app);
+        const { tc, entry } = await readerNamespaces(ports, ctx, p.tenantId);
+        await ports.seeder.replaceGoogleTranslation({ stage: tc.stage, guid: tc.guid, data });
         recordSecretWrites(ctx.db, { entry, keys: [...GOOGLE_TRANSLATION_PROPERTIES], act: "set", runId: ctx.runId });
         const blank = OPTIONAL.filter((o) => data[o] === "");
         ctx.log("meta", `${entry} written with ${GOOGLE_TRANSLATION_PROPERTIES.join(", ")}${blank.length > 0 ? ` (${blank.join(" and ")} left blank, so not set)` : ""}`);
@@ -97,42 +106,50 @@ function tenantSetGoogleTranslationSteps(ports: TenantSetGoogleTranslationPorts,
     },
     {
       name: "refresh-settings",
-      title: "Ask ESO to write the app's Google translation Secret again, and wait until it has",
+      title: "Ask ESO to write every app's Google translation Secret again, and wait until it has",
       run: async (ctx) => {
-        const tc = standingApp(ctx.db, p.tenantId, p.app);
-        const namespace = memberNamespace(tc.guid, p.app, tc.stage);
-        const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
-        const read = async () => (await clusterReader.listExternalSecrets(namespace)).find((r) => r.name === GOOGLE_TRANSLATION_EXTERNAL_SECRET);
-        const before = await read();
-        if (!before) throw errValidation(`${namespace} holds no ExternalSecret ${GOOGLE_TRANSLATION_EXTERNAL_SECRET} — the app's chart does not render the settings yet, so they reach no engine. The entry stands in Vault and is read once the chart renders it.`);
-        await clusterReader.refreshExternalSecret(namespace, GOOGLE_TRANSLATION_EXTERNAL_SECRET);
+        const { clusterReader, readers } = await readerNamespaces(ports, ctx, p.tenantId);
+        for (const r of readers) await clusterReader.refreshExternalSecret(r.namespace, GOOGLE_TRANSLATION_EXTERNAL_SECRET);
         const budgetMs = ports.refreshWaitMs ?? 2 * 60_000;
         const deadline = Date.now() + budgetMs;
+        let waiting = readers;
         for (;;) {
-          const now = await read();
-          // ESO wrote the Secret again once refreshTime moved past the one read before the request.
-          if (now?.ready && now.refreshTime !== "" && now.refreshTime !== before.refreshTime) break;
+          const left: typeof readers = [];
+          const unready: string[] = [];
+          for (const r of waiting) {
+            const now = (await clusterReader.listExternalSecrets(r.namespace)).find((row) => row.name === GOOGLE_TRANSLATION_EXTERNAL_SECRET);
+            // ESO wrote the Secret again once refreshTime moved past the one read before the request.
+            if (now?.ready && now.refreshTime !== "" && now.refreshTime !== r.refreshTime) continue;
+            left.push(r);
+            unready.push(`${r.namespace} (${now?.ready ? "Ready" : `not Ready: ${now?.reason || "no reason given"}`})`);
+          }
+          waiting = left;
+          if (waiting.length === 0) break;
           if (Date.now() >= deadline || ctx.signal.aborted) {
-            throw errValidation(`${GOOGLE_TRANSLATION_EXTERNAL_SECRET} in ${namespace} was not written again within ${Math.round(budgetMs / 1000)}s of the refresh request (${now?.ready ? "Ready" : `not Ready: ${now?.reason || "no reason given"}`}), so the engine was not restarted: it would start on the settings it read before. Read the ExternalSecret in ${namespace} for what ESO says, then retry this step.`);
+            throw errValidation(`${GOOGLE_TRANSLATION_EXTERNAL_SECRET} was not written again within ${Math.round(budgetMs / 1000)}s of the refresh request in ${unready.join(", ")}, so no engine was restarted: it would start on the settings it read before. Read the ExternalSecret there for what ESO says, then retry this step.`);
           }
           await sleep(ports.refreshPollMs ?? 2_000, ctx.signal);
         }
-        ctx.log("meta", `${GOOGLE_TRANSLATION_EXTERNAL_SECRET} written again in ${namespace} from the entry`);
+        ctx.log("meta", `${GOOGLE_TRANSLATION_EXTERNAL_SECRET} written again from the entry in ${readers.map((r) => r.namespace).join(", ")}`);
       },
     },
     {
       name: "restart-workloads",
-      title: "Roll the app's workloads so its engine reads the new settings",
+      title: "Roll the workloads of every app that reads the settings, so its engine reads them",
       run: async (ctx) => {
-        const tc = standingApp(ctx.db, p.tenantId, p.app);
-        const namespace = memberNamespace(tc.guid, p.app, tc.stage);
-        const { clusterReader } = await ports.resolver.resolve(tc.clusterId);
+        const { tc, clusterReader, readers } = await readerNamespaces(ports, ctx, p.tenantId);
+        // One stamp for the whole tenant, as tenant-restart-workloads stamps it.
         const stampedAt = new Date().toISOString();
-        const rolled = await clusterReader.restartWorkloads(namespace, stampedAt);
-        ctx.checkpoint({ rolled, stampedAt });
-        ctx.log("meta", rolled > 0
-          ? `${rolled} workload(s) rolled in ${namespace} (${stampedAt}) — the new pods read the settings as they stand now`
-          : `${namespace} has no workload to roll — a suspended tenant renders none, and its engine reads the settings when it resumes`);
+        let total = 0;
+        for (const { namespace } of readers) {
+          const rolled = await clusterReader.restartWorkloads(namespace, stampedAt);
+          total += rolled;
+          ctx.log("meta", `${namespace}: ${rolled} workload(s) rolled`);
+        }
+        ctx.checkpoint({ rolled: total, namespaces: readers.length, stampedAt });
+        ctx.log("meta", total > 0
+          ? `${total} workload(s) across ${readers.length} namespace(s) of ${tc.guid} rolled (${stampedAt}) — the new pods read the settings as they stand now`
+          : `no workload to roll in the ${readers.length} namespace(s) of ${tc.guid} — a suspended tenant renders none, and its engines read the settings when it resumes`);
       },
     },
   ];
@@ -144,8 +161,8 @@ export function makeTenantSetGoogleTranslationDef(ports: TenantSetGoogleTranslat
     paramsSchema: TenantSetGoogleTranslationParams,
     mutating: true,
     plan: async (params, { db }) => {
-      const tc = standingApp(db, params.tenantId, params.app);
-      const entry = entryOf(tc, params.app);
+      const tc = loadTenantCluster(db, params.tenantId);
+      const entry = tenantGoogleTranslationEntry(tc.stage, tc.guid);
       const typed = listSecretWrites(db, entry).filter((w) => w.act === "set").sort((a, b) => b.writtenAt.getTime() - a.writtenAt.getTime())[0];
       const steps = tenantSetGoogleTranslationSteps(ports, params);
       return {
@@ -153,9 +170,9 @@ export function makeTenantSetGoogleTranslationDef(ports: TenantSetGoogleTranslat
         targetKind: "tenant",
         targetId: params.tenantId,
         summary:
-          `Set the Google translation settings of app "${params.app}" of tenant ${tc.guid} (${tc.domain}, ${tc.stage}): ` +
-          `what you type replaces all four properties of ${entry}, ESO writes the app's Secret again, and the app's workloads are rolled so its engine translates with them. ` +
-          (typed ? `Settings typed by run ${typed.runId} at ${typed.writtenAt.toISOString()} stand there now and are replaced. ` : "No settings were typed for this app yet, so its engine translates with none. ") +
+          `Set the Google translation settings of tenant ${tc.guid} (${tc.domain}, ${tc.stage}) for every app and website of it: ` +
+          `what you type replaces all four properties of ${entry}, ESO writes each app's Secret again, and the workloads of every app that reads it are rolled so its engine translates with them. ` +
+          (typed ? `Settings typed by run ${typed.runId} at ${typed.writtenAt.toISOString()} stand there now and are replaced. ` : "No settings were typed for this tenant yet, so its engines translate with none. ") +
           "A blank location means global, and a blank glossary means none.",
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
