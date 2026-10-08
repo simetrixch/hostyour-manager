@@ -4,7 +4,7 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { errIllegalTransition, errResourceBusy } from "../../kernel/errors.ts";
+import { errIllegalTransition } from "../../kernel/errors.ts";
 import pino from "pino";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
@@ -39,12 +39,11 @@ function books(engine: string): TenantRegistrations {
 }
 
 /** An executor that records what the follower asks of it. A plan it settles as failed refuses the
- *  approve, as the executor refuses a failed run; its first approve is refused as busy where
- *  `busyHolder` names the run holding the lock. */
-function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: string; approveError?: Error; endings?: Array<{ status: RunStatus; error: string | null }> } = {}) {
+ *  approve, as the executor refuses a failed run; `queued` answers the approve as a run that waits in
+ *  the queue. */
+function fakeExecutor(opts: { planStatus?: "planned" | "failed"; queued?: boolean; approveError?: Error; endings?: Array<{ status: RunStatus; error: string | null }> } = {}) {
   const asked: string[] = [];
   const planned: unknown[] = [];
-  let refused = false;
   return {
     asked,
     planned,
@@ -58,14 +57,11 @@ function fakeExecutor(opts: { planStatus?: "planned" | "failed"; busyHolder?: st
     /** How each planned run ended, in planning order; a run with none given succeeded. */
     runEnding: (runId: string) => opts.endings?.[Number(runId.slice(4)) - 1] ?? { status: "succeeded" as const, error: null },
     discard: async (runId: string): Promise<void> => { asked.push(`discard ${runId}`); },
-    approve: async (runId: string): Promise<void> => {
+    approve: async (runId: string): Promise<{ status: "approved" | "queued" }> => {
       asked.push(`approve ${runId}`);
       if (opts.planStatus === "failed") throw errIllegalTransition("run status failed → approved");
       if (opts.approveError) throw opts.approveError;
-      if (opts.busyHolder && !refused) {
-        refused = true;
-        throw errResourceBusy("Resource busy", { resource: "git-branch", key: "deploy@books", holderRunId: opts.busyHolder });
-      }
+      return { status: opts.queued ? "queued" : "approved" };
     },
   };
 }
@@ -146,13 +142,13 @@ describe("followTenant — one check of one tenant", () => {
     expect(executor.planned).toEqual([]);
   });
 
-  it("waits for the run that holds the books branch to end, then approves", async () => {
-    const executor = fakeExecutor({ busyHolder: "run_9" });
+  it("says that a Versions run waits in the queue for the run that holds the books branch", async () => {
+    const executor = fakeExecutor({ queued: true });
     const said: string[] = [];
     const logger = { ...pino({ level: "silent" }), info: (_o: unknown, m: string) => { said.push(m); } } as unknown as TenantFollowDeps["logger"];
     await followTenant({ ...deps(executor), logger }, "tnt_1");
-    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_9", "approve run_1", "settle run_1"]);
-    expect(said).toContain("the Versions run run_1 waits for run run_9, which holds the tenant, before it is approved");
+    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_1"]);
+    expect(said).toContain("the Versions run run_1 waits in the queue for the run that holds the tenant");
   });
 
   it("PLANTED DEFECT: discards a planned run it cannot approve for another reason, and reports that reason", async () => {

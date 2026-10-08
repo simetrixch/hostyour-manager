@@ -61,7 +61,18 @@ describe("the nightly backup schedule", () => {
     seedRunRows(db, { runId: "run_move", steps: [] });
     acquireLocks(db.db, "run_move", [{ resource: "master-kube", key: "m" }]);
     expect(await startDueNightlyBackup(executor, db.db, logger, at("2026-09-28T03:00:00Z"))).toBeNull();
+    expect(await startDueNightlyBackup(executor, db.db, logger, at("2026-09-28T03:15:00Z"))).toBeNull();
     expect(started).toEqual([]);
+    // A failed run keeps its locks until it is resolved, so the wait can last the night: it is said
+    // once a night, at warn, naming the run that holds the lock.
+    expect(warned).toEqual(["nightly backup waits: run run_move holds master-kube m, and the backup starts only once no run holds a lock"]);
+  });
+
+  it("asks the executor for a free start only, so a busy approve is refused and never queued", async () => {
+    const asked: unknown[] = [];
+    const strict = { ...executor, approve: async (runId: string, secrets: unknown, opts: unknown) => { asked.push([runId, secrets, opts]); } } as unknown as Executor;
+    await startDueNightlyBackup(strict, db.db, logger, at("2026-09-28T03:00:00Z"));
+    expect(asked).toEqual([["run_consumer-nightly-backup", undefined, { onlyIfFree: true }]]);
   });
 
   it("says once a day why a family was not started, and moves on to the other", async () => {

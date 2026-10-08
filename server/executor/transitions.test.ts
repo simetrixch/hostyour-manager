@@ -4,7 +4,8 @@ import { canRunTransition, assertRunTransition, canStepTransition, assertStepTra
 
 const LEGAL_RUN = new Set([
   "planning>planned", "planning>failed", "planning>cancelled",
-  "planned>approved", "planned>cancelled",
+  "planned>queued", "planned>cancelled",
+  "queued>approved", "queued>cancelled",
   "approved>running",
   "running>succeeded", "running>failed", "running>cancelled",
   "failed>running",

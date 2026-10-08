@@ -47,12 +47,6 @@ export function followedVersions(parts: readonly TenantVersionPart[]): Record<st
   return moves;
 }
 
-/** The run that holds the lock `err` was refused on, or null where `err` is no busy refusal. */
-function busyHolder(err: unknown): string | null {
-  const e = err as { code?: unknown; detail?: { holderRunId?: unknown } };
-  return e.code === "RESOURCE_BUSY" && typeof e.detail?.holderRunId === "string" ? e.detail.holderRunId : null;
-}
-
 /** Wait until `runId` settles. The checks wait one after another, so a run that never settles holds
  *  every later check back: past LONG_WAIT_MS the log says so. */
 async function settle(deps: TenantFollowDeps, runId: string): Promise<void> {
@@ -65,25 +59,11 @@ async function settle(deps: TenantFollowDeps, runId: string): Promise<void> {
   }
 }
 
-/** Approve `runId` once no other run holds its locks. Every tenant run takes the books branch, so a
- *  second one waits for the run that holds it to end, however long that takes. */
-async function approveWhenFree(deps: TenantFollowDeps, runId: string): Promise<void> {
-  let waitedFor: string | null = null;
-  for (;;) {
-    try {
-      await deps.executor.approve(runId);
-      return;
-    } catch (err) {
-      const holder = busyHolder(err);
-      // The same holder twice is a run this process does not execute (settle returned at once), and
-      // waiting on it again would spin.
-      if (holder === null || holder === waitedFor) throw err;
-      waitedFor = holder;
-      // Said when the wait starts, so the log shows that a refresh waited for the tenant to be free.
-      deps.logger.info({ runId, holder }, `the Versions run ${runId} waits for run ${holder}, which holds the tenant, before it is approved`);
-      await settle(deps, holder);
-    }
-  }
+/** Approve `runId`. Every tenant run takes the books branch, so a second one waits in the queue for
+ *  the run that holds it, however long that takes; said when the wait starts, so the log shows it. */
+async function approveInQueue(deps: TenantFollowDeps, runId: string): Promise<void> {
+  const { status } = await deps.executor.approve(runId);
+  if (status === "queued") deps.logger.info({ runId }, `the Versions run ${runId} waits in the queue for the run that holds the tenant`);
 }
 
 /** One check of one tenant, answered as a sentence for the log. A refresh that another run's member
@@ -103,7 +83,7 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
     const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
     await settle(deps, runId);
     try {
-      await approveWhenFree(deps, runId);
+      await approveInQueue(deps, runId);
     } catch (err) {
       // A plan its gates refused settles its run as failed, and an operator may have cancelled it: in
       // both it is no run to approve, and its record says which.

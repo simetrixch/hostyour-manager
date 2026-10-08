@@ -35,7 +35,7 @@ function twoSteps(requiredSecrets: string[] = []) {
     plan: async () => ({
       kind: "noop", targetKind: "self", targetId: "manager", summary: "two steps",
       steps: [{ name: "first", title: "First" }, { name: "second", title: "Second" }], warnings: [], requiredSecrets,
-      // A lock of its own, so a test can see a cancel release it.
+      // A lock of its own, so a test can see what a cancel does to it.
       locks: [{ resource: "server", key: "planted" }],
     }),
     steps: () => [
@@ -132,7 +132,7 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     expect(steps.seen.second).toBe(0);
   });
 
-  it("a cancel of a run the drain already paused ends it, releases its locks, and nothing resumes it", async () => {
+  it("a cancel of a run the drain already paused ends it, keeps its locks, and nothing resumes it", async () => {
     const steps = twoSteps();
     const { db, executor } = make(steps.def);
     const { runId } = await executor.plan("noop", {});
@@ -148,7 +148,7 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     await executor.cancel(runId);
     expect(getRun(db.db, runId)?.status).toBe("cancelled");
     expect(log(db, runId)).toContain("✕ cancelled before: Second");
-    expect(locks()).toBe(0);
+    expect(locks()).toBe(1); // cancelled in the middle: its first step's work stands until it is resolved
     await managerOver(db, steps.def).resumeOnBoot();
     expect(steps.seen.second).toBe(0);
   });
@@ -165,15 +165,19 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     expect(log(db, runId).find((t) => t.startsWith("⏸"))).toMatch(/the values typed at approve are not kept across a restart/);
   });
 
-  it("starts no step of a run approved while the Manager shuts down", async () => {
+  it("queues a run approved while the Manager shuts down, and the next Manager starts it", async () => {
     const steps = twoSteps();
     const { db, executor } = make(steps.def);
     const { runId } = await executor.plan("noop", {});
     await executor.shutdown(10);
-    await executor.approve(runId);
-    await executor.settle(runId);
-    expect(getRun(db.db, runId)?.status).toBe("running");
-    expect(getRun(db.db, runId)?.steps.every((s) => s.status === "pending")).toBe(true);
+    expect(await executor.approve(runId)).toEqual({ status: "queued" });
+    expect(getRun(db.db, runId)?.status).toBe("queued");
     expect(steps.seen.first).toBe(0);
+    const next = managerOver(db, steps.def);
+    await next.resumeOnBoot();
+    await until(() => steps.seen.first === 1);
+    steps.release();
+    await next.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("succeeded");
   });
 });

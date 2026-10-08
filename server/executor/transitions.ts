@@ -9,7 +9,8 @@ import { errIllegalTransition } from "../kernel/errors.ts";
 
 const RUN_TRANSITIONS: Record<RunStatus, readonly RunStatus[]> = {
   planning: ["planned", "failed", "cancelled"], // async validation → plan | interrupted | discarded
-  planned: ["approved", "cancelled"],
+  planned: ["queued", "cancelled"], // an approve queues the run; it starts once its locks are free
+  queued: ["approved", "cancelled"],
   approved: ["running"],
   running: ["succeeded", "failed", "cancelled"],
   failed: ["running"], // recovery: retry / skip / abort

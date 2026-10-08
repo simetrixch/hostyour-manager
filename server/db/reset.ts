@@ -75,9 +75,9 @@ const EVENTS_TRIGGER = "CREATE TRIGGER events_no_delete BEFORE DELETE ON events 
 const AUDIT_TRIGGER = "CREATE TRIGGER audit_no_delete BEFORE DELETE ON audit BEGIN SELECT RAISE(ABORT, 'audit is append-only'); END";
 
 /** Runs that make a wipe unsafe: an in-flight executor holds in-memory state for them. A
- *  `planned` run is parked and safe to wipe; `planning/approved/running` are live. */
+ *  `planned` run is parked and safe to wipe; `planning/queued/approved/running` are live. */
 export function countLiveRuns(sqlite: Database.Database): number {
-  const row = sqlite.prepare("SELECT count(*) AS c FROM runs WHERE status IN ('planning','approved','running')").get() as { c: number };
+  const row = sqlite.prepare("SELECT count(*) AS c FROM runs WHERE status IN ('planning','queued','approved','running')").get() as { c: number };
   return row.c;
 }
 

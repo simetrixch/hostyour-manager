@@ -569,7 +569,7 @@ export type RunFamily = keyof typeof RUN_FAMILY;
 export const TENANT_ADMIN_STATE = ["ok", "none", "unreachable"] as const;
 export type TenantAdminState = (typeof TENANT_ADMIN_STATE)[number];
 
-export const RUN_STATUS = ["planning", "planned", "approved", "running",
+export const RUN_STATUS = ["planning", "planned", "queued", "approved", "running",
   "succeeded", "failed", "cancelled"] as const;
 export type RunStatus = (typeof RUN_STATUS)[number];
 
