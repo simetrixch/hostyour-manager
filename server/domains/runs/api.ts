@@ -47,6 +47,7 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
 
   app.get("/api/runs", (c) => c.json(listRuns(db)));
   app.get("/api/runs/durations", (c) => c.json(listRunDurations(db)));
+  app.get("/api/runs/queue", (c) => c.json(executor.listQueue()));
 
   app.get("/api/runs/:id", (c) => {
     const run = getRun(db, c.req.param("id"));
@@ -128,8 +129,8 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
 
   app.post("/api/runs/:id/approve", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { secrets?: unknown };
-    await executor.approve(c.req.param("id"), secretsFrom(body.secrets));
-    return c.json({ ok: true }, 202);
+    const { status } = await executor.approve(c.req.param("id"), secretsFrom(body.secrets));
+    return c.json({ ok: true, status }, 202);
   });
 
   app.post("/api/runs/:id/discard", async (c) => {

@@ -11,7 +11,7 @@ import { getOperatorDisplayName } from "../db/operator-names.ts";
 // other reader a lint failure.
 
 /** The statuses of a run that has not ended. */
-const OPEN_RUN_STATUSES: RunStatus[] = ["planning", "planned", "approved", "running"];
+const OPEN_RUN_STATUSES: RunStatus[] = ["planning", "planned", "queued", "approved", "running"];
 
 const ms = (d: Date | null): number | null => (d ? d.getTime() : null);
 

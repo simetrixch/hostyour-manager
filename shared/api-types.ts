@@ -279,6 +279,20 @@ export interface RunView extends RunApproveView {
 }
 
 /** How long the recent succeeded runs of one kind took: the median, and how many runs it is taken from. */
+/** One run waiting in the queue: its place in line, and the claims it waits for with the run on each,
+ *  which is a run holding the lock or a queued run ahead of it. A run that waits for its password
+ *  again, after a Manager restart, is passed over and waits for nothing else. */
+export interface QueuedRunView {
+  runId: string;
+  kind: string;
+  targetKind: string;
+  targetId: string;
+  place: number;
+  approvedAt: number;
+  needsSecrets: boolean;
+  waitsFor: { resource: string; key: string; holderRunId: string }[];
+}
+
 export interface RunDurationView {
   kind: string;
   typicalMs: number;

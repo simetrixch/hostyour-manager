@@ -119,6 +119,7 @@
 /* queued / idle — hollow dot */
 .badge--planned::before,
 .badge--planning::before,
+.badge--queued::before,
 .badge--pending::before,
 .badge--bare::before,
 .badge--undeployed::before {
@@ -175,6 +176,7 @@
 
 .badge--planned,
 .badge--planning,
+.badge--queued,
 .badge--degraded,
 .badge--draining {
   --c: var(--warn);

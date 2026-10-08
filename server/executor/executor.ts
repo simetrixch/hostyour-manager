@@ -1,30 +1,31 @@
-import { eq, and, inArray, gte } from "drizzle-orm";
+import { eq, and, inArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { runs, steps, runLocks } from "../db/schema/runs.ts";
 import { writeAudit } from "../db/audit-writer.ts";
 import { runId as genRunId, stepId as genStepId } from "../kernel/ids.ts";
-import { errValidation, errNotFound, errIllegalTransition, errInternal } from "../kernel/errors.ts";
+import { errValidation, errNotFound, errIllegalTransition, errInternal, errResourceBusy } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
 import type { CredentialStore } from "../security/store.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { Logger } from "../kernel/logger.ts";
 import type { RunStatus, StepStatus } from "../../shared/enums.ts";
-import { assertRecoverable, stepToResume } from "./recover.ts";
 import { assertApprovable } from "./approve.ts";
 import { runProbes } from "./probe.ts";
 import { assertRunTransition, isDeletableRun } from "./transitions.ts";
-import { acquireLocks, releaseLocks, deriveServerLocks } from "./locks.ts";
-import { isMutatingPrecondition } from "./guards.ts";
+import { releaseLocks } from "./locks.ts";
+import { conflictsAtEndOfQueue, planClaims } from "./queue.ts";
+import type { QueuedRunView } from "../../shared/api-types.ts";
 import { RunSecretsMap } from "./secrets.ts";
 import { RunContext } from "./context.ts";
 import { hashPlan } from "./plan-hash.ts";
 import { beginStreamingPlan } from "./streaming-plan.ts";
-import { registeredCleanupNames, settleAbortWithoutCleanup, scheduleCleanupSteps } from "./cleanup.ts";
 import type { RunEventBus } from "./bus.ts";
 import type { AnyRunDefinition, Plan, PlanSnapshot, Step } from "./types.ts";
 import { setStepStatus, setStepStatusIn } from "./step-status.ts";
 import { appendRunMeta, callOnTerminal } from "./run-meta.ts";
-import { declaredTargets, defaultTargets, targetServerId } from "./run-targets.ts";
+import { declaredTargets, targetServerId } from "./run-targets.ts";
+import { retryFromStep, skipStep, abortWithCleanup, type RecoveryHost } from "./step-recovery.ts";
+import { QueueDispatcher } from "./queue-dispatch.ts";
 
 export interface ExecutorDeps {
   db: Db;
@@ -36,7 +37,7 @@ export interface ExecutorDeps {
   actor: () => string; // current operator id (from request ctx) or "op_system"
 }
 
-interface LoadedRun {
+export interface LoadedRun {
   id: string;
   kind: string;
   targetKind: string;
@@ -63,8 +64,29 @@ export class Executor {
   private readonly active = new Map<string, AbortController>();
   private readonly runSecrets = new Map<string, RunSecretsMap>();
   private readonly inflight = new Map<string, Promise<void>>();
+  private readonly hasSecrets = (runId: string): boolean => this.runSecrets.has(runId);
+  private readonly queue: QueueDispatcher;
+  private readonly recoveryHost: RecoveryHost;
 
-  constructor(private readonly deps: ExecutorDeps) {}
+  constructor(private readonly deps: ExecutorDeps) {
+    this.queue = new QueueDispatcher({
+      db: this.deps.db,
+      bus: this.deps.bus,
+      logger: this.deps.logger,
+      hasSecrets: this.hasSecrets,
+      isStopping: () => this.stopping,
+      fireExecute: (runId) => { void this.fireExecute(runId); },
+    });
+    this.recoveryHost = {
+      deps: this.deps,
+      loadRun: (runId) => this.loadRun(runId),
+      stepRowFull: (runId, name) => this.stepRowFull(runId, name),
+      allStepRows: (runId) => this.allStepRows(runId),
+      storeSecrets: (runId, secrets) => this.storeSecrets(runId, secrets),
+      fireExecute: (runId) => this.fireExecute(runId),
+      dispatchQueue: () => this.queue.dispatch(),
+    };
+  }
 
   async plan(kind: string, rawParams: unknown): Promise<{ runId: string; plan: PlanSnapshot }> {
     const def = this.deps.runDefinitions.get(kind);
@@ -103,29 +125,55 @@ export class Executor {
     return beginStreamingPlan(this.deps, this.active, this.inflight, kind, rawParams);
   }
 
-  async approve(runId: string, secrets?: Record<string, Buffer>): Promise<void> {
+  /** Approve a planned run: it joins the queue, and starts at once when it waits for no lock. Answers
+   *  whether it started or waits. `onlyIfFree` refuses with RESOURCE_BUSY instead, for a run that is
+   *  worth nothing later (the night's backup). On a queued run that lost its typed secrets to a Manager
+   *  restart, the approve hands them back, and the run keeps its place. */
+  async approve(runId: string, secrets?: Record<string, Buffer>, opts: { onlyIfFree?: boolean } = {}): Promise<{ status: "approved" | "queued" }> {
     const run = this.loadRun(runId);
-    assertRunTransition(run.status, "approved");
+    if (run.status === "queued") return this.retypeQueuedSecrets(run, secrets);
+    assertRunTransition(run.status, "queued");
     await assertApprovable(run, this.deps.runDefinitions.get(run.kind), this.deps.db, secrets);
-    const targets = run.plan.targets ?? defaultTargets(run.plan);
-    acquireLocks(this.deps.db, runId, [...deriveServerLocks(targets), ...(run.plan.locks ?? [])]);
+    if (opts.onlyIfFree) {
+      const held = conflictsAtEndOfQueue(this.deps.db, planClaims(run.plan), this.hasSecrets)[0];
+      if (held) throw errResourceBusy("Resource busy", { resource: held.resource, key: held.key, holderRunId: held.runId });
+    }
     const actor = this.deps.actor();
-    this.deps.db.transaction((tx) => tx.update(runs).set({ status: "approved", approvedAt: new Date() }).where(eq(runs.id, runId)).run());
+    const moved = this.deps.db.transaction((tx) => tx.update(runs).set({ status: "queued", approvedAt: new Date() }).where(and(eq(runs.id, runId), eq(runs.status, "planned"))).run());
+    if (moved.changes !== 1) throw errIllegalTransition(`run ${runId} was approved or discarded while this approve was checked`);
     writeAudit(this.deps.db, { actor, action: "run.approved", runId, detail: { planHash: run.plan.planHash } });
-
-    const secretsMap = new RunSecretsMap(runId);
-    if (secrets) for (const [k, v] of Object.entries(secrets)) secretsMap.set(k, v);
-    this.runSecrets.set(runId, secretsMap);
-
-    this.fireExecute(runId); // fire — API returns immediately, SSE takes over
+    this.storeSecrets(runId, secrets);
+    this.queue.dispatch();
+    return this.queue.startedOrQueued(runId);
   }
 
+  /** The queue in line order, with what each run waits for. */
+  listQueue(): QueuedRunView[] {
+    return this.queue.list();
+  }
+
+  private async retypeQueuedSecrets(run: LoadedRun, secrets: Record<string, Buffer> | undefined): Promise<{ status: "approved" | "queued" }> {
+    if (!this.queue.list().find((q) => q.runId === run.id)?.needsSecrets) throw errIllegalTransition(`run ${run.id} is already queued with everything it needs`);
+    await assertApprovable(run, this.deps.runDefinitions.get(run.kind), this.deps.db, secrets);
+    this.storeSecrets(run.id, secrets);
+    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.secrets_retyped", runId: run.id });
+    appendRunMeta(this.deps.db, this.deps.bus, run.id, "its secrets were typed again, and it keeps its place in the queue");
+    this.queue.dispatch();
+    return this.queue.startedOrQueued(run.id);
+  }
+
+  /** Park a planned or queued run at `cancelled`. A queued run takes no lock and wipes its typed
+   *  secrets, and the runs behind it in line move up. */
   async discard(runId: string): Promise<void> {
     const run = this.loadRun(runId);
     assertRunTransition(run.status, "cancelled");
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { discarded: true } });
+    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { discarded: true, queued: run.status === "queued" } });
     callOnTerminal(this.deps, this.deps.runDefinitions.get(run.kind), runId, run.params, "cancelled");
+    this.runSecrets.get(runId)?.wipe();
+    this.runSecrets.delete(runId);
+    this.queue.leave(runId);
+    if (run.status === "queued") this.queue.dispatch();
   }
 
   /** Soft-delete a run — gated purely on status (isDeletableRun): any SETTLED run
@@ -162,6 +210,7 @@ export class Executor {
       tx.update(runs).set({ deletedAt: new Date() }).where(eq(runs.id, runId)).run();
     });
     this.runSecrets.delete(runId); // hygiene — a deletable run holds no secrets, but never leak
+    this.queue.dispatch();
     writeAudit(this.deps.db, {
       actor: this.deps.actor(),
       action: "run.deleted",
@@ -173,6 +222,7 @@ export class Executor {
   }
 
   async cancel(runId: string): Promise<void> {
+    if (this.deps.db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).get()?.status === "queued") return this.discard(runId);
     const inFlight = this.active.get(runId);
     if (inFlight) inFlight.abort();
     else if (this.stopping) this.cancelPaused(runId);
@@ -189,7 +239,6 @@ export class Executor {
     appendRunMeta(this.deps.db, this.deps.bus, runId, `✕ cancelled before: ${next?.title ?? "its end"}`);
     writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: next?.name ?? null } });
     callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
-    releaseLocks(this.deps.db, runId);
   }
 
   /** Resume-on-boot. No locked boot while the keystore is plaintext, so this
@@ -236,7 +285,12 @@ export class Executor {
       // Only the steps left RUNNING by the crash: pending ones are already where they belong, and
       // an ok one must never be reset. The state list IS the WHERE, so that holds in the statement.
       for (const run of pending) setStepStatusIn(this.deps.db, run.id, ["running"], "pending", { startedAt: null });
-      await Promise.all(pending.map((run) => this.fireExecute(run.id, { afterRestart: true })));
+      const resumed = pending.map((run) => this.fireExecute(run.id, { afterRestart: true }));
+      for (const q of this.queue.list().filter((v) => v.needsSecrets)) {
+        appendRunMeta(this.deps.db, this.deps.bus, q.runId, "⏸ the Manager restarted while this run was queued, and typed secrets live only in memory: type them again on the run page, and the run keeps its place");
+      }
+      this.queue.dispatch();
+      await Promise.all(resumed);
     } catch (err) { this.deps.logger.error({ err }, "boot-time recovery could not read or normalize the runs a crash left behind — nothing was resumed on this boot; they stay as the crash left them and the next boot takes them again"); }
   }
 
@@ -252,136 +306,30 @@ export class Executor {
     }
   }
 
-  /** Resolves once the run's execution (if in flight) has settled. Test/introspection use. */
+  /** Resolves once the run's execution (if in flight) has settled; a queued run is waited for until it
+   *  starts and then until it settles, or until it is discarded. */
   async settle(runId: string): Promise<void> {
-    await this.inflight.get(runId);
+    for (;;) {
+      const execution = this.inflight.get(runId);
+      if (execution) return execution;
+      if (this.deps.db.select({ status: runs.status }).from(runs).where(eq(runs.id, runId)).get()?.status !== "queued") return;
+      await this.queue.untilLeaves(runId);
+    }
   }
 
-  /** Retry a failed run from a step. Resets that step and everything after
-   *  it that is not already ok to pending (keeping checkpoints), then re-executes.
-   *
-   *  It needs no counterpart to skipStep's precondition refusal below, and the reason is structural, not
-   *  an oversight: a retry NEVER marks a step ok or skipped, and execute()'s loop re-runs every persisted
-   *  row that is not one of those two, in ordinal order. So a mutating run's attest-target that FAILED is
-   *  re-asked on the next execute whichever step the retry names — even a retry aimed at a later step
-   *  (`stepName`) leaves the failed precondition row untouched at ordinal 0 and the loop walks into it
-   *  first. Skipping was the only way to walk past a precondition without asking it. */
+  /** Retry a failed run from a step. */
   async retryFromStep(runId: string, stepName?: string, secrets?: Record<string, Buffer>): Promise<void> {
-    const run = this.loadRun(runId);
-    assertRecoverable(run, "retry");
-    const target = stepName ? this.stepRowFull(runId, stepName) : stepToResume(this.deps.db, runId, run.status);
-    if (target.status !== "failed" && target.status !== "skipped" && target.status !== "pending") {
-      throw errValidation(`cannot retry from step ${target.name} (status ${target.status})`);
-    }
-    this.deps.db.transaction((tx) => {
-      const later = tx.select().from(steps).where(and(eq(steps.runId, runId), gte(steps.ordinal, target.ordinal))).all();
-      for (const s of later) {
-        if (s.status !== "ok") {
-          setStepStatus(tx, s.id, s.status, "pending", { error: null, startedAt: null, finishedAt: null });
-        }
-      }
-      tx.update(runs).set({ status: "running", error: null, finishedAt: null }).where(eq(runs.id, runId)).run();
-    });
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.step_retried", runId, detail: { step: target.name } });
-    this.storeSecrets(runId, secrets);
-    this.fireExecute(runId);
+    return retryFromStep(this.recoveryHost, runId, stepName, secrets);
   }
 
-  /** Skip the failed step and continue with the next pending one. A run
-   *  that finishes with skipped steps still ends succeeded — EXCEPT on the one step no operator may
-   *  wave through: a MUTATING run's fail-closed precondition (step 0, attest-target).
-   *
-   *  WHY that step is not ordinary work. A precondition is not a task that can be "handled manually on
-   *  the box" (the skip's own example reason) — it is the run re-asking, against the world AS IT IS NOW,
-   *  whether it may mutate at all. tenant-purge's attest-target re-asks the live-tenant refusal
-   *  (tenant-live-guard.ts) precisely because the plan-time refusal on the route answers a question about
-   *  PLAN time only: a purge legitimately planned against a "provisioning" row stays approvable while a
-   *  create-tenant retry settles that row to "active", and approve re-validates nothing. Letting the step
-   *  it refuses in be skipped turns that whole belt into two clicks — the run screen feeds its skip dialog
-   *  exactly the failed steps, so the operator who was just refused marks the refusal skipped, execute()'s
-   *  loop passes over skipped rows, and the run walks into the pointer removal, delete-tenant-cr and
-   *  delete-namespace against the live, serving tenant the gate refused. There is no legitimate override:
-   *  a precondition that refuses states something about the WORLD, so the way past it is to change the
-   *  world and retry the step, or to abandon the run (abort, or delete it) — never to declare it done.
-   *
-   *  WHY THIS SHAPE. The alternative was to re-ask the definition here, the way abortWithCleanup asks
-   *  assertAbortable. Refusing outright is the one that GENERALISES: it rests on that invariant alone
-   *  (guards.assertGuardsArmed pins step 0 of every mutating def to attest-target, at boot), so every
-   *  mutating kind — including the next one somebody registers, whose author never thought about this
-   *  path — is fail-closed on day one, with no per-definition hook to remember. A second hook would have
-   *  closed it for tenant-purge and left the same two clicks open everywhere else. It also removes the
-   *  asymmetry that made this a defect: the SAME live-tenant rule on the abort path is asserted by the
-   *  executor BEFORE any step row exists (assertAbortable) and was therefore always unskippable. */
+  /** Skip the failed step and continue with the next pending one. */
   async skipStep(runId: string, stepName: string, reason: string): Promise<void> {
-    const run = this.loadRun(runId);
-    assertRecoverable(run, "skip");
-    if (!reason.trim()) throw errValidation("a skip reason is required");
-    const step = this.stepRowFull(runId, stepName);
-    if (step.status !== "failed") throw errValidation(`step ${stepName} is not the failed step`);
-    // Asked on the DEFINITION's mutating flag + the step name (guards.isMutatingPrecondition), never on
-    // the kind: the executor stays domain-agnostic and learns nothing about tenants, consumers or slaves.
-    if (isMutatingPrecondition(this.deps.runDefinitions.get(run.kind), step.name)) {
-      throw errValidation(
-        `step ${stepName} is the fail-closed precondition of this ${run.kind} run — it cannot be skipped. ` +
-          "It refused because of what it found in the world, not because of anything this run did, and every step after it mutates. " +
-          "Fix what it refused and retry the step, or abort/delete the run.",
-      );
-    }
-    this.deps.db.transaction((tx) => {
-      setStepStatus(tx, step.id, step.status, "skipped", { skipReason: reason });
-      tx.update(runs).set({ status: "running", error: null, finishedAt: null }).where(eq(runs.id, runId)).run();
-    });
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.step_skipped", runId, detail: { step: stepName, reason } });
-    appendRunMeta(this.deps.db, this.deps.bus, runId, `⏭ skipped by ${this.deps.actor()}: ${reason}`);
-    this.fireExecute(runId);
+    return skipStep(this.recoveryHost, runId, stepName, reason);
   }
 
-  /** Turn registered cleanups into visible steps that run in reverse registration order, ending the run
-   *  cancelled. The POLICY lives here — only a failed/cancelled run may be aborted, and
-   *  the run's own definition supplies the compensations; the persisted-row mechanics (run order,
-   *  abandoning the unfinished steps, the idempotent re-abort) live in cleanup.ts.
-   *
-   *  Two things are deliberately ordered around the "nothing was ever registered" early return.
-   *
-   *  (1) THE DEFINITION'S OWN PRECONDITION. A cleanup is a MUTATION, so the run STATUS is not the whole
-   *  question: it says the run stopped, never what undoing it would take off the cluster. The executor is
-   *  domain-agnostic and must not learn that, so it asks the definition (assertAbortable) and a refusal
-   *  throws out to the caller before a single cleanup row is written — for every caller of the abort, not
-   *  for one route. It is asked only on the path that HAS compensations, because that is the only path
-   *  that mutates anything.
-   *
-   *  (2) PARAMS ARE PARSED ONLY WHERE THEY ARE NEEDED. paramsSchema.parse as the FIRST thing this
-   *  method does would make a run that never got a usable plan un-abortable: a run that failed while still
-   *  `planning` carries only the operator's RAW request (beginStreamingPlan persists it verbatim and only
-   *  the settled plan overwrites it) and has no step rows at all, so the parse throws a ZodError at the
-   *  operator instead of settling the run cancelled — a guaranteed-failing button on a run that has
-   *  nothing to clean up in the first place. The params feed the definition's cleanups + precondition, so
-   *  they are parsed there and nowhere else.
-   *
-   *  `secrets` is retryFromStep's re-entry surface on the abort path: a terminal run's secrets were
-   *  wiped with the run (finishRun), and a cleanup that drives the machine's programs needs the
-   *  elevation password again — re-supplied here, held in memory, wiped with the cleanup run like
-   *  any other. Stored only on the path that schedules cleanups, because the other path runs nothing. */
+  /** Turn registered cleanups into visible steps that run in reverse registration order, ending the run cancelled. */
   async abortWithCleanup(runId: string, secrets?: Record<string, Buffer>): Promise<void> {
-    const run = this.loadRun(runId);
-    if (run.status !== "failed" && run.status !== "cancelled") throw errValidation(`run ${runId} is not failed/cancelled`);
-    const def = this.deps.runDefinitions.get(run.kind);
-    const all = this.allStepRows(runId);
-    const names = registeredCleanupNames(all);
-    if (names.length === 0) {
-      settleAbortWithoutCleanup(this.deps.db, runId);
-      // Said on the run itself: an abort that settles without a cleanup step to show would otherwise
-      // leave the log exactly as it was, and the operator guessing whether anything happened (#236).
-      appendRunMeta(this.deps.db, this.deps.bus, runId, "\u2715 cancelled \u2014 nothing to clean up: no completed step registered a compensation");
-      writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { cleanedUp: false } });
-      return;
-    }
-    const params = def ? def.paramsSchema.parse(run.params) : {};
-    await def?.assertAbortable?.(params, { db: this.deps.db });
-    scheduleCleanupSteps(this.deps.db, runId, all, names, new Map((def?.cleanups?.(params) ?? []).map((c) => [c.name, c])));
-    if (secrets) this.storeSecrets(runId, secrets);
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cleanup_started", runId });
-    this.fireExecute(runId);
+    return abortWithCleanup(this.recoveryHost, runId, secrets);
   }
 
   // ---- internals
@@ -448,7 +396,7 @@ export class Executor {
           ctx.emitMeta(`✕ cancelled before: ${row.title}`);
           writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: row.name } });
           callOnTerminal(this.deps, def, runId, params, "cancelled");
-          this.finishRun(runId, ctx, secrets);
+          this.finishRun(runId, ctx, secrets, "keep");
           return;
         }
         // A shutdown pauses the run here, between two steps and after a cancel had its say: it stays
@@ -472,7 +420,7 @@ export class Executor {
           ctx.emitMeta(`✗ failed: ${row.name} — ${missing}`);
           writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { failedStep: row.name } });
           callOnTerminal(this.deps, def, runId, params, "failed");
-          this.finishRun(runId, ctx, secrets);
+          this.finishRun(runId, ctx, secrets, "keep");
           return;
         }
         this.deps.db.transaction((tx) => setStepStatus(tx, row.id, row.status, "running", { startedAt: new Date() }));
@@ -505,7 +453,7 @@ export class Executor {
           // Every failed run is one error line in the process log, the line master's log alarm reads.
           if (!aborted) this.deps.logger.error({ runId, kind: def.kind, runError: message }, "run failed");
           callOnTerminal(this.deps, def, runId, params, aborted ? "cancelled" : "failed");
-          this.finishRun(runId, ctx, secrets);
+          this.finishRun(runId, ctx, secrets, "keep");
           return;
         }
       }
@@ -514,19 +462,22 @@ export class Executor {
       ctx.emitMeta(isCleanupRun ? "Run cancelled — cleanup complete" : "Run succeeded");
       writeAudit(this.deps.db, { actor: "system", action: isCleanupRun ? "run.cancelled" : "run.succeeded", runId, ...(isCleanupRun ? { detail: { cleanedUp: true } } : {}) });
       callOnTerminal(this.deps, def, runId, params, finalStatus);
-      this.finishRun(runId, ctx, secrets);
+      this.finishRun(runId, ctx, secrets, "release");
     } catch (err) {
       // Unexpected executor error (not a step failure — those are handled above).
       this.failRun(runId, redact(err instanceof Error ? err.message : String(err)));
     }
   }
 
-  private finishRun(runId: string, ctx: RunContext, secrets: RunSecretsMap): void {
-    releaseLocks(this.deps.db, runId);
+  /** A run that failed or was cancelled in the middle keeps its locks, so no other run starts on what
+   *  it left half done: they are let go when the run is retried to its end, aborted or deleted. */
+  private finishRun(runId: string, ctx: RunContext, secrets: RunSecretsMap, locks: "keep" | "release"): void {
+    if (locks === "release") releaseLocks(this.deps.db, runId);
     secrets.wipe();
     ctx.close();
     this.active.delete(runId);
     this.runSecrets.delete(runId);
+    this.queue.dispatch();
   }
 
   /** Record that a run failed. Every line of the recording is a database write, and the database is
@@ -554,13 +505,13 @@ export class Executor {
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
       this.deps.logger.error({ runId, kind: r?.kind, runError: message }, "run failed");
       if (r) callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
-      releaseLocks(this.deps.db, runId);
     } catch (err) {
       this.deps.logger.error({ err, runId, runError: message }, "could not record the run's failure — the run row still reads whatever it read before, and the reason it failed now exists only in this line");
     }
     // Reached whether or not the recording landed, because the catch above swallows deliberately.
     this.active.delete(runId);
     this.runSecrets.delete(runId);
+    this.queue.dispatch();
   }
 
   private loadRun(runId: string): LoadedRun {

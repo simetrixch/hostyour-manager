@@ -15,7 +15,7 @@ describe("the tenant administrator check's schedule", () => {
     // The whole reason this is a run: a check that did its work in a timer would leave nothing in
     // the run list, and being visible there is what the check exists for.
     const plan = vi.fn().mockResolvedValue({ runId: "run_1", plan: {} });
-    const approve = vi.fn().mockResolvedValue(undefined);
+    const approve = vi.fn().mockResolvedValue({ status: "approved" });
     const executor = { plan, approve } as unknown as Executor;
 
     return startTenantCheck(executor, silent).then((started) => {

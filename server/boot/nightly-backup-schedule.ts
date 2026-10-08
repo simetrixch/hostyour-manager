@@ -27,12 +27,15 @@ const NIGHTLY: readonly { kind: "consumer-nightly-backup" | "tenant-nightly-back
 let timer: NodeJS.Timeout | undefined;
 /** Per run kind, the UTC day (YYYYMMDD) its pass was started or refused on. */
 const handled = new Map<string, string>();
+/** The night, per kind, whose wait for a lock holder is already in the log. */
+const waitLogged = new Map<string, string>();
 
 /** Stops the schedule and forgets the days. Exported for tests. */
 export function stopNightlyBackupSchedule(): void {
   if (timer) clearInterval(timer);
   timer = undefined;
   handled.clear();
+  waitLogged.clear();
 }
 
 /** Start the nightly run that is due at `now`, at most one per call, and answer which one it started.
@@ -47,13 +50,23 @@ export async function startDueNightlyBackup(executor: Executor, db: Db, logger: 
       handled.set(kind, day);
       continue;
     }
-    // Another run holds the master: the pass waits for a later tick rather than leave a planned run.
-    if (listLocks(db).length > 0) return null;
+    // Another run holds a lock: the pass waits for a later tick rather than leave a planned run. A run
+    // that failed keeps its locks until somebody resolves it, so the wait can last the night: the
+    // first waiting tick of a night names the holder, at warn, where master's log alarm reads it.
+    const holder = listLocks(db)[0];
+    if (holder) {
+      if (waitLogged.get(kind) !== day) {
+        waitLogged.set(kind, day);
+        logger.warn({ kind, holderRunId: holder.runId }, `nightly backup waits: run ${holder.runId} holds ${holder.resource} ${holder.key}, and the backup starts only once no run holds a lock`);
+      }
+      return null;
+    }
     handled.set(kind, day);
     let runId: string | undefined;
     try {
       runId = (await executor.plan(kind, {})).runId;
-      await executor.approve(runId);
+      // A backup that starts hours later is no longer the night's: it never queues.
+      await executor.approve(runId, undefined, { onlyIfFree: true });
       logger.info({ runId, kind }, "nightly backup started");
       return kind;
     } catch (err) {

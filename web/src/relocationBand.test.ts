@@ -19,6 +19,10 @@ describe("relocationRun", () => {
     expect(relocationRun("app_1", [run({ id: "r_failed", status: "failed" })])?.id).toBe("r_failed");
     expect(relocationRun("app_1", [run({ id: "r_done", status: "succeeded" })])).toBeUndefined();
   });
+
+  it("PLANTED DEFECT: surfaces a queued relocation run as open", () => {
+    expect(relocationRun("app_1", [run({ id: "r_failed", status: "failed" }), run({ id: "r_queued", kind: "consumer-backup", status: "queued" })])?.id).toBe("r_queued");
+  });
 });
 
 describe("relocationLine", () => {

@@ -8,7 +8,7 @@ import type { ClustersView, ReleasesView, RunView, ServerView, HealthView, Plugi
   TenantPurgeInput, OrphanScanView, RunTenantStateView, // The DETECTED-consumer surface: the scan result the Detected tab renders.
   // One declaration, both ends — as above.
   DetectedScanView, // The operator-key rows the /servers/keys page renders. One declaration, both ends — as above.
-  OperatorKeyView, VersionsView, LockView, RunDurationView } from "../../shared/api-types.ts";
+  OperatorKeyView, VersionsView, LockView, RunDurationView, QueuedRunView } from "../../shared/api-types.ts";
 // The two live-reconciliation payloads and the Detected tab's row-less live probe. Same rule, same
 // reason: the server answers in these exact shapes and this client resolves to them, so the `argo`
 // union the cards narrow on `.ok` is the server's OWN union — a member added there stops THIS build,
@@ -53,6 +53,7 @@ export const listRuns = (): Promise<RunView[]> => req<RunView[]>("/api/runs");
 export const getRun = (id: string): Promise<RunView> => req<RunView>(`/api/runs/${id}`);
 export const listRunDurations = (): Promise<RunDurationView[]> => req<RunDurationView[]>("/api/runs/durations");
 export const listLocks = (): Promise<LockView[]> => req<LockView[]>("/api/locks");
+export const listQueue = (): Promise<QueuedRunView[]> => req<QueuedRunView[]>("/api/runs/queue");
 
 // Typed on RunKind rather than on string: the plan route answers "unknown run kind" for anything
 // else, and a front end that could still spell a kind the way it was spelled before a rename would
@@ -70,8 +71,8 @@ function encodeSecrets(secrets?: Record<string, string>): { secrets: Record<stri
   return { secrets: Object.fromEntries(Object.entries(secrets).map(([k, v]) => [k, toBase64(v)])) };
 }
 
-export const approveRun = (id: string, secrets?: Record<string, string>): Promise<unknown> =>
-  post(`/api/runs/${id}/approve`, encodeSecrets(secrets) ?? {});
+export const approveRun = (id: string, secrets?: Record<string, string>): Promise<{ ok: true; status: "approved" | "queued" }> =>
+  post<{ ok: true; status: "approved" | "queued" }>(`/api/runs/${id}/approve`, encodeSecrets(secrets) ?? {});
 /** Soft-delete a run: it disappears from the runs list, while its row and complete log
  *  stay in the audit DB for retroactive inspection. Any SETTLED run may go — planned, failed,
  *  cancelled or succeeded; only an in-flight one is refused with 409 and must settle first.

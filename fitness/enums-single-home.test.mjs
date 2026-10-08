@@ -52,7 +52,7 @@ describe("closed value sets are declared once, in shared/enums.ts", () => {
   it("finds a copy put in front of it, so a clean answer is a refusal and not a blind scan", () => {
     const owned = ownedSets();
     const copy = `
-      export type Status = "planning" | "planned" | "approved" | "running"
+      export type Status = "planning" | "planned" | "queued" | "approved" | "running"
         | "succeeded" | "failed" | "cancelled";
       export const OUT_OF_ORDER = ["prod", "dev", "test"];
       export const SEEN = new Set(["manager", "adopted"]);

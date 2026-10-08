@@ -7,7 +7,7 @@ import type { RunView } from "../../shared/api-types.ts";
 // whole substance here.
 
 /** Non-terminal run statuses: such a run OWNS the server's next step (approve or watch it). */
-export const OPEN_RUN: ReadonlyArray<RunView["status"]> = ["planning", "planned", "approved", "running"];
+export const OPEN_RUN: ReadonlyArray<RunView["status"]> = ["planning", "planned", "queued", "approved", "running"];
 
 /** The run this server's card must surface (listRuns is newest-first): an OPEN run — a planned run
  *  waiting for approval must never be invisible — or, failing that, the most recent FAILED one

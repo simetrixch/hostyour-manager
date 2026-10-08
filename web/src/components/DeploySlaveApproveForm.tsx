@@ -14,7 +14,8 @@ export function DeploySlaveApproveForm(props: {
   run: RunView;
   /** Resolves when the approve was accepted, rejects when it was refused. */
   onApprove: (payload: Record<string, string>) => Promise<void>;
-  onDelete: () => void;
+  /** Left out where the run cannot be deleted (a queued one is cancelled instead). */
+  onDelete?: (() => void) | undefined;
 }): ReactNode {
   const [supplied, setSupplied] = useState<Record<string, string>>({});
   const [stated, setStated] = useState<Record<string, string>>({});
@@ -89,9 +90,11 @@ export function DeploySlaveApproveForm(props: {
         <button type="submit" className="btn btn--primary" disabled={!readyToApprove(run, supplied)}>
           Approve &amp; deploy
         </button>
-        <button type="button" className="btn" onClick={props.onDelete}>
-          Delete run
-        </button>
+        {props.onDelete && (
+          <button type="button" className="btn" onClick={props.onDelete}>
+            Delete run
+          </button>
+        )}
       </div>
     </form>
   );

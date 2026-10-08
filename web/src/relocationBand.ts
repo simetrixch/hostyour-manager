@@ -7,7 +7,7 @@
 import type { RunKind } from "../../shared/enums.ts";
 import type { RunView } from "../../shared/api-types.ts";
 
-const OPEN_RUN: ReadonlyArray<RunView["status"]> = ["planning", "planned", "approved", "running"];
+const OPEN_RUN: ReadonlyArray<RunView["status"]> = ["planning", "planned", "queued", "approved", "running"];
 
 const RELOCATION_KINDS: ReadonlySet<string> = new Set<RunKind>(["consumer-backup", "consumer-restore", "consumer-migrate", "tenant-backup", "tenant-restore", "tenant-migrate"]);
 

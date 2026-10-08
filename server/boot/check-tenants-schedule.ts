@@ -52,8 +52,8 @@ export async function startTenantCheck(executor: Executor, logger: Logger): Prom
     const { runId } = await executor.plan("tenant-check", {});
     // approve() is what the operator's button does after reading a plan. There is nothing to read
     // and nothing to decide here — the check reads and records, and changes no cluster.
-    await executor.approve(runId);
-    logger.info({ runId }, "tenant administrator check started");
+    const { status } = await executor.approve(runId);
+    logger.info({ runId }, status === "queued" ? "tenant administrator check queued behind the run that holds its locks" : "tenant administrator check started");
     return true;
   } catch (err) {
     // A manager without tenant onboarding configured has no such run kind, which is a normal state
