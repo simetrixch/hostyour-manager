@@ -59,12 +59,19 @@ export function dkimRecordKey(spkiPem: string): string {
  *  names an address, so a change of the egress address never touches one. */
 function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly string[], egress: string | null, egressName: string, egressHost: string | null, publish: string): MailDnsRow {
   const mechanism = egressHost === null ? null : spfHostMechanism(name, egressHost);
-  // Each mechanism as a term of its own, never as a prefix of a longer one (ip4:1.2.3.4 in ip4:1.2.3.45).
-  const terms = (txt: string): string[] => txt.trim().split(/\s+/);
+  // Each mechanism as a term of its own, never as a prefix of a longer one (ip4:1.2.3.4 in ip4:1.2.3.45),
+  // read as SPF reads it: the `+` qualifier is the default, and a domain name ignores case and its root dot.
+  const terms = (txt: string): string[] => txt.trim().split(/\s+/).map((term) => term.replace(/^\+/, "").replace(/\.$/, "").toLowerCase());
   // The host's own name may carry the bare `a` or spell itself out; without a host no term names it.
-  const hostTerms = mechanism === null ? [] : [mechanism, `a:${egressHost}`];
+  const hostTerms = mechanism === null ? [] : [mechanism, `a:${egressHost}`].map((term) => term.toLowerCase());
   const namesHost = (txt: string): boolean => terms(txt).some((term) => hostTerms.includes(term));
-  const namesAddress = (txt: string): boolean => terms(txt).some((term) => term === `ip4:${egress}` || term === `ip4:${egress}/32`);
+  // The envelope name's record is wholly ours, so it names no address at all; a domain's apex also
+  // carries the domain's own senders, and there only the egress address is ours to refuse. The publish
+  // replaces the egress address; any other address on the envelope name is removed by hand.
+  const isEgress = (term: string): boolean => term === `ip4:${egress}` || term === `ip4:${egress}/32`;
+  const isAddress = record === "envelope-spf" ? (term: string): boolean => term.startsWith("ip4:") || term.startsWith("ip6:") : isEgress;
+  const namesAddress = (txt: string): boolean => terms(txt).some(isAddress);
+  const strayAddresses = (txt: string): string[] => terms(txt).filter((term) => isAddress(term) && !isEgress(term));
   const holds = (txt: string): boolean => namesHost(txt) && !namesAddress(txt);
   return {
     record,
@@ -82,9 +89,11 @@ function spfRow(record: "spf" | "envelope-spf", name: string, found: readonly st
             ? { note: `remove ${found.length - 1} of the ${found.length} v=spf1 records by hand, then ${publish}` }
             : holds(found[0]!)
               ? {}
-              : namesAddress(found[0]!)
-                ? { note: `${publish}; it replaces ip4:${egress} with ${mechanism}` }
-                : { note: `${publish}; ${mechanism} is merged into the record that stands` }),
+              : strayAddresses(found[0]!).length > 0
+                ? { note: `remove ${strayAddresses(found[0]!).join(", ")} from the record by hand${namesHost(found[0]!) && !terms(found[0]!).some(isEgress) ? "" : `, then ${publish}`}` }
+                : namesAddress(found[0]!)
+                  ? { note: `${publish}; it replaces ip4:${egress} with ${mechanism}` }
+                  : { note: `${publish}; ${mechanism} is merged into the record that stands` }),
   };
 }
 

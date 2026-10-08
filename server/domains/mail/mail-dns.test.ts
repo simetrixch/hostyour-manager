@@ -159,6 +159,26 @@ describe("mailDnsRows", () => {
     expect(again.find((r) => r.record === "envelope-spf")?.ok).toBe(true);
   });
 
+  it("PLANTED DEFECT: the envelope name's record is wholly ours, so any address on it is red; a domain's apex judges only the egress address", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", `v=spf1 a:${MAIL_NAME} ip4:203.0.113.95 -all`);
+    dns.seedTxt(MAIL_NAME, "v=spf1 a ip4:203.0.113.95 -all");
+    const rows = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
+    expect(rows.find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "remove ip4:203.0.113.95 from the record by hand" });
+    expect(rows.find((r) => r.record === "spf")?.ok).toBe(true);
+    dns.seedTxt(MAIL_NAME, "v=spf1 a:other.example.net ip6:2001:db8::1 -all");
+    expect((await mailDnsRows(platformNeed({ ownMailService: false }), dns)).find((r) => r.record === "envelope-spf")).toMatchObject({ ok: false, note: "remove ip6:2001:db8::1 from the record by hand, then publish the envelope SPF" });
+  });
+
+  it("PLANTED INNOCENT: the + qualifier, upper case and the root dot name the host as SPF reads them", async () => {
+    const dns = published();
+    dns.seedTxt("example.com", `v=spf1 +a:${MAIL_NAME.toUpperCase()}. -all`);
+    dns.seedTxt(MAIL_NAME, "v=spf1 +a -all");
+    const rows = await mailDnsRows(platformNeed({ ownMailService: false }), dns);
+    expect(rows.find((r) => r.record === "spf")?.ok).toBe(true);
+    expect(rows.find((r) => r.record === "envelope-spf")?.ok).toBe(true);
+  });
+
   it("PLANTED DEFECT: a record that names another host, or a host that only starts like the egress host, is red", async () => {
     const dns = published();
     dns.seedTxt("example.com", "v=spf1 a:other.example.net -all");
