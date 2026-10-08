@@ -9,7 +9,7 @@ import { TenantStatusBadge } from "./TenantStatusBadge.tsx";
 
 /** The Apps list of the tenant page: the bundle's apps lead, deployed or not, and an inventory row the
  *  bundle no longer names follows. While the catalog is unreadable the list is the inventory alone.
- *  A standing app row offers its removal (`onRemove`, whose confirm the page shares with its
+ *  A standing app row offers its Google translation settings and its removal (`onRemove`, whose confirm the page shares with its
  *  websites); an offboarded one offers its purge, whose plan names what of the app it deletes.
  *  `editable` is false on a settled or unfinished tenant. */
 export function TenantAppList(props: {
@@ -46,6 +46,12 @@ export function TenantAppList(props: {
                   {/* The per-app remove, gated by the SAME shared status rule as everything else on this
                       page: an app row that a remove-app or a tenant-wide removal already settled
                       ("offboarded" or "purged") has no Application left to prune. */}
+                  {/* Plans the run whose approve form takes the settings, so they are typed once, on the run page. */}
+                  {r.row && editable && !tenantRowOffer(r.row.status).settled && (
+                    <button type="button" className="btn" disabled={busy} onClick={() => void act(() => planRun("tenant-set-google-translation", { tenantId: t.id, app: r.name }))}>
+                      Google translation
+                    </button>
+                  )}
                   {r.row && editable && !tenantRowOffer(r.row.status).settled && (
                     <button type="button" className="btn btn--danger" disabled={busy} onClick={() => onRemove(r.name)}>
                       Remove

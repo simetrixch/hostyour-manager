@@ -8,6 +8,7 @@ import { localTx } from "../../executor/stepkit.ts";
 import { memberAppProject, memberApplication, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { forgetSecretEntry, tenantAppSecretEntry } from "../../db/secret-writes.ts";
 import { loadTenantStatus } from "./tenant-provisioned.ts";
 import { RemoveAppParams, tenantLocks } from "./tenant-lifecycle.run.ts";
 
@@ -132,6 +133,7 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
           if (c.policy) await clusterReader.deleteAdmissionPolicy(c.policy);
         }
         const { deleted } = left.vaultKeys.length > 0 ? await ports.seeder!.deleteTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) : { deleted: [] };
+        for (const key of deleted) forgetSecretEntry(ctx.db, tenantAppSecretEntry(tc.stage, tc.guid, key));
         const gone = describeLeftovers(tc, { ...left, vaultKeys: deleted });
         ctx.log("meta", (gone.length > 0 ? `app "${app}" of tenant ${tc.guid}: deleted ${gone.join(", ")}` : `app "${app}" of tenant ${tc.guid}: nothing but its record stood`) + unreadNote(left));
       },

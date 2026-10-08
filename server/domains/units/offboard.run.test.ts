@@ -61,6 +61,7 @@ function seederWith(over: Partial<VaultSeeder>): VaultSeeder {
     deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
     seedTenantAppKey: async () => ({ created: true }),
     listTenantAppKeys: async () => [],
+    replaceGoogleTranslation: async () => {},
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
     ...over,

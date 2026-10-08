@@ -23,6 +23,12 @@ export function consumerSecretEntry(stage: Stage, consumerName: string): string 
   return `${stage}/consumer/${consumerName}/app`;
 }
 
+/** The entry one tenant app key lives in, below the KV mount, named by what the seeder's listing
+ *  answers (`<kind>/<app>`): the path the seeder writes, and the name the book keys it by. */
+export function tenantAppSecretEntry(stage: Stage, guid: string, kindAndApp: string): string {
+  return `${stage}/tenants/${guid}/${kindAndApp}`;
+}
+
 /** Enter the keys one write put into `entry`. A key already in the book is REWRITTEN: the act, the
  *  run and the time are the latest write's. */
 export function recordSecretWrites(db: Db, write: { entry: string; keys: readonly string[]; act: SecretWriteAct; runId: string }): void {

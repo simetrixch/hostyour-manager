@@ -15,7 +15,7 @@
 // deployed slave stands in, the password-login and tailnet kinds only raise their own commands — so
 // the sentence common to all of them is here, and the rest is in each plan's summary, which the card
 // renders above these fields.
-import { MACHINE_PASSWORD_SECRET } from "../../shared/approve.ts";
+import { GOOGLE_TRANSLATION_SECRET_PREFIX, MACHINE_PASSWORD_SECRET } from "../../shared/approve.ts";
 
 /** What the person reads under an OPTIONAL box: why they may leave it empty. */
 export function optionalSecretFieldHint(_key: string): string {
@@ -28,8 +28,16 @@ export const CONSUMER_SECRET_PREFIX = "consumer-secret:";
 
 /** What the person reads above the box. Total: a key this module has nothing to add to is shown as
  *  it is, which is a name the plan chose rather than a word invented here. */
+const GOOGLE_TRANSLATION_LABELS: Readonly<Record<string, string>> = {
+  project: "Google Cloud project ID",
+  "service-account": "Service account key (JSON)",
+  location: "Location",
+  glossary: "Glossary ID",
+};
+
 export function secretFieldLabel(key: string): string {
   if (key === MACHINE_PASSWORD_SECRET) return "The password of the machine account this manager logs in as";
+  if (key.startsWith(GOOGLE_TRANSLATION_SECRET_PREFIX)) return GOOGLE_TRANSLATION_LABELS[key.slice(GOOGLE_TRANSLATION_SECRET_PREFIX.length)] ?? key;
   return key.startsWith(CONSUMER_SECRET_PREFIX) ? key.slice(CONSUMER_SECRET_PREFIX.length) : key;
 }
 

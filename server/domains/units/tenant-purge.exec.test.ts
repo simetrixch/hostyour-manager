@@ -24,6 +24,7 @@ import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
 import type { VaultSeeder, VaultSeedOutcome, TenantCryptoDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
+import { listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
 
 
@@ -86,7 +87,8 @@ class FakePurgeSeeder implements VaultSeeder {
   async seedTenantCrypto(): Promise<VaultSeedOutcome> { throw new Error("purge never seeds tenant crypto"); }
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async listTenantAppKeys(): Promise<string[]> { return []; }
-  async deleteTenantAppKeys(i: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> { this.deletedAppKeys.push(i); return { deleted: ["erp"] }; }
+  async replaceGoogleTranslation(): Promise<void> {}
+  async deleteTenantAppKeys(i: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> { this.deletedAppKeys.push(i); return { deleted: ["google-translation/erp"] }; }
   readonly deletedAppKeys: TenantCryptoDeleteInput[] = [];
   async deleteTenantCrypto(i: TenantCryptoDeleteInput): Promise<void> { this.deletedCrypto.push(i); }
   async deleteBuildRepoPat(): Promise<void> {}
@@ -379,11 +381,15 @@ describe("tenant-purge execution", () => {
     const seeder = new FakePurgeSeeder();
     const prt = ports(reg, { cluster, seeder });
 
+    recordSecretWrites(db.db, { entry: `prod/tenants/${GUID}/google-translation/erp`, keys: ["project"], act: "set", runId: "run_set" });
+
     const logs: string[] = [];
     const { params } = await planned(prt);
     await runAll(prt, params, logs); // nothing skipped — the run completes on its own
 
     expect(seeder.deletedCrypto).toEqual([{ stage: "prod", guid: GUID }]);
+    // A deleted entry leaves the book of secret writes with it, so no plan names settings that are gone.
+    expect(listSecretWrites(db.db, `prod/tenants/${GUID}/google-translation/erp`)).toEqual([]);
     // And every app's Password field key below it (hostyour-manager#329).
     expect(seeder.deletedAppKeys).toEqual([{ stage: "prod", guid: GUID }]);
     expect(await reg.readTenant("prod", GUID)).toBeNull();

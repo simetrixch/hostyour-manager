@@ -164,6 +164,7 @@ function fakeTenantSeeder(): VaultSeeder {
     seedTenantCrypto: async () => ({ created: true }),
     seedTenantAppKey: async () => ({ created: true }),
     listTenantAppKeys: async () => [],
+    replaceGoogleTranslation: async () => {},
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
   };

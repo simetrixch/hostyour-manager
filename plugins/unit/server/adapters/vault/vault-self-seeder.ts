@@ -1,4 +1,4 @@
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind } from "./seeder-port.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind, GoogleTranslationWriteInput } from "./seeder-port.ts";
 import { TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
@@ -272,6 +272,23 @@ export class VaultSelfSeeder implements VaultSeeder {
       const detail = await res.text().catch(() => "");
       if (res.status === 400 && detail.includes("check-and-set")) return { created: false };
       throw new VaultError(`vault tenant app key seed put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async replaceGoogleTranslation(input: GoogleTranslationWriteInput): Promise<void> {
+    // The app name is a path segment here, held to the rule seedTenantAppKey holds it to.
+    if (!appName.safeParse(input.app).success) throw new VaultError(`"${input.app}" is no tenant app name, so no settings path is composed from it`, 400);
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantAppKeyPath(input.stage, input.guid, "google-translation", input.app);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "POST",
+        headers: { "x-vault-token": token, "content-type": "application/json" },
+        body: JSON.stringify({ data: input.data }),
+      });
+      if (!res.ok) throw new VaultError(`vault Google translation settings put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
     } finally {
       await this.revoke(addr, token).catch(() => undefined);
     }

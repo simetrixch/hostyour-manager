@@ -17,6 +17,14 @@ describe("secretFieldLabel — what a credential field is called", () => {
     expect(secretFieldLabel("consumer-secret:SMTP_PASSWORD")).toBe("SMTP_PASSWORD");
   });
 
+  it("names each Google translation setting by what Google calls it, and an unknown one as its key", () => {
+    expect(secretFieldLabel("google-translation:project")).toBe("Google Cloud project ID");
+    expect(secretFieldLabel("google-translation:service-account")).toBe("Service account key (JSON)");
+    expect(secretFieldLabel("google-translation:location")).toBe("Location");
+    expect(secretFieldLabel("google-translation:glossary")).toBe("Glossary ID");
+    expect(secretFieldLabel("google-translation:other")).toBe("google-translation:other");
+  });
+
   it("shows any other key as the plan states it, rather than inventing a word for it", () => {
     expect(secretFieldLabel("tenant-storage:key")).toBe("tenant-storage:key");
   });

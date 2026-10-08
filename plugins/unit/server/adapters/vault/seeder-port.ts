@@ -246,6 +246,16 @@ export interface TenantCryptoDeleteInput {
 export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key", "google-translation"] as const;
 /** The properties of a `google-translation` entry, as the engine chart reads them. */
 export const GOOGLE_TRANSLATION_PROPERTIES = ["project", "service-account", "location", "glossary"] as const;
+export type GoogleTranslationProperty = (typeof GOOGLE_TRANSLATION_PROPERTIES)[number];
+
+export interface GoogleTranslationWriteInput {
+  stage: Stage;
+  guid: string;
+  /** The app's name as `tenant_apps.name` spells it. */
+  app: string;
+  /** Every property, the empty text for one the operator left blank. */
+  data: Record<GoogleTranslationProperty, string>;
+}
 export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
 
 export interface TenantAppKeySeedInput {
@@ -337,6 +347,11 @@ export interface VaultSeeder {
    *  with its Password field key alone, and a renderer and its engine agree only while their revalidate
    *  secret stays the same, so neither is ever overwritten. */
   seedTenantAppKey(input: TenantAppKeySeedInput): Promise<VaultSeedOutcome>;
+  /** REPLACE one tenant app's Google translation settings with what an operator typed: created where
+   *  absent, replaced where it stands, no check-and-set, because these are the operator's to change.
+   *  Every property rides every write, since the app's ExternalSecret fails on one that is missing.
+   *  Write-only: nothing is read. */
+  replaceGoogleTranslation(input: GoogleTranslationWriteInput): Promise<void>;
   /** Remove every tenant app key of one tenant, of every kind (purge), found by listing the key names
    *  under it, so the key of an app this manager no longer knows goes too; with `app`, that app's keys
    *  only (the purge of one removed app). Answers what it removed, each as <kind>/<app>. */

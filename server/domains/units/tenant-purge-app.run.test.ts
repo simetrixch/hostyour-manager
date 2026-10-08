@@ -17,6 +17,7 @@ import type { StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
+import { listSecretWrites, recordSecretWrites } from "../../db/secret-writes.ts";
 
 // tenant-purge-app: an app that tenant-remove-app took off a standing tenant leaves its record, its
 // AppProject, its admission policy and its Vault keys behind on purpose. The purge deletes exactly
@@ -142,6 +143,17 @@ describe("tenant-purge-app run", () => {
     expect(cluster.admissionPolicies.has(tenantMemberAdmissionPolicyName(OTHER_GUID, "web", "prod"))).toBe(true);
     expect(tenantRow("tnt_2")?.lastRunId ?? null).toBeNull();
     expect(logs.some((l) => l.includes(`record of app "web"`))).toBe(true);
+  });
+
+  it("PLANTED DEFECT: takes the deleted app's typed settings out of the book of secret writes, and keeps the sibling app's", async () => {
+    seedTenants();
+    const { ports } = await world({ vaultKeys: ["google-translation/web", "service-key/web"] });
+    const kept = `prod/tenants/${GUID}/google-translation/erp`;
+    recordSecretWrites(db.db, { entry: `prod/tenants/${GUID}/google-translation/web`, keys: ["project"], act: "set", runId: "run_set" });
+    recordSecretWrites(db.db, { entry: kept, keys: ["project"], act: "set", runId: "run_set" });
+    await runAll(makePurgeAppDef(ports));
+    expect(listSecretWrites(db.db, `prod/tenants/${GUID}/google-translation/web`)).toEqual([]);
+    expect(listSecretWrites(db.db, kept).map((w) => w.key)).toEqual(["project"]);
   });
 
   it("PLANTED DEFECT: finds and deletes what a move left of the app on the tenant's former cluster, naming that cluster", async () => {

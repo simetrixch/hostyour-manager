@@ -38,6 +38,25 @@ describe("VaultSelfSeeder tenant app keys", () => {
     });
   });
 
+  it("PLANTED DEFECT: replaces an app's Google translation settings whole and without check-and-set, so a typed entry overwrites the seeded one", async () => {
+    const data = { project: "p", "service-account": "{}", location: "", glossary: "" };
+    await withSelf(async (seeder) => {
+      await seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show", data });
+      const put = vault.recorded.find((r) => r.method === "POST" && r.url.includes("/data/"));
+      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/google-translation/show" });
+      expect(put!.body).toEqual({ data });
+    });
+    vault.dataPut = { status: 403, body: "permission denied" };
+    await withSelf(async (seeder) => expect(seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show", data })).rejects.toThrow(/Google translation settings put failed/));
+  });
+
+  it("PLANTED DEFECT: composes no settings path from an app name that would reach another path", async () => {
+    await withSelf(async (seeder) => {
+      await expect(seeder.replaceGoogleTranslation({ stage: "prod", guid: "g1", app: "show/../../other", data: { project: "", "service-account": "", location: "", glossary: "" } })).rejects.toThrow(/is no tenant app name/);
+      expect(vault.recorded.filter((r) => r.url.includes("/data/"))).toEqual([]);
+    });
+  });
+
   it("purges every key of every kind it lists under the tenant, including an app the manager no longer knows", async () => {
     vault.metaLists["prod/tenants/g1/password-field-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp", "retired"] } }) };
     vault.metaLists["prod/tenants/g1/revalidate-secret"] = { status: 200, body: JSON.stringify({ data: { keys: ["simetrix-ch"] } }) };
