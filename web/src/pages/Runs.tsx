@@ -40,7 +40,7 @@ export function Runs(): ReactNode {
     return () => clearInterval(timer);
   }, [load]);
 
-  const failure = error && (
+  const failure = error !== null && (
     <p role="alert" className="alert alert--danger">
       {board ? `The last refresh failed, so this list may be out of date: ${error}` : error}
     </p>
