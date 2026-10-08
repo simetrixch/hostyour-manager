@@ -281,10 +281,12 @@ describe("the Versions dialog's offer", () => {
     expect(logs.some((l) => l.startsWith("engine of the running release "))).toBe(true);
     expect(logs.some((l) => l.startsWith("releases of "))).toBe(true);
     expect(logs.some((l) => l.startsWith("engine of the newest release "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("releases searched for line 0.4: "))).toBe(true);
     expect(logs.some((l) => l.startsWith("parts and their released tags: "))).toBe(true);
     expect(logs.some((l) => l.startsWith("registry probes: "))).toBe(true);
     expect(logs.some((l) => l.startsWith("pins of the stage: "))).toBe(true);
     expect(logs.some((l) => l.startsWith("line-move read of tenant "))).toBe(true);
+    expect(logs.some((l) => l.startsWith("registration and cluster values: "))).toBe(true);
   });
 
   it("PLANTED INNOCENT: offers nothing to a tenant already on the newest line, and names no line for a tenant without a bundle", async () => {

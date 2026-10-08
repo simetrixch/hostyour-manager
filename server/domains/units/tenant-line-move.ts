@@ -87,7 +87,7 @@ export async function readLineMove(
       return parsed && parsed.ts14 >= runningTs14 && (channels[parsed.channel] ?? []).includes(stage) ? [{ release: t.name, commit: t.commit, ts14: parsed.ts14 }] : [];
     })
     .sort((a, b) => b.ts14.localeCompare(a.ts14));
-  input.log(`releases of ${appsRepo}: ${releases.length} at ${stage}, ${Math.round(performance.now() - tReleases)} ms`);
+  input.log(`releases of ${appsRepo} and the stages of their channels: ${releases.length} at ${stage}, ${Math.round(performance.now() - tReleases)} ms`);
 
   let line = input.line;
   if (line === undefined) {
@@ -106,13 +106,17 @@ export async function readLineMove(
 
   const refusals: string[] = [];
   let bundle: { release: string; commit: string; engine: AppsEngine } | undefined;
+  const tSearch = performance.now();
+  let searched = 0;
   for (const r of releases) {
     const engine = await engineOf(r.release);
+    searched++;
     if (engine?.line === line) {
       bundle = { release: r.release, commit: r.commit, engine };
       break;
     }
   }
+  input.log(`releases searched for line ${line}: ${searched} engines, ${Math.round(performance.now() - tSearch)} ms`);
   if (!bundle) return { line: running.line, toLine: line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
 
   const tParts = performance.now();
@@ -168,10 +172,12 @@ export async function readTenantLineMoves(
   const tc = loadTenantCluster(db, tenantId);
   // Logged on every path, a refused or failed read included, because the time is what tells which read is slow.
   try {
+    const tValues = performance.now();
     const read = await ports.registrations.readTenant(tc.stage, tc.guid);
     if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
     if (!read.entry.appsImage) return { line: null, offer: null };
     const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
+    log(`registration and cluster values: ${Math.round(performance.now() - tValues)} ms`);
     const reading = await readLineMove(ports, { stage: tc.stage, entry: read.entry, registryHost, log, signal: signal ?? new AbortController().signal });
     if (reading.toLine === null || reading.standing) return { line: reading.line, offer: null };
     return {
@@ -187,6 +193,6 @@ export async function readTenantLineMoves(
       },
     };
   } finally {
-    log(`line-move read of tenant ${tc.guid} took ${Math.round(performance.now() - started)} ms`);
+    log(`line-move read of tenant ${tc.guid}: ${Math.round(performance.now() - started)} ms`);
   }
 }

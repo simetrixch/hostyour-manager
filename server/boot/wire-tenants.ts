@@ -414,6 +414,7 @@ export function buildTenantOnboarding(
   // through the very registrations the runs commit pointers with — all the same instances (and the same one
   // repoURL the appsets are rendered from) the runs use, never a second one.
   const versions = (db: Db, tenantId: string, signal?: AbortSignal): Promise<VersionsView> => readTenantVersions(onboardPorts, db, tenantId, signal);
+  // ponytail: every view of the offer writes its part times at info; lower them to debug once the slow part is fixed.
   const lineMoves = (db: Db, tenantId: string, signal?: AbortSignal): Promise<LineMoveView> => readTenantLineMoves(onboardPorts, db, tenantId, signal, (line) => logger.info({ tenantId }, line));
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
   // Each standing tenant's lists off its own bundle, read with the deploy repository's credential as the
