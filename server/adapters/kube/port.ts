@@ -244,6 +244,9 @@ export interface ExternalSecretRow {
    *  the write off this field: `ready` stays True across it and cannot say it. The Manager's grants
    *  carry no `get` on Secrets, and this is what stands in for one. */
   refreshTime: string;
+  /** Every distinct `.spec.data[].remoteRef.key` — the Vault entries it reads, below its store's
+   *  mount, in the order the spec names them. */
+  remoteKeys: string[];
 }
 
 /** kube-system/hostyour-deploy-state, written by the platform's deploy-state chart on every sync — attest-target

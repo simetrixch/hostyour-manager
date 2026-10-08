@@ -17,15 +17,18 @@
 // key alone, and an engine and its renderer agree only while their secret stays the same, so the
 // write refuses to replace a key that stands, and the manager holds no read grant on it. That is also
 // what lets the boot pass below ask for every app on every start: an app that has its key answers
-// "exists", and nothing about the key is learned. The Google translation settings are the exception
-// to the minting: the first entry holds every property empty, which the plugin reads as not set, and
-// an operator's typed value replaces it later through its own write.
+// "exists", and nothing about the key is learned.
+//
+// THE GOOGLE TRANSLATION SETTINGS are one entry per tenant, <stage>/tenants/<guid>/google-translation,
+// which every app's ExternalSecret reads. They are not minted: the first entry holds every property
+// empty, which the plugin reads as not set, and an operator's typed value replaces it later through
+// its own write (tenant-google-translation.run.ts).
 import { and, eq, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import type { Logger } from "../../kernel/logger.ts";
-import { GOOGLE_TRANSLATION_PROPERTIES, type TenantAppKeyKind, type VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import type { TenantAppKeyKind, VaultSeeder, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { mintAes256Key } from "#unit/server/secret-mint.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
@@ -37,14 +40,7 @@ const KEY_KIND_TEXT: Record<TenantAppKeyKind, { keys: string; key: string; lacki
   "revalidate-secret": { keys: "Revalidate secrets", key: "revalidate secret", lacking: "a website engine without its secret does not start" },
   "form-signing-key": { keys: "Form signing keys", key: "form signing key", lacking: "a website renderer without its key does not start" },
   "service-key": { keys: "Service keys", key: "service key", lacking: "an engine without its key gets no mail token from its identity provider" },
-  "google-translation": { keys: "Google translation settings", key: "Google translation settings", lacking: "the app's ExternalSecret for them fails, and with it every sync of the app's engine" },
 };
-
-/** What the Manager writes as an app's first entry of [kind]. */
-function firstEntryOf(kind: TenantAppKeyKind): Record<string, string> {
-  if (kind === "google-translation") return Object.fromEntries(GOOGLE_TRANSLATION_PROPERTIES.map((p) => [p, ""]));
-  return { [kind]: mintAes256Key() };
-}
 
 export interface TenantAppKeysOutcome {
   /** The apps whose key this call wrote. */
@@ -54,12 +50,11 @@ export interface TenantAppKeysOutcome {
 }
 
 /** Writes the first entry of [kind] for each of [apps] of one tenant, create-only: a fresh key of 32
- *  random bytes as base64 under the property its kind names, as the app's charts read it, or the
- *  Google translation settings with every property empty. */
+ *  random bytes as base64 under the property its kind names, as the app's charts read it. */
 export async function seedTenantAppKeys(seeder: VaultSeeder, kind: TenantAppKeyKind, stage: Stage, guid: string, apps: readonly string[]): Promise<TenantAppKeysOutcome> {
   const outcome: TenantAppKeysOutcome = { created: [], existing: [] };
   for (const app of apps) {
-    const { created } = await seeder.seedTenantAppKey({ stage, guid, kind, app, data: firstEntryOf(kind) });
+    const { created } = await seeder.seedTenantAppKey({ stage, guid, kind, app, data: { [kind]: mintAes256Key() } });
     (created ? outcome.created : outcome.existing).push(app);
   }
   return outcome;
@@ -74,15 +69,20 @@ export function tenantAppKeysLine(kind: TenantAppKeyKind, stage: Stage, guid: st
   return `${KEY_KIND_TEXT[kind].keys} under ${stage}/tenants/${guid}/${kind}/: ${parts.length > 0 ? parts.join("; ") : "no app to key"}`;
 }
 
-/** Creation seeds every app's Password field key, service key and empty Google translation settings
- *  before the registration starts the engines that read them. */
-export async function seedTenantEngineKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly string[], ctx: Pick<StepCtx, "log">): Promise<{ appKeys: TenantAppKeysOutcome; serviceKeys: TenantAppKeysOutcome; googleTranslation: TenantAppKeysOutcome }> {
+/** One line for a run's log, naming whether the tenant's Google translation settings were written. */
+export function tenantGoogleTranslationLine(stage: Stage, guid: string, outcome: VaultSeedOutcome): string {
+  return `Google translation settings at ${stage}/tenants/${guid}/google-translation: ${outcome.created ? "written with every property empty, so not set" : "already standing and left untouched"}`;
+}
+
+/** Creation seeds every app's Password field key and service key, and the tenant's empty Google
+ *  translation settings, before the registration starts the engines that read them. */
+export async function seedTenantEngineKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly string[], ctx: Pick<StepCtx, "log">): Promise<{ appKeys: TenantAppKeysOutcome; serviceKeys: TenantAppKeysOutcome; googleTranslation: VaultSeedOutcome }> {
   const appKeys = await seedTenantAppKeys(seeder, "password-field-key", stage, guid, apps);
   ctx.log("meta", tenantAppKeysLine("password-field-key", stage, guid, appKeys));
   const serviceKeys = await seedTenantAppKeys(seeder, "service-key", stage, guid, apps);
   ctx.log("meta", tenantAppKeysLine("service-key", stage, guid, serviceKeys));
-  const googleTranslation = await seedTenantAppKeys(seeder, "google-translation", stage, guid, apps);
-  ctx.log("meta", tenantAppKeysLine("google-translation", stage, guid, googleTranslation));
+  const googleTranslation = await seeder.seedTenantGoogleTranslation({ stage, guid });
+  ctx.log("meta", tenantGoogleTranslationLine(stage, guid, googleTranslation));
   return { appKeys, serviceKeys, googleTranslation };
 }
 
@@ -115,9 +115,9 @@ export function seedTenantAppKeyStep(seeder: VaultSeeder | undefined, kind: Tena
   };
 }
 
-/** Every tenant app of every tenant that is not offboarded or purged, given its Password field key,
- *  its service key and its empty Google translation settings where it has none, and every website
- *  among them its revalidate secret and its form signing key.
+/** Every tenant app of every tenant that is not offboarded or purged, given its Password field key
+ *  and its service key where it has none, and every website among them its revalidate secret and its
+ *  form signing key; and every such tenant its empty Google translation settings.
  *  The forward step for the apps that joined before these keys were minted, run once at every boot.
  *  Which apps are websites is read off the tenant's registration: an apps[] entry that names a
  *  domain. Never rejects: a kind of key a tenant could not be given is named in the log, and the
@@ -156,7 +156,14 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; r
   for (const { stage, guid, apps } of byTenant.values()) {
     await ensure("password-field-key", stage, guid, async () => apps);
     await ensure("service-key", stage, guid, async () => apps);
-    await ensure("google-translation", stage, guid, async () => apps);
+    try {
+      const outcome = await deps.seeder.seedTenantGoogleTranslation({ stage, guid });
+      if (outcome.created) created += 1; else existing += 1;
+      if (outcome.created) deps.logger.info({ stage, guid }, `${tenantGoogleTranslationLine(stage, guid, outcome)} — an engine already running reads it at its next restart`);
+    } catch (err) {
+      failed.push(`${stage}/${guid}/google-translation`);
+      deps.logger.error({ stage, guid, err: err instanceof Error ? err.message : String(err) }, `the Google translation settings of tenant ${stage}/${guid} could not be written, and every app's ExternalSecret for them fails, and with it every sync of the app's engine; the next boot tries again`);
+    }
     const websites = async (): Promise<string[]> =>
       ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name);
     await ensure("revalidate-secret", stage, guid, websites);

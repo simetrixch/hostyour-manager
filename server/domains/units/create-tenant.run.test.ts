@@ -429,11 +429,11 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     return { seen, logs, store };
   }
 
-  it("writes one Password field key, one service key and empty Google translation settings per app into the app's own entries, in the same step", async () => {
+  it("writes one Password field key and one service key per app into the app's own entries, and the tenant's empty Google translation settings, in the same step", async () => {
     // Before the registration fans out into engines that read it (hostyour-manager#329).
     const keyed: string[] = [];
-    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; } });
-    expect(keyed).toEqual([...APPS.map((a) => `prod/${GUID}/password-field-key/${a.name}`), ...APPS.map((a) => `prod/${GUID}/service-key/${a.name}`), ...APPS.map((a) => `prod/${GUID}/google-translation/${a.name}`)]);
+    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; }, seedTenantGoogleTranslation: async (i) => { keyed.push(`${i.stage}/${i.guid}/google-translation`); return { created: true }; } });
+    expect(keyed).toEqual([...APPS.map((a) => `prod/${GUID}/password-field-key/${a.name}`), ...APPS.map((a) => `prod/${GUID}/service-key/${a.name}`), `prod/${GUID}/google-translation`]);
   });
 
   it.each(["prod", "test"] as const)("seeds website keys before %s registration, and only Password keys for ordinary apps", async (stage) => {
@@ -442,7 +442,7 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
       stage, ...(stage === "test" ? { sourceTenantId: "tnt_prod" } : {}),
       apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", domain: `${stage}.company.example`, seedReference: false, seedDemo: false, selections: {} }],
     });
-    expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", `service-key/${APPS[0]!.name}`, "service-key/site", `google-translation/${APPS[0]!.name}`, "google-translation/site", "revalidate-secret/site", "form-signing-key/site"].map((key) => `${stage}/${GUID}/${key}`));
+    expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", `service-key/${APPS[0]!.name}`, "service-key/site", "revalidate-secret/site", "form-signing-key/site"].map((key) => `${stage}/${GUID}/${key}`));
   });
 
   it("writes the tenant's own leaf with every property its members read", async () => {

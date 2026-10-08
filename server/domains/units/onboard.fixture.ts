@@ -85,6 +85,8 @@ export class FakeSeeder implements VaultSeeder {
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async listTenantAppKeys(): Promise<string[]> { return []; }
   async replaceGoogleTranslation(): Promise<void> {}
+  async seedTenantGoogleTranslation(): Promise<VaultSeedOutcome> { return { created: true }; }
+  async deleteTenantGoogleTranslation(): Promise<void> {}
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
 }
@@ -116,7 +118,7 @@ export const BUILD_SECRETS_MATERIALIZED_AT = "2026-01-01T00:00:00Z";
 /** The three ExternalSecret rows of a unit's build namespace as the consumer-build inventory renders
  *  them: named after the Secret each targets, Ready, materialized once at `at`. */
 export function buildSecretRows(at = BUILD_SECRETS_MATERIALIZED_AT): ExternalSecretRow[] {
-  return BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: at }));
+  return BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: at, remoteKeys: [] }));
 }
 
 /** The build plane's cluster reader with ESO standing behind it: the unit's three build

@@ -129,7 +129,7 @@ describe("consumer-set-secrets", () => {
   it("merges ONLY the keys that were filled, then deletes the rendered Secrets and rolls the workloads", async () => {
     const seeder = new FakeSeeder();
     const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
-    cluster.setExternalSecrets("swissbookai-prod", [{ name: "swissbookai-es", ready: true, reason: "SecretSynced", targetSecret: "swissbookai-app", refreshTime: "" }]);
+    cluster.setExternalSecrets("swissbookai-prod", [{ name: "swissbookai-es", ready: true, reason: "SecretSynced", targetSecret: "swissbookai-app", refreshTime: "", remoteKeys: [] }]);
     const p = ports({ seeder, resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }) });
     const logs: string[] = [];
     await runAll(makeSetSecretsDef(p).steps({ appId: "app_1", keys: ["SMTP_URL", "S3_SESSION_TOKEN"], mint: [] }), { "consumer-secret:SMTP_URL": "smtp://a:b@c:587", "consumer-secret:S3_SESSION_TOKEN": "" }, logs);

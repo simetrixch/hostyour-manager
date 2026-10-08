@@ -20,7 +20,7 @@ const refreshesOf = (unit: string) => BUILD_TARGET_SECRETS.map((name) => `${unit
 /** The build plane with ESO's rows standing: in each unit's build namespace, the three ExternalSecrets
  *  as consumer-build renders them, each named after the Secret it writes. */
 function buildPlane(options: { throwOnRefreshExternalSecret?: Error } = {}, units: readonly string[] = ["acme-apps", "shop", "beta-apps"]): FakeClusterReader {
-  const rows = BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: "2026-01-01T00:00:00Z" }));
+  const rows = BUILD_TARGET_SECRETS.map((name) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: "2026-01-01T00:00:00Z", remoteKeys: [] }));
   return new FakeClusterReader({ externalSecretsByNamespace: Object.fromEntries(units.map((u) => [`${u}-build`, rows])), ...options });
 }
 
@@ -261,9 +261,9 @@ describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
   it("asks ESO to write exactly the three Secrets again, through the ExternalSecret that writes each, in the declared order, and deletes none", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
       // Matched by the Secret written, not by the ExternalSecret's own name; one without a target writes its own name.
-      { name: "git", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "" },
-      { name: "bump-git-https", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "" },
-      { name: "build-npmrc", ready: true, reason: "SecretSynced", targetSecret: "build-npmrc", refreshTime: "" },
+      { name: "git", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "", remoteKeys: [] },
+      { name: "bump-git-https", ready: true, reason: "SecretSynced", targetSecret: "", refreshTime: "", remoteKeys: [] },
+      { name: "build-npmrc", ready: true, reason: "SecretSynced", targetSecret: "build-npmrc", refreshTime: "", remoteKeys: [] },
     ] } });
     await refreshBuildSecrets(kube, "acme-apps");
     expect(kube.refreshedExternalSecrets).toEqual(["acme-apps-build/git", "acme-apps-build/bump-git-https", "acme-apps-build/build-npmrc"]);
@@ -273,7 +273,7 @@ describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
 
   it("refuses by namespace and Secret where no ExternalSecret writes a target, before it asks for any", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
-      { name: "build-git-https", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "" },
+      { name: "build-git-https", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "", remoteKeys: [] },
     ] } });
     await expect(refreshBuildSecrets(kube, "acme-apps")).rejects.toThrow("no ExternalSecret in acme-apps-build writes bump-git-https, build-npmrc, so ESO cannot be asked to write them again");
     expect(kube.refreshedExternalSecrets).toEqual([]);
@@ -282,8 +282,8 @@ describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
   it("reads each Secret's refreshTime off the ExternalSecret row that TARGETS it, and the empty text where no row does", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
       // Matched by target, not by the ExternalSecret's own name.
-      { name: "git", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "2026-09-17T10:00:00Z" },
-      { name: "build-npmrc", ready: true, reason: "SecretSynced", targetSecret: "build-npmrc", refreshTime: "" },
+      { name: "git", ready: true, reason: "SecretSynced", targetSecret: "build-git-https", refreshTime: "2026-09-17T10:00:00Z", remoteKeys: [] },
+      { name: "build-npmrc", ready: true, reason: "SecretSynced", targetSecret: "build-npmrc", refreshTime: "", remoteKeys: [] },
     ] } });
     expect(await readBuildSecretRefreshTimes(kube, "acme-apps")).toEqual({ "build-git-https": "2026-09-17T10:00:00Z", "bump-git-https": "", "build-npmrc": "" });
     expect(kube.listedExternalSecrets).toEqual(["acme-apps-build"]);

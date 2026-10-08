@@ -88,7 +88,9 @@ class FakePurgeSeeder implements VaultSeeder {
   async seedTenantAppKey(): Promise<{ created: boolean }> { return { created: true }; }
   async listTenantAppKeys(): Promise<string[]> { return []; }
   async replaceGoogleTranslation(): Promise<void> {}
-  async deleteTenantAppKeys(i: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> { this.deletedAppKeys.push(i); return { deleted: ["google-translation/erp"] }; }
+  async seedTenantGoogleTranslation(): Promise<VaultSeedOutcome> { return { created: true }; }
+  readonly deletedGoogle: TenantCryptoDeleteInput[] = []; async deleteTenantGoogleTranslation(i: TenantCryptoDeleteInput): Promise<void> { this.deletedGoogle.push(i); }
+  async deleteTenantAppKeys(i: TenantCryptoDeleteInput): Promise<{ deleted: string[] }> { this.deletedAppKeys.push(i); return { deleted: ["password-field-key/erp"] }; }
   readonly deletedAppKeys: TenantCryptoDeleteInput[] = [];
   async deleteTenantCrypto(i: TenantCryptoDeleteInput): Promise<void> { this.deletedCrypto.push(i); }
   async deleteBuildRepoPat(): Promise<void> {}
@@ -381,7 +383,7 @@ describe("tenant-purge execution", () => {
     const seeder = new FakePurgeSeeder();
     const prt = ports(reg, { cluster, seeder });
 
-    recordSecretWrites(db.db, { entry: `prod/tenants/${GUID}/google-translation/erp`, keys: ["project"], act: "set", runId: "run_set" });
+    recordSecretWrites(db.db, { entry: `prod/tenants/${GUID}/google-translation`, keys: ["project"], act: "set", runId: "run_set" });
 
     const logs: string[] = [];
     const { params } = await planned(prt);
@@ -389,7 +391,7 @@ describe("tenant-purge execution", () => {
 
     expect(seeder.deletedCrypto).toEqual([{ stage: "prod", guid: GUID }]);
     // A deleted entry leaves the book of secret writes with it, so no plan names settings that are gone.
-    expect(listSecretWrites(db.db, `prod/tenants/${GUID}/google-translation/erp`)).toEqual([]);
+    expect([seeder.deletedGoogle, listSecretWrites(db.db, `prod/tenants/${GUID}/google-translation`)]).toEqual([[{ stage: "prod", guid: GUID }], []]);
     // And every app's Password field key below it (hostyour-manager#329).
     expect(seeder.deletedAppKeys).toEqual([{ stage: "prod", guid: GUID }]);
     expect(await reg.readTenant("prod", GUID)).toBeNull();

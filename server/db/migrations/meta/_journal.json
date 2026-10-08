@@ -176,6 +176,13 @@
       "when": 1791430932394,
       "tag": "0024_revoked-sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "6",
+      "when": 1791470169052,
+      "tag": "0025_drop-per-app-google-translation-book",
+      "breakpoints": true
     }
   ]
 }
