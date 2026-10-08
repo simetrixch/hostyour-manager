@@ -601,13 +601,17 @@
 
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: var(--sp-1);
   margin-bottom: var(--sp-4);
   border-bottom: var(--stroke-hairline) solid var(--border);
 }
 
+/* At least a control's height, not exactly it: a tab wider than its container (an environment of a
+   narrow tenant card names its status and its machine) breaks its text onto a second line instead of
+   running past the edge. */
 .tab {
-  height: var(--control-h);
+  min-height: var(--control-h);
   padding: 0 var(--sp-3);
   color: var(--text-2);
   font: inherit;
