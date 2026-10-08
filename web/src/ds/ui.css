@@ -687,6 +687,7 @@
 
 .dialog__body {
   overflow-y: auto;
+  overflow-wrap: anywhere;
   overscroll-behavior: contain;
   color: var(--text-2);
   font-size: var(--fs-2);

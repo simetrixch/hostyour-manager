@@ -230,4 +230,46 @@ describe("DNS page in-page confirmation", () => {
     // never window.confirm throughout
     expect(confirmSpy).not.toHaveBeenCalled();
   });
+
+  it("a removal asked from the derived tab reads that tab's rows, and a long value is listed whole", async () => {
+    const longKey = `v=DKIM1; k=rsa; p=${"A".repeat(380)}`;
+    const inventory: DnsInventoryView = {
+      ...sampleInventory,
+      rows: [{ ...sampleInventory.rows[0]!, owner: { kind: "tenant", name: "t1", stage: "prod" }, found: longKey }],
+    };
+    api.getDnsWrites.mockResolvedValue(sampleWrites);
+    api.getDnsInventory.mockResolvedValue(inventory);
+
+    hooks.cursor = 0;
+    evaluate(createElement(Dns));
+    for (const effect of hooks.effects.splice(0)) effect();
+    await vi.waitFor(() => expect(hooks.states[2]).toEqual(inventory));
+
+    hooks.cursor = 0;
+    let tree = evaluate(createElement(Dns));
+    const derived = () => findElements<{ id?: string }>(tree, (el) => el.props.id === "panel-derived")[0]!;
+    const checkbox = findElements<{ type?: string; "aria-label"?: string; onChange?: () => void }>(
+      derived(),
+      (el) => el.type === "input" && el.props["aria-label"] === "Select CNAME app1.example.com",
+    )[0]!;
+    checkbox.props.onChange!();
+
+    hooks.cursor = 0;
+    tree = evaluate(createElement(Dns));
+    const buttonText = (el: ReactElement<{ children?: ReactNode }>) =>
+      Array.isArray(el.props.children) ? el.props.children.join("") : String(el.props.children ?? "");
+    const removeBtn = findElements<{ onClick?: () => void; children?: ReactNode }>(
+      derived(),
+      (el) => el.type === "button" && buttonText(el).startsWith("Remove selected"),
+    )[0]!;
+    removeBtn.props.onClick!();
+
+    hooks.cursor = 0;
+    tree = evaluate(createElement(Dns));
+    const dialog = findElements<{ title: string; children: ReactNode }>(tree, (el) => el.type === ConfirmDialog)[0]!;
+    expect(dialog.props.title).toBe("Remove this record at the DNS provider, in one run?");
+    const markup = renderToStaticMarkup(dialog.props.children as ReactElement);
+    expect(markup).toContain(`${longKey} · tenant t1 (prod)`);
+    expect(markup).not.toContain("consumer app1");
+  });
 });

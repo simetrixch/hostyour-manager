@@ -21,7 +21,10 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  that is gone leaves behind. */
 const VERDICT_LABEL: Record<DnsRecordRow["verdict"], string> = { standing: "standing", absent: "absent", other: "other content" };
 
-function ownerCell(owner: { kind: string; name: string; stage?: string }): string {
+/** A row of either tab, as the removal confirm reads it. */
+type RemovalRow = Pick<DnsRecordRow, "name" | "type" | "found"> & { owner: { kind: string; name: string; stage?: string } };
+
+function ownerCell(owner: RemovalRow["owner"]): string {
   return owner.stage === undefined ? `${owner.kind} ${owner.name}` : `${owner.kind} ${owner.name} (${owner.stage})`;
 }
 
@@ -94,7 +97,9 @@ export function Dns() {
   const [data, setData] = useState<DnsInventoryView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pendingRemoval, setPendingRemoval] = useState<DnsRemoveRecord[] | null>(null); // removal confirm (our dialog, never window.confirm)
+  // The removal awaiting the in-page confirm (our dialog, never window.confirm), with the rows of the
+  // tab it was asked from, so each line reads what that tab showed.
+  const [pendingRemoval, setPendingRemoval] = useState<{ records: DnsRemoveRecord[]; rows: readonly RemovalRow[] } | null>(null);
 
   useEffect(() => {
     getDnsWrites()
@@ -105,8 +110,8 @@ export function Dns() {
       .catch((e: unknown) => setError(msg(e)));
   }, []);
 
-  function remove(records: DnsRemoveRecord[]): void {
-    setPendingRemoval(records);
+  function remove(records: DnsRemoveRecord[], rows: readonly RemovalRow[]): void {
+    setPendingRemoval({ records, rows });
   }
 
   async function doRemove(records: DnsRemoveRecord[]): Promise<void> {
@@ -142,33 +147,33 @@ export function Dns() {
 
       <div role="tabpanel" id="panel-written" aria-labelledby="tab-written" hidden={tab !== "written"}>
         {writes === null && !error && <p className="muted">Reading the book against the provider…</p>}
-        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={remove} heldBy={heldRecords(data)} />}
+        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={(records) => remove(records, writes.rows)} heldBy={heldRecords(data)} />}
       </div>
 
       <div role="tabpanel" id="panel-derived" aria-labelledby="tab-derived" hidden={tab !== "derived"}>
         {data === null && !error && <p className="muted">Reading the records at the provider…</p>}
-        {data && <DnsInventoryTable key={data.readAt} data={data} busy={busy} onRemove={remove} />}
+        {data && <DnsInventoryTable key={data.readAt} data={data} busy={busy} onRemove={(records) => remove(records, data.rows)} />}
       </div>
 
       {pendingRemoval && (
         <ConfirmDialog
-          title={`Remove ${pendingRemoval.length === 1 ? "this record" : `these ${pendingRemoval.length} records`} at the DNS provider, in one run?`}
+          title={`Remove ${pendingRemoval.records.length === 1 ? "this record" : `these ${pendingRemoval.records.length} records`} at the DNS provider, in one run?`}
           confirmLabel="Remove"
           destructive
           onCancel={() => setPendingRemoval(null)}
           onConfirm={() => {
-            const records = pendingRemoval;
+            const { records } = pendingRemoval;
             setPendingRemoval(null);
             void doRemove(records);
           }}
         >
           <ul>
-            {pendingRemoval.map((record) => {
-              const row = writes?.rows.find((r) => r.name === record.name && r.type === record.type) ?? data?.rows.find((r) => r.name === record.name && r.type === record.type);
+            {pendingRemoval.records.map((record) => {
+              const row = pendingRemoval.rows.find((r) => r.name === record.name && r.type === record.type);
               return (
                 <li key={recordKey(record)}>
                   <span className="mono">{recordKey(record)}</span>
-                  {row && ` — ${row.found ?? "no record stands"} (${ownerCell(row.owner)})`}
+                  {row && ` — ${row.found ?? "no record stands"} · ${ownerCell(row.owner)}`}
                 </li>
               );
             })}
