@@ -31,6 +31,11 @@ describe("relevantRun — the ONE run a server's card surfaces", () => {
     expect(relevantRun("srv_1", runs)?.id).toBe("run_open");
   });
 
+  it("PLANTED DEFECT: counts a queued run as open, so the card offers no second run beside it", () => {
+    const runs = [run({ id: "run_new", status: "failed" }), run({ id: "run_queued", status: "queued" })];
+    expect(relevantRun("srv_1", runs)?.id).toBe("run_queued");
+  });
+
   it("falls back to the most recent run only when it FAILED — a succeeded one is not the next step", () => {
     expect(relevantRun("srv_1", [run({ status: "failed" })])?.id).toBe("run_1");
     expect(relevantRun("srv_1", [run({ status: "succeeded" })])).toBeUndefined();

@@ -62,7 +62,8 @@ export class QueueDispatcher {
   startedOrQueued(runId: string): { status: "approved" | "queued" } {
     const place = this.list().find((q) => q.runId === runId);
     if (!place) return { status: "approved" };
-    const what = place.waitsFor.map((w) => `${w.resource} ${w.key} (run ${w.holderRunId})`).join(", ");
+    // Empty where every lock is free but the start failed: the next dispatch tries again.
+    const what = place.waitsFor.length > 0 ? place.waitsFor.map((w) => `${w.resource} ${w.key} (run ${w.holderRunId})`).join(", ") : "the next start of the queue";
     appendRunMeta(this.opts.db, this.opts.bus, runId, `⏳ queued at place ${place.place}: it waits for ${what}`);
     return { status: "queued" };
   }

@@ -12,48 +12,62 @@ import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { followedVersions, followTenant, makeTenantFollower, type TenantFollowDeps } from "./tenant-follow.ts";
 import { MEMBERS_CHANGED } from "./tenant-refresh-members.run.ts";
 import type { RunStatus } from "../../../shared/enums.ts";
+import type { QueuedRunView } from "../../../shared/api-types.ts";
 import type { TenantVersionPart } from "./tenant-versions.ts";
 
 // A tenant that follows releases is moved by the Manager when a release run of a part it renders
 // succeeds at its stage: through the Versions run, to the version the stage pins.
 
 const GUID = "zsjs023ctne0";
+const GUID2 = "q7mx4ke9ta21";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
 const OLD = "0.1.11-stable-20260920120000-def5678";
 
 const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
 
-/** The books: one tenant at prod whose erp member holds `engine`, and the engine pinned at NEW. */
+/** The books: two tenants at prod whose erp member holds `engine`, and the engine pinned at NEW. */
 function books(engine: string): TenantRegistrations {
   const repo = new FakePlatformRepo();
-  const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme", members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
-    approvedTags: { erp: { "example-engine": engine } }, ...TEST_BUNDLE,
-  });
-  const w = tenantRegistrationWrite("prod", GUID, registration);
-  repo.seed(repo.booksBranch, w.path, w.content);
+  for (const [guid, subdomain] of [[GUID, "acme"], [GUID2, "beta"]] as const) {
+    const registration = TenantRegistrationSchema.parse({
+      cluster: "s1", subdomain, members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
+      approvedTags: { erp: { "example-engine": engine } }, ...TEST_BUNDLE,
+    });
+    const w = tenantRegistrationWrite("prod", guid, registration);
+    repo.seed(repo.booksBranch, w.path, w.content);
+  }
   repo.seed(repo.booksBranch, "charts/example-auth/pins-prod.yaml", pinsFile({ "example-auth": NEW }));
   repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile({ "example-engine": NEW }));
   return new TenantRegistrations(repo);
 }
 
 /** An executor that records what the follower asks of it. A plan it settles as failed refuses the
- *  approve, as the executor refuses a failed run; `queued` answers the approve as a run that waits in
- *  the queue. */
-function fakeExecutor(opts: { planStatus?: "planned" | "failed"; queued?: boolean; approveError?: Error; endings?: Array<{ status: RunStatus; error: string | null }> } = {}) {
+ *  approve, as the executor refuses a failed run; the approve of a run of a tenant in `queuedFor`
+ *  answers as a run that waits in the queue, and settling it waits until `endQueued` ends it. */
+function fakeExecutor(opts: { planStatus?: "planned" | "failed"; queuedFor?: string[]; approveError?: Error; endings?: Array<{ status: RunStatus; error: string | null }> } = {}) {
   const asked: string[] = [];
-  const planned: unknown[] = [];
+  const planned: Array<{ tenantId: string }> = [];
+  const queue: QueuedRunView[] = [];
+  const ends = new Map<string, () => void>();
   return {
     asked,
     planned,
+    endQueued: (runId: string): void => {
+      queue.splice(queue.findIndex((q) => q.runId === runId), 1);
+      ends.get(runId)?.();
+    },
+    listQueue: (): QueuedRunView[] => queue.map((q, i) => ({ ...q, place: i + 1 })),
     planStreamed: async (_kind: string, params: unknown): Promise<{ runId: string }> => {
-      planned.push(params);
+      planned.push(params as { tenantId: string });
       const runId = `run_${planned.length}`;
       asked.push(`plan ${runId}`);
       return { runId };
     },
-    settle: async (runId: string): Promise<void> => { asked.push(`settle ${runId}`); },
+    settle: async (runId: string): Promise<void> => {
+      asked.push(`settle ${runId}`);
+      if (queue.some((q) => q.runId === runId)) await new Promise<void>((resolve) => ends.set(runId, resolve));
+    },
     /** How each planned run ended, in planning order; a run with none given succeeded. */
     runEnding: (runId: string) => opts.endings?.[Number(runId.slice(4)) - 1] ?? { status: "succeeded" as const, error: null },
     discard: async (runId: string): Promise<void> => { asked.push(`discard ${runId}`); },
@@ -61,7 +75,10 @@ function fakeExecutor(opts: { planStatus?: "planned" | "failed"; queued?: boolea
       asked.push(`approve ${runId}`);
       if (opts.planStatus === "failed") throw errIllegalTransition("run status failed → approved");
       if (opts.approveError) throw opts.approveError;
-      return { status: opts.queued ? "queued" : "approved" };
+      const { tenantId } = planned[Number(runId.slice(4)) - 1]!;
+      if (!opts.queuedFor?.includes(tenantId)) return { status: "approved" };
+      queue.push({ runId, kind: "tenant-refresh-members", targetKind: "tenant", targetId: tenantId, place: 0, approvedAt: 0, needsSecrets: false, waitsFor: [] });
+      return { status: "queued" };
     },
   };
 }
@@ -142,13 +159,17 @@ describe("followTenant — one check of one tenant", () => {
     expect(executor.planned).toEqual([]);
   });
 
-  it("says that a Versions run waits in the queue for the run that holds the books branch", async () => {
-    const executor = fakeExecutor({ queued: true });
-    const said: string[] = [];
-    const logger = { ...pino({ level: "silent" }), info: (_o: unknown, m: string) => { said.push(m); } } as unknown as TenantFollowDeps["logger"];
-    await followTenant({ ...deps(executor), logger }, "tnt_1");
-    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1", "settle run_1"]);
-    expect(said).toContain("the Versions run run_1 waits in the queue for the run that holds the tenant");
+  it("PLANTED DEFECT: does not wait for a Versions run that waits in the queue, and says the tenant is checked again", async () => {
+    const executor = fakeExecutor({ queuedFor: ["tnt_1"] });
+    expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moving example-platform to ${NEW} waits in the queue for the run that holds the tenant, and the tenant is checked again once it ends`);
+    expect(executor.asked).toEqual(["plan run_1", "settle run_1", "approve run_1"]);
+  });
+
+  it("PLANTED DEFECT: plans no second Versions run while one of the tenant waits in the queue", async () => {
+    const executor = fakeExecutor({ queuedFor: ["tnt_1"] });
+    await followTenant(deps(executor), "tnt_1");
+    expect(await followTenant(deps(executor), "tnt_1")).toBe("tenant acme: the Versions run run_1 waits in the queue at place 1, and the tenant is checked again once it ends");
+    expect(executor.planned).toHaveLength(1);
   });
 
   it("PLANTED DEFECT: discards a planned run it cannot approve for another reason, and reports that reason", async () => {
@@ -188,6 +209,16 @@ describe("the follower — which tenants an event checks", () => {
     expect(executor.planned).toEqual([]);
     await follower.releaseSucceeded({ unit: "example-platform", stage: "prod", runName: "r-2", releaseTag: "0.1.12-stable-20260925120000" });
     expect(executor.planned).toEqual([{ tenantId: "tnt_1", versions: { "example-platform": NEW } }]);
+  });
+
+  it("PLANTED DEFECT: a tenant whose lock is held waits in the queue, the other tenant still follows, and the first is checked again once its run ends", async () => {
+    h.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_1", guid: GUID2, subdomain: "beta", stage: "prod", members: ["auth", "jobs", "report", "erp"], identityProvider: "auth", status: "active", followReleases: true }).run();
+    const executor = fakeExecutor({ queuedFor: ["tnt_1"] });
+    const follower = makeTenantFollower(deps(executor));
+    await follower.releaseSucceeded({ unit: "example-platform", stage: "prod", runName: "r-1", releaseTag: "0.1.12-stable-20260925120000" });
+    expect(executor.planned.map((p) => p.tenantId)).toEqual(["tnt_1", "tnt_2"]);
+    executor.endQueued("run_1");
+    await vi.waitFor(() => { expect(executor.planned.map((p) => p.tenantId)).toEqual(["tnt_1", "tnt_2", "tnt_1"]); });
   });
 
   it("PLANTED DEFECT: keeps checking after a check that could not read the tenants", async () => {

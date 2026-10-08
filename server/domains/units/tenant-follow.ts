@@ -25,7 +25,7 @@ const LONG_WAIT_MS = 30 * 60_000;
 
 export interface TenantFollowDeps {
   db: Db;
-  executor: Pick<Executor, "planStreamed" | "settle" | "approve" | "discard">;
+  executor: Pick<Executor, "planStreamed" | "settle" | "approve" | "discard" | "listQueue">;
   /** How a run stands once it settled: its status and, where it failed, its error (executor/read.ts getRunEnding). */
   runEnding: (runId: string) => { status: RunStatus; error: string | null } | undefined;
   ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">;
@@ -59,11 +59,9 @@ async function settle(deps: TenantFollowDeps, runId: string): Promise<void> {
   }
 }
 
-/** Approve `runId`. Every tenant run takes the books branch, so a second one waits in the queue for
- *  the run that holds it, however long that takes; said when the wait starts, so the log shows it. */
-async function approveInQueue(deps: TenantFollowDeps, runId: string): Promise<void> {
-  const { status } = await deps.executor.approve(runId);
-  if (status === "queued") deps.logger.info({ runId }, `the Versions run ${runId} waits in the queue for the run that holds the tenant`);
+/** The Versions run of this tenant that waits in the queue, if one does. */
+function queuedVersionsRun(deps: TenantFollowDeps, tenantId: string): { runId: string; place: number } | undefined {
+  return deps.executor.listQueue().find((q) => q.kind === "tenant-refresh-members" && q.targetId === tenantId);
 }
 
 /** One check of one tenant, answered as a sentence for the log. A refresh that another run's member
@@ -73,6 +71,11 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
   const row = deps.db.select({ followReleases: tenants.followReleases, status: tenants.status, suspended: tenants.suspended, subdomain: tenants.subdomain }).from(tenants).where(eq(tenants.id, tenantId)).get();
   if (!row?.followReleases) return `tenant ${tenantId} does not follow releases`;
   if (row.status !== "active" || row.suspended) return `tenant ${row.subdomain} is ${row.suspended ? "suspended" : row.status}, and only an active tenant follows releases`;
+  // A run that holds the tenant may stay failed or cancelled until a person acts, and the queue keeps
+  // the tenant's Versions run behind it. The check does not wait for it, so the other tenants go on;
+  // the follower checks this tenant again once that run ends.
+  const waiting = queuedVersionsRun(deps, tenantId);
+  if (waiting) return `tenant ${row.subdomain}: the Versions run ${waiting.runId} waits in the queue at place ${waiting.place}, and the tenant is checked again once it ends`;
   const tc = loadTenantCluster(deps.db, tenantId);
   for (let attempt = 1; ; attempt++) {
     const read = await deps.ports.registrations.readTenant(tc.stage, tc.guid);
@@ -83,7 +86,8 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
     const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
     await settle(deps, runId);
     try {
-      await approveInQueue(deps, runId);
+      const { status } = await deps.executor.approve(runId);
+      if (status === "queued") return `tenant ${tc.subdomain} at ${tc.stage}: the Versions run ${runId} moving ${moves} waits in the queue for the run that holds the tenant, and the tenant is checked again once it ends`;
     } catch (err) {
       // A plan its gates refused settles its run as failed, and an operator may have cancelled it: in
       // both it is no run to approve, and its record says which.
@@ -116,6 +120,20 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
  *  versions the run before it wrote. */
 export function makeTenantFollower(deps: TenantFollowDeps) {
   let queue: Promise<void> = Promise.resolve();
+  const watched = new Set<string>();
+  // A tenant whose Versions run waits in the queue is checked again once that run ends, as one more
+  // check in line, so what the run moved or missed is read like any other check's.
+  const recheckWhenItEnds = (tenantId: string): void => {
+    const waiting = queuedVersionsRun(deps, tenantId);
+    if (!waiting || watched.has(waiting.runId)) return;
+    watched.add(waiting.runId);
+    void deps.executor.settle(waiting.runId)
+      .catch((err: unknown) => deps.logger.error({ err, runId: waiting.runId }, "a queued Versions run could not be waited for"))
+      .then(() => {
+        watched.delete(waiting.runId);
+        return enqueue(() => [tenantId], `its queued Versions run ${waiting.runId} ended`);
+      });
+  };
   // Every link catches what it throws: one rejected link would leave every later check unrun.
   const enqueue = (tenantIds: () => string[], cause: string): Promise<void> => {
     queue = queue
@@ -123,6 +141,7 @@ export function makeTenantFollower(deps: TenantFollowDeps) {
         for (const id of tenantIds()) {
           try {
             deps.logger.info({ tenantId: id, cause }, await followTenant(deps, id));
+            recheckWhenItEnds(id);
           } catch (err) {
             deps.logger.error({ err, tenantId: id, cause }, "a following tenant could not be moved");
           }
