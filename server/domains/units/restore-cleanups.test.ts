@@ -6,6 +6,7 @@ import type { RepoCredentialManifest } from "../../adapters/kube/port.ts";
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedConsumerRegistration, makeFakes, consumerPorts,
   stepCtx, CONSUMER, TARGET, missing,
+  restoreBuildPorts,
 } from "./relocation.fixture.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { CredentialStore } from "../../security/store.ts";
@@ -30,7 +31,7 @@ describe("restore-cleanups", () => {
   it("definition resolves all four cleanups", () => {
     const f = makeFakes();
     const ports = consumerPorts(f);
-    const def = makeRestoreDef(ports);
+    const def = makeRestoreDef(ports, restoreBuildPorts());
     expect(def.cleanups).toBeDefined();
 
     const cleanups = def.cleanups!(PARAMS);
@@ -68,7 +69,7 @@ describe("restore-cleanups", () => {
     const removeRegSpy = vi.spyOn(ports.registrations, "removeRegistration");
     const deleteAppSpy = vi.spyOn(ports.seeder, "deleteApp");
 
-    const def = makeRestoreDef(ports);
+    const def = makeRestoreDef(ports, restoreBuildPorts());
     const cleanups = def.cleanups!(PARAMS);
     const logs: string[] = [];
 
@@ -109,7 +110,7 @@ describe("restore-cleanups", () => {
     const setRemovingSpy = vi.spyOn(ports.registrations, "setRemoving");
     const removeRegSpy = vi.spyOn(ports.registrations, "removeRegistration");
 
-    const def = makeRestoreDef(ports);
+    const def = makeRestoreDef(ports, restoreBuildPorts());
     const cleanups = def.cleanups!(PARAMS);
     const targetCleanup = cleanups.find((c) => c.name === "restore-remove-target")!;
     expect(targetCleanup).toBeDefined();
@@ -144,7 +145,7 @@ describe("restore-cleanups", () => {
     const removeRegSpy = vi.spyOn(ports.registrations, "removeRegistration");
     const deleteAppSpy = vi.spyOn(ports.seeder, "deleteApp");
 
-    const def = makeRestoreDef(ports);
+    const def = makeRestoreDef(ports, restoreBuildPorts());
     const cleanups = def.cleanups!(PARAMS);
     const logs: string[] = [];
 

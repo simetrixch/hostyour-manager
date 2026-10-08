@@ -39,7 +39,7 @@ import { errValidation } from "#core/server/kernel/errors.ts";
 /** The onboard `setup-webhook` step: create (idempotently) the consumer's push-webhook to the build
  *  plane's image-builder EventListener. Fails LOUD on any missing prerequisite (unwired adapter, absent
  *  HMAC secret, an unreadable cluster map) or a missing-scope PAT — no hook, no build. */
-export function setupWebhookStep(ports: BuildPorts, p: BuildParams): Step {
+export function setupWebhookStep(ports: BuildPorts, p: Pick<BuildParams, "consumerName" | "repoURL" | "domain" | "repoCredentialId">): Step {
   return {
     name: "setup-webhook",
     title: "Set up the consumer's build webhook (push → Tekton)",

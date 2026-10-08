@@ -13,6 +13,7 @@ import { recordBackupFinished, recordBackupStarted } from "../../db/unit-backups
 import {
   openFixtureDb, seedClusters, seedConsumerRow, seedTenantRows, makeFakes, consumerPorts, tenantPorts,
   driveSteps, jobNames, stepCtx, tenantEntry, GUID, CONSUMER, SUBDOMAIN, TARGET, INSTALLATION,
+  restoreBuildPorts,
 } from "./relocation.fixture.ts";
 
 // restore / tenant-restore — the second half of the ONE mechanism, on its own: the picked generation is
@@ -152,7 +153,7 @@ describe("restore (consumer)", () => {
     scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
 
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(ports, restoreBuildPorts()).steps(params), params, []);
 
     const restored = await ports.registrations.readRegistration("prod", CONSUMER);
     expect(restored?.entry.cluster).toBe(TARGET.cluster);
@@ -189,7 +190,7 @@ describe("restore (consumer)", () => {
     // of it, so nothing is extracted into it.
     f.target.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0", "cache-0"], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }, { claim: "cache", ordinals: true, user: 3000, group: 3000 }]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f), restoreBuildPorts()).steps(params), params, []);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.runAs).toEqual({ user: 1000, group: 1000 });
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
@@ -207,7 +208,7 @@ describe("restore (consumer)", () => {
     f.target.reader.setClaims(`${CONSUMER}-prod`, ["uploads"], [{ claim: "uploads", ordinals: false, user: 1000, group: 1000 }]);
     const logs: string[] = [];
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, logs);
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f), restoreBuildPorts()).steps(params), params, logs);
     const job = (name: string) => f.target.reader.jobs.find((j) => j.spec.name === `reloc-${name}-${CONSUMER}`);
     expect(job("restore-pvc")?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["uploads"]);
     expect(job("restore-mongo")?.namespace).toBe(`${CONSUMER}-prod`);
@@ -224,7 +225,7 @@ describe("restore (consumer)", () => {
     // generation still holds the claim's tar.
     f.target.reader.setJobResult(`reloc-list-pvc-${CONSUMER}`, { succeeded: true, logs: "CLAIM queue-mta-0\nCLAIMS 1" });
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, nor does a StatefulSet there name it, so the restore stops/);
+    await expect(driveSteps(db, f, makeRestoreDef(consumerPorts(f), restoreBuildPorts()).steps(params), params, [])).rejects.toThrow(/holds queue-mta-0, and no claim of that name stands in acme-prod on s2, nor does a StatefulSet there name it, so the restore stops/);
     expect(jobNames(f.target).filter((n) => n.startsWith("reloc-restore-"))).toEqual([]);
   });
 
@@ -238,7 +239,7 @@ describe("restore (consumer)", () => {
     // Rendered at replicas 0, the MTA's StatefulSet has made no claim; its template names queue-mta-<n>.
     f.target.reader.setClaims(`${CONSUMER}-prod`, [], [{ claim: "queue-mta", ordinals: true, user: 1000, group: 1000 }]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, f, makeRestoreDef(consumerPorts(f)).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(consumerPorts(f), restoreBuildPorts()).steps(params), params, []);
     expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
     const restore = f.target.reader.jobs.find((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`);
     expect(restore?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["queue-mta-0"]);
@@ -255,11 +256,11 @@ describe("restore (consumer)", () => {
     const queue = { claim: "queue-mta", ordinals: true, user: 1000, group: 1000 };
     f.target.reader.setClaims(`${CONSUMER}-prod`, [], [queue]);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await expect(driveSteps(db, f, makeRestoreDef(ports).steps(params), params, [])).rejects.toThrow(/holds legacy-data/);
+    await expect(driveSteps(db, f, makeRestoreDef(ports, restoreBuildPorts()).steps(params), params, [])).rejects.toThrow(/holds legacy-data/);
     expect(f.target.reader.createdClaims).toEqual([`${CONSUMER}-prod/queue-mta-0`]);
     // The chart gains the missing claim; the restore step runs again and extracts into both.
     f.target.reader.setClaims(`${CONSUMER}-prod`, ["queue-mta-0", "legacy-data"], [queue, { claim: "legacy-data", ordinals: false, user: 1000, group: 1000 }]);
-    await makeRestoreDef(ports).steps(params).find((s) => s.name === "restore")!.run(stepCtx(db, "restore", params, []));
+    await makeRestoreDef(ports, restoreBuildPorts()).steps(params).find((s) => s.name === "restore")!.run(stepCtx(db, "restore", params, []));
     const job = f.target.reader.jobs.filter((j) => j.spec.name === `reloc-restore-pvc-${CONSUMER}`).at(-1);
     expect(job?.spec.pvcMounts?.map((m) => m.claimName)).toEqual(["legacy-data", "queue-mta-0"]);
   });
@@ -280,7 +281,7 @@ describe("restore (consumer)", () => {
     });
     scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    await driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
+    await driveSteps(db, f, makeRestoreDef(ports, restoreBuildPorts()).steps(params), params, []);
     const restored = await ports.registrations.readRegistration("prod", CONSUMER);
     expect(restored?.entry.fqdn).toBe("shop.customer.test");
     expect(restored?.entry.smtpEntry).toEqual(smtpEntry);
@@ -307,7 +308,7 @@ describe("restore (consumer)", () => {
         quota: seedQuota("small"), fqdn: "shop.customer.test", smtpEntry: { service: "acme-mta", port: 2525 },
       }));
       const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-      return driveSteps(db, f, makeRestoreDef(ports).steps(params), params, []);
+      return driveSteps(db, f, makeRestoreDef(ports, restoreBuildPorts()).steps(params), params, []);
     };
     await expect(setup({ fqdn: "shop.customer.test" })).rejects.toThrow(/other now attests at prod/);
     db.sqlite.close();
@@ -341,7 +342,7 @@ describe("restore (consumer)", () => {
 
     const logs: string[] = [];
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    const step = makeRestoreDef(ports).steps(params).find((s) => s.name === "provision-target")!;
+    const step = makeRestoreDef(ports, restoreBuildPorts()).steps(params).find((s) => s.name === "provision-target")!;
     await step.run(stepCtx(db, "provision-target", params, logs));
 
     expect(f.target.argo.synced).toEqual([
@@ -367,7 +368,7 @@ describe("restore (consumer)", () => {
 
     const logs: string[] = [];
     const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
-    const step = makeRestoreDef(ports).steps(params).find((s) => s.name === "provision-target")!;
+    const step = makeRestoreDef(ports, restoreBuildPorts()).steps(params).find((s) => s.name === "provision-target")!;
     await step.run(stepCtx(db, "provision-target", params, logs));
 
     expect(f.target.argo.synced).toEqual([]);

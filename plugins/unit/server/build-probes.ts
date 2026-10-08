@@ -29,7 +29,7 @@ export const preflightCheck = (id: string, title: string, severity: PreflightChe
 export const unmeasuredCheck = (id: string, title: string, why: string): PreflightCheck => preflightCheck(id, title, "soft", "warn", `not measured: ${why}`);
 
 /** The credential the run will open, opened now for the probes' reads and zeroed after. */
-async function withIdentity<T>(ctx: ProbeCtx, p: BuildParams, purpose: string, f: (token: string, viaApp: boolean) => Promise<T>): Promise<T> {
+async function withIdentity<T>(ctx: ProbeCtx, p: Pick<BuildParams, "repoCredentialId">, purpose: string, f: (token: string, viaApp: boolean) => Promise<T>): Promise<T> {
   const viaApp = (await ctx.creds.list({ kind: "github-app" })).some((row) => row.id === p.repoCredentialId);
   const token = await ctx.creds.open(p.repoCredentialId, { purpose, runId: "plan" });
   return withToken(token, (t) => f(t, viaApp));
@@ -73,7 +73,7 @@ export async function probeIdentity(ports: BuildPorts, p: BuildParams, ctx: Prob
 /** seed-repo-pat's probe: one private package per scope the repository routes to GitHub Packages,
  *  read with the owner's packages reader — the token the build's `.npmrc` will carry (#220).
  *  Refused by name where the owner records none. */
-export async function probePackages(ports: BuildPorts, p: BuildParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+export async function probePackages(ports: BuildPorts, p: Pick<BuildParams, "repoURL" | "resolvedSha" | "repoCredentialId">, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   if (!ports.github) return [];
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
   try {
@@ -117,7 +117,7 @@ export function unansweredHookRead(err: unknown): string | null {
 /** setup-webhook's probe: the hooks are readable with the identity, and the build plane is named.
  *  `standing` is the scheduled check's reading of a unit already onboarded: no run follows it to
  *  create the hook, so a missing one is worth a look rather than a pass. */
-export async function probeWebhook(ports: BuildPorts, p: BuildParams, ctx: ProbeCtx, standing = false): Promise<PreflightCheck[]> {
+export async function probeWebhook(ports: BuildPorts, p: Pick<BuildParams, "repoURL" | "domain" | "repoCredentialId">, ctx: ProbeCtx, standing = false): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
   const title = `The build webhook of ${owner}/${repo}`;
   if (!ports.github) return [unmeasuredCheck("webhook", title, "no GitHub client is wired on this manager")];

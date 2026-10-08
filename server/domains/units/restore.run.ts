@@ -28,6 +28,8 @@ import { eq } from "drizzle-orm";
 import { apps } from "../../db/schema/inventory.ts";
 import { planRestoreSecrets } from "./restore-seed-secrets.ts";
 import { restoreCleanups, restoreCeremonySecretsCleanup } from "./restore-cleanups.ts";
+import { planUnitBuildRestore, restoreUnitBuildSteps } from "./restore-unit-build.ts";
+import type { BuildPorts } from "#unit/server/build-chain.ts";
 
 /** A generation as its folder names it (generationId): the UTC moment it was taken. */
 const Generation = z.string().regex(/^\d{8}T\d{6}Z$/, "a generation is named YYYYMMDDTHHMMSSZ");
@@ -67,7 +69,15 @@ function restoreSteps(ports: RelocationPorts, worldOf: WorldOf, targetClusterId:
 const summaryTail =
   "The unit deploys CLOSED (quiesced) while its stores are replayed from the generation, completeness is verified BEFORE the DNS record points anywhere, and access opens last. The generation is only read — a failed restore leaves it fully intact.";
 
-export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<RestoreParams> {
+/** The consumer restore's steps: the relocation's target half, then the unit's build parts. */
+function consumerRestoreSteps(ports: ConsumerRelocationPorts, build: BuildPorts, params: RestoreParams): Step[] {
+  return [
+    ...restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer"),
+    ...restoreUnitBuildSteps(ports, build, params),
+  ];
+}
+
+export function makeRestoreDef(ports: ConsumerRelocationPorts, build: BuildPorts): RunDefinition<RestoreParams> {
   return {
     kind: "consumer-restore",
     paramsSchema: RestoreParams,
@@ -76,10 +86,11 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
       const ac = loadAppCluster(db, params.appId);
       const target = loadActiveTargetCluster(db, params.targetClusterId);
       assertRestorable(db, { kind: "consumer", unit: ac.name, stage: ac.stage }, params.generation);
-      const stepDefs = restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer");
+      const stepDefs = consumerRestoreSteps(ports, build, params);
       const row = db.select({ repoUrl: apps.repoUrl }).from(apps).where(eq(apps.id, params.appId)).get();
       if (!row?.repoUrl) throw errValidation(`consumer "${ac.name}" has no repo URL on record — nothing says which manifest declares its secrets`);
       const { requiredSecrets, warnings } = await planRestoreSecrets(ports, db, { stage: ac.stage, consumerName: ac.name, repoURL: row.repoUrl });
+      const buildParts = await planUnitBuildRestore(ports, { name: ac.name, stage: ac.stage });
       return {
         kind: "consumer-restore",
         targetKind: "app",
@@ -88,11 +99,11 @@ export function makeRestoreDef(ports: ConsumerRelocationPorts): RunDefinition<Re
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: [{ resource: "git-branch", key: ports.registrations.branch }, { resource: "git-branch", key: target.domain }, masterKubeLock],
-        warnings,
+        warnings: [...warnings, buildParts],
         requiredSecrets,
       };
     },
-    steps: (params) => restoreSteps(ports, consumerWorld(ports, params.appId), params.targetClusterId, params.generation, "restored consumer"),
+    steps: (params) => consumerRestoreSteps(ports, build, params),
     cleanups: (params) => [...restoreCleanups(ports, params), restoreCeremonySecretsCleanup(ports, params)],
   };
 }
