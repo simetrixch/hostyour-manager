@@ -267,7 +267,7 @@ export class TektonBuildPlane implements BuildPlane {
     // APPEARANCE only: once the run exists, it is followed to its end without a clock.
     const appearBy = Date.now() + opts.appearMs;
     // What the run's log was last told about the release queue, for the run it was told about.
-    let noted: { runName: string; waitsFor?: string; held: boolean } | undefined;
+    let noted: { runName: string; waitsFor?: string; started: boolean } | undefined;
     for (;;) {
       const { ns, runs } = await this.releaseRuns(query);
       const match = runs
@@ -281,17 +281,16 @@ export class TektonBuildPlane implements BuildPlane {
         } catch (e) {
           throw upstream(`could not read PipelineRun ${ns}/${match.name}: ${e instanceof Error ? e.message : String(e)}`);
         }
-        if (noted?.runName !== match.name) noted = { runName: match.name, held: false };
-        if (state.phase === "pending") {
-          // A pending run with no note yet says nothing: the queue either starts it at its next tick
-          // or notes the release it waits behind.
-          noted.held = true;
-          if (state.queuedBehind !== undefined && state.queuedBehind !== noted.waitsFor) {
-            noted.waitsFor = state.queuedBehind;
-            opts.onQueueNote?.(`release PipelineRun ${ns}/${match.name} waits for release ${state.queuedBehind}`);
-          }
-        } else if (noted.held) {
-          noted.held = false;
+        if (noted?.runName !== match.name) noted = { runName: match.name, started: false };
+        // Every release run is created pending, and one nothing holds back starts at the queue's next
+        // tick: only a run the queue noted a wait for is worth a line. A run that leaves the queue
+        // settled (cancelled, or timed out while it waited) never started, and the outcome says how it
+        // ended.
+        if (state.phase === "pending" && state.queuedBehind !== undefined && state.queuedBehind !== noted.waitsFor) {
+          noted.waitsFor = state.queuedBehind;
+          opts.onQueueNote?.(`release PipelineRun ${ns}/${match.name} waits for release ${state.queuedBehind}`);
+        } else if (state.phase === "running" && noted.waitsFor !== undefined && !noted.started) {
+          noted.started = true;
           opts.onQueueNote?.(`release PipelineRun ${ns}/${match.name} started`);
         }
         if (state.phase === "settled") return { runName: match.name, releaseTag: match.params["release-tag"] ?? "", ...state.outcome };

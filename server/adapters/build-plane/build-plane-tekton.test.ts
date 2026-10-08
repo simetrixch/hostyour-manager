@@ -133,16 +133,13 @@ describe("TektonBuildPlane", () => {
       expect(out).toEqual({ runName: "acme-release-7", releaseTag: "1.0.0-stable-20260728100000", succeeded: true });
     });
 
-    it("THE INNOCENT NEIGHBOUR: a run the queue never held notes nothing", async () => {
-      expect((await watch([running, settled({ succeeded: true })])).lines).toEqual([]);
+    it("THE INNOCENT NEIGHBOUR: a run the queue starts at once, created pending like every release run, notes nothing", async () => {
+      expect((await watch([pending, running, settled({ succeeded: true })])).lines).toEqual([]);
     });
 
-    it("notes the start of a held run that settles between two ticks", async () => {
+    it("claims no start for a run that settles while it waits (cancelled, or timed out in the queue)", async () => {
       const { lines, out } = await watch([behind("digita-platform-build/0.5.010-stable-1"), settled({ succeeded: false })]);
-      expect(lines).toEqual([
-        "release PipelineRun acme-build/acme-release-7 waits for release digita-platform-build/0.5.010-stable-1",
-        "release PipelineRun acme-build/acme-release-7 started",
-      ]);
+      expect(lines).toEqual(["release PipelineRun acme-build/acme-release-7 waits for release digita-platform-build/0.5.010-stable-1"]);
       expect(out).toMatchObject({ succeeded: false });
     });
 

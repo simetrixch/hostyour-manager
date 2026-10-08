@@ -18,8 +18,12 @@ export class FakeBuildPlane implements BuildPlane {
     this.releaseRuns.set(unit, list);
   }
 
-  async awaitReleaseRun(query: ReleaseRunQuery): Promise<ReleaseRunOutcome | null> {
+  /** The lines the release queue hands every release watch, as the Tekton plane notes a wait. */
+  readonly queueNotes: string[] = [];
+
+  async awaitReleaseRun(query: ReleaseRunQuery, opts?: { onQueueNote?: (line: string) => void }): Promise<ReleaseRunOutcome | null> {
     this.releaseWatches.push(query);
+    for (const line of this.queueNotes) opts?.onQueueNote?.(line);
     const match = this.matching(query).filter((r) => !query.standing?.includes(r.runName)).at(-1);
     if (!match) return null; // no seeded run models the watch that times out
     const { stage: _stage, ...outcome } = match;

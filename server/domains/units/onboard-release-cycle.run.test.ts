@@ -154,6 +154,15 @@ describe("watch-release-build", () => {
     expect(logs.some((l) => l.includes("acme-build/acme-release-9 Succeeded"))).toBe(true);
   });
 
+  it("writes what the release queue notes about the run into the run's log", async () => {
+    const buildPlane = new FakeBuildPlane();
+    buildPlane.seedReleaseRun("acme", { runName: "acme-release-9", releaseTag: MINTED_TAG, succeeded: true });
+    buildPlane.queueNotes.push("release PipelineRun acme-build/acme-release-9 waits for release digita-auth-build/0.5.009-stable-1");
+    const logs: string[] = [];
+    await watchReleaseBuildStep(portsWith({ buildPlane }), params(), {}).run(ctx(logs));
+    expect(logs).toContain("release PipelineRun acme-build/acme-release-9 waits for release digita-auth-build/0.5.009-stable-1");
+  });
+
   it("fails naming the run when the release PipelineRun FAILED", async () => {
     const buildPlane = new FakeBuildPlane();
     buildPlane.seedReleaseRun("acme", { runName: "acme-release-9", releaseTag: MINTED_TAG, succeeded: false });
