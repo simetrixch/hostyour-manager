@@ -161,6 +161,9 @@ export interface MasterArgoReader {
   /** Request ArgoCD's native refresh without changing its desired spec or sync policy.
    * Missing Applications are still being generated; only accepted names are returned. */
   refreshApplications(namespace: string, names: readonly string[]): Promise<string[]>;
+  /** Ask ArgoCD to sync the Applications at `revision` (argocd app sync).
+   * Missing Applications are skipped; only accepted names are returned. */
+  syncApplications(namespace: string, names: readonly string[], revision: string): Promise<string[]>;
   /** Refresh a registration generator before watching its generated Applications. */
   refreshApplicationSet(namespace: string, name: string): Promise<void>;
   getApplication(namespace: string, name: string): Promise<ArgoAppStatus | null>;

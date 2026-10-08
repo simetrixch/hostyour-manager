@@ -226,7 +226,16 @@ export class FakePlatformRepo implements PlatformRepo {
       },
       readFileHistory: async (relPath) => [...(this.history.get(`${branch}\0${relPath}`) ?? [])],
       commit: async (input) => {
-        const commit = `commit_${++this.seq}`;
+        let changed = false;
+        for (const w of input.write ?? []) {
+          const key = `${branch}\0${w.path}`;
+          if (this.store.get(key) !== w.content) changed = true;
+        }
+        for (const p of input.remove ?? []) {
+          const key = `${branch}\0${p}`;
+          if (this.store.has(key)) changed = true;
+        }
+        const commit = changed ? `commit_${++this.seq}` : `commit_${this.seq}`;
         for (const w of input.write ?? []) {
           const key = `${branch}\0${w.path}`;
           const before = this.store.get(key);
@@ -240,7 +249,7 @@ export class FakePlatformRepo implements PlatformRepo {
           this.fileCommits.delete(`${branch}\0${p}`);
         }
         this.commits.push({ ...input, branch });
-        return { commit };
+        return { commit, changed };
       },
       mintTag: async (input) => {
         const standing = this.tags.get(input.tag);

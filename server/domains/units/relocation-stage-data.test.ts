@@ -171,7 +171,7 @@ describe("moving or restoring onto a cluster where another registration holds th
     await seedConsumerRegistration(ports.registrations, { name: "other", cluster: TARGET.cluster, services: ["redis"], databases: [], keyPatterns: ["acme:*"] });
     const dumped = (await ports.registrations.readRegistration("prod", CONSUMER))!.entry;
     const ctx = stepCtx(db, "restore", {}, []);
-    await expect((await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET)).resolves.toBeUndefined();
+    await expect((await consumerWorld(ports, "app_1")(ctx)).writeRegistrationFromDump(ctx, JSON.stringify(dumped), TARGET)).resolves.toMatchObject({ changed: true });
   });
 
   it("PLANTED: a TEST move is refused at plan where the target serves the same _test database", async () => {

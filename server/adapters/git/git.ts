@@ -440,7 +440,7 @@ export class GitPlatformRepo implements PlatformRepo {
     return dir;
   }
 
-  private async commitPushIn(dir: string, branch: string, input: CommitInput): Promise<{ commit: string }> {
+  private async commitPushIn(dir: string, branch: string, input: CommitInput): Promise<{ commit: string; changed: boolean }> {
     await stageWorkdirChanges(dir, input, (args) => this.run(dir, args));
     // No-op idempotency: fetchResetBranch hard-resets to origin, so re-running a step that already
     // landed (crash-resume, a same-value suspend flip, a redundant rewrite) stages bytes identical
@@ -451,7 +451,7 @@ export class GitPlatformRepo implements PlatformRepo {
     if (staged === "") {
       const head = (await this.run(dir, ["rev-parse", "HEAD"])).trim();
       if (!SHA40.test(head)) throw errValidation(`git rev-parse returned a non-SHA: "${head}"`);
-      return { commit: head };
+      return { commit: head, changed: false };
     }
     await this.run(dir, [...identity(this.deps), "commit", "-q", "-m", input.message]);
     const pushRefspec = `refs/heads/${branch}:refs/heads/${branch}`;
@@ -480,7 +480,7 @@ export class GitPlatformRepo implements PlatformRepo {
     }
     const commit = (await this.run(dir, ["rev-parse", "HEAD"])).trim();
     if (!SHA40.test(commit)) throw errValidation(`git rev-parse returned a non-SHA: "${commit}"`);
-    return { commit };
+    return { commit, changed: true };
   }
 
   private async mintTagIn(dir: string, input: { tag: string; message: string }): Promise<{ tag: string; commit: string; minted: boolean }> {

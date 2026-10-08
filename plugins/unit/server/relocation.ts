@@ -108,7 +108,9 @@ export interface RelocationWorld {
   seedSecrets?(ctx: StepCtx, registrationYaml: string): Promise<void>;
   /** Re-commit the DUMPED registration onto the target, quiesced — how a restore rebuilds a unit
    *  whose live registration is long gone. */
-  writeRegistrationFromDump(ctx: StepCtx, registrationYaml: string, target: TargetCluster): Promise<void>;
+  writeRegistrationFromDump(ctx: StepCtx, registrationYaml: string, target: TargetCluster): Promise<{ commit: string; changed: boolean }>;
+  /** Ask ArgoCD on the target cluster to sync the unit's Applications at `revision` and answer their names. */
+  syncApplications(ctx: StepCtx, target: TargetCluster, revision: string): Promise<string[]>;
   /** The handle half of verify-source-released: the source no longer GENERATES the unit — a
    *  consumer's source Application is pruned, a tenant's source CR is gone. */
   verifySourceHandleReleased(ctx: StepCtx): Promise<void>;

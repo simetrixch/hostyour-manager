@@ -11,6 +11,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
   readonly watched: string[] = [];
   readonly refreshed: string[] = [];
   readonly refreshedSets: string[] = [];
+  readonly synced: { namespace: string; names: string[]; revision: string }[] = [];
   readonly operations: string[] = [];
 
   /** The opts the most recent single-app watch was called with — lets a test inspect the budget and
@@ -29,6 +30,7 @@ export class FakeMasterArgoReader implements MasterArgoReader {
     throwOnGet?: Error;
     throwOnSet?: Error;
     throwOnRefresh?: Error;
+    throwOnSync?: Error;
     /** What a namespace HOLDS, per namespace — what listApplications answers. An unlisted namespace
      *  reads [], which is the "the ApplicationSet has not generated anything yet" case every caller
      *  of the list retries on rather than passing. */
@@ -45,6 +47,16 @@ export class FakeMasterArgoReader implements MasterArgoReader {
       this.operations.push(`refresh:${namespace}/${name}`);
     }
     return [...new Set(names)];
+  }
+
+  async syncApplications(namespace: string, names: readonly string[], revision: string): Promise<string[]> {
+    if (this.scripted.throwOnSync) throw this.scripted.throwOnSync;
+    const unique = [...new Set(names)];
+    this.synced.push({ namespace, names: unique, revision });
+    for (const name of unique) {
+      this.operations.push(`sync:${namespace}/${name}@${revision}`);
+    }
+    return unique;
   }
 
   async refreshApplicationSet(namespace: string, name: string): Promise<void> {

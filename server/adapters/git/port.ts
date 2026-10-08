@@ -67,8 +67,8 @@ export interface BranchScope {
   /** Every content `relPath` has had on this branch, newest first: one per commit on the branch's own
    *  line that wrote it, none for one that deleted it; [] where it was never written. */
   readFileHistory(relPath: string): Promise<string[]>;
-  /** Serialize the writes, commit, and push with rebase-retry; returns the new commit SHA. */
-  commit(input: CommitInput): Promise<{ commit: string }>;
+  /** Serialize the writes, commit, and push with rebase-retry; returns the new commit SHA and whether anything changed. */
+  commit(input: CommitInput): Promise<{ commit: string; changed: boolean }>;
   /** Mint an ANNOTATED tag at the worktree's current HEAD and push it. MINT-ONCE: a tag the remote
    *  already carries is never re-pointed — the call reports `minted:false` and the commit the standing
    *  tag names, so a resumed run adopts its own earlier tag instead of moving a released one onto new

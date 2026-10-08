@@ -70,7 +70,11 @@ export function provisionTargetFromDumpStep(ports: RelocationPorts, worldOf: Wor
       }
       await w.provisionTarget(ctx, target, registrationYaml);
       await w.seedSecrets?.(ctx, registrationYaml);
-      await w.writeRegistrationFromDump(ctx, registrationYaml, target);
+      const { commit, changed } = await w.writeRegistrationFromDump(ctx, registrationYaml, target);
+      if (!changed) {
+        const names = await w.syncApplications(ctx, target, commit);
+        ctx.log("meta", `the registration commit changed nothing (${commit.slice(0, 12)}), and ArgoCD does not retry a revision whose sync retries are spent — asked it to sync ${names.join(", ")} at that revision`);
+      }
     },
   };
 }

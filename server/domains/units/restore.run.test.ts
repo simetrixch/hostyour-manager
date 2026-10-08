@@ -314,4 +314,63 @@ describe("restore (consumer)", () => {
     db = openFixtureDb();
     await expect(setup({ smtpEntry: { service: "other-mta", port: 2525 } })).rejects.toThrow(/which other is now/);
   });
+
+  it("asks ArgoCD to sync the Application when the registration commit changed nothing", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    const dumped = serializePointer(ConsumerRegistrationSchema, {
+      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "medium", mongodb: "shared",
+      quota: seedQuota("medium"),
+    });
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
+
+    const prior = await ports.registrations.commitRegistration({
+      unit: { name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false },
+      builds: [],
+      deploy: {
+        stage: "prod", quiesced: true, chartPath: "deploy/chart", cluster: TARGET.cluster, host: "acme", databases: ["acme_db"],
+        keyPatterns: [], channelPatterns: [], services: ["mongodb"], size: "medium", mongodb: "shared", quota: seedQuota("medium"),
+      },
+      runId: "run_prior_failed",
+    });
+    expect(prior.changed).toBe(true);
+
+    const logs: string[] = [];
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    const step = makeRestoreDef(ports).steps(params).find((s) => s.name === "provision-target")!;
+    await step.run(stepCtx(db, "provision-target", params, logs));
+
+    expect(f.target.argo.synced).toEqual([
+      { namespace: TARGET.cluster, names: ["acme-prod"], revision: prior.commit },
+    ]);
+    expect(logs).toContain(
+      `the registration commit changed nothing (${prior.commit.slice(0, 12)}), and ArgoCD does not retry a revision whose sync retries are spent — asked it to sync acme-prod at that revision`,
+    );
+  });
+
+  it("PLANTED INNOCENT: when the registration commit changed, no sync is requested", async () => {
+    seedClusters(db);
+    seedConsumerRow(db, "offboarded");
+    seedGeneration(db, "consumer", CONSUMER);
+    const f = makeFakes();
+    const ports = consumerPorts(f);
+    const dumped = serializePointer(ConsumerRegistrationSchema, {
+      name: CONSUMER, repoURL: "https://github.com/x/acme.git", suspended: false, quiesced: false, removing: false,
+      chartPath: "deploy/chart", host: "acme", cluster: "s1", databases: ["acme_db"], services: ["mongodb"], size: "medium", mongodb: "shared",
+      quota: seedQuota("medium"),
+    });
+    scriptDumpedRegistration(f.target.reader, CONSUMER, dumped);
+
+    const logs: string[] = [];
+    const params = { appId: "app_1", targetClusterId: TARGET.clusterId, generation: GENERATION };
+    const step = makeRestoreDef(ports).steps(params).find((s) => s.name === "provision-target")!;
+    await step.run(stepCtx(db, "provision-target", params, logs));
+
+    expect(f.target.argo.synced).toEqual([]);
+    expect(logs.some((l) => l.includes("the registration commit changed nothing"))).toBe(false);
+  });
 });

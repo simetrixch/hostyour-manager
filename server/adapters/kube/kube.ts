@@ -179,6 +179,10 @@ export class KubeMasterArgoReader implements MasterArgoReader {
     return argo.refreshApplications(this.custom, namespace, names);
   }
 
+  syncApplications(namespace: string, names: readonly string[], revision: string): Promise<string[]> {
+    return argo.syncApplications(this.custom, namespace, names, revision);
+  }
+
   refreshApplicationSet(namespace: string, name: string): Promise<void> {
     return argo.refreshApplicationSet(this.custom, namespace, name);
   }

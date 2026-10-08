@@ -167,6 +167,8 @@ describe("GitPlatformRepo", () => {
       // Re-run the SAME write on a fresh checkout (a crash-resume): no staged change => return HEAD, no throw.
       const rerun = makeRepo(originURL);
       const second = await rerun.withBranch("main", (main) => main.commit({ message: "create-tenant [run_1]", write }));
+      expect(first.changed).toBe(true);
+      expect(second.changed).toBe(false);
       expect(second.commit).toBe(first.commit); // same SHA, the prior attempt's commit
       expect(git(originDir, "rev-parse", "main").trim()).toBe(first.commit); // origin did not advance
     },

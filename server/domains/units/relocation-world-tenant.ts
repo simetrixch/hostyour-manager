@@ -187,7 +187,7 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         // empty stores, and open-access lifts it only after the data is back and verified.
         // The tenant's OWN stage: the dump is re-committed at the path it was dumped from, on the
         // target cluster, whatever stage that cluster's map carries.
-        const { commit } = await ports.registrations.commitTenant({
+        const { commit, changed } = await ports.registrations.commitTenant({
           stage: tc.stage,
           guid: tc.guid,
           registration: { ...entry, cluster: target.cluster, quiesced: true },
@@ -195,6 +195,13 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         });
         c.checkpoint({ commit });
         c.log("meta", `tenant registration for ${tc.guid} re-committed from the dump onto ${target.cluster}, quiesced (${commit})`);
+        return { commit, changed };
+      },
+      syncApplications: async (_c, target, revision) => {
+        const entry = await readRegistration(ports, tc.stage, tc.guid);
+        const names = tenantApplicationSet(entry.members.map((m) => m.name), tc.guid, tc.stage);
+        const { argoReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
+        return argoReader.syncApplications(argoNamespace, names, revision);
       },
       verifySourceHandleReleased: async (c) => {
         // The tenant twin of the consumer's check, on the same evidence and for the same reason: the

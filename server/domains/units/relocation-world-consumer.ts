@@ -321,7 +321,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // The dumped registration is re-committed AT THE TARGET: the restored stage deploys closed
         // (deploy.quiesced: true) until the data is back and open-access lifts it, while the unit
         // file keeps what stands (or writes the manifest's builds when the last stage was offboarded).
-        await ports.registrations.commitRegistration({
+        const { commit, changed } = await ports.registrations.commitRegistration({
           unit,
           builds,
           // The unit's OWN stage: the dump is re-committed at the path it was dumped from, on the
@@ -356,6 +356,11 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
           runId: c.runId,
         });
         c.log("meta", `registration for ${entry.name} re-committed from the dump onto ${target.cluster}, quiesced — the target deploys closed until the data is back`);
+        return { commit, changed };
+      },
+      syncApplications: async (_c, target, revision) => {
+        const { argoReader, argoNamespace } = await ports.resolver.resolve(target.clusterId);
+        return argoReader.syncApplications(argoNamespace, [appName], revision);
       },
       verifySourceHandleReleased: async (c) => {
         const { argoReader, argoNamespace } = await ports.resolver.resolve(ac.clusterId);

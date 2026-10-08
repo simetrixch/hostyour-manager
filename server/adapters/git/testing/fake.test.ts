@@ -52,6 +52,19 @@ describe("FakePlatformRepo", () => {
     expect(p.read("s1.example", "consumers/prod/active/acme.yaml")).toBeNull();
   });
 
+  it("reports changed: true on write and changed: false on identical content", async () => {
+    const p = new FakePlatformRepo();
+    const first = await p.withBranch("s1.example", (books) =>
+      books.commit({ message: "first", write: [{ path: "file.txt", content: "hello" }] }),
+    );
+    expect(first.changed).toBe(true);
+    const second = await p.withBranch("s1.example", (books) =>
+      books.commit({ message: "second", write: [{ path: "file.txt", content: "hello" }] }),
+    );
+    expect(second.changed).toBe(false);
+    expect(second.commit).toBe(first.commit);
+  });
+
   // The ordering guarantee the port promises, asserted on the fake so every domain test that runs
   // against it inherits a world production can actually produce. Two turns on ONE branch may not
   // interleave; two turns on DIFFERENT branches must not wait for each other, or a slow read of one

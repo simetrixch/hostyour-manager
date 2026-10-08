@@ -375,7 +375,7 @@ export class Registrations {
    *  stage file when a deploy group is given, in ONE commit. Nothing else in this process writes a file
    *  under registrations/<unit>/, which together with the schema's `name == basename(repoURL)`
    *  invariant is what makes the two files structurally unable to contradict each other. */
-  async commitRegistration(input: RegistrationCommit & { runId: string }): Promise<{ commit: string }> {
+  async commitRegistration(input: RegistrationCommit & { runId: string }): Promise<{ commit: string; changed: boolean }> {
     const { unit, builds, deploy, runId } = input;
     const write: { path: string; content: string }[] = [
       { path: guard(buildPath(unit.name)), content: serializePointer(ConsumerRegistrationSchema, { ...unit, removing: false, builds }) },
@@ -615,7 +615,8 @@ export class Registrations {
           }
         }
       }
-      return books.commit({ message, write });
+      const { commit } = await books.commit({ message, write });
+      return { commit };
     });
   }
 }

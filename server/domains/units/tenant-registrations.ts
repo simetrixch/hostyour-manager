@@ -262,7 +262,7 @@ export class TenantRegistrations {
   }
 
   /** Commit ONE tenant's registration for ONE stage (create-tenant). Overwrite-idempotent on resume. */
-  async commitTenant(input: { stage: Stage; guid: string; registration: TenantRegistration; runId: string }): Promise<{ commit: string }> {
+  async commitTenant(input: { stage: Stage; guid: string; registration: TenantRegistration; runId: string }): Promise<{ commit: string; changed: boolean }> {
     const { stage, guid, registration, runId } = input;
     return this.repo.withBranch(this.branch, (books) =>
       books.commit({

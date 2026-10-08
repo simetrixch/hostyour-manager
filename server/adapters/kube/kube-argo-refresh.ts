@@ -18,6 +18,21 @@ export async function refreshApplications(custom: CustomObjectsApi, namespace: s
   return refreshed;
 }
 
+export async function syncApplications(custom: CustomObjectsApi, namespace: string, names: readonly string[], revision: string): Promise<string[]> {
+  const synced: string[] = [];
+  for (const name of new Set(names)) {
+    try {
+      await custom.patchNamespacedCustomObject({ ...ARGO, namespace, name,
+        body: { operation: { initiatedBy: { username: "hostyour-manager" }, sync: { revision } } } },
+      setHeaderOptions("Content-Type", PatchStrategy.MergePatch));
+      synced.push(name);
+    } catch (e) {
+      if (!isNotFound(e)) throw upstream(`sync Argo Application ${namespace}/${name}`, e);
+    }
+  }
+  return synced;
+}
+
 
 export async function refreshApplicationSet(custom: CustomObjectsApi, namespace: string, name: string): Promise<void> {
   try {
