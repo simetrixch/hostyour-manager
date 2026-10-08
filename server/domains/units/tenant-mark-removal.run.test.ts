@@ -6,14 +6,13 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
-import { makeTenantPurgeDef, type TenantPurgeRequest } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, type TenantPurgeRequest, type TenantPurgePorts } from "./tenant-purge.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
 import { createTenantCleanups } from "./create-tenant-abort.ts";
 import { CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { REPLACE_TEARDOWN, removeIssuerRecordsStep } from "./tenant-teardown.ts";
 import { composeTenantReport } from "./gates/tenant-gates.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -38,7 +37,7 @@ beforeEach(() => {
 });
 afterEach(() => { db.sqlite.close(); });
 
-function ports(reg: TenantRegistrations, dns: FakeDnsProvider, over: Partial<TenantLifecyclePorts> = {}): TenantLifecyclePorts {
+function ports(reg: TenantRegistrations, dns: FakeDnsProvider, over: Partial<TenantPurgePorts> = {}): TenantPurgePorts {
   return {
     registrations: reg,
     resolver: new FakeClusterKubeResolver({
@@ -51,6 +50,8 @@ function ports(reg: TenantRegistrations, dns: FakeDnsProvider, over: Partial<Ten
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns,
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
     ...over,
   };
 }
@@ -83,7 +84,7 @@ const standing = async (dns: FakeDnsProvider): Promise<string[]> => [
   ...(await dns.listRecordContents({ name: "auth.acme.example.com", type: "CNAME" })),
 ];
 
-async function purgeRemoveDns(p: TenantLifecyclePorts): Promise<void> {
+async function purgeRemoveDns(p: TenantPurgePorts): Promise<void> {
   const planCtx: PlanStreamCtx = { db: db.db, log: () => undefined, signal: new AbortController().signal };
   const result = await makeTenantPurgeDef(p).planStream!(REQUEST, planCtx);
   if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);

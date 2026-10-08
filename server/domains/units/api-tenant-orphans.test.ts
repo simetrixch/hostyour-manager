@@ -15,7 +15,7 @@ import { getRun } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerTenantRoutes } from "./api.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { makeTenantPurgeDef } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, type TenantPurgePorts } from "./tenant-purge.run.ts";
 import { makeSuspendTenantDef } from "./tenant-lifecycle.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -24,7 +24,6 @@ import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver, FakeBuildRbacWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
-import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
@@ -119,8 +118,17 @@ function tenantResolver(): FakeClusterKubeResolver {
   });
 }
 
-function lifecyclePorts(registrations: TenantRegistrations): TenantLifecyclePorts {
-  return { registrations, resolver: tenantResolver(), deployRepoUrl: DEPLOY_URL, argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com", dns: new FakeDnsProvider() };
+function lifecyclePorts(registrations: TenantRegistrations): TenantPurgePorts {
+  return {
+    registrations,
+    resolver: tenantResolver(),
+    deployRepoUrl: DEPLOY_URL,
+    argoWatchTimeoutMs: 1000,
+    resolveUnitApex: async () => "example.com",
+    dns: new FakeDnsProvider(),
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
+  };
 }
 
 /** A VaultSeeder for the tenant runs: create-tenant seeds the crypto entry through it, and nothing
@@ -453,6 +461,7 @@ describe("POST /api/tenants/purge (the force-offboard trigger)", () => {
       `purge-${ORPHAN_GUID}-watch-prune`,
       `purge-${ORPHAN_GUID}-delete-projects`,
       "delete-namespaces",
+      "unbind-sender-issuer",
       "delete-tenant-crypto",
       "withdraw-bucket-keys",
       "remove-dns",

@@ -398,7 +398,7 @@ export function buildTenantOnboarding(
     // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision
     // cascade) + the namespace. Same narrow port set as the other lifecycle run kinds — the teardown and the
     // two cluster-side deletes all resolve through the per-cluster resolver.
-    makeTenantPurgeDef(lifecyclePorts),
+    makeTenantPurgeDef({ ...lifecyclePorts, unitCall, senderDomainIssuers: async () => (await readTenantSpec(onboardPorts, {}))?.senderDomainIssuers ?? null }),
     // tenant-backup / tenant-restore / tenant-migrate — the same ONE relocation mechanism over the
     // whole member bracket.
     makeTenantBackupDef(tenantRelocationPorts),

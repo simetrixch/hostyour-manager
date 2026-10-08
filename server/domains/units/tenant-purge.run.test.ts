@@ -9,9 +9,8 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgePorts, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakePlatformRepo, FAKE_BOOKS_BRANCH } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
@@ -22,6 +21,10 @@ import type { PlanStreamCtx } from "../../executor/types.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
 import { ARGO_NS, STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers } from "./tenant-members.fixture.ts";
+import { FakeUnitCall } from "#unit/server/adapters/unit-call/testing/fake.ts";
+import { keepUnitCallKey } from "#unit/server/unit-call-key.ts";
+import { CredentialStore } from "../../security/store.ts";
+import { pino } from "pino";
 
 
 // tenant-purge (force-offboard by GUID) tests — the tenant twin of
@@ -54,6 +57,7 @@ const STEP_ORDER = [
   `purge-${GUID}-watch-prune`,
   `purge-${GUID}-delete-projects`,
   "delete-namespaces",
+  "unbind-sender-issuer",
   "delete-tenant-crypto",
   "withdraw-bucket-keys",
   "remove-dns",
@@ -77,7 +81,7 @@ function entry(cluster = "s1"): TenantRegistration {
 
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
-function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePorts {
+function ports(reg: TenantRegistrations, over: FakeKube & Partial<TenantPurgePorts> = {}): TenantPurgePorts {
   return {
     registrations: reg,
     resolver: new FakeClusterKubeResolver({
@@ -91,6 +95,9 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
+    ...over,
   };
 }
 
@@ -135,7 +142,7 @@ function seedTenantRow(status: TenantStatus = "provisioning"): void {
 
 /** Plan through the streaming planner (the only planning path — the target must be resolved + frozen
  *  before steps() can build the shared teardown) and hand back the frozen params + the plan. */
-async function planned(prt: TenantLifecyclePorts, req: TenantPurgeRequest = REQUEST, logs: string[] = []) {
+async function planned(prt: TenantPurgePorts, req: TenantPurgeRequest = REQUEST, logs: string[] = []) {
   const result = await makeTenantPurgeDef(prt).planStream!(req, planCtx(logs));
   if (result.outcome !== "planned") throw new Error(`expected a planned outcome, got ${result.outcome}`);
   return result;
@@ -374,5 +381,111 @@ describe("tenant-purge plan", () => {
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry("s2"), runId: "run_onb" }); // the tenant is on s2
     const def = makeTenantPurgeDef(ports(reg));
     await expect(def.planStream!(REQUEST, planCtx())).rejects.toThrow(/lives on cluster cls_2 \("s2"\).*refusing to purge on the wrong cluster/);
+  });
+});
+
+describe("unbind-sender-issuer step in tenant-purge", () => {
+  const ROUTE = { url: "https://post.{stageApex}/api/sender-domains/{domain}/issuers", unit: "post" };
+  const SENDER_DOMAIN = "mail.example.org";
+  const KEY_VAL = "k".repeat(64);
+
+  it("plans sender from tenant row with senderDomain and step calls DELETE with issuer at filled route URL", async () => {
+    seedCluster();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+
+    const creds = new CredentialStore({ db: db.db, logger: pino({ level: "silent" }) });
+    await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEY_VAL });
+    const unitCall = new FakeUnitCall(() => ({ status: 200, detail: "HTTP 200", body: { removed: true } }));
+    const prt = ports(reg, { unitCall, senderDomainIssuers: async () => ROUTE });
+
+    const { params, plan } = await planned(prt);
+    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://auth.${SUB}.example.com` });
+    expect(plan.summary).toContain(SENDER_DOMAIN);
+    expect(plan.summary).toContain(`https://auth.${SUB}.example.com`);
+    expect(plan.summary).toContain(`It unbinds https://auth.${SUB}.example.com at ${SENDER_DOMAIN} in the product's mail service`);
+
+    const step = makeTenantPurgeDef(prt).steps(params).find((s) => s.name === "unbind-sender-issuer")!;
+    const logs: string[] = [];
+    await step.run({ runId: "run_purge", stepName: "unbind-sender-issuer", db: db.db, creds, params, log: (_s: string, t: string) => logs.push(t), checkpoint: () => {} } as unknown as StepCtx);
+
+    expect(unitCall.calls).toEqual([{ method: "DELETE", url: `https://post.example.com/api/sender-domains/${encodeURIComponent(SENDER_DOMAIN)}/issuers`, key: KEY_VAL, body: { issuer: `https://auth.${SUB}.example.com` } }]);
+    expect(logs.some((l) => l.includes("post (prod) no longer lets https://auth.acme.example.com send from mail.example.org"))).toBe(true);
+  });
+
+  it("plans sender from live registration when no inventory row stands", async () => {
+    seedCluster();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+    await reg.setSenderDomain("prod", GUID, SENDER_DOMAIN, "run_sender");
+    const prt = ports(reg, { senderDomainIssuers: async () => ROUTE });
+
+    const { params, plan } = await planned(prt);
+    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://auth.${SUB}.example.com` });
+    expect(plan.summary).toContain(`It unbinds https://auth.${SUB}.example.com at ${SENDER_DOMAIN} in the product's mail service`);
+  });
+
+  it("PLANTED INNOCENT: a tenant with senderDomain: \"\" → sender null, no unit call, the log says so", async () => {
+    seedCluster();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: "", status: "provisioning" }).run();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+
+    const creds = new CredentialStore({ db: db.db, logger: pino({ level: "silent" }) });
+    const unitCall = new FakeUnitCall(() => ({ status: 200, detail: "HTTP 200", body: { removed: true } }));
+    const prt = ports(reg, { unitCall, senderDomainIssuers: async () => ROUTE });
+
+    const { params, plan } = await planned(prt);
+    expect(params.sender).toBeNull();
+    expect(plan.summary).toContain("The tenant sends from no domain of its own, so no issuer is unbound");
+
+    const step = makeTenantPurgeDef(prt).steps(params).find((s) => s.name === "unbind-sender-issuer")!;
+    const logs: string[] = [];
+    await step.run({ runId: "run_purge", stepName: "unbind-sender-issuer", db: db.db, creds, params, log: (_s: string, t: string) => logs.push(t), checkpoint: () => {} } as unknown as StepCtx);
+
+    expect(unitCall.calls).toHaveLength(0);
+    expect(logs.some((l) => l.includes(`tenant ${GUID} sends from no domain of its own — no issuer to unbind`))).toBe(true);
+  });
+
+  it("PLANTED DEFECT: the fake answers 500 → the step throws and the purge fails, the error naming the domain", async () => {
+    seedCluster();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+
+    const creds = new CredentialStore({ db: db.db, logger: pino({ level: "silent" }) });
+    await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEY_VAL });
+    const unitCall = new FakeUnitCall(() => ({ status: 500, detail: "mail service internal error" }));
+    const prt = ports(reg, { unitCall, senderDomainIssuers: async () => ROUTE });
+
+    const { params } = await planned(prt);
+    const step = makeTenantPurgeDef(prt).steps(params).find((s) => s.name === "unbind-sender-issuer")!;
+    await expect(
+      step.run({ runId: "run_purge", stepName: "unbind-sender-issuer", db: db.db, creds, params, log: () => {}, checkpoint: () => {} } as unknown as StepCtx),
+    ).rejects.toThrow(new RegExp(SENDER_DOMAIN));
+  });
+
+  it("the route absent (senderDomainIssuers answers null) → no call, the log names the binding left", async () => {
+    seedCluster();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    const reg = new TenantRegistrations(new FakePlatformRepo());
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
+
+    const creds = new CredentialStore({ db: db.db, logger: pino({ level: "silent" }) });
+    await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEY_VAL });
+    const unitCall = new FakeUnitCall(() => ({ status: 200, detail: "HTTP 200", body: { removed: true } }));
+    const prt = ports(reg, { unitCall, senderDomainIssuers: async () => null });
+
+    const { params } = await planned(prt);
+    const step = makeTenantPurgeDef(prt).steps(params).find((s) => s.name === "unbind-sender-issuer")!;
+    const logs: string[] = [];
+    await step.run({ runId: "run_purge", stepName: "unbind-sender-issuer", db: db.db, creds, params, log: (_s: string, t: string) => logs.push(t), checkpoint: () => {} } as unknown as StepCtx);
+
+    expect(unitCall.calls).toHaveLength(0);
+    expect(logs.some((l) =>
+      l.includes("the product declares no senderDomainIssuers route") &&
+      l.includes(`https://auth.${SUB}.example.com stays bound at ${SENDER_DOMAIN}`),
+    )).toBe(true);
   });
 });

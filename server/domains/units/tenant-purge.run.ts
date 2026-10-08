@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
@@ -8,16 +8,24 @@ import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
 import { type TenantLifecyclePorts } from "./lifecycle.ts";
+import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
+import { changeStageIssuer, stageServiceIssuer, type SenderDomainIssuers } from "./tenant-sender-domain-issuer.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { assertTenantNotLive, type TenantLiveRefusal } from "./tenant-live-guard.ts";
 import { memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
+import type { ScannedTenant } from "./tenant-registrations.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { tenantBucketName, tenantKeyName } from "./tenant-storage.ts";
+
+export type TenantPurgePorts = TenantLifecyclePorts & {
+  unitCall: UnitCall;
+  senderDomainIssuers: () => Promise<SenderDomainIssuers | null>;
+};
 
 // tenant-purge / force-offboard by GUID — the tenant analogue of the consumer
 // purge.run.ts, and the ONLY run kind that can name an ORPHAN: a tenant that exists in GitOps + ArgoCD
@@ -159,7 +167,10 @@ export type TenantPurgeRequest = z.infer<typeof TenantPurgeRequest>;
  *  read off the LIVE pointer BEFORE the teardown removes it — so steps() rebuilds the SAME steps at
  *  execute and at resume. Required, never optional: a purge that could run without a frozen target would
  *  silently wait on an EMPTY fan-out and report it pruned. */
-export const TenantPurgeParams = TenantPurgeRequest.extend({ target: TenantTeardownTargetSchema });
+export const TenantPurgeParams = TenantPurgeRequest.extend({
+  target: TenantTeardownTargetSchema,
+  sender: z.object({ domain: z.string(), issuer: z.string() }).nullable(),
+});
 export type TenantPurgeParams = z.infer<typeof TenantPurgeParams>;
 
 /** The tenant-purge teardown flavour: FAIL-SOFT, because the cluster-side deletes below reap the tenant
@@ -284,7 +295,7 @@ function unresolvedTeardownTarget(db: Db, c: TenantPurgeCluster, named: readonly
  *  between delete-project and the record step, so the row is only ever settled once ALL THREE have
  *  succeeded (see the ORDER and DEPROVISION paragraphs in the header). Named as their own builder so the
  *  composition reads as what it is: pointer teardown, then deprovision, then record. */
-function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParams): Step[] {
+function tenantDeprovisionSteps(ports: TenantPurgePorts, p: TenantPurgeParams): Step[] {
   return [
     {
       name: "delete-namespaces",
@@ -337,6 +348,46 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
             `${stuck.length} namespace(s) accepted the delete but are still TERMINATING on ${c.cluster} (${stuck.join(", ")}) — a finalizer on something inside is holding them, and everything in them is still there. The purge itself is complete; these shells are not, and no later step re-reads them.`,
           );
         }
+      },
+    },
+    {
+      name: "unbind-sender-issuer",
+      title: "Stop the stage's issuer sending from its sender domain",
+      run: async (ctx) => {
+        if (p.sender === null) {
+          ctx.log("meta", `tenant ${p.guid} sends from no domain of its own — no issuer to unbind`);
+          return;
+        }
+        const route = await ports.senderDomainIssuers();
+        if (route === null) {
+          ctx.log(
+            "meta",
+            `the product declares no senderDomainIssuers route, so ${p.sender.issuer} stays bound at ${p.sender.domain} — remove it in the product's mail service`,
+          );
+          return;
+        }
+        const c = loadPurgeCluster(ctx.db, p);
+        const unitApex = await ports.resolveUnitApex(c.domain, c.stage);
+        const removed = await changeStageIssuer(
+          { store: ctx.creds, unitCall: ports.unitCall },
+          {
+            route,
+            stage: c.stage,
+            unitApex,
+            domain: p.sender.domain,
+            issuer: p.sender.issuer,
+            change: "remove",
+            runId: ctx.runId,
+            signal: ctx.signal,
+          },
+        );
+        ctx.log(
+          "meta",
+          removed
+            ? `${route.unit} (${c.stage}) no longer lets ${p.sender.issuer} send from ${p.sender.domain}`
+            : `${p.sender.issuer} was not bound at ${p.sender.domain} — nothing to unbind`,
+        );
+        ctx.checkpoint({ domain: p.sender.domain, issuer: p.sender.issuer, removed });
       },
     },
     {
@@ -446,7 +497,7 @@ function tenantDeprovisionSteps(ports: TenantLifecyclePorts, p: TenantPurgeParam
   ];
 }
 
-function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams): Step[] {
+function tenantPurgeSteps(ports: TenantPurgePorts, params: TenantPurgeParams): Step[] {
   const p = params;
   // guards.assertGuardsArmed evaluates def.steps({}) — with no frozen target there is simply no
   // teardown to build, and attest-target still comes first, which is exactly what that check asserts.
@@ -544,7 +595,7 @@ function tenantPurgeSteps(ports: TenantLifecyclePorts, params: TenantPurgeParams
   ];
 }
 
-export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<TenantPurgeParams> {
+export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<TenantPurgeParams> {
   return {
     kind: "tenant-purge",
     paramsSchema: TenantPurgeParams,
@@ -560,7 +611,15 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
       // (tenant-replace.ts): the inventory row while the tenant is still live, else purely from its live
       // tenant.yaml (the ORPHAN case), else null — neither source knows it, and the cluster footprint is
       // then reaped by guid alone (unresolvedTeardownTarget).
-      const resolved = await resolveTeardownTarget({ db: ctx.db, registrations: ports.registrations }, req.stage, req.guid);
+      let scannedEntry: ScannedTenant | null = null;
+      const resolved = await resolveTeardownTarget(
+        { db: ctx.db, registrations: ports.registrations },
+        req.stage,
+        req.guid,
+        (scan) => {
+          if (scan.status === "read") scannedEntry = scan.entry;
+        },
+      );
       if (resolved && resolved.clusterId !== c.clusterId) {
         throw errValidation(
           `tenant ${req.guid} lives on cluster ${resolved.clusterId} ("${resolved.cluster}"), tenant-purge targets ${c.clusterId} — refusing to purge on the wrong cluster`,
@@ -574,7 +633,35 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
             ? `tenant ${req.guid} ("${target.subdomain}") resolved from its GitOps pointer on ${target.cluster} with NO inventory row (an orphan) — ${target.watchNames.length} fan-out Application(s) to prune`
             : `tenant ${req.guid} has no live inventory row and no live pointer — purging its cluster footprint by guid on ${target.cluster}: ${target.members.length} recorded member AppProject(s) and admission polic${target.members.length === 1 ? "y" : "ies"}, every namespace labelled ${tenantSelector(req.guid)}, and its Vault crypto entry`,
       );
-      const params: TenantPurgeParams = { ...req, target };
+      // Find what the tenant sent from: the inventory row first, else the scanned registration.
+      const row = ctx.db
+        .select({
+          senderDomain: tenants.senderDomain,
+          subdomain: tenants.subdomain,
+          routing: tenants.routing,
+          identityProvider: tenants.identityProvider,
+        })
+        .from(tenants)
+        .where(and(eq(tenants.guid, req.guid), eq(tenants.stage, req.stage)))
+        .orderBy(desc(tenants.updatedAt))
+        .limit(1)
+        .get();
+      const source = row ?? scannedEntry;
+      let sender: { domain: string; issuer: string } | null = null;
+      if (source && source.senderDomain !== "") {
+        const unitApex = await ports.resolveUnitApex(c.domain, req.stage);
+        const issuer = stageServiceIssuer(
+          {
+            routing: source.routing,
+            identityProvider: source.identityProvider,
+            stage: req.stage,
+            subdomain: source.subdomain,
+          },
+          unitApex,
+        );
+        sender = { domain: source.senderDomain, issuer };
+      }
+      const params: TenantPurgeParams = { ...req, target, sender };
       const stepDefs = tenantPurgeSteps(ports, params);
       const plan: Plan = {
         kind: "tenant-purge",
@@ -596,6 +683,9 @@ export function makeTenantPurgeDef(ports: TenantLifecyclePorts): RunDefinition<T
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"
             : "") +
           ". THE OBJECT-STORAGE BUCKET AND ITS DATA SURVIVE this purge — they are deliberately kept. " +
+          (sender
+            ? `It unbinds ${sender.issuer} at ${sender.domain} in the product's mail service. `
+            : "The tenant sends from no domain of its own, so no issuer is unbound. ") +
           // The tail an operator reads LAST, immediately before approving. Ending it "safe to
           // re-run, and safe on a healthy tenant" means only "the steps will not error on a
           // healthy tenant" but reads as "if this turns out to be live, nothing bad happens" — the exact

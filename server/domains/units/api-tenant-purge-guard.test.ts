@@ -15,13 +15,12 @@ import { buildRunDefinitions } from "../../domains/runs/run-definitions.ts";
 import { getRun, listRuns, readEvents } from "../../executor/read.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerTenantRoutes } from "./api.ts";
-import { makeTenantPurgeDef } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, type TenantPurgePorts } from "./tenant-purge.run.ts";
 import { memberNamespace } from "./tenant-fanout.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
-import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { TenantRegistration } from "../../../shared/tenant.ts";
@@ -98,7 +97,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   };
 }
 
-function lifecyclePorts(registrations: TenantRegistrations, clusterReader: FakeClusterReader): TenantLifecyclePorts {
+function lifecyclePorts(registrations: TenantRegistrations, clusterReader: FakeClusterReader): TenantPurgePorts {
   return {
     registrations,
     resolver: new FakeClusterKubeResolver({
@@ -111,6 +110,8 @@ function lifecyclePorts(registrations: TenantRegistrations, clusterReader: FakeC
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
   };
 }
 

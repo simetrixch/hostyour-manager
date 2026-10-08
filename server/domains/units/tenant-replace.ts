@@ -21,7 +21,7 @@ import { tenants } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
-import { TenantRegistrations } from "./tenant-registrations.ts";
+import { TenantRegistrations, type TenantScan } from "./tenant-registrations.ts";
 import { tenantTeardownMembers } from "./tenant-lifecycle.run.ts";
 import { TenantTeardownTargetSchema, type TenantTeardownTarget } from "./tenant-teardown.ts";
 import { resolveClusterIdByName, resolveClusterNameById } from "../inventory/read.ts";
@@ -66,6 +66,7 @@ export async function resolveTeardownTarget(
   deps: { db: Db; registrations: TenantRegistrations },
   stage: Stage,
   guid: string,
+  onScan?: (scan: TenantScan) => void,
 ): Promise<TenantTeardownTarget | null> {
   const { db, registrations } = deps;
   const row = db
@@ -74,6 +75,7 @@ export async function resolveTeardownTarget(
     .where(and(eq(tenants.guid, guid), eq(tenants.stage, stage), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .get();
   const scan = await registrations.scanTenant(stage, guid);
+  onScan?.(scan);
   const pointer = scan.status === "read" ? scan.entry : null;
   let identity: { subdomain: string; clusterId: string; tenantId: string | null } | null = null;
   if (row) {

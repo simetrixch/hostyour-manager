@@ -5,13 +5,13 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantTeardownMembers, tenantWatchMembers, tenantWatchSet } from "./tenant-lifecycle.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
-import { makeTenantPurgeDef, type TenantPurgeParams } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, type TenantPurgeParams, type TenantPurgePorts } from "./tenant-purge.run.ts";
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
-import { loadTenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
+import { loadTenantCluster } from "./lifecycle.ts";
 import { memberAppProject, memberApplication, tenantApplicationSet } from "./tenant-fanout.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
@@ -58,7 +58,7 @@ function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
 
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
 
-function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePorts {
+function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantPurgePorts {
   return {
     registrations: reg,
     resolver: new FakeClusterKubeResolver({
@@ -71,6 +71,8 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
   };
 }
 
@@ -135,7 +137,7 @@ async function runAll(steps: Step[], runId: string, params: Record<string, unkno
   for (const step of steps) await step.run(ctx(runId, step.name, params, logs));
 }
 
-async function plannedPurge(prt: TenantLifecyclePorts, logs: string[]): Promise<TenantPurgeParams> {
+async function plannedPurge(prt: TenantPurgePorts, logs: string[]): Promise<TenantPurgeParams> {
   const result = await makeTenantPurgeDef(prt).planStream!({ guid: GUID, stage: "prod", clusterId: "cls_1" }, planCtx(logs));
   if (result.outcome !== "planned") throw new Error(`expected a planned outcome, got ${result.outcome}`);
   return result.params;

@@ -7,11 +7,10 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
-import { makeTenantPurgeDef, PURGE_TEARDOWN, type TenantPurgeParams, type TenantPurgeRequest } from "./tenant-purge.run.ts";
+import { makeTenantPurgeDef, PURGE_TEARDOWN, type TenantPurgeParams, type TenantPurgePorts, type TenantPurgeRequest } from "./tenant-purge.run.ts";
 import { makeOffboardTenantDef } from "./tenant-offboard.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { renderTenantAppProject } from "./appproject.ts";
-import type { TenantLifecyclePorts } from "./lifecycle.ts";
 import { memberAppProject, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { CLAIM_RELOCATING_ANNOTATION } from "../../adapters/kube/port.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -98,7 +97,7 @@ class FakePurgeSeeder implements VaultSeeder {
   async deleteMariadb(): Promise<void> {}
 }
 
-function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePorts {
+function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantPurgePorts {
   return {
     registrations: reg,
     // null models the Manager with no Vault wired at all — the one case where the crypto entry
@@ -116,6 +115,8 @@ function ports(reg: TenantRegistrations, over: FakeKube = {}): TenantLifecyclePo
     argoWatchTimeoutMs: 1000,
     resolveUnitApex: async () => "example.com",
     dns: new FakeDnsProvider(),
+    unitCall: { call: async () => ({ status: 200, detail: "OK", body: {} }) },
+    senderDomainIssuers: async () => null,
   };
 }
 
@@ -165,7 +166,7 @@ function seedTenantRow(status: TenantStatus = "provisioning"): void {
 
 /** Plan through the streaming planner (the only planning path — the target must be resolved + frozen
  *  before steps() can build the shared teardown) and hand back the frozen params + the plan. */
-async function planned(prt: TenantLifecyclePorts, req: TenantPurgeRequest = REQUEST, logs: string[] = []) {
+async function planned(prt: TenantPurgePorts, req: TenantPurgeRequest = REQUEST, logs: string[] = []) {
   const result = await makeTenantPurgeDef(prt).planStream!(req, planCtx(logs));
   if (result.outcome !== "planned") throw new Error(`expected a planned outcome, got ${result.outcome}`);
   return result;
@@ -177,7 +178,7 @@ async function planned(prt: TenantLifecyclePorts, req: TenantPurgeRequest = REQU
  *  delete-tenant-crypto here, and a member's databases go with the ServiceClaim finalizers that fire
  *  when delete-namespaces reaps their namespaces — so a purge completes on its own. `skip` stays for
  *  the tests that model an operator skipping a step with a reason. */
-async function runAll(prt: TenantLifecyclePorts, p: TenantPurgeParams, logs: string[], skip: readonly string[] = []): Promise<void> {
+async function runAll(prt: TenantPurgePorts, p: TenantPurgeParams, logs: string[], skip: readonly string[] = []): Promise<void> {
   for (const step of makeTenantPurgeDef(prt).steps(p)) {
     if (!skip.includes(step.name)) await step.run(ctx(step.name, p, logs));
   }

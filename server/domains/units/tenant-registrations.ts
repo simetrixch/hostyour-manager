@@ -68,6 +68,7 @@ export interface ScannedTenant {
    *  deletes one AppProject per. Read from the file rather than assumed, so a scan of a tenant of any
    *  product names the members that tenant actually has. */
   members: string[];
+  identityProvider: string;
   /** How the tenant's members are addressed below its zone, off its own registration — what the DNS
    *  inventory names the tenant's record by (the wildcard or the zone). */
   routing: MemberRouting;
@@ -178,7 +179,7 @@ export class TenantRegistrations {
       status: "read",
       entry: {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
-        members: r.data.members.map((m) => m.name), routing: r.data.routing, ownDomain: r.data.ownDomain,
+        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, routing: r.data.routing, ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
         senderDomain: r.data.senderDomain ?? "",
       },
