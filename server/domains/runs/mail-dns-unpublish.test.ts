@@ -71,10 +71,13 @@ function booked(): void {
 
 describe("mail-dns-unpublish plan", () => {
   it("names the three records it deletes and warns what the domain loses the moment they are gone", async () => {
-    const plan = await makeMailDnsUnpublishDef(ports(published())).plan(PARAMS, { db: {} as unknown as StepCtx["db"] });
+    const plan = await makeMailDnsUnpublishDef(ports(published())).plan(PARAMS, { db: db.db });
     expect(plan.steps.map((s) => s.name)).toEqual(["attest-target", "remove-records"]);
     expect(plan).toMatchObject({ targetKind: "self", targetId: "manager", requiredSecrets: [] });
-    expect(plan.summary).toContain("delete example.com, prod._domainkey.example.com, _dmarc.example.com at the DNS provider");
+    // Each record with what its removal deletes, by the rule the step carries out.
+    expect(plan.summary).toContain(`the TXT record example.com (the mail "example.com"): deletes ${SPF}, and ${NEIGHBOUR} stays`);
+    expect(plan.summary).toContain('the TXT record prod._domainkey.example.com (the mail "example.com"): deletes v=DKIM1; p=MIIB');
+    expect(plan.summary).toContain('the TXT record _dmarc.example.com (the mail "example.com"): deletes v=DMARC1; p=none');
     expect(plan.summary).toContain("The domain's own address record stays");
     expect(plan.warnings.join(" ")).toMatch(/fails the checks receivers make the moment these records are gone/);
   });

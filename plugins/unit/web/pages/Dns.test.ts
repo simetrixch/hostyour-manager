@@ -15,7 +15,7 @@ const api = vi.hoisted(() => ({
   planRun: vi.fn(),
   getRun: vi.fn(),
   approveRun: vi.fn(),
-  cancelRun: vi.fn(),
+  discardRun: vi.fn(),
 }));
 const nav = vi.hoisted(() => vi.fn());
 
@@ -194,22 +194,22 @@ describe("DNS page in-page confirmation", () => {
     dialog.props.onConfirm();
     await vi.waitFor(() => expect(nav).toHaveBeenCalledWith("/runs/run_removal"));
     expect(api.approveRun).toHaveBeenCalledWith("run_removal");
-    expect(api.cancelRun).not.toHaveBeenCalled();
+    expect(api.discardRun).not.toHaveBeenCalled();
     expect(dialogs()).toHaveLength(0);
     expect(confirmSpy).not.toHaveBeenCalled();
   });
 
-  it("Cancel cancels the planned run and approves nothing", async () => {
+  it("Cancel discards the planned run, so nobody approves it later, and approves nothing", async () => {
     api.getDnsWrites.mockResolvedValue(sampleWrites);
     api.getDnsInventory.mockResolvedValue(sampleInventory);
     api.planRun.mockResolvedValue({ runId: "run_removal" });
     api.getRun.mockResolvedValue({ summary: SUMMARY, steps: [] });
-    api.cancelRun.mockResolvedValue({});
+    api.discardRun.mockResolvedValue({});
     await pressRemoveOnBothRows();
     await vi.waitFor(() => expect(dialogs()).toHaveLength(1));
 
     dialogs()[0]!.props.onCancel();
-    await vi.waitFor(() => expect(api.cancelRun).toHaveBeenCalledWith("run_removal"));
+    await vi.waitFor(() => expect(api.discardRun).toHaveBeenCalledWith("run_removal"));
     expect(api.approveRun).not.toHaveBeenCalled();
     expect(nav).not.toHaveBeenCalled();
     expect(dialogs()).toHaveLength(0);

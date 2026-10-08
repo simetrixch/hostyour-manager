@@ -4,7 +4,7 @@ import { ATTEST_TARGET_STEP } from "../../../executor/guards.ts";
 import { errValidation } from "../../../kernel/errors.ts";
 import type { DnsRecordRow } from "../../../../shared/dns.ts";
 import { platformDomainRefusal } from "../../../../shared/mail.ts";
-import { deleteRecord, ownedRecords, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "#unit/server/dns/dns-record.kit.ts";
+import { deleteRecord, ownedRecords, providerRemoval, removalSentence, requireDnsProvider, type DnsRecordPorts, type RemovableRecordRow } from "#unit/server/dns/dns-record.kit.ts";
 
 // mail-dns-unpublish: the inverse of mail-dns-publish — take the mail records of ONE sender domain
 // of this installation back out of the zone. Three records go, in one act: the domain's SPF, the
@@ -86,17 +86,21 @@ export function makeMailDnsUnpublishDef(ports: DnsRecordPorts): RunDefinition<Ma
     kind: "mail-dns-unpublish",
     paramsSchema: MailDnsUnpublishParams,
     mutating: true,
-    plan: async (params) => {
+    plan: async (params, deps) => {
       const records = publishedRecordsOf(await ownedRecords(ports), params.domain);
-      requireDnsProvider(ports);
+      const dns = requireDnsProvider(ports);
+      // What each record's removal deletes, by the rule the step carries out, against what stands now.
+      const removals = await Promise.all(records.map(async (row) => {
+        const standing = await dns.listRecordContents({ name: row.name, type: row.type });
+        return removalSentence(row, standing, providerRemoval(deps.db, row, standing));
+      }));
       return {
         kind: "mail-dns-unpublish",
         targetKind: "self",
         targetId: "manager",
         summary:
-          `Unpublish the mail DNS of ${params.domain}: delete ${records.map((r) => r.name).join(", ")} at the DNS provider, ` +
-          "which takes the domain's SPF, its DKIM key and its DMARC policy out of the zone in one act. The domain's own address record " +
-          "stays (it is the installer's) and the reverse DNS of the egress address is not in this zone at all. What each record stood at " +
+          `Unpublish the mail DNS of ${params.domain}, which takes the domain's SPF, its DKIM key and its DMARC policy out of the zone in one act: ${removals.join("; ")}. ` +
+          "The domain's own address record stays (it is the installer's) and the reverse DNS of the egress address is not in this zone at all. What each record stood at " +
           "is written into this run's log before it goes.",
         steps: mailDnsUnpublishSteps(params, ports).map((s) => ({ name: s.name, title: s.title })),
         warnings: [

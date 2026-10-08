@@ -155,7 +155,8 @@ const isPublished = (record: DnsRecordRow["record"]): record is MailTxtRecord =>
  *    because whatever stands at the name then is content no run here wrote; the book only forgets
  *    its row;
  *  - an unbooked TXT: the record its mail record's tag picks, a record published before the book
- *    existed, or nothing where none carries the tag;
+ *    existed, and only where the mail measurement judged what stands this platform's (`standing`);
+ *    a tagged record the measurement judged `other` is somebody's hand, and nothing is deleted;
  *  - an unbooked A or CNAME: every record of the name, which is the unit's own.
  *  `content` is what goes; undefined goes by name; null deletes nothing. */
 export interface ProviderRemoval {
@@ -173,6 +174,7 @@ export function providerRemoval(db: Db, row: RemovableRecordRow, standing: strin
       `the inventory does not say which mail record TXT ${row.name} is, so nothing here can pick this installation's own among the records of the name — refusing to delete by name alone`,
     );
   }
+  if (row.verdict !== "standing") return { content: null, booked: false };
   return { content: standing.find(MAIL_RECORD_TAG[row.record]) ?? null, booked: false };
 }
 

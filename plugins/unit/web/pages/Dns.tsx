@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsRemoveInput, DnsWritesView } from "#core/shared/dns.ts";
-import { approveRun, cancelRun, getDnsInventory, getDnsWrites, getRun, planRun } from "#core/web/api.ts";
+import { approveRun, discardRun, getDnsInventory, getDnsWrites, getRun, planRun } from "#core/web/api.ts";
 import { ConfirmDialog } from "#core/web/components/ConfirmDialog.tsx";
 import { DnsWritesTable, recordKey, useRecordSelection, type DnsRemoveRecord } from "./DnsWrites.tsx";
 import { heldRecords } from "./held-records.ts";
@@ -87,8 +87,8 @@ type Tab = "written" | "derived";
  *  selected" plans it, and the confirm in the page shows the plan's own summary and steps: what each
  *  record's removal deletes at the provider, or that it deletes nothing, decided by the rule the
  *  steps carry out (dns-record.kit.ts providerRemoval). The confirm is the one approval, so it
- *  shows the server's plan and never the page's reading of what stands. Cancel cancels the planned
- *  run. The plan resolves every name in the inventory, which is the permission, so a book row the
+ *  shows the server's plan and never the page's reading of what stands. Cancel discards the planned
+ *  run, so nobody can approve it later. The plan resolves every name in the inventory, which is the permission, so a book row the
  *  inventory no longer carries refuses the whole run with a sentence naming it. */
 export function Dns() {
   const nav = useNavigate();
@@ -132,7 +132,7 @@ export function Dns() {
         await approveRun(runId);
         nav(`/runs/${runId}`);
       } else {
-        await cancelRun(runId);
+        await discardRun(runId);
       }
     } catch (e: unknown) {
       setError(msg(e));
