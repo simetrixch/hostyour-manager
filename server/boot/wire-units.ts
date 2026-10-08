@@ -553,7 +553,7 @@ function buildConsumerOnboarding(
     // provisioning writers ride along because a move re-arms the unit's isolation on the target,
     // and the DNS provider because a move is a content update of the unit's one record.
     makeBackupDef(consumerRelocationPorts),
-    makeRestoreDef(consumerRelocationPorts),
+    makeRestoreDef(consumerRelocationPorts, onboardPorts),
     makeMigrateDef(consumerRelocationPorts),
     makeConsumerNightlyBackupDef(consumerRelocationPorts),
   ].map((d) => d as unknown as AnyRunDefinition);

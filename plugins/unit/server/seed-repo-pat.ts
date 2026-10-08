@@ -32,7 +32,7 @@ import { readOwnerIdentity } from "./owners.ts";
  *  `.npmrc` at the pinned commit, read the way the packages probe reads it), null where it routes
  *  none — and a refusal, naming the owner and the scopes, where a scope is routed and the
  *  owner records no reader (#221). */
-async function packagesReaderOrRefuse(ports: BuildPorts, p: BuildParams, ctx: StepCtx): Promise<string | null> {
+async function packagesReaderOrRefuse(ports: BuildPorts, p: Pick<BuildParams, "repoURL" | "resolvedSha" | "repoCredentialId">, ctx: StepCtx): Promise<string | null> {
   const id = packagesReaderFor((org) => readOwnerIdentity(ctx.db, org), p.repoURL);
   if (id) return id;
   const clone = await ports.repo.cloneAtRef({ repoURL: p.repoURL, ref: p.resolvedSha, credentialId: p.repoCredentialId, signal: ctx.signal });
@@ -50,7 +50,7 @@ async function packagesReaderOrRefuse(ports: BuildPorts, p: BuildParams, ctx: St
   return null;
 }
 
-export function seedRepoPatStep(ports: BuildPorts, p: BuildParams): Step {
+export function seedRepoPatStep(ports: BuildPorts, p: Pick<BuildParams, "consumerName" | "repoURL" | "resolvedSha" | "repoCredentialId">): Step {
   return {
     name: "seed-repo-pat",
     title: "Seed the unit's repository token and its owner's packages reader into the local build Vault",

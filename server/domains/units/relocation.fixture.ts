@@ -25,7 +25,8 @@ import type { ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { seedCredentialRow } from "../../security/store.fixture.ts";
-import { FakeSeeder } from "./onboard.fixture.ts";
+import { FakeSeeder, ports as onboardPorts } from "./onboard.fixture.ts";
+import type { OnboardPorts } from "./onboard.run.ts";
 import type { GitHubConsumer } from "#unit/server/adapters/github-consumer/port.ts";
 
 const FIXTURE_CONSUMER_MANIFEST = `
@@ -305,4 +306,10 @@ export function renderRelocation(side: FakeSide, quiesced: boolean): void {
   side.argo.setStatuses(new Map(TENANT_WATCH.map((name) => [name, { ...synced,
     syncSources: [{ repoURL: "https://github.com/acme/acme-deploy.git", revision: SHA, path: "charts/example-engine", valuesObject: { tenant: { quiesced } } }],
   }])));
+}
+
+/** The onboarding's build ports a consumer restore brings a unit's build parts back with. Every
+ *  cluster's map names the master as the build plane. */
+export function restoreBuildPorts(): OnboardPorts {
+  return onboardPorts({ resolveBuildPlaneFqdn: async () => "m1.example" });
 }
