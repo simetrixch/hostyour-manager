@@ -14,7 +14,7 @@ describe("tenant-set-own-domain and the stage rule", () => {
     const h = await make({ stage: "test" });
     h.dns.zones = ["example.org"];
     expect((await plan(h, { ownDomain: "test.show.example.org", previous: "" })).error).toMatch(/test\.show\.example\.org is no test host: the stage stands directly before the zone example\.org, so it is show\.test\.example\.org/);
-    expect((await plan(h, { ownDomain: "show.test.example.org", previous: "", ownDomainAliases: ["test.veloluck.show.example.org"] })).error).toMatch(/so it is veloluck\.show\.test\.example\.org/);
+    expect((await plan(h, { ownDomain: "show.test.example.org", previous: "", ownDomainAliases: ["test.cycleshop.show.example.org"] })).error).toMatch(/so it is cycleshop\.show\.test\.example\.org/);
     expect((await plan(h, { ownDomain: "show.test.example.org", previous: "" })).status).toBe("planned");
   });
 

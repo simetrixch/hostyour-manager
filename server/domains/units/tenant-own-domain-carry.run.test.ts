@@ -22,11 +22,11 @@ import { tenantZone } from "#unit/shared/unit-host.ts";
 useMemoryDb();
 
 const OLD = "show.example.org";
-const NEW = "show.simplidigita.ai";
-const VELO = { name: "veloluck", site: "shop", domain: "veloluck.show.example.org" };
+const NEW = "show.example.net";
+const CYCLESHOP = { name: "cycleshop", site: "shop", domain: "cycleshop.show.example.org" };
 
 function at(repo: FakePlatformRepo, showAliases: string[] = []): TenantRegistrations {
-  const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD, ...(showAliases.length ? { aliases: showAliases } : {}) }, VELO].map((a) => ({ folder: "web", ...a }))];
+  const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD, ...(showAliases.length ? { aliases: showAliases } : {}) }, CYCLESHOP].map((a) => ({ folder: "web", ...a }))];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE,
     routing: "path", ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`],
@@ -46,10 +46,10 @@ function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
   seedWebsiteTenant();
   db.db.update(tenants).set({ ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
-  dns.zones = ["example.org", "simplidigita.ai"];
+  dns.zones = ["example.org", "example.net"];
   const repo = new FakePlatformRepo();
   const registrations = at(repo, opts.showAliases);
-  const urls = ["https://show.simplidigita.ai/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`, `https://${ZONE}/auth/`, `https://${ZONE}/`];
+  const urls = ["https://show.example.net/auth/", `https://${NEW}/`, `https://www.${NEW}/`, `https://${OLD}/`, `https://www.${OLD}/`, `https://${ZONE}/auth/`, `https://${ZONE}/`];
   const answer = (status: number) => ({ reachable: true, status, detail: `HTTP ${status}` });
   const probe = new FakePublicProbe(Object.fromEntries(urls.map((u) => [u, u === `https://${NEW}/` ? answer(opts.siteRoot ?? 200) : u.startsWith(`https://${NEW}/`) || u.startsWith(`https://${ZONE}/`) ? answer(200) : answer(301)])));
   const def = makeTenantSetOwnDomainDef(ports({ registrations, dns, probe, repo: withDomain() }, WEBSITE_APPS));
@@ -80,8 +80,8 @@ describe("an own-domain move with a website on the own host", () => {
     expect(repo.commits.length - before).toBe(1);
     const after = (await registrations.readTenant("prod", GUID))?.entry;
     const site = (name: string) => after?.apps.find((a) => a.name === name);
-    expect([after?.ownDomain, after?.ownDomainAliases, site("show")?.domain, site("show")?.aliases, site("veloluck")?.domain, row()]).toEqual([
-      NEW, [OLD], NEW, undefined, VELO.domain, { ownDomain: NEW, aliases: [OLD] },
+    expect([after?.ownDomain, after?.ownDomainAliases, site("show")?.domain, site("show")?.aliases, site("cycleshop")?.domain, row()]).toEqual([
+      NEW, [OLD], NEW, undefined, CYCLESHOP.domain, { ownDomain: NEW, aliases: [OLD] },
     ]);
     expect(after?.members.find((m) => m.name === "show")).toEqual(planned.params.carriedWebsites[0]!.member);
 
@@ -141,7 +141,7 @@ describe("clearing the own domain with a website on the own host", () => {
     await write.run(ctx(params(), write.name, []));
     expect(repo.commits.length - before).toBe(1);
     const after = (await registrations.readTenant("prod", GUID))?.entry;
-    expect([after?.ownDomain, after?.apps.find((a) => a.name === "show")?.domain, after?.apps.find((a) => a.name === "veloluck")?.domain, row()?.ownDomain]).toEqual(["", ZONE, VELO.domain, ""]);
+    expect([after?.ownDomain, after?.apps.find((a) => a.name === "show")?.domain, after?.apps.find((a) => a.name === "cycleshop")?.domain, row()?.ownDomain]).toEqual(["", ZONE, CYCLESHOP.domain, ""]);
 
     const restore = def.cleanups!(planned.params).find((c) => c.name === "restore-own-domain")!;
     await restore.run(ctx(params(), restore.name, []));

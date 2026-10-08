@@ -19,7 +19,7 @@ describe("add-app for a website, and the stage rule", () => {
     const dns = new FakeDnsProvider();
     dns.zones = ["example.org"];
     const def = makeAddAppDef(ports({ dns }, WEBSITE_APPS));
-    await expect(def.planStream!({ ...WEBSITE, domain: "veloluck.show.test.example.org" }, planCtx())).rejects.toThrow(/carries the stage test before its zone example\.org, and prod carries none: it is veloluck\.show\.example\.org/);
+    await expect(def.planStream!({ ...WEBSITE, domain: "cycleshop.show.test.example.org" }, planCtx())).rejects.toThrow(/carries the stage test before its zone example\.org, and prod carries none: it is cycleshop\.show\.example\.org/);
   });
 });
 

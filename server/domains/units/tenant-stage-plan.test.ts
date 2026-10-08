@@ -211,14 +211,14 @@ describe("tenant stages share identity while provisioning independently", () => 
     const p = stagePorts();
     (p.dns as FakeDnsProvider).zones = ["example.org"];
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "veloluck", folder: "web", site: "veloluck", domain: "veloluck.show.example.org", databases: ["core"] }];
+    const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", domain: "cycleshop.show.example.org", databases: ["core"] }];
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), routing: "path", ownDomain: "show.example.org", ownDomainRedirects: ["www.show.example.org"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
     const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
-    expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.example.org", ["www.show.test.example.org"], "veloluck.show.test.example.org"]);
+    expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.example.org", ["www.show.test.example.org"], "cycleshop.show.test.example.org"]);
   });
 
   it("PLANTED DEFECT: refuses a stage for a domain whose zone cannot be read, and never takes its last two labels for one", async () => {

@@ -42,35 +42,35 @@ describe("undeployedApps", () => {
   });
 
   it("names a new website after its site, clear of the tenant's members and of the apps its catalog offers", () => {
-    const catalog = { apps: [entry("workshop", false), { ...entry("web", false), sites: ["veloluck", "auth"] }], members: ["auth", "jobs", "report", "veloluck"] };
+    const catalog = { apps: [entry("workshop", false), { ...entry("web", false), sites: ["cycleshop", "auth"] }], members: ["auth", "jobs", "report", "cycleshop"] };
     expect(newWebsiteName(catalog, "show")).toBe("show");
     // A standing member and an earlier website, then an app the tenant has not added yet.
     expect(newWebsiteName(catalog, "auth")).toBe("auth-2");
-    expect(newWebsiteName(catalog, "veloluck")).toBe("veloluck-2");
+    expect(newWebsiteName(catalog, "cycleshop")).toBe("cycleshop-2");
     expect(newWebsiteName(catalog, "workshop")).toBe("workshop-2");
   });
 
   it("keeps a removed website out of the Apps list and hands it to the Websites section, with its site and last run", () => {
-    const removed = { id: "tna_old", name: "veloluck-show-digitapla-a9665c", status: "offboarded", lastRunId: "run_rm", site: "veloluck" };
-    const standing = { id: "tna_v", name: "veloluck", status: "active", lastRunId: "run_add", site: "veloluck" };
+    const removed = { id: "tna_old", name: "cycleshop-show-digitapla-a9665c", status: "offboarded", lastRunId: "run_rm", site: "cycleshop" };
+    const standing = { id: "tna_v", name: "cycleshop", status: "active", lastRunId: "run_add", site: "cycleshop" };
     const rows = [row("erp"), removed, standing];
-    expect(tenantAppRows([entry("erp", true)], rows, [{ name: "veloluck" }]).map((r) => r.name)).toEqual(["erp"]);
+    expect(tenantAppRows([entry("erp", true)], rows, [{ name: "cycleshop" }]).map((r) => r.name)).toEqual(["erp"]);
     expect(removedWebsites(rows)).toEqual([removed]);
     // A catalog still loading, or one that answered without its websites, never turns a live website into a removed one.
     expect(removedWebsites([standing])).toEqual([]);
   });
 
   it("lists the catalog's websites with their domains, and every live inventory website the catalog does not name", () => {
-    const live = { ...row("veloluck"), site: "veloluck" };
+    const live = { ...row("cycleshop"), site: "cycleshop" };
     const unnamed = { ...row("show"), site: "show" };
     const gone = { ...row("old", "offboarded"), site: "old" };
-    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch", aliases: [] }]);
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [] }]);
     // A live website the catalog's list leaves out stays on the page, by name and site, without the
     // domain only the registration knows, beside the ones the catalog names.
-    expect(listedWebsites({ websites: [{ name: "veloluck", site: "veloluck", domain: "veloluck.ch" }] }, [live, unnamed])).toEqual([{ name: "veloluck", site: "veloluck", domain: "veloluck.ch", aliases: [] }, { name: "show", site: "show", domain: null, aliases: [] }]);
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live, unnamed])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [] }, { name: "show", site: "show", domain: null, aliases: [] }]);
     // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
-    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "veloluck", site: "veloluck", domain: null, aliases: [] }]);
-    expect(listedWebsites({}, [live])).toEqual([{ name: "veloluck", site: "veloluck", domain: null, aliases: [] }]);
+    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [] }]);
+    expect(listedWebsites({}, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [] }]);
   });
 
   it("says why a website's domain is unknown only as far as the page knows it", () => {
@@ -95,10 +95,10 @@ describe("undeployedApps", () => {
   });
 
   it("offers only unused website sites and removes the folder only after the last site is deployed", () => {
-    const web = { ...entry("web", true), sites: ["show", "veloluck"] };
-    expect(websiteFolder([web], [{ site: "show" }])?.sites).toEqual(["veloluck"]);
-    expect(websiteFolder([web], [{ site: "show" }, { site: "veloluck" }])).toBeNull();
-    expect(websiteFolder([web], [])?.sites).toEqual(["show", "veloluck"]);
+    const web = { ...entry("web", true), sites: ["show", "cycleshop"] };
+    expect(websiteFolder([web], [{ site: "show" }])?.sites).toEqual(["cycleshop"]);
+    expect(websiteFolder([web], [{ site: "show" }, { site: "cycleshop" }])).toBeNull();
+    expect(websiteFolder([web], [])?.sites).toEqual(["show", "cycleshop"]);
   });
 });
 

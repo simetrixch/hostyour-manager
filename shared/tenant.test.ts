@@ -189,11 +189,11 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
 
   it("names a new website after its site, numbered where a member or a catalog app holds that name", () => {
     const taken = new Set(["auth", "jobs", "report", "web", "workshop"]);
-    expect(websiteAppName("veloluck", taken)).toBe("veloluck");
+    expect(websiteAppName("cycleshop", taken)).toBe("cycleshop");
     // A standing member, a catalog app and an earlier website each push the name to the next number.
     expect(websiteAppName("auth", taken)).toBe("auth-2");
     expect(websiteAppName("workshop", taken)).toBe("workshop-2");
-    expect(websiteAppName("veloluck", new Set([...taken, "veloluck", "veloluck-2"]))).toBe("veloluck-3");
+    expect(websiteAppName("cycleshop", new Set([...taken, "cycleshop", "cycleshop-2"]))).toBe("cycleshop-3");
     // A one-letter id is no app name. A long id is cut to 30 characters, and no dash stands before the number.
     expect(websiteAppName("a", taken)).toBe("a-2");
     const long = `${"a".repeat(27)}-${"b".repeat(10)}`;
@@ -205,11 +205,11 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
   });
 
   it("holds a website's name to its site: the id or one of its numbered forms, never another name", () => {
-    for (const [name, site] of [["veloluck", "veloluck"], ["veloluck-2", "veloluck"], ["veloluck-12", "veloluck"], ["a-2", "a"], [`${"a".repeat(27)}-2`, `${"a".repeat(27)}-${"b".repeat(10)}`], ["shop-2", "shop-2"]]) {
+    for (const [name, site] of [["cycleshop", "cycleshop"], ["cycleshop-2", "cycleshop"], ["cycleshop-12", "cycleshop"], ["a-2", "a"], [`${"a".repeat(27)}-2`, `${"a".repeat(27)}-${"b".repeat(10)}`], ["shop-2", "shop-2"]]) {
       expect(isWebsiteAppNameOf(name!, site!), `${name} for site ${site}`).toBe(true);
     }
-    for (const name of ["veloluck-1", "veloluck-02", "veloluck-2x", "velo", "veloluck-show-digitapla-a9665c", "example-ch"]) {
-      expect(isWebsiteAppNameOf(name, "veloluck"), name).toBe(false);
+    for (const name of ["cycleshop-1", "cycleshop-02", "cycleshop-2x", "cycle", "cycleshop-show-digitapla-a9665c", "example-ch"]) {
+      expect(isWebsiteAppNameOf(name, "cycleshop"), name).toBe(false);
     }
     expect(isWebsiteAppNameOf("a", "a")).toBe(false);
   });

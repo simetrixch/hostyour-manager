@@ -128,17 +128,17 @@ describe("a website moving onto the tenant's own domain", () => {
 
   it("PLANTED INNOCENT: a website moving to a domain of its own keeps the name it leaves as its own alias", async () => {
     const dns = atTest();
-    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at([{ ...SHOW, domain: OWN }, { name: "veloluck", site: "shop", domain: "test.veloluck.show.example.org" }]), dns }, WEBSITE_APPS));
-    const planned = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.example.org", aliases: [] }, planCtx());
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: at([{ ...SHOW, domain: OWN }, { name: "cycleshop", site: "shop", domain: "test.cycleshop.show.example.org" }]), dns }, WEBSITE_APPS));
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "cycleshop", domain: "cycleshop.show.test.example.org", aliases: [] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
-    expect([planned.params.aliases, planned.params.ownDomainAliases]).toEqual([["test.veloluck.show.example.org"], undefined]);
+    expect([planned.params.aliases, planned.params.ownDomainAliases]).toEqual([["test.cycleshop.show.example.org"], undefined]);
   });
 });
 
-// The TEST move from the example.org zone into simplidigita.ai, both zones on the
+// The TEST move from the example.org zone into example.net, both zones on the
 // installation's provider: the own domain first, then each website, every old name a redirect.
-describe("a TEST move from the example.org zone into the simplidigita.ai zone", () => {
-  const NEW_OWN = "show.test.simplidigita.ai";
+describe("a TEST move from the example.org zone into the example.net zone", () => {
+  const NEW_OWN = "show.test.example.net";
   const registration = (own: string, ownDomainAliases: string[], apps: Parameters<typeof at>[0]): TenantRegistrations => {
     const repo = new FakePlatformRepo();
     const all = [{ name: "erp" }, ...apps.map((a) => ({ folder: "web", ...a }))];
@@ -152,14 +152,14 @@ describe("a TEST move from the example.org zone into the simplidigita.ai zone", 
   };
   const crossZone = (): FakeDnsProvider => {
     const dns = atTest();
-    dns.zones = ["example.org", "simplidigita.ai"];
+    dns.zones = ["example.org", "example.net"];
     return dns;
   };
-  const VELO = { name: "veloluck", site: "shop", domain: "test.veloluck.show.example.org" };
+  const CYCLESHOP = { name: "cycleshop", site: "shop", domain: "test.cycleshop.show.example.org" };
 
   it("moves the own domain across the zones and keeps the old one as its alias", async () => {
     const dns = crossZone();
-    const def = makeTenantSetOwnDomainDef(ports({ registrations: registration(OWN, [], [{ ...SHOW, domain: OLD }, VELO]), dns }));
+    const def = makeTenantSetOwnDomainDef(ports({ registrations: registration(OWN, [], [{ ...SHOW, domain: OLD }, CYCLESHOP]), dns }));
     const planned = await def.planStream!({ tenantId: "tnt_1", ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], previous: OWN, previousRedirects: [`www.${OWN}`] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect(planned.params.ownDomainAliases).toEqual([OWN]);
@@ -169,7 +169,7 @@ describe("a TEST move from the example.org zone into the simplidigita.ai zone", 
   it("moves website show onto the new own domain, its old name joining the own domain's aliases beside the old own domain", async () => {
     const dns = crossZone();
     db.db.update(tenants).set({ ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], ownDomainAliases: [OWN] }).where(eq(tenants.id, "tnt_1")).run();
-    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: registration(NEW_OWN, [OWN], [{ ...SHOW, domain: OLD }, VELO]), dns }, WEBSITE_APPS));
+    const def = makeTenantSetWebsiteDomainDef(ports({ registrations: registration(NEW_OWN, [OWN], [{ ...SHOW, domain: OLD }, CYCLESHOP]), dns }, WEBSITE_APPS));
     const planned = await def.planStream!({ tenantId: "tnt_1", app: "show", domain: NEW_OWN, aliases: [] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.retiredHosts]).toEqual([[], [OWN, OLD], []]);
@@ -177,16 +177,16 @@ describe("a TEST move from the example.org zone into the simplidigita.ai zone", 
     expect(planned.plan.summary).toMatch(new RegExp(`https://${OLD.replaceAll(".", "\\.")}/, https://www\\.${OLD.replaceAll(".", "\\.")}/ redirects`));
   });
 
-  it("moves website veloluck across the zones to a domain of its own, keeping its old name as its own alias and the own domain's aliases as they stand", async () => {
+  it("moves website cycleshop across the zones to a domain of its own, keeping its old name as its own alias and the own domain's aliases as they stand", async () => {
     const dns = crossZone();
     db.db.update(tenants).set({ ownDomain: NEW_OWN, ownDomainRedirects: [`www.${NEW_OWN}`], ownDomainAliases: [OWN, OLD] }).where(eq(tenants.id, "tnt_1")).run();
-    const registrations = registration(NEW_OWN, [OWN, OLD], [{ ...SHOW, domain: NEW_OWN }, VELO]);
+    const registrations = registration(NEW_OWN, [OWN, OLD], [{ ...SHOW, domain: NEW_OWN }, CYCLESHOP]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations, dns }, WEBSITE_APPS));
-    const planned = await def.planStream!({ tenantId: "tnt_1", app: "veloluck", domain: "veloluck.show.test.simplidigita.ai", aliases: [] }, planCtx());
+    const planned = await def.planStream!({ tenantId: "tnt_1", app: "cycleshop", domain: "cycleshop.show.test.example.net", aliases: [] }, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
     expect([planned.params.aliases, planned.params.ownDomainAliases, planned.params.recordHosts]).toEqual([
-      ["test.veloluck.show.example.org"], undefined,
-      ["veloluck.show.test.simplidigita.ai", "www.veloluck.show.test.simplidigita.ai", "test.veloluck.show.example.org", "www.test.veloluck.show.example.org"],
+      ["test.cycleshop.show.example.org"], undefined,
+      ["cycleshop.show.test.example.net", "www.cycleshop.show.test.example.net", "test.cycleshop.show.example.org", "www.test.cycleshop.show.example.org"],
     ]);
     const write = def.steps(planned.params).find((s) => s.name === "write-website-domain")!;
     await write.run(ctx(params(), write.name, []));

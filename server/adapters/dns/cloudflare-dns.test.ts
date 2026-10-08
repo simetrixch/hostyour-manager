@@ -87,10 +87,10 @@ describe("CloudflareDns.zoneName — the zone that holds a name, as the label wa
       return new Response(JSON.stringify({ success: true, result }), { status: 200 });
     }) as unknown as typeof fetch;
     const dns = new CloudflareDns({ apiToken: "t", apiBase: API, fetchImpl });
-    expect(await dns.zoneName({ name: "veloluck.show.example.net" })).toBe("example.net");
+    expect(await dns.zoneName({ name: "cycleshop.show.example.net" })).toBe("example.net");
     expect(await dns.zoneName({ name: "example.net" })).toBe("example.net");
     // The walk asks the name, then each suffix, and keeps the answer for the name it asked for.
-    expect(calls.slice(0, 3)).toEqual(["/client/v4/zones?name=veloluck.show.example.net&per_page=1", "/client/v4/zones?name=show.example.net&per_page=1", "/client/v4/zones?name=example.net&per_page=1"]);
+    expect(calls.slice(0, 3)).toEqual(["/client/v4/zones?name=cycleshop.show.example.net&per_page=1", "/client/v4/zones?name=show.example.net&per_page=1", "/client/v4/zones?name=example.net&per_page=1"]);
     await expect(dns.zoneName({ name: "example.org" })).rejects.toThrow(/no Cloudflare zone found/);
   });
 

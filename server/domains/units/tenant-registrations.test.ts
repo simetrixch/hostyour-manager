@@ -58,8 +58,8 @@ describe("TenantRegistrations", () => {
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: registration({ apps: [{ name: "show", ...website, seedReference: false, seedDemo: false, selections: {} }], members: testMembers(["show"]) }), runId: "run_first" });
     await expect(reg.updateTenantApps("prod", GUID, { op: "append", app: "show-2", website: { ...website, domain: "another.example.ch" }, member: testMembers(["show-2"])[3]!, runId: "run_stale" })).rejects.toThrow(/site "show" already runs/);
     expect(repo.commits).toHaveLength(1);
-    await reg.updateTenantApps("prod", GUID, { op: "append", app: "veloluck", website: { ...website, site: "veloluck", domain: "veloluck.example.ch" }, member: testMembers(["veloluck"])[3]!, runId: "run_other" });
-    expect((await reg.readTenant("prod", GUID))?.entry.apps.map((a) => a.site)).toEqual(["show", "veloluck"]);
+    await reg.updateTenantApps("prod", GUID, { op: "append", app: "cycleshop", website: { ...website, site: "cycleshop", domain: "cycleshop.example.ch" }, member: testMembers(["cycleshop"])[3]!, runId: "run_other" });
+    expect((await reg.readTenant("prod", GUID))?.entry.apps.map((a) => a.site)).toEqual(["show", "cycleshop"]);
   });
 
   it("commits the ONE registration file in one commit with a run-id trailer", async () => {
