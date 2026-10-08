@@ -54,7 +54,8 @@ export async function openStageUnitCallKey(
 }
 
 /** Adds the issuer at the domain, or removes it; answers whether this call changed the domain's list.
- *  Removing from an unknown domain (404) answers false: the issuer is not bound there.
+ *  Removing from an unknown domain answers false: the issuer is not bound there. Only the product's own
+ *  404, which carries a JSON body, says so; a bodiless 404 comes from an ingress or a moved route.
  *  A race inside the product (409) is asked once more; every other refusal throws, naming its repair. */
 export async function changeStageIssuer(
   deps: { store: Pick<CredentialStore, "list" | "open">; unitCall: UnitCall },
@@ -79,7 +80,7 @@ export async function changeStageIssuer(
   }
   if (answer.status === 503) throw errValidation(`${at} holds no Manager key yet (503) — ${mintRepair(route.unit, stage)}`);
   if (answer.status === 404) {
-    if (req.change === "remove") return false;
+    if (req.change === "remove" && typeof answer.body === "object" && answer.body !== null) return false;
     throw errValidation(`${at} does not know ${req.domain} as a sender domain (404) — register it in its mail service first`);
   }
   throw errValidation(`${at} did not ${req.change === "add" ? "bind" : "remove"} ${req.issuer}: ${answer.detail}`);
