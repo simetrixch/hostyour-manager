@@ -238,8 +238,14 @@ export interface TenantCryptoDeleteInput {
  *    the form's post against.
  *  - `service-key`: what an app's engine proves itself with to its tenant's identity provider, which
  *    hands it a short-lived token for digita-post in exchange; every app has one, website or not.
+ *  - `google-translation`: the Google Cloud Translation settings of an app's localization plugin,
+ *    which an operator types. Unlike the others it is not minted: the Manager first writes it with
+ *    every property empty, because the app's ExternalSecret reads each property by name and a
+ *    missing entry fails the sync of the app's engine; a typed value then replaces it.
  *  The tenant's members read every one through the same templated policy as the entry above it. */
-export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key"] as const;
+export const TENANT_APP_KEY_KINDS = ["password-field-key", "revalidate-secret", "form-signing-key", "service-key", "google-translation"] as const;
+/** The properties of a `google-translation` entry, as the engine chart reads them. */
+export const GOOGLE_TRANSLATION_PROPERTIES = ["project", "service-account", "location", "glossary"] as const;
 export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
 
 export interface TenantAppKeySeedInput {

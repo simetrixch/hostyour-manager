@@ -397,8 +397,8 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
         // ONE PASSWORD FIELD KEY PER APP, each in its own entry below this one, in the same step and
         // for the same reason: before the registration fans out into engines that read it
         // (tenant-app-keys.ts). Create-only as well, so a re-run keeps every key it finds.
-        const { appKeys, serviceKeys } = await seedTenantEngineKeys(ports.seeder, p.stage, p.guid, (p.apps ?? []).map((a) => a.name), ctx);
-        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys, serviceKeys, websiteKeys: await seedTenantWebsiteKeys(ports.seeder, p.stage, p.guid, p.apps ?? [], ctx) });
+        const { appKeys, serviceKeys, googleTranslation } = await seedTenantEngineKeys(ports.seeder, p.stage, p.guid, (p.apps ?? []).map((a) => a.name), ctx);
+        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys, serviceKeys, googleTranslation, websiteKeys: await seedTenantWebsiteKeys(ports.seeder, p.stage, p.guid, p.apps ?? [], ctx) });
         ctx.log(
           "meta",
           created
