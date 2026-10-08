@@ -3,6 +3,7 @@ import { useNavigate } from "react-router";
 import { DMARC_POLICY, STAGE, type DmarcPolicy, type Stage } from "../../../shared/enums.ts";
 import type { FormerDmarcView, MailDnsDomainView, MailDnsRow, MailDnsView } from "../../../shared/mail.ts";
 import { getMailDns, publishEnvelopeSpf, publishMailDmarc, publishMailDns, publishPlatformDkim, unpublishMailDns } from "../api.ts";
+import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -34,6 +35,7 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
   const [dkimStage, setDkimStage] = useState<Stage>(masterStage);
   const [mailbox, setMailbox] = useState(() => reportMailboxOf(view.rows.find((r) => r.record === "dmarc")?.found ?? null));
   const [busy, setBusy] = useState(false);
+  const [confirmUnpublish, setConfirmUnpublish] = useState(false); // unpublish confirm (our dialog, never window.confirm)
   const green = view.rows.filter((r) => r.ok).length;
   const envelope = view.rows.find((r) => r.record === "envelope-spf");
 
@@ -84,8 +86,7 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
   /** The inverse act, for a domain that stops sending: the SPF, the DKIM key and the DMARC policy
    *  go, the address record and the reverse DNS stay. It is a run like the publish, so what the
    *  three records stand at is read on the Run screen before anything is approved. */
-  async function unpublish(): Promise<void> {
-    if (!window.confirm(`Unpublish the mail DNS of ${view.domain}? Mail sent as this domain fails the checks receivers make the moment the SPF, DKIM and DMARC records are gone.`)) return;
+  async function doUnpublish(): Promise<void> {
     setBusy(true);
     onError(null);
     try {
@@ -172,12 +173,26 @@ function DomainCard({ view, masterId, masterStage, onError }: { view: MailDnsDom
             <button type="button" className="btn btn--primary" disabled={busy || mailbox.trim() === ""} onClick={() => void changeDmarc()}>
               {busy ? "Planning…" : "Change only the report mailbox"}
             </button>
-            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => void unpublish()}>
+            <button type="button" className="btn btn--danger" disabled={busy} onClick={() => setConfirmUnpublish(true)}>
               {busy ? "Planning…" : `Unpublish ${view.domain}`}
             </button>
             <span className="field__hint">Unpublishing deletes this domain&apos;s SPF, DKIM and DMARC records at the DNS provider. Its address record stays and the reverse DNS is not in the zone. Changing only the report mailbox rewrites the rua tag of the DMARC record and nothing else.</span>
           </div>
         </div>
+      )}
+      {confirmUnpublish && (
+        <ConfirmDialog
+          title={`Unpublish the mail DNS of ${view.domain}?`}
+          confirmLabel={`Unpublish ${view.domain}`}
+          destructive
+          onCancel={() => setConfirmUnpublish(false)}
+          onConfirm={() => {
+            setConfirmUnpublish(false);
+            void doUnpublish();
+          }}
+        >
+          <p>Mail sent as this domain fails the checks receivers make the moment the SPF, DKIM and DMARC records are gone.</p>
+        </ConfirmDialog>
       )}
     </section>
   );

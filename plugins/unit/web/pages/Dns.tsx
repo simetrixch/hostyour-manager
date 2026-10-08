@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
 import type { DnsInventoryView, DnsRecordRow, DnsRecordType, DnsWritesView } from "#core/shared/dns.ts";
 import { getDnsInventory, getDnsWrites, removeDnsRecords } from "#core/web/api.ts";
+import { ConfirmDialog } from "#core/web/components/ConfirmDialog.tsx";
 import { DnsWritesTable, recordKey, useRecordSelection, type DnsRemoveRecord } from "./DnsWrites.tsx";
 import { heldRecords } from "./held-records.ts";
 
@@ -20,7 +21,7 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
  *  that is gone leaves behind. */
 const VERDICT_LABEL: Record<DnsRecordRow["verdict"], string> = { standing: "standing", absent: "absent", other: "other content" };
 
-function ownerCell(owner: DnsRecordRow["owner"]): string {
+function ownerCell(owner: { kind: string; name: string; stage?: string }): string {
   return owner.stage === undefined ? `${owner.kind} ${owner.name}` : `${owner.kind} ${owner.name} (${owner.stage})`;
 }
 
@@ -82,11 +83,10 @@ function DnsInventoryTable({ data, busy, onRemove }: { data: DnsInventoryView; b
 
 type Tab = "written" | "derived";
 
-/** Both readings are taken on load, and the removal either tab offers is the same RUN: this starts
- *  the plan over the ticked records and navigates to it, where the operator reads what stands at
- *  each and approves — a deletion at the provider is never one click here. The run resolves every
- *  name in the inventory, which is the permission, so a book row the inventory no longer carries
- *  refuses the whole run with a sentence naming it. */
+/** Both readings are taken on load, and the removal either tab offers is the same RUN: one confirm
+ *  in the page, which plans and approves the removal and opens its run. The run resolves every name
+ *  in the inventory, which is the permission, so a book row the inventory no longer carries refuses
+ *  the whole run with a sentence naming it. */
 export function Dns() {
   const nav = useNavigate();
   const [tab, setTab] = useState<Tab>("written");
@@ -94,6 +94,7 @@ export function Dns() {
   const [data, setData] = useState<DnsInventoryView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<DnsRemoveRecord[] | null>(null); // removal confirm (our dialog, never window.confirm)
 
   useEffect(() => {
     getDnsWrites()
@@ -104,9 +105,11 @@ export function Dns() {
       .catch((e: unknown) => setError(msg(e)));
   }, []);
 
-  async function remove(records: DnsRemoveRecord[]): Promise<void> {
-    const count = records.length === 1 ? "this record" : `these ${records.length} records`;
-    if (!window.confirm(`Remove ${count} at the DNS provider, in one run?\n\n${records.map(recordKey).join("\n")}`)) return;
+  function remove(records: DnsRemoveRecord[]): void {
+    setPendingRemoval(records);
+  }
+
+  async function doRemove(records: DnsRemoveRecord[]): Promise<void> {
     setBusy(true);
     setError(null);
     try {
@@ -139,13 +142,39 @@ export function Dns() {
 
       <div role="tabpanel" id="panel-written" aria-labelledby="tab-written" hidden={tab !== "written"}>
         {writes === null && !error && <p className="muted">Reading the book against the provider…</p>}
-        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={(records) => void remove(records)} heldBy={heldRecords(data)} />}
+        {writes && <DnsWritesTable key={writes.readAt} data={writes} busy={busy} onRemove={remove} heldBy={heldRecords(data)} />}
       </div>
 
       <div role="tabpanel" id="panel-derived" aria-labelledby="tab-derived" hidden={tab !== "derived"}>
         {data === null && !error && <p className="muted">Reading the records at the provider…</p>}
-        {data && <DnsInventoryTable key={data.readAt} data={data} busy={busy} onRemove={(records) => void remove(records)} />}
+        {data && <DnsInventoryTable key={data.readAt} data={data} busy={busy} onRemove={remove} />}
       </div>
+
+      {pendingRemoval && (
+        <ConfirmDialog
+          title={`Remove ${pendingRemoval.length === 1 ? "this record" : `these ${pendingRemoval.length} records`} at the DNS provider, in one run?`}
+          confirmLabel="Remove"
+          destructive
+          onCancel={() => setPendingRemoval(null)}
+          onConfirm={() => {
+            const records = pendingRemoval;
+            setPendingRemoval(null);
+            void doRemove(records);
+          }}
+        >
+          <ul>
+            {pendingRemoval.map((record) => {
+              const row = writes?.rows.find((r) => r.name === record.name && r.type === record.type) ?? data?.rows.find((r) => r.name === record.name && r.type === record.type);
+              return (
+                <li key={recordKey(record)}>
+                  <span className="mono">{recordKey(record)}</span>
+                  {row && ` — ${row.found ?? "no record stands"} (${ownerCell(row.owner)})`}
+                </li>
+              );
+            })}
+          </ul>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }
