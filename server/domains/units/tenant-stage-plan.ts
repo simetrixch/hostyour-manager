@@ -3,13 +3,15 @@ import type { Cleanup, RunDefinition, Step, StepCtx } from "../../executor/types
 import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Db } from "../../db/client.ts";
-import { STAGE } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
+import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
 import { TenantRegistrationSchema, type TenantRegistration } from "../../../shared/tenant.ts";
 import { TENANT_LIVE_STATUS } from "./tenant-live-guard.ts";
 import { CreateTenantParams, CreateTenantRequest, createTenantSteps, type CreateTenantStageParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { createTenantCleanups, assertCreateTenantAbortable } from "./create-tenant-abort.ts";
 import { mintFreeGuid } from "./create-tenant-registration.ts";
 import { planStandingStage, stageBundleStep, stageHostsStep } from "./tenant-stage-source.ts";
+import { resolveTenantCluster } from "./tenant-values.ts";
 
 export function bundleStageSteps(ports: TenantOnboardPorts, p: CreateTenantStageParams, runtime: { appsImageTag?: string }, steps: Step[]): Step[] {
   return p.bundleStage ? steps.map((step) => ({ ...step, run: async (ctx) => {
@@ -40,6 +42,14 @@ function completedStage(db: Db, p: CreateTenantStageParams): boolean {
 
 function stagePlans(p: CreateTenantParams): CreateTenantStageParams[] {
   return [p, ...(p.additionalStages ?? [])];
+}
+
+/** Refuses before any stage is planned, so a pair that cannot stand together costs no gate run. */
+function assertRequestedStagesApart(db: Db, placements: readonly { stage: Stage; clusterId: string }[]): void {
+  for (const { stage, clusterId } of placements) {
+    const clash = findStagePlacementConflict(placements, stage, clusterId);
+    if (clash) throw errValidation(`${stage} and ${clash.stage} of one tenant cannot stand on ${resolveTenantCluster(db, clusterId, stage).domain}: TEST and PROD cannot share a machine`);
+  }
 }
 
 function sourceDefinition(entry: TenantRegistration): string {
@@ -101,6 +111,7 @@ export function makeTenantStagesDef(
       const placements = request.stages ?? [{ stage: request.stage, clusterId: request.clusterId }];
       // The broadest channel builds the shared bundle once and admits it to every selected stage.
       placements.sort((a, b) => STAGE.indexOf(b.stage) - STAGE.indexOf(a.stage));
+      assertRequestedStagesApart(ctx.db, placements);
       const guid = request.sourceTenantId ? undefined : await mintFreeGuid(ports);
       const results = [];
       for (const placement of placements) {

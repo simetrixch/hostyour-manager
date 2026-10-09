@@ -2,13 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import type { Cleanup, StepCtx } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, CreateTenantRequest } from "./create-tenant.run.ts";
-import { db, GUID, ports, planCtx, seedTenant, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
+import { db, GUID, planCtx, useMemoryDb } from "./tenant-refresh-members.fixture.ts";
+import { stagePorts, request, addRequest } from "./tenant-stage-plan.fixture.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import { FakeClusterKubeResolver, FakeClusterReader, FakeMasterArgoReader, FakeMasterProjectWriter } from "../../adapters/kube/testing/fake.ts";
 import { FakeObjectStore } from "../../adapters/object-store/testing/fake.ts";
-import { fakeTenantSeeder } from "./tenant-seeder.fixture.ts";
 import { tenantBucketName, provisionTenantStorage } from "./tenant-storage.ts";
 import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
 import { tenantClearSourceJobs } from "./relocation-jobs-tenant.ts";
@@ -31,20 +30,6 @@ function context(params: CreateTenantParams, cleanups: Cleanup[] = []): StepCtx 
   } as unknown as StepCtx;
 }
 
-function stagePorts() {
-  seedTenant();
-  const p = ports(testMembers(["erp"]));
-  p.resolver = new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader({
-    deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-10-01T00:00:00Z", generation: 1 },
-  }), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
-  p.seeder = fakeTenantSeeder();
-  p.objectStore = new FakeObjectStore();
-  p.dns = new FakeDnsProvider();
-  return p;
-}
-
-const request = { clusterId: "cls_1", stage: "prod", subdomain: "newtenant", owner: "team-acme", size: "small", apps: [] };
-
 async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<TenantRegistration>): Promise<TenantRegistration> {
   const source = (await p.registrations.readTenant("prod", GUID))!.entry;
   const entry = TenantRegistrationSchema.parse({ ...source, ...change });
@@ -56,15 +41,15 @@ async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<Te
 }
 
 describe("tenant stages share identity while provisioning independently", () => {
-  it("plans all selected stages with one guid on the same machine", async () => {
+  it("plans all selected stages with one guid, TEST on a machine of its own", async () => {
     const p = stagePorts();
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: ["dev", "test", "prod"].map((stage) => ({ stage, clusterId: "cls_1" })) }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: [{ stage: "dev", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") throw new Error(result.summary);
     const stages = [result.params, ...result.params.additionalStages!];
     expect(stages.map((s) => s.stage)).toEqual(["prod", "test", "dev"]);
     expect(new Set(stages.map((s) => s.guid)).size).toBe(1);
-    expect(stages.every((s) => s.clusterId === "cls_1")).toBe(true);
+    expect(stages.map((s) => s.clusterId)).toEqual(["cls_1", "cls_2", "cls_1"]);
     const steps = makeCreateTenantDef(p).steps(result.params);
     expect(steps[0]!.name).toBe("attest-target");
     expect(new Set(steps.map((s) => s.name)).size).toBe(steps.length);
@@ -87,7 +72,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("invites only after every selected stage has been provisioned", async () => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
-    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_1" }] }, planCtx());
+    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_2" }] }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     const names = def.steps(result.params).map((step) => step.name);
     expect(names.slice(-2)).toEqual(["prod-activate", "test-activate"]);
@@ -97,7 +82,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("aborts a failed stage while preserving a completed sibling", async () => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
-    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_1" }] }, planCtx());
+    const result = await def.planStream!({ ...request, stages: [{ stage: "prod", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_2" }] }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     for (const stage of ["prod", "test"]) await def.steps(result.params).find((step) => step.name === `${stage}-record-provisional`)!.run(context(result.params));
     db.db.update(tenants).set({ status: "active" }).where(and(eq(tenants.guid, result.params.guid), eq(tenants.stage, "prod"))).run();
@@ -110,7 +95,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("adds a stage to the standing guid without replacing the source", async () => {
     const p = stagePorts();
     const source = await p.registrations.readTenant("prod", GUID);
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") throw new Error(result.summary);
     expect(result.params).toMatchObject({ guid: GUID, stage: "test", sourceStage: "prod", seedUsers: false, replaces: [] });
@@ -125,10 +110,10 @@ describe("tenant stages share identity while provisioning independently", () => 
 
   it("plans the added stage at the size the operator chose, not the default", async () => {
     const p = stagePorts();
-    const chosen = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...request, sourceTenantId: "tnt_1", stage: "test", size: "medium" }), planCtx());
+    const chosen = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...addRequest, stage: "test", size: "medium" }), planCtx());
     if (chosen.outcome !== "planned") throw new Error(chosen.summary);
     expect(chosen.params.size).toBe("medium");
-    const unnamed = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...request, sourceTenantId: "tnt_1", stage: "test" }), planCtx());
+    const unnamed = await makeCreateTenantDef(p).planStream!(CreateTenantRequest.parse({ ...addRequest, stage: "test" }), planCtx());
     if (unnamed.outcome !== "planned") throw new Error(unnamed.summary);
     expect(unnamed.params.size).toBe("small");
   });
@@ -137,7 +122,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
     await expect(def.planStream!({ ...request, sourceTenantId: "tnt_1" }, planCtx())).rejects.toThrow(/already has prod/);
-    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await def.planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     await p.registrations.setDemo("prod", GUID, true, "run_changed");
     await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
@@ -147,7 +132,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it.each(["approvedTags", "appsImageTag"] as const)("allows source %s release drift while keeping the validated target versions", async (field) => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
-    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await def.planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     const frozen = JSON.stringify(result.params);
     const tag = "0.1.13-stable-20261004101328-befad87";
@@ -170,7 +155,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   ] satisfies Partial<TenantRegistration>[])("refuses source definition drift %j before creating a stage", async (change) => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
-    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await def.planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     await changeSource(p, change);
     await expect(def.steps(result.params)[0]!.run(context(result.params))).rejects.toThrow(/changed after this Add stage plan/);
@@ -180,7 +165,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("refuses missing source and changed member or app composition", async () => {
     const p = stagePorts();
     const def = makeCreateTenantDef(p);
-    const result = await def.planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await def.planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     const source = (await p.registrations.readTenant("prod", GUID))!.entry;
     await changeSource(p, { members: source.members.map((m) => ({ ...m, namespaceLabels: { ...m.namespaceLabels, "example/changed": "true" } })) });
@@ -201,7 +186,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, TenantRegistrationSchema.parse({ ...current, apps, members, quota: seedQuota("small") })); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     const source = members.find((m) => m.name === "company")!.sources[0]!.values;
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toEqual({ ...source, site: { domain: "test.company.example" } });
@@ -216,7 +201,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.example.org", ["www.show.test.example.org"], "cycleshop.show.test.example.org"]);
   });
@@ -228,7 +213,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
-    const plan = () => makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const plan = () => makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     const unheld = new FakeDnsProvider();
     unheld.unmanaged = ["example.org"];
     p.dns = unheld;
@@ -249,7 +234,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     expect(result.params.ownDomain).toBe("test.show.example");
     expect(result.params.ownDomainRedirects).toEqual(["www.test.show.example"]);
@@ -298,7 +283,7 @@ describe("stage resources cannot reach a sibling", () => {
   it("an Add stage abort removes only that stage's recorded hosts", async () => {
     const p = stagePorts();
     const dns = new FakeDnsProvider(); p.dns = dns;
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, sourceTenantId: "tnt_1", stage: "test" }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
     for (const stage of ["prod", "test"] as const) {
       const name = `${stage}.company.example`, content = `${stage}.tenant.example`;
@@ -333,7 +318,7 @@ describe("native purged-stage recovery", () => {
     db.db.insert(tenants).values({ ...source, id: "tnt_purged", stage: "test", status, lastRunId: "run_purged" }).run();
     db.db.insert(tenantApps).values({ id: "tna_purged", tenantId: "tnt_purged", name: "erp", status: "purged", lastRunId: "run_purged" }).run();
   }
-  const add = { ...request, sourceTenantId: "tnt_1", stage: "test" };
+  const add = { ...addRequest, stage: "test" };
 
   it("plans a fresh stage after native purge while preserving its inventory identity", async () => {
     const p = stagePorts(); target();

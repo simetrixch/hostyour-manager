@@ -3,9 +3,12 @@
 // Kept OUT of TenantCreate.tsx the same way tenantRows.ts holds the tenants-page status rule and
 // runScreen.ts the Run screen's honesty rules — it is pure, so it is stated and tested once here rather
 // than through a component (vitest.config.ts runs web/**/*.test.ts in the node environment; there is
-// no DOM harness in this repo). Nothing here is submitted: the placement only prints what the
+// no DOM harness in this repo). The read-out submits nothing: it only prints what the
 // server will compose from the same two inputs (tenant-fanout.ts memberNamespace,
 // tenant-registrations.ts registrationPath).
+
+import type { Stage } from "../../shared/enums.ts";
+import { findStagePlacementConflict, tenantStagesNeedSeparateMachines } from "../../shared/tenant-stage-placement.ts";
 
 /** The placeholder that stands where the tenant's guid will be. It is a PLACEHOLDER on purpose and must
  *  stay one that cannot be mistaken for an identifier: the guid does not exist yet when this is rendered
@@ -71,4 +74,19 @@ export function tenantPlacement(
     // so the read-out and the run's own step log name the members identically.
     namespaces: [...TENANT_TRIO, ...apps].map((member) => `${TENANT_GUID_PLACEHOLDER}-${member}-${stage}`),
   };
+}
+
+/** The machine of each selected stage in the create wizard, and the machines it may be given. The
+ *  default machine stands in for a stage that has not chosen its own, except where the tenant also
+ *  has the stage that must stand apart from it (TEST and PROD): those two never share a default, so
+ *  each is chosen. A machine another selected stage stands on is not offered to a stage that must
+ *  stand apart from it, which leaves no pair of choices the server would refuse. */
+export function stageMachineChoices<T extends { id: string }>(
+  selected: readonly Stage[], chosen: Partial<Record<Stage, string>>, defaultClusterId: string, targets: readonly T[],
+): { stage: Stage; clusterId: string; offered: T[] }[] {
+  const placed = selected.map((stage) => ({
+    stage,
+    clusterId: chosen[stage] || (selected.some((other) => tenantStagesNeedSeparateMachines(stage, other)) ? "" : defaultClusterId),
+  }));
+  return placed.map(({ stage, clusterId }) => ({ stage, clusterId, offered: targets.filter((t) => !findStagePlacementConflict(placed, stage, t.id)) }));
 }

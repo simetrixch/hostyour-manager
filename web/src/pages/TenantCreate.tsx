@@ -4,7 +4,7 @@ import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { HOST_LABEL_RE } from "#unit/shared/unit-host.ts";
 import { TENANT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { listTenantTargets, createTenant, type TenantTargetView } from "../api.ts";
-import { tenantPlacement, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
+import { tenantPlacement, stageMachineChoices, TENANT_GUID_PLACEHOLDER } from "../tenantPlacement.ts";
 
 /** Onboard-tenant wizard — the tenant analogue of
  *  ConsumerOnboard. Unlike a consumer it does NOT point at an external repo: a tenant's charts
@@ -42,13 +42,14 @@ export function TenantCreate() {
   async function submit(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (!selectedStages.length) { setError("Choose at least one stage."); return; }
+    if (choices.some((c) => !c.clusterId)) { setError("Choose a machine for every stage."); return; }
     setBusy(true);
     setError(null);
     try {
       const { runId } = await createTenant({
         clusterId: form.clusterId,
         stage: selectedStages[0]!,
-        stages: selectedStages.map((stage) => ({ stage, clusterId: stageMachines[stage] || form.clusterId })),
+        stages: choices.map(({ stage, clusterId }) => ({ stage, clusterId })),
         subdomain: form.subdomain.trim(),
         owner: form.owner.trim(),
         size: form.size as UnitSize,
@@ -67,9 +68,10 @@ export function TenantCreate() {
 
   const activeTargets = (targets ?? []).filter((t) => t.status === "active");
   const noTargets = targets !== null && activeTargets.length === 0;
+  const choices = stageMachineChoices(selectedStages, stageMachines, form.clusterId, activeTargets);
   // Where the tenant lands, derived from the chosen stage and cluster (tenantPlacement.ts). Null until
   // both are chosen, and it changes NOTHING about what is submitted.
-  const placement = tenantPlacement(selectedStages[0] ?? "", stageMachines[selectedStages[0]!] || form.clusterId, targets);
+  const placement = tenantPlacement(choices[0]?.stage ?? "", choices[0]?.clusterId ?? "", targets);
 
   return (
     <section className="page">
@@ -140,19 +142,25 @@ export function TenantCreate() {
           </label>
           <fieldset className="field">
             <legend className="field__label">Stages</legend>
-            {STAGE.map((stage) => (
-              <div key={stage}>
-                <label><input type="checkbox" checked={selectedStages.includes(stage)} onChange={(e) => setSelectedStages((chosen) => e.target.checked ? [...chosen, stage] : chosen.filter((s) => s !== stage))} /> {stage}</label>
-                {selectedStages.includes(stage) && <label className="field">
-                  <span className="field__label">{stage} machine</span>
-                  <select value={stageMachines[stage] || form.clusterId} required onChange={(e) => setStageMachines((machines) => ({ ...machines, [stage]: e.target.value }))}>
-                    <option value="" disabled>Choose a machine</option>
-                    {activeTargets.map((target) => <option key={target.id} value={target.id}>{target.domain}</option>)}
-                  </select>
-                </label>}
-              </div>
-            ))}
-            <span className="field__hint">One tenant identity. Each selected stage has its own data, users, sessions and keys. Stages may share a machine.</span>
+            {STAGE.map((stage) => {
+              const choice = choices.find((c) => c.stage === stage);
+              return (
+                <div key={stage}>
+                  <label><input type="checkbox" checked={Boolean(choice)} onChange={(e) => {
+                    setSelectedStages((chosen) => e.target.checked ? [...chosen, stage] : chosen.filter((s) => s !== stage));
+                    if (!e.target.checked) setStageMachines(({ [stage]: _unselected, ...kept }) => kept);
+                  }} /> {stage}</label>
+                  {choice && <label className="field">
+                    <span className="field__label">{stage} machine</span>
+                    <select value={choice.clusterId} required onChange={(e) => setStageMachines((machines) => ({ ...machines, [stage]: e.target.value }))}>
+                      <option value="" disabled>Choose a machine</option>
+                      {choice.offered.map((target) => <option key={target.id} value={target.id}>{target.domain}</option>)}
+                    </select>
+                  </label>}
+                </div>
+              );
+            })}
+            <span className="field__hint">One tenant identity. Each selected stage has its own data, users, sessions and keys. Stages may share a machine, except TEST and PROD: each of those two is given its own.</span>
           </fieldset>
 
           {/* The placement read-out that makes the two fields above checkable instead of merely stated:
@@ -221,7 +229,7 @@ export function TenantCreate() {
         </div>
 
         <div className="form-foot">
-          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || !form.owner || !form.size}>
+          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || choices.some((c) => !c.clusterId) || !form.owner || !form.size}>
             {busy ? "Validating…" : "Validate & plan"}
           </button>
         </div>
