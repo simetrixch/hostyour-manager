@@ -433,8 +433,9 @@ export const RUN_KIND = [
   // no machine, which is why neither carries a program: the records are in the zone, not on a host.
   "dns-remove", "mail-dns-unpublish",
   // The consumer lifecycle. `consumer-purge` is force-offboard BY NAME (orphan removal), not a mode
-  // on `consumer-offboard`.
-  "consumer-onboard", "consumer-suspend", "consumer-resume", "consumer-offboard", "consumer-purge",
+  // on `consumer-offboard`. `consumer-offboard-ci-only` removes a unit that only runs CI, which has
+  // no apps row for the first and no stage for the second.
+  "consumer-onboard", "consumer-suspend", "consumer-resume", "consumer-offboard", "consumer-purge", "consumer-offboard-ci-only",
   // Reconstruct the apps row from the GitOps pointer, for a consumer this Manager did not onboard.
   "consumer-adopt",
   // The last step of putting a NEW secret value in front of a unit, and only that: a unit reads its
@@ -550,7 +551,7 @@ export const RUN_FAMILY = {
     "cluster-operator-key-place", "cluster-operator-key-remove", "cluster-authorized-keys-read",
     "mail-dns-publish", "mail-envelope-spf-publish", "mail-dkim-publish", "mail-dmarc-publish", "dns-remove", "mail-dns-unpublish",
   ],
-  consumer: ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
+  consumer: ["consumer-onboard", "consumer-offboard", "consumer-offboard-ci-only", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
   tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-purge-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-set-website-site", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-display-name", "tenant-set-demo", "tenant-set-google-translation", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;

@@ -70,3 +70,13 @@ export interface OnboardPrefillView {
    *  token while `recorded` is null — once per owner (#237). */
   packagesReader?: PackagesReaderView;
 }
+
+/** One unit that only runs CI — GET /api/consumers/ci-only. It has no apps row, so the Consumers page
+ *  cannot list it from the inventory; the registration tree is the only place it stands. */
+export interface CiOnlyUnitView {
+  name: string;
+  repoUrl: string;
+  /** Null for a registration written before these fields were required. */
+  owner: string | null;
+  onboardedAt: string | null;
+}
