@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { makeAddAppDef } from "./add-app.run.ts";
-import { FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
+import { makeAddAppDef, type AddAppParams } from "./add-app.run.ts";
+import { FakeRepoReader, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
+import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
+import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
+import { clusters, servers } from "../../db/schema/inventory.ts";
+import { refreshImagesStep } from "./tenant-builds.ts";
+import { ports as onboardPorts, FakeBuildPlaneClusterReader } from "./onboard.fixture.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { tenantAppsManifest, tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -8,8 +13,8 @@ import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { bundleReleaseTag } from "./engine-line.ts";
-import { NEW_APP, ctx, params, planCtx, ports, scriptBundle, seededPlatformRepo, TEMPLATE_APPS, useMemoryDb } from "./add-app.fixture.ts";
-import { BUNDLE, ORG, TEMPLATE_URL, UNIT } from "./tenant-apps-repo.fixture.ts";
+import { GUID, NEW_APP, REGISTRY_HOST, ctx, db, params, planCtx, ports, scriptBundle, seededPlatformRepo, TEMPLATE_APPS, useMemoryDb } from "./add-app.fixture.ts";
+import { BUNDLE, ORG, SHA, TEMPLATE_MANIFEST, TEMPLATE_URL, UNIT } from "./tenant-apps-repo.fixture.ts";
 import { WEBSITE_APPS, seedWebsiteTenant, websitePorts } from "./tenant-website.fixture.ts";
 
 useMemoryDb();
@@ -143,5 +148,92 @@ describe("add-app for a website of the tenant's own bundle", () => {
     const line = logs.find((l) => l.includes(served));
     expect(line).toBeDefined();
     expect(line).not.toContain(TEMPLATE_URL);
+  });
+
+  // After the build the run renders the fan-out again against the bundle it just released, and judges
+  // the site there: the template's folder lists no such site, so it is the bundle's manifest at the
+  // release the build wrote that has to say it.
+  describe("refresh-images, after the bundle is built", () => {
+    const BUILT_TAG = "0.1.1-stable-20260102000000-def5678";
+    const BUILT_RELEASE = bundleReleaseTag(BUILT_TAG);
+    const both = manifestOf(webEntry(["main", "simplidigita-ai"]));
+    // The App's one row, and a token for every open: what the bundle's build-only chain asks the store for.
+    const buildCreds = {
+      open: async () => Buffer.from("x", "utf8"),
+      list: async ({ kind }: { kind: string }) => (kind === "github-app" ? [{ id: "cred_app", kind, label: "GitHub App (acme-org)", fingerprint: "fp", subject: { kind: "owner", id: ORG }, purpose: "repository-identity" }] : []),
+    } as unknown as CredentialStore;
+
+    /** A planned add-app of `request` on the tenant whose bundle stands at TEST_BUNDLE's tag with
+     *  `standing` as its apps.yaml, and whose build plane builds it again at BUILT_TAG with `built`. */
+    async function plannedBuild(request: Record<string, unknown>, template: Record<string, string>, manifests: { standing: string; built: string }): Promise<{ step: (name: string) => Promise<void>; reader: FakeRepoReader; params: AddAppParams; bundleRefs: (from: number) => string[]; registrations: TenantRegistrations }> {
+      seedWebsiteTenant();
+      db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
+      db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
+      const buildPlane = new FakeBuildPlane();
+      buildPlane.seedReleaseRun(TEST_BUNDLE.appsImage, { runName: `${TEST_BUNDLE.appsImage}-release-1`, releaseTag: "0.1.000-stable-20260102000000", succeeded: true, imageTag: BUILT_TAG });
+      // The bundle's repository as the build-only chain reads it back after write-tree.
+      const unitReader = new FakeRepoReader({ resolvedSha: SHA, files: {} });
+      unitReader.scriptFor(BUNDLE_URL, { resolvedSha: SHA, files: { "deploy/platform.yaml": TEMPLATE_MANIFEST.replace(/example-apps/g, TEST_BUNDLE.appsImage) } });
+      const onboard = onboardPorts({ repo: unitReader, consumerRepo: new FakeRepoWriter(), github: new FakeGitHubConsumer(), buildPlane, buildClusterReader: new FakeBuildPlaneClusterReader(TEST_BUNDLE.appsImage) });
+      const prt = websitePorts({ dns: new FakeDnsProvider(), onboard: () => ({ ports: onboard }), buildUnitRegistration: async () => null }, template);
+      scriptBundle(prt, { "apps.yaml": manifests.standing });
+      const reader = prt.repo as FakeRepoReader;
+      reader.scriptFor(`${TEST_BUNDLE.appsRepo}@${BUILT_RELEASE}`, { resolvedSha: SHA, files: { "apps.yaml": manifests.built } });
+      const result = await makeAddAppDef(prt).planStream!(request, planCtx());
+      if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
+      // One run, one memory: the tag onboard-build-only reads off the release is what refresh-images renders at.
+      const defined = makeAddAppDef(prt).steps(result.params);
+      const step = async (name: string): Promise<void> => { await defined.find((s) => s.name === name)!.run({ ...ctx(result.params, name, []), creds: buildCreds }); };
+      const bundleRefs = (from: number): string[] => reader.clones.slice(from).filter((c) => c.repoURL === TEST_BUNDLE.appsRepo).map((c) => c.ref);
+      return { step, reader, params: result.params, bundleRefs, registrations: prt.registrations };
+    }
+
+    it("PLANTED DEFECT: passes for a site only the bundle lists, judged against the bundle's manifest at the release the build wrote", async () => {
+      const run = await plannedBuild(OWN_SITE, WEBSITE_APPS, { standing: both, built: both });
+      expect(run.params.siteFromBundle).toBe(true);
+      await run.step("onboard-build-only");
+      await run.step("record-apps-repo");
+      expect((await run.registrations.readTenant("prod", GUID))?.entry.appsImageTag).toBe(BUILT_TAG);
+      const from = run.reader.clones.length;
+      await run.step("refresh-images");
+      expect(run.bundleRefs(from)).toEqual([BUILT_RELEASE]);
+    });
+
+    it("PLANTED INNOCENT: judges a template app added to a standing bundle against the template, and reads no bundle", async () => {
+      const run = await plannedBuild({ tenantId: "tnt_1", app: NEW_APP }, TEMPLATE_APPS(), { standing: manifestOf(), built: manifestOf() });
+      expect(run.params.siteFromBundle).toBe(false);
+      await run.step("onboard-build-only");
+      await run.step("record-apps-repo");
+      const from = run.reader.clones.length;
+      await run.step("refresh-images");
+      expect(run.bundleRefs(from)).toEqual([]);
+    });
+
+    it("PLANTED DEFECT: fails naming T4 where the manifest at the release the build wrote no longer lists the site, though the tag the plan stood at did", async () => {
+      // record-apps-repo has not run, so the registration still names the tag the plan stood at: a read
+      // at the registration's tag would find the site, and only the pass's own tag finds it gone.
+      const run = await plannedBuild(OWN_SITE, WEBSITE_APPS, { standing: both, built: manifestOf(webEntry(["main", "shop"])) });
+      await run.step("onboard-build-only");
+      const from = run.reader.clones.length;
+      await expect(run.step("refresh-images")).rejects.toThrow(/the fan-out no longer validates after the builds wrote their pins — T4 did not pass/);
+      expect(run.bundleRefs(from)).toEqual([BUILT_RELEASE]);
+    });
+
+    it("PLANTED DEFECT: fails by name, and does not judge the site against the template, where the registration names no apps repository", async () => {
+      seedWebsiteTenant();
+      const template = { ...WEBSITE_APPS, "apps.yaml": manifestOf(webEntry(["main", "shop", "simplidigita-ai"])) };
+      const prt = websitePorts({ registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) }, template);
+      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
+      const step = refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: [app], seedUsers: false, registryHost: REGISTRY_HOST, requiredImages: [], appsImage: UNIT, siteFromBundle: true }, { appsImageTag: BUILT_TAG });
+      await expect(step.run(ctx(params(), "refresh-images", []))).rejects.toThrow(`the website's site is listed by the tenant's own bundle, but the registration of tenant ${GUID} at prod names no apps repository`);
+    });
+
+    it("PLANTED DEFECT: refuses by name a new stage's size beside a site from the bundle, whose registration this step does not read", async () => {
+      seedWebsiteTenant();
+      const prt = websitePorts({}, WEBSITE_APPS);
+      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
+      const step = refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: [app], seedUsers: false, registryHost: REGISTRY_HOST, requiredImages: [], appsImage: UNIT, siteFromBundle: true, size: "small" }, { appsImageTag: BUILT_TAG });
+      await expect(step.run(ctx(params(), "refresh-images", []))).rejects.toThrow(`which only a standing tenant's registration names, and this run creates a stage of tenant ${GUID} at size small`);
+    });
   });
 });
