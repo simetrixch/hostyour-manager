@@ -10,7 +10,8 @@ import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
 import { getRun, readEvents } from "./read.ts";
 import { listLocks } from "./locks.ts";
-import { startQueuedRuns } from "./queue.ts";
+import { findFailedHolder, startQueuedRuns } from "./queue.ts";
+import { seedRunRows } from "./run-rows.fixture.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
 import type { AnyRunDefinition } from "./types.ts";
 import type { RunKind } from "../../shared/enums.ts";
@@ -64,11 +65,11 @@ describe("the run queue", () => {
     dirs.push(dir);
     return join(dir, "manager.db");
   }
-  function managerOver(path: string, def: AnyRunDefinition): { db: DbHandle; executor: Executor } {
+  function managerOver(path: string, def: AnyRunDefinition, log: typeof logger = logger): { db: DbHandle; executor: Executor } {
     const db = openDb(path);
     handles.push(db);
     const executor = new Executor({
-      db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
+      db: db.db, creds: new CredentialStore({ db: db.db, logger: log }), bus: new RunEventBus(), logger: log,
       runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system",
     });
     return { db, executor };
@@ -329,5 +330,96 @@ describe("the run queue", () => {
     await expect(executor.approve(b, undefined, { onlyIfFree: true })).rejects.toMatchObject({ code: "RESOURCE_BUSY", detail: { holderRunId: a } });
     expect(status(db, b)).toBe("planned");
     w.open("a");
+  });
+
+  /** A Manager whose process log is kept: the lines it writes at warn level or above, parsed. */
+  function managerLogging(def: AnyRunDefinition): { db: DbHandle; executor: Executor; waitLines: () => Record<string, unknown>[] } {
+    const lines: string[] = [];
+    const { db, executor } = managerOver(file(), def, pino({ level: "warn" }, { write: (s: string) => { lines.push(s); } }));
+    const waitLines = () => lines.map((l) => JSON.parse(l) as Record<string, unknown>).filter((l) => l["msg"] === "a run waits behind a failed run's lock");
+    return { db, executor, waitLines };
+  }
+
+  it("writes one warn line when a run queues behind a failed holder, and names the holder in the run's log", async () => {
+    const w = world();
+    w.failing.add("a");
+    const { db, executor, waitLines } = managerLogging(w.def);
+    const a = await plan(executor, "a", ["deploy@main"]);
+    const b = await plan(executor, "b", ["deploy@main"]);
+    await executor.approve(a);
+    await executor.settle(a);
+    expect(waitLines()).toEqual([]);
+    expect(await executor.approve(b)).toEqual({ status: "queued" });
+    expect(waitLines()).toEqual([expect.objectContaining({
+      level: 40, waitingRunId: b, waitingKind: "noop", holderRunId: a, holderKind: "noop", holderStatus: "failed",
+      holderFailedStep: "Change", holderError: "half done", resource: "git-branch", key: "deploy@main",
+    })]);
+    expect(readEvents(db.db, b).map((e) => e.text)).toContain(`⏳ queued at place 1: it waits for git-branch deploy@main (run ${a}, failed at step Change)`);
+  });
+
+  it("writes no line for a run that queues behind a holder that is still running", async () => {
+    const w = world();
+    w.blocking.set("a", () => undefined);
+    const { executor, waitLines } = managerLogging(w.def);
+    const a = await plan(executor, "a", ["deploy@main"]);
+    const b = await plan(executor, "b", ["deploy@main"]);
+    await executor.approve(a);
+    await until(() => w.started.includes("a"));
+    expect(await executor.approve(b)).toEqual({ status: "queued" });
+    expect(waitLines()).toEqual([]);
+    w.open("a");
+    await executor.settle(b);
+    expect(waitLines()).toEqual([]);
+  });
+
+  it("writes the line when the holder fails while a run already waits behind it", async () => {
+    const w = world();
+    w.blocking.set("a", () => undefined);
+    w.failing.add("a");
+    const { executor, waitLines } = managerLogging(w.def);
+    const a = await plan(executor, "a", ["deploy@main"]);
+    const b = await plan(executor, "b", ["deploy@main"]);
+    await executor.approve(a);
+    await until(() => w.started.includes("a"));
+    await executor.approve(b);
+    expect(waitLines()).toEqual([]);
+    w.open("a");
+    await executor.settle(a);
+    expect(waitLines()).toEqual([expect.objectContaining({ waitingRunId: b, holderRunId: a, holderStatus: "failed" })]);
+  });
+
+  it("names a holder that was cancelled in the middle, and writes the line once per waiting run and holder", async () => {
+    const w = world();
+    w.blocking.set("a", () => undefined);
+    const { executor, waitLines } = managerLogging(w.def);
+    const a = await plan(executor, "a", ["deploy@main"]);
+    const b = await plan(executor, "b", ["deploy@main"]);
+    const c = await plan(executor, "c", ["deploy@main"]);
+    const other = await plan(executor, "other", ["elsewhere"]);
+    await executor.approve(a);
+    await until(() => w.started.includes("a"));
+    const cancelled = executor.cancel(a);
+    w.failing.add("a");
+    w.open("a");
+    await cancelled;
+    await executor.approve(b);
+    expect(waitLines().map((l) => [l["waitingRunId"], l["holderRunId"], l["holderStatus"]])).toEqual([[b, a, "cancelled"]]);
+    // Every run that ends and every approve dispatches again; the pair that was written stays written.
+    await executor.approve(other);
+    await executor.settle(other);
+    await executor.approve(c);
+    expect(waitLines().map((l) => [l["waitingRunId"], l["holderRunId"]])).toEqual([[b, a], [c, a]]);
+  });
+
+  it("finds a run only once it failed or was cancelled, with the step that failed", async () => {
+    const { db } = managerOver(file(), world().def);
+    seedRunRows(db, { runId: "run_going", steps: [{ id: "step_going", name: "Change" }] });
+    expect(findFailedHolder(db.db, "run_going")).toBeUndefined();
+    expect(findFailedHolder(db.db, "run_unknown")).toBeUndefined();
+    db.sqlite.prepare("UPDATE runs SET status = 'cancelled' WHERE id = 'run_going'").run();
+    expect(findFailedHolder(db.db, "run_going")).toEqual({ runId: "run_going", kind: "noop", status: "cancelled", failedStep: null, error: null });
+    db.sqlite.prepare("UPDATE runs SET status = 'failed', error = 'half done' WHERE id = 'run_going'").run();
+    db.sqlite.prepare("UPDATE steps SET status = 'failed' WHERE id = 'step_going'").run();
+    expect(findFailedHolder(db.db, "run_going")).toEqual({ runId: "run_going", kind: "noop", status: "failed", failedStep: "Change", error: "half done" });
   });
 });
