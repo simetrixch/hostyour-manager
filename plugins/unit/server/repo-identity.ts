@@ -39,12 +39,12 @@ export async function appReachesRepoURL(app: Pick<GitHubApp, "reachesRepository"
   return app.reachesRepository({ owner, repo, ...(signal ? { signal } : {}) });
 }
 
-export const ADD_APP_FORM = "the tenant's Add app form";
+export const DEPLOY_BUTTON = "the step beside the Deploy buttons of the tenant's page";
 export const CONSUMER_WIZARD = "the consumer wizard";
 
 /** The refusal a repository routing a scope to GitHub Packages gets where its owner records no
  *  packages reader — one sentence every caller uses; `where` names the place the token is given
- *  (a tenant's bundle: the Add app form, #233). */
+ *  (a tenant's bundle: the step beside the Deploy buttons of its page). */
 export function packagesReaderMissing(owner: string, repo: string, scopes: readonly string[], where: string = CONSUMER_WIZARD): string {
   return `owner ${owner} records no packages reader, and ${owner}/${repo} installs private npm packages of ${scopes.map((s) => `@${s}`).join(", ")} from GitHub Packages (its .npmrc) — record a token that reads them in ${where} first`;
 }

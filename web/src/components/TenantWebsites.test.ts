@@ -15,13 +15,13 @@ const catalog: TenantAppCatalogView = {
   websites: [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai" }],
   members: ["web"],
 };
-const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai", aliases: [] as string[] }];
+const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai", aliases: [] as string[], main: false }];
 const removedSite = (name: string, status: TenantStatus) => ({ name, site: name, status, lastRunId: "run_removed" });
 
-function render(removed: ReturnType<typeof removedSite>[]): string {
+function render(removed: ReturnType<typeof removedSite>[], websites: typeof live = live): string {
   return renderToStaticMarkup(
     createElement(StaticRouter, { location: "/tenants/tnt_1" },
-      createElement(TenantWebsites, { tenantId: "tnt_1", catalog, websites: live, removed, busy: false, act: async () => undefined, onRemove: () => undefined, onPurge: () => undefined, onRecordPackagesReader: async () => undefined })),
+      createElement(TenantWebsites, { tenantId: "tnt_1", catalog, websites, removed, busy: false, act: async () => undefined, onRemove: () => undefined, onPurge: () => undefined, onRecordPackagesReader: async () => undefined })),
   );
 }
 const rowOf = (html: string, name: string): string => html.split("<li>").find((li) => li.includes(`<span class="row__title">${name}</span>`)) ?? "";
@@ -57,5 +57,17 @@ describe("the Websites section offers Deploy on a site of the bundle that is not
     expect(rowOf(html, "simplidigita-ai")).not.toContain("Deploy");
     expect(rowOf(html, "digitaplatform-com")).not.toContain("Deploy");
     expect(deploys(html)).toBe(1);
+  });
+});
+
+describe("the Websites section marks the tenant's main website", () => {
+  it("PLANTED DEFECT: shows the main chip on the website that holds the mark, and on no other row", () => {
+    const html = render([], [{ ...live[0]!, main: true }, { name: "blog", site: "blog", domain: "blog.example.ch", aliases: [], main: false }]);
+    expect(rowOf(html, "simplidigita-ai")).toContain('<span class="chip">main</span>');
+    expect(rowOf(html, "blog")).not.toContain(">main<");
+  });
+
+  it("PLANTED INNOCENT: shows no main chip where no website holds the mark", () => {
+    expect(render([])).not.toContain(">main<");
   });
 });

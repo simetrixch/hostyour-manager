@@ -33,7 +33,7 @@ export function seedWebsiteTenant(): void {
 }
 
 /** A live tenant whose registration carries `apps` beside erp, and optionally an own domain. */
-export function tenantWith(apps: readonly { name: string; [field: string]: string | string[] }[], own: { ownDomain: string; ownDomainRedirects: string[] } = { ownDomain: "", ownDomainRedirects: [] }, repo = new FakePlatformRepo()): TenantRegistrations {
+export function tenantWith(apps: readonly { name: string; [field: string]: string | string[] | boolean }[], own: { ownDomain: string; ownDomainRedirects: string[] } = { ownDomain: "", ownDomainRedirects: [] }, repo = new FakePlatformRepo()): TenantRegistrations {
   const all = [{ name: "erp" }, ...apps];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,

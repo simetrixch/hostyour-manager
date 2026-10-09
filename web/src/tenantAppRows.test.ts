@@ -64,13 +64,15 @@ describe("undeployedApps", () => {
     const live = { ...row("cycleshop"), site: "cycleshop" };
     const unnamed = { ...row("show"), site: "show" };
     const gone = { ...row("old", "offboarded"), site: "old" };
-    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [] }]);
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [], main: false }]);
     // A live website the catalog's list leaves out stays on the page, by name and site, without the
     // domain only the registration knows, beside the ones the catalog names.
-    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live, unnamed])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [] }, { name: "show", site: "show", domain: null, aliases: [] }]);
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live, unnamed])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [], main: false }, { name: "show", site: "show", domain: null, aliases: [], main: false }]);
     // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
-    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [] }]);
-    expect(listedWebsites({}, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [] }]);
+    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [], main: false }]);
+    expect(listedWebsites({}, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [], main: false }]);
+    // The catalog's mark carries through; an inventory-only row never holds it.
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", main: true }] }, [live, unnamed]).map((w) => w.main)).toEqual([true, false]);
   });
 
   it("says why a website's domain is unknown only as far as the page knows it", () => {

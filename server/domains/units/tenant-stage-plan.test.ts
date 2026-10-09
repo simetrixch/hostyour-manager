@@ -247,7 +247,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ domain: "test.company.example" });
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toMatchObject(INNOCENT);
     expect(result.params.members.map((m) => m.name)).toEqual(members.map((m) => m.name));
-    // Every host a website answers at gets its record, www. included, as Add website writes them; the
+    // Every host a website answers at gets its record, www. included, as the Deploy button of a website writes them; the
     // abort takes them all back.
     const cleanups: Cleanup[] = [];
     const steps = makeCreateTenantDef(p).steps(result.params);

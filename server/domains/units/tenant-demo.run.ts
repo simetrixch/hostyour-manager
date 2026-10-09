@@ -1,16 +1,15 @@
 import { z } from "zod";
 import { eq } from "drizzle-orm";
-import { clusters, tenants } from "../../db/schema/inventory.ts";
+import { tenants } from "../../db/schema/inventory.ts";
 import type { Cleanup, RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import { errInternal, errNotFound, errValidation } from "../../kernel/errors.ts";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { guid, memberName } from "../../../shared/tenant.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { attestTenantTargetStep, loadTenantCluster, refreshTenantApplications } from "./lifecycle.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { assertTenantProvisioned, loadTenantStatus } from "./tenant-provisioned.ts";
+import { readStandingTenant } from "./tenant-standing.ts";
 
 export const TenantSetDemoRequest = z.object({ tenantId: z.string().startsWith("tnt_"), demo: z.boolean() });
 export const TenantSetDemoParams = TenantSetDemoRequest.extend({
@@ -19,20 +18,7 @@ export const TenantSetDemoParams = TenantSetDemoRequest.extend({
 });
 export type TenantSetDemoParams = z.infer<typeof TenantSetDemoParams>;
 
-async function currentDemo(ports: TenantOnboardPorts, p: TenantSetDemoParams, ctx: Pick<StepCtx, "db">) {
-  const tc = loadTenantCluster(ctx.db, p.tenantId);
-  assertTenantProvisioned(loadTenantStatus(ctx.db, p.tenantId), "setting demo mode");
-  const current = await ports.registrations.readTenant(tc.stage, tc.guid);
-  if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-  const cluster = ctx.db.select({ name: clusters.name }).from(clusters).where(eq(clusters.id, tc.clusterId)).get();
-  if (tc.guid !== p.guid || tc.clusterId !== p.clusterId || current.entry.cluster !== cluster?.name || current.entry.members.map((m) => m.name).join(",") !== p.members.join(",")) {
-    throw errValidation("the tenant target or members changed since this demo switch was planned — plan it again");
-  }
-  if (current.entry.suspended || (TENANT_SETTLED_STATUS as readonly string[]).includes(loadTenantStatus(ctx.db, p.tenantId).status)) {
-    throw errValidation(`tenant ${tc.subdomain} is suspended or removed — demo mode needs running members`);
-  }
-  return { tc, entry: current.entry };
-}
+const currentDemo = (ports: TenantOnboardPorts, p: TenantSetDemoParams, ctx: Pick<StepCtx, "db">) => readStandingTenant(ports, p, ctx, "demo mode");
 
 function restoreDemo(ports: TenantOnboardPorts, p: TenantSetDemoParams): Cleanup {
   return {

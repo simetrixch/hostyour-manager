@@ -469,6 +469,9 @@ export const RUN_KIND = [
   // Move one website of a standing tenant to another site of its bundle: the site, the member resolved
   // with it and the bundle release that carries the site, in one registration commit.
   "tenant-set-website-site",
+  // Make one deployed website of a standing tenant its main website, the one served at `/` of the
+  // tenant's domain: the mark on its registration entry and off the website that held it, in one commit.
+  "tenant-set-main-website",
   // Put the parts of a standing tenant on the versions chosen for them, and resolve every member again
   // off its product's manifest: also the one way a renamed chart reaches a tenant that already stands.
   "tenant-refresh-members",
@@ -552,7 +555,7 @@ export const RUN_FAMILY = {
     "mail-dns-publish", "mail-envelope-spf-publish", "mail-dkim-publish", "mail-dmarc-publish", "dns-remove", "mail-dns-unpublish",
   ],
   consumer: ["consumer-onboard", "consumer-offboard", "consumer-offboard-ci-only", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-set-domain", "consumer-set-secrets", "consumer-set-release", "consumer-backup", "consumer-restore", "consumer-migrate", "consumer-nightly-backup"],
-  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-purge-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-set-website-site", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-display-name", "tenant-set-demo", "tenant-set-google-translation", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
+  tenant: ["tenant-create", "tenant-add-app", "tenant-remove-app", "tenant-purge-app", "tenant-apps-repo", "tenant-suspend", "tenant-resume", "tenant-offboard", "tenant-purge", "tenant-restart-workloads", "tenant-set-size", "tenant-set-routing", "tenant-set-own-domain", "tenant-set-website-domain", "tenant-set-website-site", "tenant-set-main-website", "tenant-refresh-members", "tenant-line-move", "tenant-set-sender-domain", "tenant-set-display-name", "tenant-set-demo", "tenant-set-google-translation", "tenant-backup", "tenant-restore", "tenant-migrate", "tenant-check", "tenant-nightly-backup"],
 } as const satisfies Record<string, readonly RunKind[]>;
 export type RunFamily = keyof typeof RUN_FAMILY;
 

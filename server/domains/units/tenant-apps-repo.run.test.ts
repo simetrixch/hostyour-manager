@@ -222,7 +222,7 @@ describe("tenant-apps-repo planStream — the refusals, each a sentence", () => 
     const r = await plan(h, REQUEST);
     expect(r.outcome).toBe("rejected");
     if (r.outcome !== "rejected") return;
-    expect(r.summary).toMatch(new RegExp(`owner ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* Add app form`));
+    expect(r.summary).toMatch(new RegExp(`owner ${ORG} records no packages reader, and ${ORG}/${UNIT} installs private npm packages of @${ORG} from GitHub Packages .* in the step beside the Deploy buttons of the tenant's page first`));
   });
   it("refuses a deploy repository whose appsOrg is not the owner the App is installed in", async () => {
     const h = harness();
