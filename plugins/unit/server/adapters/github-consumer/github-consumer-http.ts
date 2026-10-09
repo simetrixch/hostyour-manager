@@ -5,7 +5,7 @@
 // github.ts one is platform-repo/single-token scoped and has no hook or workflow methods.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, TokenAccess, RepositoryTag, BranchCommit,
+  DispatchWorkflowInput, DispatchedWorkflowRun, WorkflowRunReading, TokenAccess, RepositoryTag, BranchCommit,
 } from "./port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener, REPO_PERMISSIONS, type OrgTokenReading } from "./port.ts";
 
@@ -261,21 +261,44 @@ export class HttpGitHubConsumer implements GitHubConsumer {
     throw new GitHubConsumerError(`GitHub DELETE ${path} → ${res.status}: ${message}`, res.status);
   }
 
-  async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
+  async dispatchWorkflow(input: DispatchWorkflowInput): Promise<DispatchedWorkflowRun | null> {
     const base = this.repoPath(input.owner, input.repo);
     const path = `${base}/actions/workflows/${encodeURIComponent(input.workflowFile)}/dispatches`;
     const res = await this.send(input.token, path, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ ref: input.ref, inputs: input.inputs }),
+      body: JSON.stringify({ ref: input.ref, inputs: input.inputs, return_run_details: true }),
       ...(input.signal ? { signal: input.signal } : {}),
     });
-    if (res.status === 204) return;
+    if (res.status === 204) return null;
+    if (res.status === 200) {
+      const body = (await res.json()) as { workflow_run_id?: number; html_url?: string };
+      if (typeof body.workflow_run_id !== "number" || !body.html_url) throw new GitHubConsumerError(`GitHub POST ${path} answered 200 without the run it created`);
+      return { id: body.workflow_run_id, htmlUrl: body.html_url };
+    }
     const message = await HttpGitHubConsumer.ghMessage(res);
     if (res.status === 404) {
       throw new WorkflowNotFoundError(`GitHub does not (yet) know the workflow ${input.workflowFile} on ${input.owner}/${input.repo} (HTTP 404: ${message})`);
     }
     throw new GitHubConsumerError(`GitHub POST ${path} → ${res.status}: ${message}`, res.status);
+  }
+
+  async readWorkflowRun(input: { owner: string; repo: string; runId: number; token: string; signal?: AbortSignal }): Promise<WorkflowRunReading> {
+    const path = `${this.repoPath(input.owner, input.repo)}/actions/runs/${input.runId}`;
+    const init = input.signal ? { signal: input.signal } : undefined;
+    const res = await this.send(input.token, path, init);
+    if (!res.ok) throw new GitHubConsumerError(`GitHub GET ${path} → ${res.status}: ${await HttpGitHubConsumer.ghMessage(res)}`, res.status);
+    const run = (await res.json()) as { html_url: string; status: string; conclusion: string | null };
+    const reading: WorkflowRunReading = { htmlUrl: run.html_url, status: run.status, conclusion: run.conclusion };
+    if (run.status !== "completed" || run.conclusion === "success") return reading;
+    const jobsRes = await this.send(input.token, `${path}/jobs`, init);
+    if (!jobsRes.ok) throw new GitHubConsumerError(`GitHub GET ${path}/jobs → ${jobsRes.status}: ${await HttpGitHubConsumer.ghMessage(jobsRes)}`, jobsRes.status);
+    const { jobs } = (await jobsRes.json()) as { jobs: { name: string; conclusion: string | null; html_url: string | null; steps?: { name: string; number: number; conclusion: string | null }[] }[] };
+    for (const job of jobs) {
+      const step = job.conclusion === "failure" ? job.steps?.find((s) => s.conclusion === "failure") : undefined;
+      if (step && job.html_url) return { ...reading, failedStep: { job: job.name, step: step.name, url: `${job.html_url}#step:${step.number}:1` } };
+    }
+    return reading;
   }
 
 }

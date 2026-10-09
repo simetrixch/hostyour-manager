@@ -141,6 +141,21 @@ export interface DispatchWorkflowInput {
   signal?: AbortSignal;
 }
 
+/** The run a workflow dispatch created, as GitHub names it in the dispatch's answer. */
+export interface DispatchedWorkflowRun {
+  id: number;
+  htmlUrl: string;
+}
+
+/** A workflow run as GitHub reports it. `conclusion` is null while the run has not completed;
+ *  `failedStep` is set only where a job of a completed run failed at a step GitHub names. */
+export interface WorkflowRunReading {
+  htmlUrl: string;
+  status: string;
+  conclusion: string | null;
+  failedStep?: { job: string; step: string; url: string };
+}
+
 export interface GitHubConsumer {
   /** Read the consumer PAT's granted scopes via a SINGLE GET /repos/{owner}/{repo}, off GitHub's
    *  X-OAuth-Scopes response header (returned on any authenticated classic-PAT request, even a 404).
@@ -205,14 +220,17 @@ export interface GitHubConsumer {
   readBranchCommit(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<BranchCommit | null>;
   /** Delete a branch (DELETE .../git/refs/heads/<branch>). A branch that is already gone is no error; a protected one throws. */
   deleteBranch(input: { owner: string; repo: string; branch: string; token: string; signal?: AbortSignal }): Promise<void>;
-  /** Fire the release workflow once (POST .../actions/workflows/<file>/dispatches — HTTP 204, no
-   *  body). Throws WorkflowNotFoundError on a 404: a workflow committed moments ago is not indexed
-   *  yet, and the trigger step RETRIES exactly that case. A 422 (the workflow refuses the inputs —
-   *  an old kit without the stage input, or no workflow_dispatch trigger at all) and a 403 throw
-   *  GitHubConsumerError carrying GitHub's own message, surfaced immediately, never retried. */
-  dispatchWorkflow(input: DispatchWorkflowInput): Promise<void>;
-  /** The workflow's runs, newest first — the correlation read behind watch-release-workflow: the
-   *  watcher matches displayTitle + the trigger's t0 and aborts on ambiguity. */
+  /** Fire the release workflow once (POST .../actions/workflows/<file>/dispatches with
+   *  `return_run_details`, so GitHub answers 200 with the run it created). Answers that run, or null
+   *  where GitHub answers the bodyless 204 instead. Throws WorkflowNotFoundError on a 404: a workflow
+   *  committed moments ago is not indexed yet, and the trigger step RETRIES exactly that case. A 422
+   *  (the workflow refuses the inputs — an old kit without the stage input, or no workflow_dispatch
+   *  trigger at all) and a 403 throw GitHubConsumerError carrying GitHub's own message, surfaced
+   *  immediately, never retried. */
+  dispatchWorkflow(input: DispatchWorkflowInput): Promise<DispatchedWorkflowRun | null>;
+  /** Read a workflow run the dispatch answered (GET .../actions/runs/<id>), and where it ended in
+   *  failure, the first failed step of its first failed job (GET .../actions/runs/<id>/jobs). */
+  readWorkflowRun(input: { owner: string; repo: string; runId: number; token: string; signal?: AbortSignal }): Promise<WorkflowRunReading>;
 }
 
 /** The PAT lacks the admin:repo_hook scope — GitHub answers 403 (or 404, to avoid leaking repo

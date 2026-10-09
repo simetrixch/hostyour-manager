@@ -6,7 +6,7 @@
 // contract the HTTP client answers.
 import type {
   GitHubConsumer, EnsureHookInput, EnsureHookResult, DeleteHookInput, DeleteHookResult, TokenScopes,
-  DispatchWorkflowInput, OrgTokenReading, TokenAccess, RepoPermission, RepositoryTag, BranchCommit,
+  DispatchWorkflowInput, DispatchedWorkflowRun, WorkflowRunReading, OrgTokenReading, TokenAccess, RepoPermission, RepositoryTag, BranchCommit,
 } from "../port.ts";
 import { WebhookScopeError, WorkflowNotFoundError, GitHubConsumerError, targetsEventListener } from "../port.ts";
 
@@ -89,6 +89,10 @@ export class FakeGitHubConsumer implements GitHubConsumer {
   /** When set, every dispatch throws GitHubConsumerError with this message + status — the 422/403
    *  surface-GitHub's-own-message path. */
   dispatchRefusal: { status: number; message: string } | null = null;
+  /** False makes a dispatch answer GitHub's bodyless 204, which names no run. */
+  answersRunDetails = true;
+  /** What readWorkflowRun answers for every run a dispatch created. */
+  dispatchedRun: Omit<WorkflowRunReading, "htmlUrl"> = { status: "completed", conclusion: "success" };
 
   /** owner/repo -> the tags listReleaseTags answers; unseeded repos answer none. */
   private readonly tags = new Map<string, RepositoryTag[]>();
@@ -240,7 +244,7 @@ export class FakeGitHubConsumer implements GitHubConsumer {
     return this.defaultBranch;
   }
 
-  async dispatchWorkflow(input: DispatchWorkflowInput): Promise<void> {
+  async dispatchWorkflow(input: DispatchWorkflowInput): Promise<DispatchedWorkflowRun | null> {
     if (this.dispatchNotFoundTimes > 0) {
       this.dispatchNotFoundTimes--;
       throw new WorkflowNotFoundError(`fake: workflow ${input.workflowFile} not indexed yet on ${input.owner}/${input.repo}`);
@@ -252,6 +256,15 @@ export class FakeGitHubConsumer implements GitHubConsumer {
       );
     }
     this.dispatches.push(input);
+    return this.answersRunDetails ? { id: this.dispatches.length, htmlUrl: this.runUrl(input.owner, input.repo, this.dispatches.length) } : null;
+  }
+
+  async readWorkflowRun(input: { owner: string; repo: string; runId: number }): Promise<WorkflowRunReading> {
+    return { htmlUrl: this.runUrl(input.owner, input.repo, input.runId), ...this.dispatchedRun };
+  }
+
+  private runUrl(owner: string, repo: string, runId: number): string {
+    return `https://github.com/${owner}/${repo}/actions/runs/${runId}`;
   }
 
 }

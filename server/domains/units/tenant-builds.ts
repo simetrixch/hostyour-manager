@@ -316,7 +316,7 @@ export function buildUnitStep(
       // A registered unit gets the current release kit too, before its release: the kit is written by
       // comparison, so a repository already on it commits nothing (#277).
       const chain: Step[] = unit.registered
-        ? [injectReleaseKitStep(ports, params), triggerReleaseStep(ports, params), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]
+        ? [injectReleaseKitStep(ports, params), triggerReleaseStep(ports, params, release), watchReleaseBuildStep(ports, params, release), recordBuildOnlyStep(ports, params, release)]
         : buildOnlySteps(ports, params, release);
       for (const step of chain) {
         ctx.log("meta", `${unit.unit}: ${step.title}`);

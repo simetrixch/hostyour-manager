@@ -275,9 +275,26 @@ describe("github-consumer adapter — the release workflow (dispatch)", () => {
     return { ok: true, status: 204, statusText: "204", json: async () => null } as Response;
   }) as unknown as typeof fetch;
 
-  it("dispatches the workflow with {ref, inputs} and accepts the bodyless 204", async () => {
-    const client = new HttpGitHubConsumer({ fetchImpl: stub204("POST /repos/x/acme/actions/workflows/release.yml/dispatches") });
-    await client.dispatchWorkflow({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", ref: "main", inputs: { version: "1.0.0", channel: "stable", stage: "prod" } });
+  it("dispatches the workflow with {ref, inputs}, asks for the run it creates, and answers null on the bodyless 204", async () => {
+    const bodies: unknown[] = [];
+    const recording204 = (async (url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)));
+      return stub204("POST /repos/x/acme/actions/workflows/release.yml/dispatches")(url, init);
+    }) as unknown as typeof fetch;
+    const client = new HttpGitHubConsumer({ fetchImpl: recording204 });
+    const run = await client.dispatchWorkflow({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", ref: "main", inputs: { version: "1.0.0", channel: "stable", stage: "prod" } });
+    expect(run).toBeNull();
+    expect(bodies).toEqual([{ ref: "main", inputs: { version: "1.0.0", channel: "stable", stage: "prod" }, return_run_details: true }]);
+  });
+
+  it("answers the run GitHub's 200 names, and refuses a 200 that names none", async () => {
+    const named = new HttpGitHubConsumer({ fetchImpl: stubFetch({
+      "POST /repos/x/acme/actions/workflows/release.yml/dispatches": { status: 200, body: { workflow_run_id: 37989251676, run_url: "https://api.github.com/repos/x/acme/actions/runs/37989251676", html_url: "https://github.com/x/acme/actions/runs/37989251676" } },
+    }) });
+    await expect(named.dispatchWorkflow({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", ref: "main", inputs: {} }))
+      .resolves.toEqual({ id: 37989251676, htmlUrl: "https://github.com/x/acme/actions/runs/37989251676" });
+    const unnamed = new HttpGitHubConsumer({ fetchImpl: stubFetch({ "POST /repos/x/acme/actions/workflows/release.yml/dispatches": { status: 200, body: {} } }) });
+    await expect(unnamed.dispatchWorkflow({ owner: "x", repo: "acme", token: "tkn", workflowFile: "release.yml", ref: "main", inputs: {} })).rejects.toThrow(/answered 200 without the run it created/);
   });
 
   it("throws the RETRYABLE WorkflowNotFoundError on 404 (the just-committed workflow is not indexed yet)", async () => {
@@ -363,5 +380,38 @@ describe("github-consumer adapter — readTokenAccess (#252)", () => {
     expect(await client.readTokenAccess({ owner: "acme-owner", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User" });
     expect(await client.readTokenAccess({ owner: "acme-owner", repo: "shop", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User", permission: "push" });
     expect(await client.readTokenAccess({ owner: "acme-owner", repo: "hidden", token: "tkn" })).toEqual({ login: "acme-operator", ownerKind: "User", permission: "none" });
+  });
+});
+
+describe("github-consumer adapter — readWorkflowRun", () => {
+  const RUN = "GET /repos/x/acme/actions/runs/7";
+  const read = (routes: Parameters<typeof stubFetch>[0]) => new HttpGitHubConsumer({ fetchImpl: stubFetch(routes) }).readWorkflowRun({ owner: "x", repo: "acme", runId: 7, token: "tkn" });
+
+  it("names the first failed step of the first failed job of a failed run, with a link to that step", async () => {
+    await expect(read({
+      [RUN]: { status: 200, body: { html_url: "https://github.com/x/acme/actions/runs/7", status: "completed", conclusion: "failure" } },
+      [`${RUN}/jobs`]: { status: 200, body: { total_count: 2, jobs: [
+        { name: "lint", conclusion: "success", html_url: "https://github.com/x/acme/actions/runs/7/job/1", steps: [{ name: "Lint", number: 2, conclusion: "success" }] },
+        { name: "release", conclusion: "failure", html_url: "https://github.com/x/acme/actions/runs/7/job/2", steps: [
+          { name: "Checkout", number: 1, conclusion: "success" },
+          { name: "Push the deploy ref", number: 5, conclusion: "failure" },
+          { name: "Post Checkout", number: 9, conclusion: "success" },
+        ] },
+      ] } },
+    })).resolves.toEqual({
+      htmlUrl: "https://github.com/x/acme/actions/runs/7", status: "completed", conclusion: "failure",
+      failedStep: { job: "release", step: "Push the deploy ref", url: "https://github.com/x/acme/actions/runs/7/job/2#step:5:1" },
+    });
+  });
+
+  it("reads no jobs of a run that succeeded or still runs", async () => {
+    await expect(read({ [RUN]: { status: 200, body: { html_url: "https://github.com/x/acme/actions/runs/7", status: "completed", conclusion: "success" } } }))
+      .resolves.toEqual({ htmlUrl: "https://github.com/x/acme/actions/runs/7", status: "completed", conclusion: "success" });
+    await expect(read({ [RUN]: { status: 200, body: { html_url: "https://github.com/x/acme/actions/runs/7", status: "in_progress", conclusion: null } } }))
+      .resolves.toEqual({ htmlUrl: "https://github.com/x/acme/actions/runs/7", status: "in_progress", conclusion: null });
+  });
+
+  it("surfaces GitHub's own message when the run cannot be read", async () => {
+    await expect(read({ [RUN]: { status: 404, body: { message: "Not Found" } } })).rejects.toThrow(/actions\/runs\/7 → 404: Not Found/);
   });
 });
