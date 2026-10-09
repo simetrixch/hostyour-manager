@@ -4,7 +4,7 @@ import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/ap
 import type { TenantStatus } from "../../../shared/enums.ts";
 import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteDialogConfirm } from "../tenantAppRows.ts";
 import { appPurgeable } from "../tenantRows.ts";
-import { setTenantMainWebsite, setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
+import { setTenantWebsiteMain, setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 import { TenantDeployWebsiteDialog } from "./TenantDeployWebsiteDialog.tsx";
@@ -151,7 +151,7 @@ export function TenantWebsites(props: {
           confirmLabel={siteConfirm.label ?? "Move to the site"}
           confirmDisabled={siteConfirm.label === null}
           onCancel={() => setResiting(null)}
-          onConfirm={() => { const w = resiting; setResiting(null); void act(() => (markMain && !w.main ? setTenantMainWebsite(tenantId, w.name) : setTenantWebsiteSite(tenantId, w.name, siteTyped, tagTyped))); }}
+          onConfirm={() => { const w = resiting; setResiting(null); void act(() => (markMain && !w.main ? setTenantWebsiteMain(tenantId, w.name) : setTenantWebsiteSite(tenantId, w.name, siteTyped, tagTyped))); }}
         >
           <label className="field">
             <span className="field__label">Site, as the bundle's apps.yaml lists it</span>

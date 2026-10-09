@@ -5,7 +5,7 @@ import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 // The Websites section and the dialog of its Deploy button, driven without a DOM: the useState slots
 // are kept by a minimal hook store, and the components are called as functions whose elements are read.
 const hooks = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
-const api = vi.hoisted(() => ({ addTenantWebsite: vi.fn(), setTenantMainWebsite: vi.fn(), setTenantWebsiteDomain: vi.fn(), setTenantWebsiteSite: vi.fn() }));
+const api = vi.hoisted(() => ({ addTenantWebsite: vi.fn(), setTenantWebsiteMain: vi.fn(), setTenantWebsiteDomain: vi.fn(), setTenantWebsiteSite: vi.fn() }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (initial: unknown) => {
@@ -168,9 +168,9 @@ describe("the Site… dialog's Hauptseite unter /", () => {
     expect(siteDialog(false).props.confirmDisabled).toBe(true);
     mainBox(siteDialog(false)).props.onChange({ target: { checked: true } });
     expect(siteDialog(false).props).toMatchObject({ confirmLabel: "Make it the main website", confirmDisabled: false });
-    api.setTenantMainWebsite.mockResolvedValue({ runId: "run_2" });
+    api.setTenantWebsiteMain.mockResolvedValue({ runId: "run_2" });
     siteDialog(false).props.onConfirm();
-    await vi.waitFor(() => expect(api.setTenantMainWebsite).toHaveBeenCalledWith("tnt_1", "simplidigita-ai"));
+    await vi.waitFor(() => expect(api.setTenantWebsiteMain).toHaveBeenCalledWith("tnt_1", "simplidigita-ai"));
     expect(api.setTenantWebsiteSite).not.toHaveBeenCalled();
   });
 
