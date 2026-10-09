@@ -30,6 +30,14 @@ describe("one-stage tenant Move", () => {
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get()).toEqual(before);
   });
 
+  it("refuses PROD onto the machine of its active TEST at plan, and lets a purged TEST stay there", async () => {
+    const def = makeTenantMigrateDef(tenantPorts(makeFakes()));
+    sibling("test", TARGET.clusterId);
+    await expect(def.plan(move, { db: db.db })).rejects.toThrow("another stage of this tenant requires a separate machine: TEST and PROD cannot share a machine");
+    db.db.update(tenants).set({ status: "purged" }).where(eq(tenants.id, "tnt_sibling")).run();
+    expect((await def.plan(move, { db: db.db })).steps).toHaveLength(16);
+  });
+
   it("keeps stored legacy runs recoverable, while refusing legacy-shaped new plans and half-specified bindings", async () => {
     const ports = tenantPorts(makeFakes()); const def = makeTenantMigrateDef(ports);
     const legacy = { tenantId: move.tenantId, targetClusterId: move.targetClusterId };

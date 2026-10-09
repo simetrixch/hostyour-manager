@@ -14,6 +14,8 @@ vi.mock("react", async (original) => ({
     return [slots[i] as S, (next: S) => { slots[i] = next; }];
   },
 }));
+const api = vi.hoisted(() => ({ listTenants: vi.fn(), listTenantTargets: vi.fn() }));
+vi.mock("../api.ts", async (original) => ({ ...(await original<typeof import("../api.ts")>()), ...api }));
 const { TenantMoveAction, TenantMoveConfirm } = await import("./TenantMoveAction.tsx");
 
 const row = (stage: TenantView["stage"]): TenantView =>
@@ -35,5 +37,25 @@ describe("the Move dialog's wiring", () => {
     const next = render();
     expect(next.type).toBe(TenantMoveConfirm);
     expect((next.props as { tenant: TenantView }).tenant.id).toBe("tnt_prod");
+  });
+});
+
+describe("the Move dialog's machine list", () => {
+  const targets = ["cls_prod", "cls_dev", "cls_free", "cls_elsewhere"].map((id) => ({ id }));
+  const listed = async (rows: TenantView[]): Promise<string[]> => {
+    slots.length = 0; slot = 0;
+    api.listTenants.mockResolvedValue(rows);
+    api.listTenantTargets.mockResolvedValue(targets);
+    const dialog = TenantMoveConfirm({ tenant: all[1]!, onCancel: () => undefined, onConfirm: () => undefined }) as ReactElement<{ loadTargets: () => Promise<{ id: string }[]> }>;
+    return (await dialog.props.loadTargets()).map((t) => t.id);
+  };
+  const other = { ...row("prod"), id: "tnt_other", guid: "other", clusterId: "cls_elsewhere" };
+
+  it("PLANTED DEFECT: leaves out the machine PROD of the same tenant stands on", async () => {
+    expect(await listed([...all, other])).toEqual(["cls_dev", "cls_free", "cls_elsewhere"]);
+  });
+
+  it("PLANTED INNOCENT: keeps the machine of a purged PROD and the machine of a DEV", async () => {
+    expect(await listed([all[1]!, { ...all[0]!, status: "purged" }, { ...row("dev"), clusterId: "cls_dev" }])).toEqual(["cls_prod", "cls_dev", "cls_free", "cls_elsewhere"]);
   });
 });

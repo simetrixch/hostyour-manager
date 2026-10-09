@@ -27,13 +27,15 @@ function render(tenant: TenantView): string {
   hooks.cursor = 0;
   return renderToStaticMarkup(createElement(TenantStageActions, { tenant }));
 }
-async function loaded(siblings: TenantView[]): Promise<string> {
+const machine = (n: number) => ({ id: `cls_${n}`, domain: `apps${n}.example`, status: "active" });
+const pageOf = (siblings: TenantView[]) => siblings.find((t) => t.stage === "prod") ?? siblings[0]!;
+async function loaded(siblings: TenantView[], machines = [machine(1)]): Promise<string> {
   api.listTenants.mockResolvedValue(siblings);
-  api.listTenantTargets.mockResolvedValue([{ id: "cls_1", domain: "apps1.example", status: "active" }]);
-  render(siblings.find((t) => t.stage === "prod")!);
+  api.listTenantTargets.mockResolvedValue(machines);
+  render(pageOf(siblings));
   for (const effect of hooks.effects.splice(0)) effect();
   await vi.waitFor(() => expect(hooks.states[7]).toBe(true));
-  return render(siblings.find((t) => t.stage === "prod")!);
+  return render(pageOf(siblings));
 }
 beforeEach(() => { hooks.states = []; hooks.cursor = 0; hooks.effects = []; search.params = new URLSearchParams(); vi.clearAllMocks(); });
 
@@ -63,5 +65,44 @@ describe("Add stage chooses its own machine and size", () => {
     for (const [id, letter] of [["xsmall", "XS"], ["small", "S"], ["medium", "M"], ["large", "L"]]) expect(html).toContain(`<option value="${id}">${letter}</option>`);
     expect(html).not.toContain("xlarge");
     expect(html).toMatch(/<button class="btn" disabled="">Validate &amp; plan Add stage<\/button>/);
+  });
+});
+
+describe("Add stage leaves out the machine its stage must stand apart from", () => {
+  const machines = [machine(1), machine(2), { ...machine(3), status: "removed" }];
+  const offered = (html: string) => [...html.matchAll(/<option value="(cls_\d)">/g)].map((m) => m[1]);
+
+  it("PLANTED DEFECT: offers TEST no machine PROD stands on, and PROD none TEST stands on", async () => {
+    search.params = new URLSearchParams("addStage=test");
+    expect(offered(await loaded([row("prod", "active")], machines))).toEqual(["cls_2"]);
+    hooks.states = [];
+    search.params = new URLSearchParams("addStage=prod");
+    expect(offered(await loaded([row("test", "active")], machines))).toEqual(["cls_2"]);
+  });
+
+  it("PLANTED INNOCENT: offers DEV every active machine, and TEST the machine of a purged PROD", async () => {
+    search.params = new URLSearchParams("addStage=dev");
+    expect(offered(await loaded([row("prod", "active")], machines))).toEqual(["cls_1", "cls_2"]);
+    hooks.states = [];
+    search.params = new URLSearchParams("addStage=test");
+    expect(offered(await loaded([row("prod", "purged"), row("dev", "active")], machines))).toEqual(["cls_1", "cls_2"]);
+  });
+
+  it("PLANTED DEFECT: a machine chosen for DEV is dropped once the stage becomes TEST and PROD stands on it", async () => {
+    search.params = new URLSearchParams("addStage=test");
+    const prod = row("prod", "active");
+    await loaded([prod], machines);
+    hooks.states[3] = "cls_1"; hooks.states[4] = "small";
+    expect(render(prod)).toContain('<option value="" disabled="" selected="">Choose a machine</option>');
+    expect(render(prod)).toMatch(/<button class="btn" disabled="">Validate/);
+  });
+
+  it("PLANTED INNOCENT: a machine chosen earlier stays chosen while the stage still allows it", async () => {
+    search.params = new URLSearchParams("addStage=test");
+    const prod = row("prod", "active");
+    await loaded([prod], machines);
+    hooks.states[3] = "cls_2"; hooks.states[4] = "small";
+    expect(render(prod)).toContain('<option value="cls_2" selected="">apps2.example</option>');
+    expect(render(prod)).toMatch(/<button class="btn">Validate/);
   });
 });

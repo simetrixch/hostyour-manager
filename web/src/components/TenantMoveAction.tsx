@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
-import { tenantStagesNeedSeparateMachines } from "../../../shared/tenant-stage-placement.ts";
+import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
 import { listTenants, listTenantTargets, type TenantView } from "../api.ts";
 import { chosenForMove, movableEnvironments, typedConfirmation } from "../tenantRows.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
@@ -56,7 +55,8 @@ export function TenantMoveConfirm({ tenant, onCancel, onConfirm }: {
     title={title} kind="move" confirmLabel="Plan stage move" currentClusterId={tenant.clusterId}
     loadTargets={async () => {
       const [all, targets] = await Promise.all([listTenants(), listTenantTargets()]);
-      return targets.filter((target) => !all.some((t) => t.guid === tenant.guid && t.id !== tenant.id && t.clusterId === target.id && tenantStagesNeedSeparateMachines(tenant.stage, t.stage) && !TENANT_SETTLED_STATUS.some((status) => status === t.status)));
+      const siblings = all.filter((t) => t.guid === tenant.guid);
+      return targets.filter((target) => !findStagePlacementConflict(siblings, tenant.stage, target.id));
     }}
     onCancel={onCancel} onConfirm={(target) => onConfirm(tenant, target)}
   >
