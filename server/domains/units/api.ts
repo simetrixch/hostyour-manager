@@ -33,7 +33,7 @@ import { scanClusterOrphanConsumers, scanDetectedConsumers } from "./consumer-de
 import { readChannelStages, CHANNEL_STAGES_PATH } from "../inventory/channel-stages.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import { CreateTenantRequest } from "./create-tenant.run.ts";
-import { AddAppRequest } from "./add-app.run.ts";
+import { AddAppRequest } from "./add-app-request.ts";
 import { TenantPurgeRequest, purgeLiveRefusal } from "./tenant-purge.run.ts";
 import { assertTenantNotLive } from "./tenant-live-guard.ts";
 import { scanOrphanTenants, resolveRunTenantState } from "./tenant-orphans.ts";

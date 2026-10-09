@@ -16,6 +16,8 @@ export interface AppendedApp {
   app: string;
   tenantId: string;
   clusterId: string;
+  /** The website that held `main` when the run was planned; the drop gives the mark back to it. */
+  previousMain: string | null;
 }
 
 /** The inverse of append-app — registered by append-app, run only on an explicit abort-with-cleanup.
@@ -24,7 +26,8 @@ export interface AppendedApp {
  *  swallowed — a real git failure now propagates and fails the cleanup step visibly, where the old
  *  bare catch reported it as a completed rollback. The new member's namespace, AppProject and
  *  admission policy are cluster state and stay (soft state, re-addable) — only tenant-purge reaps a
- *  tenant's namespaces, which is why add-app registers no project or policy delete. */
+ *  tenant's namespaces, which is why add-app registers no project or policy delete. If the app holds
+ *  `main`, the same commit gives it back to the website that held it before this run. */
 export function revertAppendCleanup(ports: TenantOnboardPorts, p: AppendedApp): Cleanup {
   return {
     name: "revert-app-append",
@@ -35,7 +38,7 @@ export function revertAppendCleanup(ports: TenantOnboardPorts, p: AppendedApp): 
         ctx.log("meta", `app "${p.app}" is not in tenant ${p.guid}'s registration — nothing to drop`);
         return;
       }
-      const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "drop", app: p.app, runId: ctx.runId });
+      const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "drop", app: p.app, mainTo: p.previousMain, runId: ctx.runId });
       ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `app "${p.app}" dropped from tenant ${p.guid} (${commit}) — ArgoCD will now prune only this member's Application`);
     },

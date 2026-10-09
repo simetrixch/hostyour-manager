@@ -261,8 +261,9 @@ export const CreateTenantRequest = z.object({
   owner: z.string().min(1),
   // Per-app seed tiers — each selected app's Reference + Demo checkboxes. Absent ⇒ both false.
   // A website is added to a standing tenant (tenant-add-app), which names it, points its hosts at
-  // the zone and waits for it; an entry that carries a folder, a site or a domain is refused here.
-  apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined), { message: "a website is added to a standing tenant with Add website, never when the tenant is created" }),
+  // the zone and waits for it; an entry that carries a folder, a site, a domain or the main mark is
+  // refused here.
+  apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined && a.main === undefined), { message: "a website is added to a standing tenant with the Deploy button of its row on the tenant's page, never when the tenant is created" }),
   // The name the tenant is shown under, "" for none: a member without its own sender domain names
   // the tenant in the From of its mail. Changed later by tenant-set-display-name.
   seedUsers: z.boolean().default(false), displayName: tenantDisplayName.default(""),

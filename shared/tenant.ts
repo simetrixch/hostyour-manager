@@ -66,11 +66,12 @@ function numberedSiteName(site: string, n: number): string {
 }
 
 /** What makes an apps[] entry a website: the folder it runs, the site it serves, the domain it is
- *  served at. */
+ *  served at. `main` marks the tenant's main website; absent means it is not. */
 export interface TenantWebsite {
   folder: string;
   site: string;
   domain: string;
+  main?: true | undefined;
 }
 
 /** The app folder an apps[] entry runs: its own `folder` (a website's), else the folder of its name. */
@@ -161,13 +162,16 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` and its aliases redirect to). It is
  *  named after its site when it is added, and numbered where that name is taken (websiteAppName), so
  *  one folder serves as many websites as there are domains. An entry without a folder runs the folder
- *  of its own name. */
+ *  of its own name. One website of a tenant may carry `main: true`: the tenant's main website. */
 export const TenantAppSchema = z
   .object({
     name: appName,
     folder: appName.optional(),
     site: siteId.optional(),
     domain: publicFqdn.optional(),
+    // The tenant's main website, served at `/` of the tenant's domain: on a website only, on one website
+    // at most (the registration holds both). Absent means false, and false is never written.
+    main: z.boolean().optional(),
     // A website's alias domains, each typed without `www.`: `<alias>` and `www.<alias>` answer with a
     // redirect to `<domain>`. A move of the website keeps the domain it leaves here.
     aliases: z.array(publicFqdn).optional(),
@@ -182,11 +186,12 @@ export const TenantAppSchema = z
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, folder, site, domain, aliases, seedReference, seedDemo, seed, databases, selections }) => ({
+  .transform(({ name, folder, site, domain, main, aliases, seedReference, seedDemo, seed, databases, selections }) => ({
     name,
     ...(folder === undefined ? {} : { folder }),
     ...(site === undefined ? {} : { site }),
     ...(domain === undefined ? {} : { domain }),
+    ...(main ? { main: true as const } : {}),
     ...(aliases?.length ? { aliases } : {}),
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
@@ -398,6 +403,18 @@ export const TenantRegistrationSchema = z
     const names = e.apps.map((a) => a.name);
     if (new Set(names).size !== names.length) {
       ctx.addIssue({ code: "custom", path: ["apps"], message: "apps[].name must be unique within a tenant" });
+    }
+    // The main website is one website: the charts read the mark off tenant.apps, so a second holder
+    // would leave them without an answer to "which website is the main one", and an app that is no
+    // website has no site to serve at the root.
+    e.apps.forEach((a, i) => {
+      if (a.main && !(a.folder && a.site && a.domain)) {
+        ctx.addIssue({ code: "custom", path: ["apps", i, "main"], message: `app "${a.name}" is marked main but is no website — a website names its folder, its site and its domain` });
+      }
+    });
+    const holders = e.apps.filter((a) => a.main).map((a) => a.name);
+    if (holders.length > 1) {
+      ctx.addIssue({ code: "custom", path: ["apps"], message: `more than one app is marked main (${holders.map((h) => `"${h}"`).join(", ")}) — a tenant has one main website` });
     }
   });
 export type TenantRegistration = z.infer<typeof TenantRegistrationSchema>;

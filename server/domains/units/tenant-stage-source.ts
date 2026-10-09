@@ -133,7 +133,7 @@ export function stageHostsStep(ports: TenantOnboardPorts, p: CreateTenantStagePa
       if (!row) throw errValidation(`tenant ${p.guid} ${p.stage} has no provisional inventory row`);
       const tc = loadTenantCluster(ctx.db, row.id);
       const apex = await ports.resolveUnitApex(p.domain, p.stage);
-      // Every host a website answers at, its www. included, as Add website writes them; a host the own
+      // Every host a website answers at, its www. included, as the Deploy button of a website writes them; a host the own
       // domain holds is written once.
       const hosts = [...new Set([p.ownDomain, ...(p.ownDomainRedirects ?? []), ...p.apps.flatMap((app) => (app.domain ? websiteHosts(app.domain) : []))].filter((host): host is string => Boolean(host)))];
       for (const host of hosts) {

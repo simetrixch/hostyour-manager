@@ -55,6 +55,25 @@ const registrationPath = (stage: Stage, guid: string): string => `${tenantDir(gu
  *  is the same for a body that failed its schema. */
 const yamlWhy = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
+type RegisteredApp = TenantRegistration["apps"][number];
+
+/** An apps[] entry that is a website, the only kind that can hold `main`. */
+const isWebsite = (a: RegisteredApp): boolean => Boolean(a.folder && a.site && a.domain);
+
+/** `apps` with `main` on `holder` alone, or on none where `holder` is null: the one place the mark is
+ *  set, so no write can leave two holders or keep a stale one. */
+const markMain = (apps: readonly RegisteredApp[], holder: string | null): RegisteredApp[] =>
+  apps.map(({ main: _held, ...a }) => (a.name === holder ? { ...a, main: true as const } : a));
+
+/** Where `main` goes when its holder leaves the tenant, `left` being the apps that stay: to `mainTo` where that website still stands
+ *  (an aborted add gives it back to the website that held it before; null leaves the tenant without), else
+ *  to the first website left in apps[] order, else to none. */
+function heirOfMain(left: readonly RegisteredApp[], mainTo: string | null | undefined): string | null {
+  if (mainTo === null) return null;
+  if (mainTo !== undefined && left.some((a) => a.name === mainTo && isWebsite(a))) return mainTo;
+  return left.find(isWebsite)?.name ?? null;
+}
+
 /** ONE tenant as the TOLERANT scan sees it: the registration fields a DISCOVERY (the orphan scan) or a
  *  REMOVAL (tenant-purge / the replace, via tenant-replace.ts) needs. `guid`/`stage` come from the PATH
  *  — the body carries neither, so the two can never disagree. */
@@ -277,11 +296,15 @@ export class TenantRegistrations {
    *  refused with a clear VALIDATION error (the guard the schema's superRefine provides at write time,
    *  raised here so the operator sees it before a commit is attempted). add-app / remove-app. The app's
    *  versions move with it in the same commit: an append fixes `approved` as its own, a drop removes
-   *  them. Returns the tenant's versions as written, for the row. */
-  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; databases?: readonly string[]; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
+   *  them. Returns the tenant's versions as written, for the row.
+   *
+   *  The tenant's main website moves in the same commit: an append of a website marked main takes the
+   *  mark from the website that held it, and a drop of the website that holds it hands it on (heirOfMain;
+   *  `mainTo` names the heir where the caller knows one). */
+  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; databases?: readonly string[]; mainTo?: string | null; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, runId } = input;
+    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, mainTo, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
     if (op === "append" && website && current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) {
@@ -296,7 +319,10 @@ export class TenantRegistrations {
     if (op === "append" && !member) throw errValidation(`add-app for "${app}" carries no member record — the ApplicationSet fans out over members[], so the app would be recorded as owned and never deployed`);
     // A later-added app carries its selections too into the registration's apps[] entry, and its
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
-    const apps = op === "append" ? [...current.entry.apps, { name: app, ...website, seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }] : current.entry.apps.filter((a) => a.name !== app);
+    const left = current.entry.apps.filter((a) => a.name !== app);
+    const appended = [...current.entry.apps, { name: app, ...(website ? { folder: website.folder, site: website.site, domain: website.domain } : {}), seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }];
+    const holdsMain = current.entry.apps.some((a) => a.name === app && a.main);
+    const apps = op === "append" ? (website?.main ? markMain(appended, app) : appended) : holdsMain ? markMain(left, heirOfMain(left, mainTo)) : left;
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
     const kept = Object.fromEntries(Object.entries(current.entry.approvedTags).filter(([m]) => m !== app));
     const approvedTags = op === "append" && Object.keys(approved).length > 0 ? { ...kept, [app]: approved } : kept;
@@ -304,6 +330,16 @@ export class TenantRegistrations {
     const sign = op === "append" ? "+" : "-";
     const { commit } = await this.write(stage, guid, { ...current.entry, apps, members, approvedTags }, `${runKind}(${guid}): ${sign}${app} ${trailer(runId)}`);
     return { commit, approvedTags };
+  }
+
+  /** Mark one website as the tenant's main website and clear the mark everywhere else (null clears it
+   *  everywhere), in one commit. Writing the marks that stand writes the same bytes, which the books
+   *  branch takes as no commit. tenant-set-website-main. */
+  async setWebsiteMain(stage: Stage, guid: string, app: string | null, runId: string): Promise<{ commit: string }> {
+    const current = await this.readTenant(stage, guid);
+    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
+    if (app !== null && !current.entry.apps.some((a) => a.name === app && isWebsite(a))) throw errValidation(`app "${app}" of tenant "${guid}" is no website`);
+    return this.write(stage, guid, { ...current.entry, apps: markMain(current.entry.apps, app) }, `main-website(${guid}): ${app ?? "none"} ${trailer(runId)}`);
   }
 
   /** Flip the tenant-wide suspended field — a FIELD flip, NOT a git-mv: the file stays at its one path,

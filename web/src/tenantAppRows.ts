@@ -58,10 +58,10 @@ export function removedWebsites<R extends TenantAppRowInput>(rows: readonly R[])
  *  inventory row that names a site, is not settled and is not among them, by name and site. That is
  *  every row while the catalog has not answered (still loading, unreadable or degraded). The Apps list
  *  leaves every row with a site out, so a live website missing here would vanish from the page. */
-export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null; aliases: string[] }[] {
-  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, domain: w.domain as string | null, aliases: w.aliases ?? [] }));
+export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null; aliases: string[]; main: boolean }[] {
+  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, domain: w.domain as string | null, aliases: w.aliases ?? [], main: w.main === true }));
   const unnamed = websiteRows(rows).filter((r) => !SETTLED.includes(r.status) && !named.some((w) => w.name === r.name));
-  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null, aliases: [] }))];
+  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null, aliases: [], main: false }))];
 }
 
 /** The alias domains as an operator types them into one field: separated by commas or spaces. */
@@ -99,9 +99,6 @@ export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "mem
   return websiteAppName(site, new Set([...(catalog.members ?? []), ...catalog.apps.map((a) => a.name)]));
 }
 
-/** What the confirm of a website's domain dialog does, as its label: move the website, change its
- *  aliases, or, with the domain and aliases as they stand, write the host records it misses. The
- *  server refuses the last where no record is missing. Null where no domain is typed. */
 /** The confirm label of a website's move to another site on the bundle release `appsImageTag`, or
  *  null where nothing would move: no site typed, the site it serves, or no release named. */
 export function websiteSiteConfirm(standing: string, next: string, appsImageTag: string): string | null {
@@ -109,6 +106,18 @@ export function websiteSiteConfirm(standing: string, next: string, appsImageTag:
   return `Serve site ${next} on ${appsImageTag}`;
 }
 
+/** What the confirm of a website's Site… dialog does. Ticked "Hauptseite unter /" on a website that is
+ *  not the main one, with no site and no release typed, it makes the website the main one; with either
+ *  typed it is two changes, and each is a run of its own, so it confirms neither and says why. */
+export function websiteSiteDialogConfirm(standing: { site: string; main: boolean }, next: string, appsImageTag: string, markMain: boolean): { label: string | null; why: string | null } {
+  if (!markMain || standing.main) return { label: websiteSiteConfirm(standing.site, next, appsImageTag), why: null };
+  if (next || appsImageTag) return { label: null, why: "The main mark and a site move are two runs: leave the site and the release empty to mark the website, or untick the mark to move the site." };
+  return { label: "Make it the main website", why: null };
+}
+
+/** What the confirm of a website's domain dialog does, as its label: move the website, change its
+ *  aliases, or, with the domain and aliases as they stand, write the host records it misses. The
+ *  server refuses the last where no record is missing. Null where no domain is typed. */
 export function websiteDomainConfirm(standing: { domain: string; aliases: readonly string[] }, next: string, aliases: readonly string[]): string | null {
   if (!next) return null;
   if (next !== standing.domain) return `Serve at ${next}`;

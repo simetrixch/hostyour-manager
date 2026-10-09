@@ -34,7 +34,7 @@ import { recordBuildOnlyStep } from "#unit/server/build-registration.ts";
 import { refreshRepoPatStep } from "#unit/server/seed-repo-pat.ts";
 import { mergeAppsManifest, missingBundleFolders, readTemplateTree, tenantAppsManifest, tenantAppsRepoURL, tenantAppsUnit, type ServedSites, type TreeFile } from "./tenant-apps-tree.ts";
 import type { RepoFileWrite } from "../../adapters/git/port.ts";
-import { ADD_APP_FORM, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
+import { DEPLOY_BUTTON, npmrcPackageScopes, packagesReaderMissing, type OwnerIdentityReader } from "#unit/server/repo-identity.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { probeAppsRepository } from "./tenant-probes.ts";
 
@@ -159,7 +159,7 @@ export async function resolveTenantAppsUnit(
     // The bundle's build installs what the template's .npmrc routes to GitHub Packages with the
     // owner's packages reader (#220, #221) — asked here, before anything is created.
     const scopes = npmrcPackageScopes(read.npmrc);
-    if (scopes.length > 0 && !input.owners(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, ADD_APP_FORM));
+    if (scopes.length > 0 && !input.owners(org)?.packagesCredentialId) return refuse(packagesReaderMissing(org, unit, scopes, DEPLOY_BUTTON));
     unfolded = await read.missing(input.chosen.filter((a) => offered.includes(a)), input.sites ?? {});
     if (!read.manifest.builds.some((b) => b.name === template.name)) return refuse(`${template.repo} declares no build named ${template.name} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
   } finally {

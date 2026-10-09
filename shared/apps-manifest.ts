@@ -98,13 +98,15 @@ export interface TenantCatalogAppView extends AppEntry {
   deployed: boolean;
 }
 
-/** One website of a tenant: its app name, the site it serves, the domain it is served at, and the
- *  alias domains that redirect there (absent where there is none). */
+/** One website of a tenant: its app name, the site it serves, the domain it is served at, the
+ *  alias domains that redirect there (absent where there is none), and `main` where it is the tenant's
+ *  main website (absent otherwise). */
 export interface TenantWebsiteView {
   name: string;
   site: string;
   domain: string;
   aliases?: string[];
+  main?: boolean;
 }
 
 /** GET /api/tenants/:id/app-catalog — a READ, and it degrades the way the orphan scan does: `apps`
