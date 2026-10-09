@@ -3,7 +3,7 @@
 // restore writes a generation's claim into a target rendered at replicas 0, where the StatefulSet has
 // made none. Split from kube.ts along the 400-line budget, the way kube-namespace.ts is; these take the
 // caller's own clients, so a slave's bearer and the master's ServiceAccount reach them as before.
-import type { AppsV1Api, CoreV1Api, V1PersistentVolumeClaim, V1StatefulSet } from "@kubernetes/client-node";
+import type { AppsV1Api, CoreV1Api, CustomObjectsApi, V1PersistentVolumeClaim, V1StatefulSet } from "@kubernetes/client-node";
 import { isOrdinalClaim } from "./port.ts";
 import { upstream } from "./kube.ts";
 
@@ -15,6 +15,20 @@ export async function listPersistentVolumeClaims(core: CoreV1Api, namespace: str
     return res.items.map((p) => p.metadata?.name).filter((n): n is string => typeof n === "string");
   } catch (e) {
     throw upstream(`list PersistentVolumeClaims in ${namespace}`, e);
+  }
+}
+
+const SERVICE_CLAIMS = { group: "platform.hostyour.cloud", version: "v1alpha1", plural: "serviceclaims" } as const;
+
+/** Every ServiceClaim name in the namespace. A 404 is an error here, not "none": the CRD is served on
+ *  every cluster that runs the service-provisioner, and a namespace delete that read a missing kind as
+ *  an empty one would drop the databases of a claim it never saw. NEEDS a live cluster. */
+export async function listServiceClaims(custom: CustomObjectsApi, namespace: string): Promise<string[]> {
+  try {
+    const raw = (await custom.listNamespacedCustomObject({ ...SERVICE_CLAIMS, namespace })) as { items?: { metadata?: { name?: unknown } }[] };
+    return (raw.items ?? []).map((c) => c.metadata?.name).filter((n): n is string => typeof n === "string");
+  } catch (e) {
+    throw upstream(`list ServiceClaims in ${namespace}`, e);
   }
 }
 

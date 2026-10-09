@@ -338,6 +338,11 @@ export interface ClusterReader {
   /** Every PersistentVolumeClaim name in `namespace` — what the consumer dump mounts for the tar
    *  (PVC names are chart-chosen, so only the cluster can answer which exist). */
   listPersistentVolumeClaims(namespace: string): Promise<string[]>;
+  /** Every ServiceClaim name in `namespace`. The service-provisioner drops a claim's databases when
+   *  the claim goes, and a namespace delete takes its claims with it, so a caller about to delete a
+   *  namespace reads this first. A cluster that cannot answer is an error and never an empty list:
+   *  an unseen claim would lose its databases. */
+  listServiceClaims(namespace: string): Promise<string[]>;
   /** One row per workload container in `namespace` that mounts a claim and states the user it runs
    *  as, read off the pod templates so a workload scaled to zero still answers. A claim no such
    *  container mounts has no row. */

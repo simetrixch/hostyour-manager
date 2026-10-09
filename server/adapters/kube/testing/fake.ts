@@ -178,6 +178,8 @@ export class FakeClusterReader implements ClusterReader {
       jobResults?: Record<string, JobResult>;
       /** The PVC names of a namespace — what listPersistentVolumeClaims answers; unlisted reads []. */
       pvcsByNamespace?: Record<string, readonly string[]>;
+      /** The ServiceClaim names of a namespace — what listServiceClaims answers; unlisted reads []. */
+      serviceClaimsByNamespace?: Record<string, readonly string[]>;
       /** Who mounts which claim in a namespace — what listClaimUsers answers; unlisted reads []. */
       claimUsersByNamespace?: Record<string, readonly ClaimUser[]>;
       /** The ExternalSecrets a namespace holds — what listExternalSecrets answers; unlisted reads [],
@@ -412,6 +414,11 @@ export class FakeClusterReader implements ClusterReader {
   /** The PVC names scripted for this namespace, else [] (a namespace holding none). */
   async listPersistentVolumeClaims(namespace: string): Promise<string[]> {
     return [...(this.scripted.pvcsByNamespace?.[namespace] ?? [])];
+  }
+
+  /** The ServiceClaim names scripted for this namespace, else [] (a namespace holding none). */
+  async listServiceClaims(namespace: string): Promise<string[]> {
+    return [...(this.scripted.serviceClaimsByNamespace?.[namespace] ?? [])];
   }
 
   /** The claim users scripted for this namespace, else [] (no running pod mounts a claim). */

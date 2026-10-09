@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import type { AppsV1Api, CoreV1Api, V1PersistentVolumeClaim, V1StatefulSet } from "@kubernetes/client-node";
-import { createStatefulSetClaim, statefulSetClaimOf } from "./kube-claims.ts";
+import type { AppsV1Api, CoreV1Api, CustomObjectsApi, V1PersistentVolumeClaim, V1StatefulSet } from "@kubernetes/client-node";
+import { createStatefulSetClaim, listServiceClaims, statefulSetClaimOf } from "./kube-claims.ts";
 
 // The claim the Manager makes in place of a StatefulSet at replicas 0 must be the one the StatefulSet
 // would make, or it does not adopt it when it scales up: the name, the template's spec, and labels
@@ -52,5 +52,27 @@ describe("createStatefulSetClaim", () => {
     const { created, api } = clients([mta]);
     expect(await createStatefulSetClaim(api, "acme-prod", "cache-0")).toBe(false);
     expect(created).toEqual([]);
+  });
+});
+
+describe("listServiceClaims", () => {
+  const custom = (list: (request: Record<string, unknown>) => Promise<unknown>) => ({ listNamespacedCustomObject: list }) as unknown as CustomObjectsApi;
+
+  it("lists the names of the ServiceClaims of the namespace, from the platform group's served version", async () => {
+    const asked: Record<string, unknown>[] = [];
+    const api = custom(async (request) => { asked.push(request); return { items: [{ metadata: { name: "web-mongo" } }, { metadata: { name: "web-redis" } }, { metadata: {} }] }; });
+    expect(await listServiceClaims(api, "acme-web-prod")).toEqual(["web-mongo", "web-redis"]);
+    expect(asked).toEqual([{ group: "platform.hostyour.cloud", version: "v1alpha1", plural: "serviceclaims", namespace: "acme-web-prod" }]);
+  });
+
+  it("PLANTED INNOCENT: answers [] for a namespace that holds none", async () => {
+    expect(await listServiceClaims(custom(async () => ({ items: [] })), "acme-web-prod")).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: fails on a 404 and on a refusal instead of answering [], since a claim it never saw would lose its databases with the namespace", async () => {
+    for (const code of [404, 403]) {
+      const api = custom(async () => { throw Object.assign(new Error(`HTTP ${code}`), { code }); });
+      await expect(listServiceClaims(api, "acme-web-prod")).rejects.toThrow(`kube: list ServiceClaims in acme-web-prod failed: HTTP ${code}`);
+    }
   });
 });

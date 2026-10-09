@@ -21,8 +21,9 @@ import type { TenantStatus } from "../../../shared/enums.ts";
 // tenant-purge-app: an app that tenant-remove-app took off a standing tenant leaves its record, its
 // AppProject, its admission policy and its Vault keys behind on purpose. The purge deletes exactly
 // those of that one app, each named in the plan, and then the record; nothing of another app or
-// another tenant. It refuses an app that is still deployed, an app that is not offboarded, and a
-// tenant that is not standing.
+// another tenant. It deletes the app's member namespace where one stands empty, since remove-app has
+// already dropped its databases. It refuses an app that is still deployed (a workload or a ServiceClaim
+// in its namespace, or its Application), an app that is not offboarded, and a tenant that is not standing.
 
 const GUID = "zsjs023ctne0";
 const OTHER_GUID = "a1b2c3d4e5f6";
@@ -53,12 +54,16 @@ const project = (guid: string, member: string) => renderTenantAppProject({
 });
 
 /** The cluster, master and Vault as a remove-app leaves them: `web`'s namespace and Application gone,
- *  its AppProject, admission policy and Vault keys kept, unless a test says otherwise. A sibling app
- *  and the other tenant's `web` keep their own pieces throughout. */
-async function world(left: { namespace?: boolean; application?: boolean; project?: boolean; policy?: boolean; vaultKeys?: string[]; registered?: boolean } = {}) {
+ *  its AppProject, admission policy and Vault keys kept, unless a test says otherwise. A namespace that
+ *  stands is empty unless `workloads` or `serviceClaims` put something in it. A sibling app and the other
+ *  tenant's `web` keep their own pieces throughout. */
+async function world(left: { namespace?: boolean; workloads?: string[]; serviceClaims?: string[]; application?: boolean; project?: boolean; policy?: boolean; vaultKeys?: string[]; registered?: boolean } = {}) {
+  const ns = memberNamespace(GUID, "web", "prod");
   const cluster = new FakeClusterReader({
     deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 },
-    absentNamespaces: left.namespace ? [] : [memberNamespace(GUID, "web", "prod")],
+    absentNamespaces: left.namespace || left.workloads || left.serviceClaims ? [] : [ns],
+    smokeByNamespace: { [ns]: { namespaceExists: true, externalSecretsReady: true, workloads: (left.workloads ?? []).map((name) => ({ kind: "Deployment", name, available: false, desired: 0, ready: 0 })) } },
+    serviceClaimsByNamespace: { [ns]: left.serviceClaims ?? [] },
   });
   const policies = [tenantMemberAdmissionPolicyName(GUID, "erp", "prod"), tenantMemberAdmissionPolicyName(OTHER_GUID, "web", "prod")];
   if (left.policy ?? true) policies.push(tenantMemberAdmissionPolicyName(GUID, "web", "prod"));
@@ -151,7 +156,7 @@ describe("tenant-purge-app run", () => {
     db.db.insert(servers).values({ id: "srv_2", name: "m2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
     const { ports } = await world({ project: false, policy: false });
-    const former = new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 }, absentNamespaces: [memberNamespace(GUID, "web", "prod")] });
+    const former = new FakeClusterReader({ deployState: { domain: "s2.example", stage: "prod", writtenAt: "x", generation: 1 } });
     former.admissionPolicies.set(tenantMemberAdmissionPolicyName(GUID, "web", "prod"), {} as never);
     const formerProjects = new FakeMasterProjectWriter();
     await formerProjects.applyAppProject("s2", project(GUID, "web"));
@@ -160,9 +165,11 @@ describe("tenant-purge-app run", () => {
     const plan = await def.plan(PARAMS, { db: db.db });
     expect(plan.summary).toContain(`AppProject ${memberAppProject(GUID, "web", "prod")} on s2.example`);
     expect(plan.summary).toContain(`admission policy ${tenantMemberAdmissionPolicyName(GUID, "web", "prod")} with its binding on s2.example`);
+    expect(plan.summary).toContain(`namespace ${memberNamespace(GUID, "web", "prod")} on s2.example`);
     await runAll(def);
     expect(formerProjects.get("s2", memberAppProject(GUID, "web", "prod"))).toBeUndefined();
     expect(former.deletedAdmissionPolicies).toEqual([tenantMemberAdmissionPolicyName(GUID, "web", "prod")]);
+    expect(former.deletedNamespaces).toEqual([memberNamespace(GUID, "web", "prod")]);
     expect(appRow("tnt_1", "web")).toBeUndefined();
   });
 
@@ -185,7 +192,7 @@ describe("tenant-purge-app run", () => {
     (ports.resolver as FakeClusterKubeResolver).set("cls_2", { clusterReader: unreachable, argoReader: new FakeMasterArgoReader({}), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "s2" });
     const def = makePurgeAppDef(ports);
     const plan = await def.plan(PARAMS, { db: db.db });
-    expect(plan.summary).toContain("not read: s2.example — connect ECONNREFUSED; its AppProject and policy, if any, stay");
+    expect(plan.summary).toContain("not read: s2.example — connect ECONNREFUSED; its AppProject, policy and namespace, if any, stay");
     const logs: string[] = [];
     await runAll(def, logs);
     expect(logs.join("\n")).toContain("not read: s2.example — connect ECONNREFUSED");
@@ -209,14 +216,77 @@ describe("tenant-purge-app run", () => {
     expect(appRow("tnt_1", "web")).toBeUndefined();
   });
 
-  it("PLANTED DEFECT: refuses an app that is still deployed, naming its namespace and Application, and deletes nothing", async () => {
+  it("PLANTED DEFECT: deletes the empty member namespace that remove-app left, named in the plan, after the AppProject and policy and before the record", async () => {
     seedTenants();
-    const { ports, projects } = await world({ namespace: true, application: true });
-    const plan = makePurgeAppDef(ports).plan(PARAMS, { db: db.db } as never);
-    const message = await plan.catch((e: Error) => e.message);
-    expect(message).toContain(`namespace ${memberNamespace(GUID, "web", "prod")}`);
+    const ns = memberNamespace(GUID, "web", "prod");
+    const { ports, cluster, projects } = await world({ namespace: true });
+    const def = makePurgeAppDef(ports);
+    const plan = await def.plan(PARAMS, { db: db.db } as never);
+    expect(plan.summary).toContain(`namespace ${ns}`);
+    expect(plan.steps.find((s) => s.name === "delete-app-objects")?.title).toContain("namespace");
+    const atDelete: { project: boolean; policy: boolean; record: boolean }[] = [];
+    const deleteNamespace = cluster.deleteNamespace.bind(cluster);
+    cluster.deleteNamespace = async (name) => {
+      atDelete.push({
+        project: projects.get("argocd", memberAppProject(GUID, "web", "prod")) !== undefined,
+        policy: cluster.admissionPolicies.has(tenantMemberAdmissionPolicyName(GUID, "web", "prod")),
+        record: appRow("tnt_1", "web") !== undefined,
+      });
+      return deleteNamespace(name);
+    };
+    const logs: string[] = [];
+    await runAll(def, logs);
+    expect(cluster.deletedNamespaces).toEqual([ns]);
+    expect(atDelete).toEqual([{ project: false, policy: false, record: true }]);
+    expect(logs.join("\n")).toContain(`empty namespace ${ns}`);
+    expect(appRow("tnt_1", "web")).toBeUndefined();
+  });
+
+  it("PLANTED DEFECT: refuses an app whose namespace still holds a workload of any replica count, naming it, and deletes nothing", async () => {
+    seedTenants();
+    const ns = memberNamespace(GUID, "web", "prod");
+    const { ports, cluster, projects, vaultDeletes } = await world({ workloads: ["web", "worker"] });
+    const def = makePurgeAppDef(ports);
+    await expect(def.plan(PARAMS, { db: db.db } as never)).rejects.toThrow(`namespace ${ns} holds workload(s) web, worker — remove the app first`);
+    await expect(runAll(def)).rejects.toThrow("holds workload(s) web, worker");
+    expect(cluster.deletedNamespaces).toEqual([]);
+    expect(appRow("tnt_1", "web")).toBeDefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
+    expect(vaultDeletes).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: refuses an app whose namespace still holds a ServiceClaim, naming it, and deletes nothing", async () => {
+    seedTenants();
+    const ns = memberNamespace(GUID, "web", "prod");
+    const { ports, cluster, projects, vaultDeletes } = await world({ serviceClaims: ["web-mongo"] });
+    const def = makePurgeAppDef(ports);
+    await expect(def.plan(PARAMS, { db: db.db } as never)).rejects.toThrow(`namespace ${ns} holds ServiceClaim(s) web-mongo — remove the app first`);
+    await expect(runAll(def)).rejects.toThrow("holds ServiceClaim(s) web-mongo");
+    expect(cluster.deletedNamespaces).toEqual([]);
+    expect(appRow("tnt_1", "web")).toBeDefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
+    expect(vaultDeletes).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: refuses an app that is still deployed, naming its workload and Application, and deletes nothing", async () => {
+    seedTenants();
+    const { ports, cluster, projects } = await world({ workloads: ["web"], application: true });
+    const message = await makePurgeAppDef(ports).plan(PARAMS, { db: db.db } as never).catch((e: Error) => e.message);
+    expect(message).toContain(`namespace ${memberNamespace(GUID, "web", "prod")} holds workload(s) web`);
     expect(message).toContain(`ArgoCD Application ${memberApplication(GUID, "web", "prod")}`);
     expect(message).toContain("remove the app first");
+    expect(cluster.deletedNamespaces).toEqual([]);
+    expect(appRow("tnt_1", "web")).toBeDefined();
+    expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
+  });
+
+  it("PLANTED DEFECT: refuses an app whose Application stands though its namespace is empty, and deletes nothing", async () => {
+    seedTenants();
+    const { ports, cluster, projects } = await world({ namespace: true, application: true });
+    const message = await makePurgeAppDef(ports).plan(PARAMS, { db: db.db } as never).catch((e: Error) => e.message);
+    expect(message).toContain(`ArgoCD Application ${memberApplication(GUID, "web", "prod")}`);
+    expect(message).not.toContain("holds");
+    expect(cluster.deletedNamespaces).toEqual([]);
     expect(appRow("tnt_1", "web")).toBeDefined();
     expect(projects.get("argocd", memberAppProject(GUID, "web", "prod"))).toBeDefined();
   });

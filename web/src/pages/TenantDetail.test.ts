@@ -55,7 +55,12 @@ async function loaded(status: TenantDetailView["status"]): Promise<ReactElement>
   await vi.waitFor(() => expect(find(render(), TenantAppList)).toBeDefined());
   return render();
 }
-const dialog = () => find<{ title: string; onConfirm: () => void }>(render(), ConfirmDialog);
+const dialog = () => find<{ title: string; children: ReactNode; onConfirm: () => void }>(render(), ConfirmDialog);
+const textOf = (node: ReactNode): string => {
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  return node && typeof node === "object" && "props" in node ? textOf((node as ReactElement<{ children?: ReactNode }>).props.children) : "";
+};
 
 beforeEach(() => {
   hooks.states = [];
@@ -85,6 +90,14 @@ describe("Purge on the tenant page", () => {
     expect(dialog()?.props.title).toBe(tenantConfirmTitle.purgeApp(tenant("active"), "erp"));
     dialog()!.props.onConfirm();
     await vi.waitFor(() => expect(api.planRun).toHaveBeenCalledWith("tenant-purge-app", { tenantId: "tnt_1", app: "erp" }));
+  });
+
+  it("says in the confirmation that the purge deletes the app's empty member namespace, and still refuses while the app is deployed", async () => {
+    const page = await loaded("active");
+    find<{ onPurge: (app: string) => void }>(page, TenantAppList)!.props.onPurge("erp");
+    const text = textOf(dialog()?.props.children);
+    expect(text).toContain("its member namespace where it stands empty");
+    expect(text).toContain("It refuses while the app is still deployed.");
   });
 
   it("offers neither list a Purge on a tenant that is settled or unfinished: only a standing tenant is edited", async () => {
