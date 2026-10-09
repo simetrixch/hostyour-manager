@@ -3,7 +3,8 @@
 // version of every build its members render (tenant.approvedTags, #283), so a release moves no build a
 // tenant holds. Two writers set those versions: create-tenant and add-app (the newest available when the
 // member is created), and the tenant's Versions run (the version chosen per part). A build a member's
-// chart gains later renders the stage pin until that run fixes it.
+// chart gains later renders the stage pin until that run fixes it, and a build the pin files stop naming
+// leaves the tenant's versions when that run writes them.
 //
 // A PART is the set of builds one unit releases together (its build registration), so one release tag
 // names every image of it and a choice moves them all: a tenant never runs the engine of one release
@@ -133,15 +134,36 @@ export async function readTenantVersions(
 /** The stage pin of every build the members' charts pin, per member: `<member> -> <build> -> <tag>`.
  *  A pin that names no released image (a chart's placeholder before its first release) is left out. */
 export async function stagePinsOf(pinned: (chart: string) => Promise<{ name: string; tag: string }[]>, members: readonly TenantMemberRecord[]): Promise<Approvals> {
-  const pins: Approvals = {};
+  return (await stagePinsAndNamesOf(pinned, members)).tags;
+}
+
+/** The stage pins of the members' charts: `tags` as stagePinsOf answers, and `named`, per member, every
+ *  build its pin files name at any tag, a placeholder included, so "not released yet" and "no longer
+ *  built" stay apart. A member is absent from `named` where one of its charts has no pin file or a file
+ *  that names no build: what it holds cannot be judged against the pins then, and an empty read never
+ *  empties a tenant. */
+export interface StagePins {
+  tags: Approvals;
+  named: Readonly<Record<string, ReadonlySet<string>>>;
+}
+
+export async function stagePinsAndNamesOf(pinned: (chart: string) => Promise<{ name: string; tag: string }[]>, members: readonly TenantMemberRecord[]): Promise<StagePins> {
+  const tags: Approvals = {};
+  const named: Record<string, ReadonlySet<string>> = {};
   for (const m of members) {
+    const names = new Set<string>();
+    let everyChartPinned = m.sources.length > 0;
     for (const source of m.sources) {
-      for (const pin of await pinned(source.chart)) {
-        if (approvedImageTag.safeParse(pin.tag).success) (pins[m.name] ??= {})[pin.name] = pin.tag;
+      const pins = await pinned(source.chart);
+      if (pins.length === 0) everyChartPinned = false;
+      for (const pin of pins) {
+        names.add(pin.name);
+        if (approvedImageTag.safeParse(pin.tag).success) (tags[m.name] ??= {})[pin.name] = pin.tag;
       }
     }
+    if (everyChartPinned) named[m.name] = names;
   }
-  return pins;
+  return { tags, named };
 }
 
 /** `current` with every build of `pins` it does not hold yet added at the pin; what it holds stays. */
@@ -169,14 +191,20 @@ export async function addedMemberVersions(ports: TenantOnboardPorts, stage: Stag
   return approved;
 }
 
-/** `current` with every build of `pins` it does not hold yet added at the pin, and every build `chosen`
- *  names (build -> tag) moved onto its chosen version; any other build keeps what it holds. */
-export function withChosenVersions(current: Approvals, pins: Approvals, chosen: Readonly<Record<string, string>>): Approvals {
-  const next = withMissingPins(current, pins);
-  for (const [member, builds] of Object.entries(pins)) {
+/** `current` with every build of `pins` it does not hold yet added at the pin, every build `chosen`
+ *  names (build -> tag) moved onto its chosen version, and every build the member's pin files no longer
+ *  name dropped; any other build keeps what it holds. */
+export function withChosenVersions(current: Approvals, pins: StagePins, chosen: Readonly<Record<string, string>>): Approvals {
+  const next = withMissingPins(current, pins.tags);
+  for (const [member, builds] of Object.entries(pins.tags)) {
     for (const build of Object.keys(builds)) {
       const tag = chosen[build];
       if (tag !== undefined) next[member]![build] = tag;
+    }
+  }
+  for (const [member, names] of Object.entries(pins.named)) {
+    for (const build of Object.keys(next[member] ?? {})) {
+      if (!names.has(build)) delete next[member]![build];
     }
   }
   return next;
@@ -234,7 +262,7 @@ export function writeVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsPa
       ctx.registerCleanup(restoreVersionsCleanup(ports, p));
       const read = await ports.registrations.readTenant(p.stage, p.guid);
       if (!read) throw errValidation(`tenant ${p.guid} is not onboarded (no registration at ${p.stage})`);
-      const approved = withChosenVersions(read.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members), p.chosenVersions);
+      const approved = withChosenVersions(read.entry.approvedTags, await stagePinsAndNamesOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members), p.chosenVersions);
       throwEngineLineRefusal(await bundleReleaseRefusal(ports, read.entry, read.entry.approvedTags, approved, stepLog(ctx)), `tenant ${p.guid} cannot run these versions`);
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, approved, ctx.runId);
       ctx.db.update(tenants).set({ approvedTags: approved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();

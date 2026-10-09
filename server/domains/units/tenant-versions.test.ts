@@ -6,7 +6,7 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
-import { readTenantVersions, sameApprovals, stagePinsOf, withChosenVersions, withMissingPins, type Approvals } from "./tenant-versions.ts";
+import { readTenantVersions, sameApprovals, stagePinsAndNamesOf, stagePinsOf, withChosenVersions, withMissingPins, type Approvals, type StagePins } from "./tenant-versions.ts";
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -24,6 +24,9 @@ const BETA = "0.1.12-beta-20260924120000-7654321";
 
 const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
+
+/** The stage pins of members whose pin files name `named`; a named build absent from `tags` stands at its placeholder. */
+const stagePinsNaming = (tags: Approvals, named: Record<string, string[]>): StagePins => ({ tags, named: Object.fromEntries(Object.entries(named).map(([m, names]) => [m, new Set(names)])) });
 
 /** One tenant at prod holding `approvedTags`, and the stage pins of two of its charts: by default the
  *  engine's second build still carries its placeholder, which names no released image. `enginePins` is
@@ -67,13 +70,66 @@ describe("tenant versions", () => {
 
   it("a choice moves every build it names, a build the tenant lacks starts at its pin, and any other keeps what it holds", () => {
     const current = { erp: { "example-engine": NEW, "example-kept": OLD } };
-    expect(withChosenVersions(current, { erp: { "example-engine": NEW }, auth: { "example-auth": NEW } }, { "example-engine": OLD }))
+    const pins = stagePinsNaming({ erp: { "example-engine": NEW }, auth: { "example-auth": NEW } }, { erp: ["example-engine", "example-kept"], auth: ["example-auth"] });
+    expect(withChosenVersions(current, pins, { "example-engine": OLD }))
       .toEqual({ erp: { "example-engine": OLD, "example-kept": OLD }, auth: { "example-auth": NEW } });
     expect(current.erp["example-engine"]).toBe(NEW);
   });
 
   it("a build no choice names keeps what it holds when its stage pin moved on: a release makes a version available and moves no tenant", () => {
-    expect(withChosenVersions({ erp: { "example-engine": OLD } }, { erp: { "example-engine": NEW } }, {})).toEqual({ erp: { "example-engine": OLD } });
+    expect(withChosenVersions({ erp: { "example-engine": OLD } }, stagePinsNaming({ erp: { "example-engine": NEW } }, { erp: ["example-engine"] }), {})).toEqual({ erp: { "example-engine": OLD } });
+  });
+
+  describe("a held build the pin files of its member stop naming", () => {
+    const jobs = testMembers().filter((m) => m.name === "jobs");
+    /** The pin files by chart, as listPinnedBuilds answers them; a chart without one answers []. */
+    const filesOf = (files: Record<string, { name: string; tag: string }[]>) => async (chart: string) => files[chart] ?? [];
+    const held = { jobs: { "example-jobs": OLD, "example-jobs-frontend": OLDEST } };
+
+    it("leaves the versions with the next write, and the build still named stays where it is", async () => {
+      const pins = await stagePinsAndNamesOf(filesOf({ "charts/example-jobs": [{ name: "example-jobs", tag: NEW }] }), jobs);
+      expect(withChosenVersions(held, pins, {})).toEqual({ jobs: { "example-jobs": OLD } });
+      expect(held.jobs["example-jobs-frontend"]).toBe(OLDEST);
+    });
+
+    it("stays when a pin file still names it at its placeholder, which stagePinsOf leaves out", async () => {
+      const files = filesOf({ "charts/example-jobs": [{ name: "example-jobs", tag: NEW }, { name: "example-jobs-frontend", tag: "0.0.0-placeholder" }] });
+      expect(await stagePinsOf(files, jobs)).toEqual({ jobs: { "example-jobs": NEW } });
+      expect(withChosenVersions(held, await stagePinsAndNamesOf(files, jobs), {})).toEqual(held);
+    });
+
+    it("stays where the member's chart has no pin file, as listPinnedBuilds answers a missing file", async () => {
+      const registrations = books({});
+      expect(await registrations.listPinnedBuilds("prod", "charts/example-jobs")).toEqual([]);
+      const pins = await stagePinsAndNamesOf((chart) => registrations.listPinnedBuilds("prod", chart), jobs);
+      expect(withChosenVersions(held, pins, {})).toEqual(held);
+    });
+
+    it("stays where one of the member's charts has no pin file, since the build may belong to that chart", async () => {
+      const web = testMembers(["web"]).filter((m) => m.name === "web");
+      const heldWeb = { web: { "example-engine": OLD, "example-web": OLDEST } };
+      const pins = await stagePinsAndNamesOf(filesOf({ "charts/example-engine": [{ name: "example-engine", tag: NEW }] }), web);
+      expect(withChosenVersions(heldWeb, pins, {})).toEqual(heldWeb);
+    });
+
+    it("is judged against every chart of its member: one the other chart names stays, one no chart names goes", async () => {
+      const web = testMembers(["web"]).filter((m) => m.name === "web");
+      const heldWeb = { web: { "example-engine": OLD, "example-web": OLDEST, "example-gone": OLDEST } };
+      const pins = await stagePinsAndNamesOf(filesOf({
+        "charts/example-engine": [{ name: "example-engine", tag: NEW }],
+        "charts/example-web": [{ name: "example-web", tag: NEW }],
+      }), web);
+      expect(withChosenVersions(heldWeb, pins, {})).toEqual({ web: { "example-engine": OLD, "example-web": OLDEST } });
+    });
+
+    it("stays where the pin file names no build, since an empty read never empties a tenant", async () => {
+      const pins = await stagePinsAndNamesOf(filesOf({ "charts/example-jobs": [] }), jobs);
+      expect(withChosenVersions(held, pins, {})).toEqual(held);
+    });
+
+    it("fails where a pin file cannot be read, as before", async () => {
+      await expect(stagePinsAndNamesOf(async () => { throw new Error("books branch unreadable"); }, jobs)).rejects.toThrow("books branch unreadable");
+    });
   });
 
   it("offers per part the versions a stage pin named that every image of it stands at in the registry, newest first, one put back on the stage included, and none on a channel the stage does not take", async () => {

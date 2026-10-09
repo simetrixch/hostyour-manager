@@ -26,7 +26,7 @@ import { isDeepStrictEqual } from "node:util";
 import { bundleReleaseRefusal, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import { standingAppDatabases } from "./tenant-app-databases.ts";
 import {
-  restoreVersionsCleanup, sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
+  restoreVersionsCleanup, sameApprovals, stagePinsAndNamesOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
   type Approvals, type TenantVersionPart,
 } from "./tenant-versions.ts";
 
@@ -407,7 +407,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         }
       }
       // A build the tenant does not hold yet starts at its stage pin; write-versions reads the pins again when it runs.
-      const approved = withChosenVersions(current.entry.approvedTags, await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
+      const approved = withChosenVersions(current.entry.approvedTags, await stagePinsAndNamesOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
       // The engines this run puts the tenant on have to fit the bundle it runs, read off the tenant's
       // own repository at the release the bundle was built from where a version moves a line
       // (engine-line.ts); write-versions judges again with the pins as they stand then.

@@ -152,6 +152,21 @@ describe("tenant-refresh-members", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": OLD } });
   });
 
+  it("drops from the tenant's versions a build its members' pin files no longer name when the Versions run writes them", async () => {
+    seedTenant();
+    const resolved = await planned(ports(staleMembers()));
+    // The ui chart of erp is not released yet, so its pin file names its build at the placeholder: that build is named, and example-gone is not.
+    const prt = ports(resolved.members, { files: { ...RELEASED, "charts/example-ui/pins-prod.yaml": 'builds:\n  - { name: example-ui, image: example-ui, tag: "" }\n' } });
+    const current = await prt.registrations.readTenant("prod", GUID);
+    const gone = { erp: { "example-engine": OLD, "example-gone": OLDER } };
+    await prt.registrations.commitTenant({ stage: "prod", guid: GUID, registration: { ...current!.entry, approvedTags: gone }, runId: "run_gone" });
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    const p = out.params;
+    await makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-versions")!.run(stepCtx(p, [], []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.approvedTags).toEqual({ erp: { "example-engine": NEW }, auth: { "example-auth": NEW } });
+  });
+
   // The bundle the tenant runs is read off its own repository at the release it was built from, where a
   // version moves a line, and the engines a run puts the tenant on have to be of the line that bundle
   // declares (engine-line.ts). NEXT_LINE is a release of the engine on the line after the one held.
