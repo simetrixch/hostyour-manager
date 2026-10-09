@@ -2,13 +2,13 @@
 // build.yaml is written, taken back and recorded here. The writer itself is the Registrations
 // (registrations.ts), the ONE writer of registrations/**.
 import type { Cleanup, Step } from "#core/server/executor/types.ts";
-import type { BuildOnlyParams, BuildParams, BuildPorts } from "./build-chain.ts";
+import type { BuildOnlyParams, BuildParams, BuildPorts, BuildUnitRef, CiOnlyParams } from "./build-chain.ts";
 import type { ReleaseCycleRuntime } from "./release-cycle.ts";
 import { removeWebhookCleanup } from "./build-webhook.ts";
 
 /** Create build.yaml alone. A standing unit belongs to the shorter re-attestation chain; a
  *  creation approved before another run registered it must not overwrite that run's identity. */
-export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams): Step {
+export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams | CiOnlyParams): Step {
   return {
     name: "write-registration",
     title: "Commit the build registration (GitOps)",
@@ -39,7 +39,7 @@ export function writeBuildRegistrationStep(ports: BuildPorts, p: BuildOnlyParams
  *  Nothing of a build-only unit deploys, so there is no prune to wait for; every entry already asks
  *  the registration tree before it removes a UNIT-scoped object (the webhook goes only with the
  *  unit's last stage, and build.yaml is kept while any stage file stands). */
-export function buildOnlyCleanups(ports: BuildPorts, p: BuildParams): Cleanup[] {
+export function buildOnlyCleanups(ports: BuildPorts, p: BuildUnitRef): Cleanup[] {
   return [
     removeBuildRegistrationCleanup(ports, p),
     removeWebhookCleanup(ports, p),
@@ -49,7 +49,7 @@ export function buildOnlyCleanups(ports: BuildPorts, p: BuildParams): Cleanup[] 
 /** Take back registrations/<name>/build.yaml — the registrations itself keeps it (removed:false) when
  *  a stage file still stands (the unit is deployed elsewhere and its build attestation must survive
  *  this run's abort). */
-export function removeBuildRegistrationCleanup(ports: BuildPorts, p: BuildParams): Cleanup {
+export function removeBuildRegistrationCleanup(ports: BuildPorts, p: Pick<BuildParams, "consumerName">): Cleanup {
   return {
     name: "remove-build-registration",
     title: "Remove the build registration",
@@ -82,6 +82,19 @@ export function recordBuildOnlyStep(_ports: BuildPorts, p: BuildOnlyParams, rele
         `build-only unit ${p.consumerName} recorded — builds [${p.builds.join(", ")}] attested` +
           (release.releaseTag ? `, release ${release.releaseTag} proven through the injected cycle` : ""),
       );
+    },
+  };
+}
+
+/** The CI-only form's final record: the registration is its durable record, and the run says what
+ *  the unit does and does not get, so nobody reads a missing release as a failure. */
+export function recordCiOnlyStep(_ports: BuildPorts, p: CiOnlyParams): Step {
+  return {
+    name: "record",
+    title: "Record the CI-only unit in the run record",
+    run: async (ctx) => {
+      ctx.checkpoint({ registration: `registrations/${p.consumerName}/build.yaml`, builds: p.builds });
+      ctx.log("meta", `CI-only unit ${p.consumerName} recorded — every push to ${p.repoURL} runs its scripts/check.sh on the build plane; no image, release or deployment exists for it`);
     },
   };
 }

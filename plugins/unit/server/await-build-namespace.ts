@@ -36,7 +36,7 @@ import type { BuildPorts, BuildParams } from "./build-chain.ts";
  *  And a BUILD-ONLY unit carries no `clusterId` at all — it deploys nothing, so it has no cluster —
  *  so there is nothing to resolve with in the very form this step exists for. `buildArgo` is
  *  injected the way `buildRbac` beside it is, and for the same reason. */
-export function awaitBuildNamespaceStep(ports: BuildPorts, p: BuildParams): Step {
+export function awaitBuildNamespaceStep(ports: BuildPorts, p: Pick<BuildParams, "consumerName">): Step {
   return {
     name: "await-build-namespace",
     title: "Wait for GitOps to render the unit's build namespace",
@@ -58,7 +58,7 @@ export function awaitBuildNamespaceStep(ports: BuildPorts, p: BuildParams): Step
             `That namespace is ${MASTER_ARGO_NAMESPACE}/${app}'s to create and no step of this run may write it. This is the platform's own sync, not a finding about the repository under validation — nothing in it can change this outcome.`,
         );
       }
-      ctx.log("meta", `${app} is Synced + Healthy — its namespace, SecretStore and release Pipeline stand, and the grants below have somewhere to land`);
+      ctx.log("meta", `${app} is Synced + Healthy — its namespace, SecretStore and pipelines stand, and what is written after this has somewhere to land`);
     },
   };
 }

@@ -26,7 +26,7 @@ import { probeIdentity } from "./build-probes.ts";
  *  on the consumer repo — repo + workflow + admin:repo_hook — up front, before any mutation, and fail
  *  with the COMPLETE missing set (never one scope at a time). Fail-closed on an unwired client, a
  *  fine-grained/invalid token, or any missing scope. */
-export function preflightScopesStep(ports: BuildPorts, p: BuildParams): Step {
+export function preflightScopesStep(ports: BuildPorts, p: Pick<BuildParams, "consumerName" | "repoURL" | "repoCredentialId">): Step {
   return {
     name: "preflight-scopes",
     title: "Pre-flight the repository PAT scopes (repo + workflow + admin:repo_hook)",

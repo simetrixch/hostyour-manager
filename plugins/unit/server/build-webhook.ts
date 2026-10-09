@@ -28,7 +28,7 @@
 // secret does not match the EventListener's would have every delivery rejected by its
 // X-Hub-Signature-256 check — a silent no-build.
 import type { Step, StepCtx, Cleanup } from "#core/server/executor/types.ts";
-import type { BuildPorts, BuildParams } from "./build-chain.ts";
+import type { BuildPorts, BuildParams, BuildUnitRef } from "./build-chain.ts";
 import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
 import { WebhookScopeError, webhookTargetUrl } from "./adapters/github-consumer/port.ts";
 import { probeWebhook } from "./build-probes.ts";
@@ -104,7 +104,7 @@ export function setupWebhookStep(ports: BuildPorts, p: Pick<BuildParams, "consum
  *  ensureHook only found the first stage's hook already there — so without the read, aborting the
  *  onboard of a second stage deletes the hook the live stage releases through, and its pushes stop
  *  reaching the platform entirely. */
-export function removeWebhookCleanup(ports: BuildPorts, p: BuildParams): Cleanup {
+export function removeWebhookCleanup(ports: BuildPorts, p: BuildUnitRef): Cleanup {
   return {
     name: "remove-consumer-webhook",
     title: "Remove the consumer build webhook (the unit's own goes with its last stage)",

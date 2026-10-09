@@ -45,7 +45,7 @@ async function withToken<T>(token: Buffer, f: (token: string) => Promise<T>): Pr
 
 
 /** preflight-scopes' probe: a PAT's scopes, or the App's reach of the repository. */
-export async function probeIdentity(ports: BuildPorts, p: BuildParams, ctx: ProbeCtx): Promise<PreflightCheck[]> {
+export async function probeIdentity(ports: BuildPorts, p: Pick<BuildParams, "repoURL" | "repoCredentialId">, ctx: ProbeCtx): Promise<PreflightCheck[]> {
   const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
   const title = `The identity of ${owner}/${repo}`;
   if (!ports.github) return [unmeasuredCheck("identity", title, "no GitHub client is wired on this manager")];
