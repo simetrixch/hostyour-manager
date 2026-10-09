@@ -73,6 +73,7 @@ export function TenantDetail() {
   const [catalog, setCatalog] = useState<TenantAppCatalogView | null>(null);
   const [busy, setBusy] = useState(false);
   const [removeApp, setRemoveApp] = useState<string | null>(null);
+  const [purgeApp, setPurgeApp] = useState<string | null>(null);
   const [offboardT, setOffboardT] = useState<TenantDetailView | null>(null);
   const [purgeT, setPurgeT] = useState<TenantDetailView | null>(null);
   // The relocation dialogs: "Back up" is a plain confirm (no target); "Move…"/"Restore…"
@@ -231,11 +232,11 @@ export function TenantDetail() {
       </div>
 
       <div>{!unfinished && !settled && <TenantStageActions tenant={t} />}<h3 className="steps-panel__title">Apps</h3></div>
-      <TenantAppList tenant={t} catalog={catalog} editable={!settled && !unfinished} busy={busy} act={act} onRemove={setRemoveApp} />
+      <TenantAppList tenant={t} catalog={catalog} editable={!settled && !unfinished} busy={busy} onRemove={setRemoveApp} onPurge={setPurgeApp} />
 
       {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
 
-      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} websites={listedWebsites(catalog, t.apps)} removed={removedWebsites(t.apps)} busy={busy} act={act} onRemove={setRemoveApp} onRecordPackagesReader={recordPackagesReader} />}
+      {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} websites={listedWebsites(catalog, t.apps)} removed={removedWebsites(t.apps)} busy={busy} act={act} onRemove={setRemoveApp} onPurge={setPurgeApp} onRecordPackagesReader={recordPackagesReader} />}
 
       {!settled && (
         <div className="actionbar">
@@ -306,6 +307,18 @@ export function TenantDetail() {
           onConfirm={() => { const a = removeApp; setRemoveApp(null); void act(() => removeTenantApp(tenantId, a)); }}
         >
           <p>ArgoCD prunes its Application(s); the rest of the fan-out stays.</p>
+        </ConfirmDialog>
+      )}
+
+      {purgeApp && (
+        <ConfirmDialog
+          title={tenantConfirmTitle.purgeApp(t, purgeApp)}
+          confirmLabel="Plan the purge"
+          destructive
+          onCancel={() => setPurgeApp(null)}
+          onConfirm={() => { const a = purgeApp; setPurgeApp(null); void act(() => planRun("tenant-purge-app", { tenantId: t.id, app: a })); }}
+        >
+          <p>The plan names what of the app still stands and is deleted: its AppProject, its admission policy with its binding, its Vault keys, and last its record. Nothing of another app is touched. It refuses while the app is still deployed.</p>
         </ConfirmDialog>
       )}
 
