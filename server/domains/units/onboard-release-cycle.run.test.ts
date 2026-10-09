@@ -213,6 +213,15 @@ describe("watch-release-build", () => {
     expect(await watchWithoutReleaseRun(github)).toMatch(/runs\/1 is still in_progress; read that run/);
   });
 
+  it("keeps the missing release run as the finding when the repository credential cannot be opened", async () => {
+    const ports = portsWith({ github: new FakeGitHubConsumer() });
+    const runtime: ReleaseCycleRuntime = {};
+    await triggerReleaseStep(ports, params(), runtime).run(ctx([]));
+    const revoked = { open: () => Promise.reject(new Error("credential cred_pat not found")) } as unknown as CredentialStore;
+    await expect(watchReleaseBuildStep(ports, params(), runtime).run({ ...ctx([]), creds: revoked } as unknown as StepCtx))
+      .rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared .* reading the release workflow run https:\/\/github\.com\/x\/acme\/actions\/runs\/1 failed \(credential cred_pat not found\)/);
+  });
+
   it("keeps the missing release run as the finding when the workflow run cannot be read", async () => {
     const github = new FakeGitHubConsumer();
     github.readWorkflowRun = () => Promise.reject(new Error("GitHub GET /repos/x/acme/actions/runs/1 → 403: Resource not accessible"));

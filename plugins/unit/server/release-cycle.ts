@@ -20,7 +20,7 @@
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { BuildPlane, ReleaseRunOutcome, ReleaseRunQuery } from "#core/server/adapters/build-plane/port.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import { WorkflowNotFoundError, type DispatchedWorkflowRun, type GitHubConsumer } from "./adapters/github-consumer/port.ts";
+import { WorkflowNotFoundError, type DispatchedWorkflowRun, type GitHubConsumer, type WorkflowRunReading } from "./adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 
@@ -195,16 +195,22 @@ async function settledReleaseRun(ctx: StepCtx, buildPlane: BuildPlane, ports: Bu
  *  succeeded pushed the deploy ref, so only then does the webhook stand accused. */
 async function whyNoReleaseRun(ctx: StepCtx, github: GitHubConsumer | undefined, p: ReleaseOnStage, workflowRun: DispatchedWorkflowRun | undefined): Promise<string> {
   if (!workflowRun || !github) return `the release workflow's run is not known here; read the ${RELEASE_WORKFLOW_FILE} run on GitHub, then the EventListener's log on the build plane`;
+  const run = await readDispatchedRun(ctx, github, p, workflowRun.id)
+    .catch((err: unknown) => `reading the release workflow run ${workflowRun.htmlUrl} failed (${err instanceof Error ? err.message : String(err)}); read that run, then the EventListener's log on the build plane`);
+  if (typeof run === "string") return run;
+  if (run.status !== "completed") return `the release workflow run ${run.htmlUrl} is still ${run.status}; read that run`;
+  if (run.conclusion === "success") return `the release workflow run ${run.htmlUrl} succeeded and pushed the deploy ref, but the webhook fired no run; read the EventListener's log on the build plane`;
+  if (run.failedStep) return `the release workflow run ${run.htmlUrl} ended ${run.conclusion} at the step "${run.failedStep.step}" of the job "${run.failedStep.job}"; read that step's log: ${run.failedStep.url}`;
+  return `the release workflow run ${run.htmlUrl} ended ${run.conclusion}; read that run`;
+}
+
+/** The dispatched run read with the repository's credential. Opening that credential can fail too
+ *  (an App credential mints its token over the network), so the caller guards both. */
+async function readDispatchedRun(ctx: StepCtx, github: GitHubConsumer, p: ReleaseOnStage, runId: number): Promise<WorkflowRunReading> {
   const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
   const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "release-cycle:read-workflow-run", runId: ctx.runId });
   try {
-    const run = await github.readWorkflowRun({ owner, repo, runId: workflowRun.id, token: pat.toString("utf8"), signal: ctx.signal })
-      .catch((err: unknown) => `reading the release workflow run ${workflowRun.htmlUrl} failed (${err instanceof Error ? err.message : String(err)}); read that run, then the EventListener's log on the build plane`);
-    if (typeof run === "string") return run;
-    if (run.status !== "completed") return `the release workflow run ${run.htmlUrl} is still ${run.status}; read that run`;
-    if (run.conclusion === "success") return `the release workflow run ${run.htmlUrl} succeeded and pushed the deploy ref, but the webhook fired no run; read the EventListener's log on the build plane`;
-    if (run.failedStep) return `the release workflow run ${run.htmlUrl} ended ${run.conclusion} at the step "${run.failedStep.step}" of the job "${run.failedStep.job}"; read that step's log: ${run.failedStep.url}`;
-    return `the release workflow run ${run.htmlUrl} ended ${run.conclusion}; read that run`;
+    return await github.readWorkflowRun({ owner, repo, runId, token: pat.toString("utf8"), signal: ctx.signal });
   } finally {
     pat.fill(0);
   }
