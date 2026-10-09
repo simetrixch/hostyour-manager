@@ -65,7 +65,7 @@ describe("trigger-release", () => {
   it("dispatches release.yml on the repo's default branch with {version, channel, stage}", async () => {
     const github = new FakeGitHubConsumer();
     github.defaultBranch = "master";
-    await triggerReleaseStep(portsWith({ github }), params()).run(ctx([]));
+    await triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx([]));
     expect(github.dispatches).toEqual([
       expect.objectContaining({ owner: "x", repo: "acme", workflowFile: "release.yml", ref: "master", inputs: { version: "1.0.0", channel: "stable", stage: "prod" } }),
     ]);
@@ -75,7 +75,7 @@ describe("trigger-release", () => {
     const github = new FakeGitHubConsumer();
     github.dispatchNotFoundTimes = 2; // the kit landed moments ago; GitHub indexes with a lag
     const logs: string[] = [];
-    await triggerReleaseStep(portsWith({ github }), params()).run(ctx(logs));
+    await triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx(logs));
     expect(github.dispatches).toHaveLength(1);
     expect(logs.filter((l) => l.includes("retrying the dispatch"))).toHaveLength(2);
   });
@@ -83,14 +83,14 @@ describe("trigger-release", () => {
   it("surfaces a 422 IMMEDIATELY with GitHub's own message — an old kit's workflow will not heal by waiting", async () => {
     const github = new FakeGitHubConsumer();
     github.dispatchRefusal = { status: 422, message: "Unexpected inputs provided: [\"stage\"]" };
-    await expect(triggerReleaseStep(portsWith({ github }), params()).run(ctx([]))).rejects.toThrow(/422: Unexpected inputs provided/);
+    await expect(triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx([]))).rejects.toThrow(/422: Unexpected inputs provided/);
     expect(github.dispatches).toHaveLength(0); // never recorded as fired, never retried
   });
 
   it("surfaces a 403 immediately with GitHub's own message", async () => {
     const github = new FakeGitHubConsumer();
     github.dispatchRefusal = { status: 403, message: "Resource not accessible by personal access token" };
-    await expect(triggerReleaseStep(portsWith({ github }), params()).run(ctx([]))).rejects.toThrow(/403: Resource not accessible/);
+    await expect(triggerReleaseStep(portsWith({ github }), params(), {}).run(ctx([]))).rejects.toThrow(/403: Resource not accessible/);
   });
 });
 
@@ -132,6 +132,16 @@ describe("put-release (#299)", () => {
       .rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared/);
   });
 
+  it("names the failed release workflow it dispatched, and keeps that run for a resume", async () => {
+    const github = new FakeGitHubConsumer();
+    github.dispatchedRun = { status: "completed", conclusion: "failure", failedStep: { job: "release", step: "Push the deploy ref", url: "https://github.com/x/acme/actions/runs/1/job/3#step:4:1" } };
+    const checkpoints: unknown[] = [];
+    const recording = { ...ctx([]), checkpoint: (d: unknown) => checkpoints.push(d) } as unknown as StepCtx;
+    await expect(putReleaseStep(portsWith({ github, buildPlane: planeFiring([STOOD]) }), params(), {}).run(recording))
+      .rejects.toThrow(/runs\/1 ended failure at the step "Push the deploy ref"/);
+    expect(checkpoints.at(-1)).toEqual(expect.objectContaining({ dispatched: true, workflowRun: { id: 1, htmlUrl: "https://github.com/x/acme/actions/runs/1" } }));
+  });
+
   it("a resume after the dispatch waits for the same run and dispatches no second one", async () => {
     const github = new FakeGitHubConsumer();
     const buildPlane = planeFiring([STOOD, FIRED]);
@@ -169,8 +179,62 @@ describe("watch-release-build", () => {
     await expect(watchReleaseBuildStep(portsWith({ buildPlane }), params(), {}).run(ctx([]))).rejects.toThrow(/acme-build\/acme-release-9.*FAILED/);
   });
 
-  it("fails when no matching run APPEARS inside the budget (the webhook fired nothing)", async () => {
-    await expect(watchReleaseBuildStep(portsWith(), params(), {}).run(ctx([]))).rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared/);
+  /** trigger-release then watch-release-build, as a chain runs them, where no release run appears. */
+  async function watchWithoutReleaseRun(github: FakeGitHubConsumer): Promise<string> {
+    const ports = portsWith({ github });
+    const runtime: ReleaseCycleRuntime = {};
+    await triggerReleaseStep(ports, params(), runtime).run(ctx([]));
+    const err = await watchReleaseBuildStep(ports, params(), runtime).run(ctx([])).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    return (err as Error).message;
+  }
+
+  it("PLANTED DEFECT: a release workflow that failed before the deploy ref is named with its failed step, not blamed on the webhook", async () => {
+    const github = new FakeGitHubConsumer();
+    github.dispatchedRun = {
+      status: "completed", conclusion: "failure",
+      failedStep: { job: "release", step: "Mint the release tag and push the deploy ref", url: "https://github.com/x/acme/actions/runs/1/job/7#step:5:1" },
+    };
+    const message = await watchWithoutReleaseRun(github);
+    expect(message).toMatch(/no release PipelineRun for 1\.0\.0-stable-\* appeared/);
+    expect(message).toContain('the release workflow run https://github.com/x/acme/actions/runs/1 ended failure at the step "Mint the release tag and push the deploy ref" of the job "release"');
+    expect(message).toContain("https://github.com/x/acme/actions/runs/1/job/7#step:5:1");
+    expect(message).not.toMatch(/webhook/);
+  });
+
+  it("a release workflow that succeeded, while no release run appears, still points at the webhook", async () => {
+    const message = await watchWithoutReleaseRun(new FakeGitHubConsumer());
+    expect(message).toMatch(/run https:\/\/github\.com\/x\/acme\/actions\/runs\/1 succeeded and pushed the deploy ref, but the webhook fired no run/);
+  });
+
+  it("a release workflow still running says so instead of blaming the webhook", async () => {
+    const github = new FakeGitHubConsumer();
+    github.dispatchedRun = { status: "in_progress", conclusion: null };
+    expect(await watchWithoutReleaseRun(github)).toMatch(/runs\/1 is still in_progress; read that run/);
+  });
+
+  it("keeps the missing release run as the finding when the repository credential cannot be opened", async () => {
+    const ports = portsWith({ github: new FakeGitHubConsumer() });
+    const runtime: ReleaseCycleRuntime = {};
+    await triggerReleaseStep(ports, params(), runtime).run(ctx([]));
+    const revoked = { open: () => Promise.reject(new Error("credential cred_pat not found")) } as unknown as CredentialStore;
+    await expect(watchReleaseBuildStep(ports, params(), runtime).run({ ...ctx([]), creds: revoked } as unknown as StepCtx))
+      .rejects.toThrow(/no release PipelineRun for 1\.0\.0-stable-\* appeared .* reading the release workflow run https:\/\/github\.com\/x\/acme\/actions\/runs\/1 failed \(credential cred_pat not found\)/);
+  });
+
+  it("keeps the missing release run as the finding when the workflow run cannot be read", async () => {
+    const github = new FakeGitHubConsumer();
+    github.readWorkflowRun = () => Promise.reject(new Error("GitHub GET /repos/x/acme/actions/runs/1 → 403: Resource not accessible"));
+    const message = await watchWithoutReleaseRun(github);
+    expect(message).toMatch(/no release PipelineRun for 1\.0\.0-stable-\* appeared .* reading the release workflow run https:\/\/github\.com\/x\/acme\/actions\/runs\/1 failed \(.*403: Resource not accessible\)/);
+  });
+
+  it("claims no deploy ref where the dispatch named no run (GitHub's bodyless 204)", async () => {
+    const github = new FakeGitHubConsumer();
+    github.answersRunDetails = false;
+    const message = await watchWithoutReleaseRun(github);
+    expect(message).toMatch(/the release workflow's run is not known here; read the release\.yml run on GitHub/);
+    expect(message).not.toMatch(/deploy ref was pushed/);
   });
 });
 

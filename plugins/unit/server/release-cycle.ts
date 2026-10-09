@@ -8,9 +8,10 @@
 // committed to the delivery branch. Triggering through the INJECTED workflow is simultaneously the
 // proof of the injection: a broken kit produces no run, and the build watch fails visibly.
 //
-// NOTHING HERE IS FOUND BY TIME. GitHub's own run list is not read: a dispatch answers 204 with no
-// run id, and picking "the run created after the dispatch" compares GitHub's clock with the
-// Manager's — a Manager 30 s fast after a restore never saw the run it fired (hostyour-manager#140).
+// NOTHING HERE IS FOUND BY TIME. GitHub's own run list is not read: picking "the run created after
+// the dispatch" compares GitHub's clock with the Manager's — a Manager 30 s fast after a restore
+// never saw the run it fired. The workflow run a dispatch created is read only
+// by the id GitHub's answer to that dispatch names, and only to say why no release run appeared.
 // What identifies the release is the release itself: the PipelineRun the webhook fires carries
 // unit + version + channel in its params, and the bump writes the minted tag into the delivery
 // branch. Appearing is bounded (a webhook delivers in seconds; a run that never appears is a
@@ -19,7 +20,7 @@
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { BuildPlane, ReleaseRunOutcome, ReleaseRunQuery } from "#core/server/adapters/build-plane/port.ts";
 import type { BuildPorts, BuildParams } from "./build-chain.ts";
-import { WorkflowNotFoundError, type GitHubConsumer } from "./adapters/github-consumer/port.ts";
+import { WorkflowNotFoundError, type DispatchedWorkflowRun, type GitHubConsumer, type WorkflowRunReading } from "./adapters/github-consumer/port.ts";
 import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 
@@ -29,10 +30,12 @@ export const RELEASE_WORKFLOW_FILE = "release.yml";
 /** In-run memory the release-cycle steps share within ONE execute() pass (the seed-secrets/activate
  *  precedent): `releaseTag` is the FULL minted tag read off the build run's param, `imageTag` the
  *  immutable `<release tag>-<sha7>` read off the run's `image-tag` result — what the run pushed
- *  every build under. Lost on a crash-resume — the watch then re-reads both. */
+ *  every build under, `workflowRun` the workflow run trigger-release's dispatch created. Lost on a
+ *  crash-resume — the watch then re-reads the tags, and cannot name the workflow run. */
 export interface ReleaseCycleRuntime {
   releaseTag?: string | undefined;
   imageTag?: string | undefined;
+  workflowRun?: DispatchedWorkflowRun | undefined;
 }
 
 /** What putting a release on a stage reads of its run's params — every form of the release cycle
@@ -54,7 +57,7 @@ export const sleep = (ms: number, signal: AbortSignal): Promise<void> =>
 
 /** trigger-release: dispatch the injected release workflow with {version, channel, stage} — the ONE
  *  external start of the release cycle, and the test of the injection that preceded it. */
-export function triggerReleaseStep(ports: BuildPorts, p: BuildParams): Step {
+export function triggerReleaseStep(ports: BuildPorts, p: BuildParams, runtime: ReleaseCycleRuntime): Step {
   return {
     name: "trigger-release",
     title: "Trigger the injected release workflow",
@@ -62,9 +65,10 @@ export function triggerReleaseStep(ports: BuildPorts, p: BuildParams): Step {
       if (!ports.github) {
         throw errValidation(`onboard "${p.consumerName}" requires the GitHub client to trigger the release workflow but none is wired on this manager — the release cycle cannot start`);
       }
-      const where = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, "consumer-onboard:trigger-release", {});
-      ctx.checkpoint({ workflow: RELEASE_WORKFLOW_FILE, version: p.version, channel: p.channel, stage: p.stage });
-      ctx.log("meta", `release workflow dispatched on ${where} — ${RELEASE_WORKFLOW_FILE} with version=${p.version} channel=${p.channel} stage=${p.stage}; the cycle now runs outside the manager`);
+      const { where, run } = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, "consumer-onboard:trigger-release", {});
+      runtime.workflowRun = run ?? undefined;
+      ctx.checkpoint({ workflow: RELEASE_WORKFLOW_FILE, version: p.version, channel: p.channel, stage: p.stage, ...(run ? { workflowRun: run } : {}) });
+      ctx.log("meta", `release workflow dispatched on ${where} — ${RELEASE_WORKFLOW_FILE} with version=${p.version} channel=${p.channel} stage=${p.stage}${run ? ` as run ${run.htmlUrl}` : ""}; the cycle now runs outside the manager`);
     },
   };
 }
@@ -73,8 +77,9 @@ export function triggerReleaseStep(ports: BuildPorts, p: BuildParams): Step {
  *  {version, channel, stage} and `inputs` beside them. A 404 is retried inside a bounded budget: the
  *  workflow was committed moments ago and GitHub indexes it with a small lag. A 422 (the workflow
  *  refuses the inputs — an old kit, or no dispatch trigger) and a 403 surface GitHub's own message
- *  IMMEDIATELY: waiting cannot heal either. Answers `<owner>/<repo>` for the log. */
-async function dispatchReleaseWorkflow(ctx: StepCtx, github: GitHubConsumer, ports: BuildPorts, p: ReleaseOnStage, purpose: string, inputs: Record<string, string>): Promise<string> {
+ *  IMMEDIATELY: waiting cannot heal either. Answers `<owner>/<repo>` for the log, and the run the
+ *  dispatch created where GitHub named it. */
+async function dispatchReleaseWorkflow(ctx: StepCtx, github: GitHubConsumer, ports: BuildPorts, p: ReleaseOnStage, purpose: string, inputs: Record<string, string>): Promise<{ where: string; run: DispatchedWorkflowRun | null }> {
   const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
   const retry = ports.dispatchRetry ?? { budgetMs: 60_000, intervalMs: 5_000 };
   const pat = await ctx.creds.open(p.repoCredentialId, { purpose, runId: ctx.runId });
@@ -84,14 +89,14 @@ async function dispatchReleaseWorkflow(ctx: StepCtx, github: GitHubConsumer, por
     const deadline = Date.now() + retry.budgetMs;
     for (;;) {
       try {
-        await github.dispatchWorkflow({
+        const run = await github.dispatchWorkflow({
           owner, repo, token,
           workflowFile: RELEASE_WORKFLOW_FILE,
           ref,
           inputs: { version: p.version, channel: p.channel, stage: p.stage, ...inputs },
           signal: ctx.signal,
         });
-        return `${owner}/${repo}`;
+        return { where: `${owner}/${repo}`, run };
       } catch (err) {
         // Only the not-yet-indexed 404 is retried — the kit landed seconds ago. Everything else
         // (422: the workflow refuses the inputs; 403: forbidden) carries GitHub's own message and
@@ -118,7 +123,7 @@ export function watchReleaseBuildStep(ports: BuildPorts, p: BuildParams, runtime
       if (!ports.buildPlane) {
         throw errValidation(`onboard "${p.consumerName}" requires the build-plane client to watch the release run but none is wired on this manager`);
       }
-      const outcome = await settledReleaseRun(ctx, ports.buildPlane, ports, p, { unit: p.consumerName, version: p.version, channel: p.channel });
+      const outcome = await settledReleaseRun(ctx, ports.buildPlane, ports, p, { unit: p.consumerName, version: p.version, channel: p.channel }, runtime.workflowRun);
       runtime.releaseTag = outcome.releaseTag;
       runtime.imageTag = outcome.imageTag;
       ctx.checkpoint({ pipelineRun: outcome.runName, releaseTag: outcome.releaseTag, ...(outcome.imageTag ? { imageTag: outcome.imageTag } : {}) });
@@ -142,18 +147,20 @@ export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: Re
         throw errValidation(`putting ${p.version}-${p.channel} on ${p.stage} again needs the GitHub client and the build-plane client, and this manager wires ${ports.github ? "no build-plane client" : "no GitHub client"}`);
       }
       const release = { unit: p.consumerName, version: p.version, channel: p.channel, stage: p.stage };
-      const saved = ctx.readCheckpoint<{ standing: string[]; dispatched: boolean }>();
+      const saved = ctx.readCheckpoint<{ standing: string[]; dispatched: boolean; workflowRun?: DispatchedWorkflowRun }>();
       const standing = saved?.standing ?? (await ports.buildPlane.listReleaseRuns(release));
+      let workflowRun = saved?.workflowRun;
       if (!saved?.dispatched) {
         ctx.checkpoint({ standing, dispatched: false });
-        const where = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, purpose, { existing: "true" });
-        ctx.checkpoint({ standing, dispatched: true });
-        ctx.log("meta", `release workflow dispatched on ${where} — ${RELEASE_WORKFLOW_FILE} with version=${p.version} channel=${p.channel} stage=${p.stage} existing=true; ${standing.length} earlier run(s) of this release on ${p.stage} are not taken for the one it fires`);
+        const { where, run } = await dispatchReleaseWorkflow(ctx, ports.github, ports, p, purpose, { existing: "true" });
+        workflowRun = run ?? undefined;
+        ctx.checkpoint({ standing, dispatched: true, ...(workflowRun ? { workflowRun } : {}) });
+        ctx.log("meta", `release workflow dispatched on ${where} — ${RELEASE_WORKFLOW_FILE} with version=${p.version} channel=${p.channel} stage=${p.stage} existing=true${run ? ` as run ${run.htmlUrl}` : ""}; ${standing.length} earlier run(s) of this release on ${p.stage} are not taken for the one it fires`);
       }
-      const outcome = await settledReleaseRun(ctx, ports.buildPlane, ports, p, { ...release, standing });
+      const outcome = await settledReleaseRun(ctx, ports.buildPlane, ports, p, { ...release, standing }, workflowRun);
       runtime.releaseTag = outcome.releaseTag;
       runtime.imageTag = outcome.imageTag;
-      ctx.checkpoint({ standing, dispatched: true, pipelineRun: outcome.runName, releaseTag: outcome.releaseTag });
+      ctx.checkpoint({ standing, dispatched: true, ...(workflowRun ? { workflowRun } : {}), pipelineRun: outcome.runName, releaseTag: outcome.releaseTag });
       ctx.log("meta", `release PipelineRun ${p.consumerName}-build/${outcome.runName} Succeeded — release ${outcome.releaseTag} stands on ${p.stage} again`);
     },
   };
@@ -162,7 +169,7 @@ export function putReleaseStep(ports: BuildPorts, p: ReleaseOnStage, runtime: Re
 /** The release steps of an onboarding: a release that stands put on the stage as it stands, where
  *  another stage of the unit runs one, else the version minted, built and watched. */
 export function releaseSteps(ports: BuildPorts, p: BuildParams, runtime: ReleaseCycleRuntime): Step[] {
-  return p.existing ? [putReleaseStep(ports, p, runtime, "consumer-onboard:put-release")] : [triggerReleaseStep(ports, p), watchReleaseBuildStep(ports, p, runtime)];
+  return p.existing ? [putReleaseStep(ports, p, runtime, "consumer-onboard:put-release")] : [triggerReleaseStep(ports, p, runtime), watchReleaseBuildStep(ports, p, runtime)];
 }
 
 /** The release run the query names, awaited to its end. Appearing is bounded: the release script's
@@ -170,18 +177,41 @@ export function releaseSteps(ports: BuildPorts, p: BuildParams, runtime: Release
  *  finding. Finishing is not bounded — the build takes what it takes, and the operator's cancel
  *  (ctx.signal) is the only limit. A run that never appeared, a cancelled watch and a failed run are
  *  each refused with what to read. */
-async function settledReleaseRun(ctx: StepCtx, buildPlane: BuildPlane, ports: BuildPorts, p: ReleaseOnStage, query: ReleaseRunQuery): Promise<ReleaseRunOutcome> {
+async function settledReleaseRun(ctx: StepCtx, buildPlane: BuildPlane, ports: BuildPorts, p: ReleaseOnStage, query: ReleaseRunQuery, workflowRun: DispatchedWorkflowRun | undefined): Promise<ReleaseRunOutcome> {
   const outcome = await buildPlane.awaitReleaseRun(query, { appearMs: ports.releaseBuildAppearMs, signal: ctx.signal, onQueueNote: (line) => ctx.log("meta", line) });
   const ns = `${p.consumerName}-build`;
   if (outcome === null) {
-    throw errValidation(
-      ctx.signal.aborted
-        ? `the watch on the release PipelineRun for ${p.version}-${p.channel}-* in ${ns} was cancelled`
-        : `no release PipelineRun for ${p.version}-${p.channel}-* appeared in ${ns} within ${Math.round(ports.releaseBuildAppearMs / 1000)}s — the deploy ref was pushed but the webhook fired no run; read the EventListener's log on the build plane`,
-    );
+    if (ctx.signal.aborted) throw errValidation(`the watch on the release PipelineRun for ${p.version}-${p.channel}-* in ${ns} was cancelled`);
+    const missing = `no release PipelineRun for ${p.version}-${p.channel}-* appeared in ${ns} within ${Math.round(ports.releaseBuildAppearMs / 1000)}s`;
+    throw errValidation(`${missing} — ${await whyNoReleaseRun(ctx, ports.github, p, workflowRun)}`);
   }
   if (!outcome.succeeded) {
     throw errValidation(`release PipelineRun ${ns}/${outcome.runName} (${outcome.releaseTag}) FAILED — the release cycle died in the build plane; read that run's log`);
   }
   return outcome;
+}
+
+/** Why no release run appeared, read off the workflow run the dispatch created: only a run that
+ *  succeeded pushed the deploy ref, so only then does the webhook stand accused. */
+async function whyNoReleaseRun(ctx: StepCtx, github: GitHubConsumer | undefined, p: ReleaseOnStage, workflowRun: DispatchedWorkflowRun | undefined): Promise<string> {
+  if (!workflowRun || !github) return `the release workflow's run is not known here; read the ${RELEASE_WORKFLOW_FILE} run on GitHub, then the EventListener's log on the build plane`;
+  const run = await readDispatchedRun(ctx, github, p, workflowRun.id)
+    .catch((err: unknown) => `reading the release workflow run ${workflowRun.htmlUrl} failed (${err instanceof Error ? err.message : String(err)}); read that run, then the EventListener's log on the build plane`);
+  if (typeof run === "string") return run;
+  if (run.status !== "completed") return `the release workflow run ${run.htmlUrl} is still ${run.status}; read that run`;
+  if (run.conclusion === "success") return `the release workflow run ${run.htmlUrl} succeeded and pushed the deploy ref, but the webhook fired no run; read the EventListener's log on the build plane`;
+  if (run.failedStep) return `the release workflow run ${run.htmlUrl} ended ${run.conclusion} at the step "${run.failedStep.step}" of the job "${run.failedStep.job}"; read that step's log: ${run.failedStep.url}`;
+  return `the release workflow run ${run.htmlUrl} ended ${run.conclusion}; read that run`;
+}
+
+/** The dispatched run read with the repository's credential. Opening that credential can fail too
+ *  (an App credential mints its token over the network), so the caller guards both. */
+async function readDispatchedRun(ctx: StepCtx, github: GitHubConsumer, p: ReleaseOnStage, runId: number): Promise<WorkflowRunReading> {
+  const { owner, repo } = parseGitHubOwnerRepo(p.repoURL);
+  const pat = await ctx.creds.open(p.repoCredentialId, { purpose: "release-cycle:read-workflow-run", runId: ctx.runId });
+  try {
+    return await github.readWorkflowRun({ owner, repo, runId, token: pat.toString("utf8"), signal: ctx.signal });
+  } finally {
+    pat.fill(0);
+  }
 }

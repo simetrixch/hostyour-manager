@@ -284,7 +284,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         // The chain's scope preflight skips itself for the App credential (plugins/unit/server/preflight-scopes.ts).
         const release: ReleaseCycleRuntime = {};
         const chain: Step[] = p.registered
-          ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
+          ? [refreshRepoPatStep(onboard, params), triggerReleaseStep(onboard, params, release), watchReleaseBuildStep(onboard, params, release), recordBuildOnlyStep(onboard, params, release)]
           : buildOnlySteps(onboard, params, release);
         ctx.log("meta", `${unit}: version ${version}, channel ${channel}, release run on ${p.stage}, build plane ${master.domain} — ${p.registered ? "registered build-only, its release is re-run" : "onboarded build-only by this run"}`);
         // The chain's own cleanups (write-registration arms remove-build-registration and
