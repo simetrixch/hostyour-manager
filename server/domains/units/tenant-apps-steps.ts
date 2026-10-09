@@ -72,6 +72,9 @@ export interface TenantAppsStepParams extends TenantAppsUnit {
   apps: readonly string[];
   /** The sites the run serves per folder: add-app names the site of the website it adds. */
   sites?: ServedSites;
+  /** The repository already carries everything the run serves, so write-tree copies no template file:
+   *  a file the template has and the repository lacks may be a helper of an app this run does not add. */
+  templateSuppliesNoFile?: boolean;
 }
 
 /** In-run memory of one execute() pass: the id of the `github-app` credential sealed for the unit,
@@ -192,7 +195,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
     },
     {
       name: "write-tree",
-      title: `Write the tree of ${unit} from the deploy repository's ${p.templateBuild}`,
+      title: p.templateSuppliesNoFile ? `Write the tree of ${unit}, copying no file from the deploy repository's ${p.templateBuild}` : `Write the tree of ${unit} from the deploy repository's ${p.templateBuild}`,
       run: async (ctx) => {
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
@@ -200,7 +203,7 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
         let files: TreeFile[];
         try {
-          files = await template.tree(chosen, sites);
+          files = p.templateSuppliesNoFile ? [] : await template.tree(chosen, sites);
         } finally {
           await template.dispose();
         }
@@ -228,7 +231,9 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
           if (current === null || additions.length > 0) write.push({ path: APPS_MANIFEST_PATH, content: merged.content });
           if (write.length === 0) {
             ctx.checkpoint({ repoURL: url, branch: session.branch, files: 0, added: [] });
-            ctx.log("meta", `${url} already carries every file of the template and every chosen entry (${chosen.join(", ")}) — nothing to commit`);
+            ctx.log("meta", p.templateSuppliesNoFile
+              ? `${url} serves what this run adds from its own tree, and carries every chosen entry (${chosen.join(", ")}) — no template file is copied, nothing to commit`
+              : `${url} already carries every file of the template and every chosen entry (${chosen.join(", ")}) — nothing to commit`);
             return;
           }
           const message = current === null ? `Create ${unit} from the catalog` : `Add ${additions.join(", ") || "the missing files"} to ${unit} from the catalog`;

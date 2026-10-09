@@ -33,7 +33,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
-import { builtBundleEngine, bundleFolderSites, bundleLacksSite, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
+import { builtBundleEngine, bundleFolderSites, bundleLacksSite, bundleReleaseTag, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { seedTenantAppKeyStep } from "./tenant-app-keys.ts";
 import { assertAddAppAbortable, revertAppendCleanup } from "./add-app-abort.ts";
@@ -110,7 +110,7 @@ export const AddAppParams = z.object({
   // A website's folder, site and domain, written into its apps[] entry.
   website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
   // The website's site is one the tenant's own bundle lists under its folder: the bundle already carries
-  // `webs/<site>`, so the bundle steps ask the template for no folder of it.
+  // `webs/<site>`, so the bundle steps ask the template for no folder and copy no file of it.
   siteFromBundle: z.boolean().default(false),
   // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
   websiteRecordHosts: z.array(publicFqdn).default([]),
@@ -188,7 +188,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     // steps, composed here).
     ...(p.appsUnit
       ? [
-        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)], ...(p.website ? { sites: templateSites(p.website, p.siteFromBundle) } : {}) }, runtime),
+        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)], ...(p.website ? { sites: templateSites(p.website, p.siteFromBundle) } : {}), templateSuppliesNoFile: p.siteFromBundle }, runtime),
         recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org, bundle: p.appsUnit.templateBuild }, runtime),
       ]
       : []),
@@ -420,9 +420,13 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       // another is stale, and the run would create a repository from the template without the site's folder.
       if (siteFromBundle && !hasBundle) throw errValidation(`the website's site is listed by ${current.entry.appsRepo}, but the registration names the image ${standingImage}, and this run builds ${appsUnit.org}/${appsImage} — correct the registration's bundle first`);
       const appsImageTag = hasBundle ? standingTag! : placeholderTagFromChain(clusterValueFiles);
-      ctx.log(hasBundle
-        ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`
-        : `tenant ${tc.guid} has no apps bundle yet — this run creates ${appsUnit.org}/${appsImage} from ${appsUnit.templateRepoURL} with "${req.app}" as its first app, builds it and records it before the member is fanned out`);
+      // A site the bundle lists is served from the bundle at its release: the template names nothing of it.
+      const bundleSite = siteFromBundle && website ? `serves the site ${website.site} it lists at release ${bundleReleaseTag(appsImageTag)}` : null;
+      ctx.log(bundleSite
+        ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} ${bundleSite}, so no template file is copied; it is built and recorded before the member is fanned out`
+        : hasBundle
+          ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`
+          : `tenant ${tc.guid} has no apps bundle yet — this run creates ${appsUnit.org}/${appsImage} from ${appsUnit.templateRepoURL} with "${req.app}" as its first app, builds it and records it before the member is fanned out`);
       // The registration is the GitOps truth for the tenant's target slave; apply-appproject pins the
       // new member's project against exactly it.
       const { cluster } = current.entry;
@@ -516,7 +520,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.${replacementSentence(params.websiteReplacing)}`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${bundleSite ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} ${bundleSite}, takes no file from the template, and is built first` : hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.${replacementSentence(params.websiteReplacing)}`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
