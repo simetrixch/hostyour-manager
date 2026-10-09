@@ -40,6 +40,8 @@ export const DKIM_RECORD_ROUTE = "https://post.{stageApex}/api/internal/sender-d
 export const DKIM_CHECK_ROUTE = "https://post.{stageApex}/api/internal/sender-domains/{domain}/check";
 export const DKIM_RECORD_URL = `https://post.example.com/api/internal/sender-domains/${DOMAIN}/dkim-record`;
 export const DKIM_CHECK_URL = `https://post.example.com/api/internal/sender-domains/${DOMAIN}/check`;
+const DMARC_RECORD_ROUTE = "https://post.{stageApex}/api/internal/sender-domains/{domain}/dmarc-record";
+export const DMARC_RECORD_URL = `https://post.example.com/api/internal/sender-domains/${DOMAIN}/dmarc-record`;
 
 export function createTestLogger(): Logger {
   return createLogger(parseConfig({
@@ -53,14 +55,15 @@ export const logger = createTestLogger();
 export interface ManifestDkim {
   recordUrl: string;
   checkUrl: string;
+  dmarcRecordUrl?: string;
   unit: string;
 }
 
-export const manifest = (check: string | null, issuers: boolean, dkim?: ManifestDkim | boolean): string => {
+export const manifest = (check: string | null, issuers: boolean, dkim?: ManifestDkim | boolean, dmarc = false): string => {
   const dkimBlock = dkim === true
-    ? `  senderDomainDkim: { recordUrl: "${DKIM_RECORD_ROUTE}", checkUrl: "${DKIM_CHECK_ROUTE}", unit: post }\n`
+    ? `  senderDomainDkim: { recordUrl: "${DKIM_RECORD_ROUTE}", checkUrl: "${DKIM_CHECK_ROUTE}", ${dmarc ? `dmarcRecordUrl: "${DMARC_RECORD_ROUTE}", ` : ""}unit: post }\n`
     : dkim
-      ? `  senderDomainDkim: { recordUrl: "${dkim.recordUrl}", checkUrl: "${dkim.checkUrl}", unit: ${dkim.unit} }\n`
+      ? `  senderDomainDkim: { recordUrl: "${dkim.recordUrl}", checkUrl: "${dkim.checkUrl}", ${dkim.dmarcRecordUrl ? `dmarcRecordUrl: "${dkim.dmarcRecordUrl}", ` : ""}unit: ${dkim.unit} }\n`
       : "";
   return `apiVersion: hostyour.cloud/v1
 kind: ConsumerManifest
@@ -82,11 +85,15 @@ ${check ? `  senderDomainCheck: ${check}\n` : ""}${issuers ? `  senderDomainIssu
 export const DKIM_RECORD_NAME = `sel._domainkey.${DOMAIN}`;
 export const DKIM_RECORD_CONTENT = "v=DKIM1; p=MIGfMA0GCSqGSIb3DQE";
 export const DKIM_ZONE = "customer.test";
+export const DMARC_RECORD_NAME = `_dmarc.${DOMAIN}`;
+// Not the policy post starts a domain with, so a Manager that wrote a policy of its own would show.
+export const DMARC_RECORD_CONTENT = "v=DMARC1; p=quarantine; pct=50";
 
 export interface FakePostOptions {
   lists?: Record<string, string[]> | undefined;
   status?: number[] | undefined;
   dkimRecord?: { name?: unknown; type?: unknown; content?: unknown } | null | undefined;
+  dmarcRecord?: { name?: unknown; type?: unknown; content?: unknown } | null | undefined;
   onCheck?: ((domain: string) => void) | undefined;
   checkStatus?: number | undefined;
 }
@@ -98,7 +105,7 @@ export function fakePost(
   status?: number[],
 ): FakeUnitCall {
   const isOpts = typeof listsOrOpts === "object" && listsOrOpts !== null &&
-    ("lists" in listsOrOpts || "dkimRecord" in listsOrOpts || "onCheck" in listsOrOpts || "checkStatus" in listsOrOpts);
+    ("lists" in listsOrOpts || "dkimRecord" in listsOrOpts || "dmarcRecord" in listsOrOpts || "onCheck" in listsOrOpts || "checkStatus" in listsOrOpts);
   const opts: FakePostOptions = isOpts ? (listsOrOpts as FakePostOptions) : { lists: listsOrOpts as Record<string, string[]>, status };
   const lists = opts.lists ?? {};
   const forcedStatus = opts.status ? [...opts.status] : [];
@@ -113,6 +120,14 @@ export function fakePost(
         status: 200,
         detail: "HTTP 200",
         body: opts.dkimRecord ?? { name: `sel._domainkey.${domain}`, type: "TXT", content: DKIM_RECORD_CONTENT },
+      };
+    }
+    if (req.url.endsWith("/dmarc-record")) {
+      if (opts.dmarcRecord === null) return { status: 404, detail: "HTTP 404" };
+      return {
+        status: 200,
+        detail: "HTTP 200",
+        body: opts.dmarcRecord ?? { name: `_dmarc.${domain}`, type: "TXT", content: DMARC_RECORD_CONTENT },
       };
     }
     if (req.url.endsWith("/check")) {
@@ -147,6 +162,8 @@ export interface MakeOptions {
   post?: FakeUnitCall;
   dns?: FakeDnsProvider;
   dkim?: ManifestDkim | boolean;
+  /** The default DKIM routes plus the DMARC record route beside them. */
+  dmarc?: boolean;
   dkimWaitMs?: number;
   dkimPollMs?: number;
 }
@@ -171,8 +188,9 @@ export async function make(opts: MakeOptions = {}, handles: DbHandle[] = [], dir
       seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });
+  const dkim = opts.dkim ?? opts.dmarc;
   const creds = new CredentialStore({ db: db.db, logger });
-  if (opts.kept ?? (opts.issuers || opts.dkim)) await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEPT });
+  if (opts.kept ?? (opts.issuers || dkim)) await keepUnitCallKey(creds, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEPT });
   const post = opts.post ?? fakePost({});
   const dns = opts.dns ?? new FakeDnsProvider();
   const probe = new FakePublicProbe();
@@ -180,7 +198,7 @@ export async function make(opts: MakeOptions = {}, handles: DbHandle[] = [], dir
   probe.set(ASKED, { reachable: answer.status < 500 && answer.status !== 404, status: answer.status, detail: `HTTP ${answer.status}`, ...(answer.body !== undefined ? { body: answer.body } : {}) });
   const def = makeTenantSetSenderDomainDef({
     registrations: reg,
-    repo: new FakeRepoReader({ resolvedSha: "a".repeat(40), files: { "deploy/platform.yaml": manifest(opts.check === undefined ? CHECK : opts.check, opts.issuers ?? false, opts.dkim) } }),
+    repo: new FakeRepoReader({ resolvedSha: "a".repeat(40), files: { "deploy/platform.yaml": manifest(opts.check === undefined ? CHECK : opts.check, opts.issuers ?? false, dkim, opts.dmarc ?? false) } }),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({ deployState: { domain: CLUSTER, stage: "prod", writtenAt: "x", generation: 1 } }),
       argoReader: new FakeMasterArgoReader({ statuses: rendering(opts.renders ?? senderDomain) }), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",

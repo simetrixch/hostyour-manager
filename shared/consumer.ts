@@ -198,12 +198,15 @@ export const TenantSpecSchema = z.object({
   }).strict().optional(),
   // Where the product's mail service hands a stage's sender domain its DKIM record and checks it, held to
   // the stage's apex like senderDomainIssuers: `recordUrl` answers GET with { name, type: "TXT", content },
-  // the record the Manager publishes; `checkUrl` answers POST by checking the domain's records now; `unit`,
-  // the consumer whose kept key the Manager presents. Absent, a domain the product does not sign yet is
-  // refused, and its record is published by hand.
+  // the record the Manager publishes; `checkUrl` answers POST by checking the domain's records now;
+  // `dmarcRecordUrl` answers GET with the domain's DMARC record in the same shape, which the Manager
+  // publishes beside the DKIM record unless a TXT already stands at its name; `unit`, the consumer whose
+  // kept key the Manager presents. Absent, a domain the product does not sign yet is refused, and its
+  // record is published by hand; without `dmarcRecordUrl` no DMARC record is published.
   senderDomainDkim: z.object({
     recordUrl: stageApexDomainUrl,
     checkUrl: stageApexDomainUrl,
+    dmarcRecordUrl: stageApexDomainUrl.optional(),
     unit: consumerName,
   }).strict().optional(),
   // The DNS label under which the Manager marks each tenant's identity provider for the product's mail

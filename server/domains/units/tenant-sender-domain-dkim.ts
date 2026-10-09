@@ -19,7 +19,7 @@ import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { fillStageUrl, openStageUnitCallKey } from "./tenant-sender-domain-issuer.ts";
 import type { TenantSetSenderDomainParams, TenantSetSenderDomainPorts } from "./tenant-sender-domain.run.ts";
 
-const RUN_KIND = "tenant-set-sender-domain";
+export const RUN_KIND = "tenant-set-sender-domain";
 export const DKIM_SIGNING_WAIT_MS = 10 * 60_000;
 export const DKIM_POLL_INTERVAL_MS = 15_000;
 
@@ -59,16 +59,42 @@ export async function refuseUnsigned(
   return { why: `mail from ${domain} is not signed yet (${url} answered signing: ${String(signing)}) — its key is not active in the product's mail service`, pending: true };
 }
 
-/** The record the product's mail service wants published for `domain`. Only its name, type and content
- *  are read, and none of them is echoed where the answer is not such a record. */
-async function readDkimRecord(ports: TenantSetSenderDomainPorts, url: string, key: string, domain: string, signal?: AbortSignal): Promise<{ name: string; content: string }> {
-  const answer = await ports.unitCall.call({ method: "GET", url, key, ...(signal ? { signal } : {}) });
-  if (answer.status !== 200) throw errValidation(`${url} answered ${answer.status ?? "nothing"} (${answer.detail}) — the Manager cannot read the DKIM record of ${domain}`);
+/** The TXT record a route of the product's mail service answers for `domain`. Only its name, type and content
+ *  are read, and none of them is echoed where the answer is not such a record: `what` names the record in the
+ *  refusals, `shape` says what it has to be, and `accepts` judges the answered name and content. */
+export async function readTxtRecord(
+  ports: Pick<TenantSetSenderDomainPorts, "unitCall">,
+  route: { url: string; key: string; signal?: AbortSignal },
+  record: { what: string; domain: string; shape: string; accepts: (name: string, content: string) => boolean },
+): Promise<{ name: string; content: string }> {
+  const answer = await ports.unitCall.call({ method: "GET", url: route.url, key: route.key, ...(route.signal ? { signal: route.signal } : {}) });
+  if (answer.status !== 200) throw errValidation(`${route.url} answered ${answer.status ?? "nothing"} (${answer.detail}) — the Manager cannot read the ${record.what} of ${record.domain}`);
   const body = (answer.body ?? {}) as { name?: unknown; type?: unknown; content?: unknown };
-  if (typeof body.name !== "string" || !body.name.endsWith(`._domainkey.${domain}`) || body.type !== "TXT" || typeof body.content !== "string" || body.content === "") {
-    throw errValidation(`${url} answered no DKIM record of ${domain}, which is a TXT record named <selector>._domainkey.${domain}`);
+  if (typeof body.name !== "string" || body.type !== "TXT" || typeof body.content !== "string" || body.content === "" || !record.accepts(body.name, body.content)) {
+    throw errValidation(`${route.url} answered no ${record.what} of ${record.domain}, which is ${record.shape}`);
   }
   return { name: body.name, content: body.content };
+}
+
+/** The record the product's mail service wants published for `domain`. */
+function readDkimRecord(ports: TenantSetSenderDomainPorts, url: string, key: string, domain: string, signal?: AbortSignal): Promise<{ name: string; content: string }> {
+  return readTxtRecord(ports, { url, key, ...(signal ? { signal } : {}) }, {
+    what: "DKIM record",
+    domain,
+    shape: `a TXT record named <selector>._domainkey.${domain}`,
+    accepts: (name) => name.endsWith(`._domainkey.${domain}`),
+  });
+}
+
+/** The zone that holds a record's name, or the refusal where this Manager manages none: `repair` says what
+ *  the person does then. */
+export async function zoneOfRecord(dns: DnsProvider, name: string, repair: string): Promise<string> {
+  try {
+    return await dns.zoneName({ name });
+  } catch (err) {
+    if (err instanceof DnsZoneUnknownError) throw errValidation(`${name} lies in a zone this Manager does not manage — ${repair}`);
+    throw err;
+  }
 }
 
 /** Whether the record already stands at its name. Another TXT record there refuses: the Manager never
@@ -95,21 +121,13 @@ export async function planDkimRecord(ports: TenantSetSenderDomainPorts, db: Db, 
   const key = await openStageUnitCallKey(ports.store, route.unit, tc.stage, `${RUN_KIND}:read-dkim-record`);
   const record = await readDkimRecord(ports, fillStageUrl(route.recordUrl, apex, senderDomain), key, senderDomain);
   const dns = requireDns(ports.dns, tc.guid, RUN_KIND);
-  let zone: string;
-  try {
-    zone = await dns.zoneName({ name: record.name });
-  } catch (err) {
-    if (err instanceof DnsZoneUnknownError) {
-      throw errValidation(`${record.name} lies in a zone this Manager does not manage — publish it there by hand and have ${route.unit} check it, or give the Manager that zone`);
-    }
-    throw err;
-  }
+  const zone = await zoneOfRecord(dns, record.name, `publish it there by hand and have ${route.unit} check it, or give the Manager that zone`);
   await standingDkim(dns, db, record);
   return { ...record, zone };
 }
 
-/** What a step of the record needs at run time: the route as the product declares it now, and the key. */
-async function dkimRouteAt(ports: TenantSetSenderDomainPorts, ctx: StepCtx, p: TenantSetSenderDomainParams, purpose: string) {
+/** What a step of a sender-domain record needs at run time: the route as the product declares it now, and the key. */
+export async function dkimRouteAt(ports: TenantSetSenderDomainPorts, ctx: StepCtx, p: TenantSetSenderDomainParams, purpose: string) {
   const spec = await readTenantSpec(ports, { signal: ctx.signal });
   const route = spec?.senderDomainDkim;
   if (!route) throw errValidation(`the product's tenant spec no longer declares senderDomainDkim — plan again`);

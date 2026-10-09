@@ -24,6 +24,7 @@ import {
   removeDkimRecordCleanup,
   tenantUnitApex,
 } from "./tenant-sender-domain-dkim.ts";
+import { dmarcPlanSentence, planDmarcRecord, publishDmarcRecordStep, removeDmarcRecordCleanup } from "./tenant-sender-domain-dmarc.ts";
 
 // `tenant-set-sender-domain` — set, switch or clear the domain a tenant's mail is sent as.
 // A customer sends from its own domain (example.org) instead of
@@ -59,6 +60,11 @@ export const TenantSetSenderDomainParams = z.object({
     content: z.string(),
     zone: z.string(),
   }).optional(),
+  /** The stage DMARC record to publish, or the TXT record that stands at its name and stays. */
+  dmarc: z.discriminatedUnion("act", [
+    z.object({ act: z.literal("publish"), name: z.string(), content: z.string(), zone: z.string() }),
+    z.object({ act: z.literal("keep"), name: z.string(), content: z.string(), zone: z.string(), why: z.string() }),
+  ]).optional(),
 });
 export type TenantSetSenderDomainParams = z.infer<typeof TenantSetSenderDomainParams>;
 
@@ -153,6 +159,7 @@ function tenantSetSenderDomainSteps(ports: TenantSetSenderDomainPorts, p: Tenant
       },
     },
     publishDkimRecordStep(ports, p),
+    publishDmarcRecordStep(ports, p),
     awaitDkimSigningStep(ports, p),
     {
       name: "bind-issuer",
@@ -249,8 +256,11 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       // The record to publish comes from the plan alone, never from the request: a run writes only what
       // the product wants for this domain, and the stored params carry what the approve said yes to.
       delete params.dkim;
+      delete params.dmarc;
       const dkim = params.senderDomain === "" ? null : await planDkimRecord(ports, db, tc, spec, params.senderDomain);
       if (dkim) params.dkim = dkim;
+      const dmarc = await planDmarcRecord(ports, db, tc, spec, params.senderDomain);
+      if (dmarc) params.dmarc = dmarc;
       const route = spec?.senderDomainIssuers;
       const unbinds = params.previous !== "" && params.previous !== params.senderDomain;
       let issuerNote = "";
@@ -272,6 +282,7 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
           `${params.previous === params.senderDomain ? " (unchanged, re-applied)" : `, instead of ${params.previous || "the platform's own domain"}`}` +
           `: record it on the registration and the row, then wait until every member is Synced + Healthy rendering it.` +
           `${params.dkim ? ` The run publishes TXT ${params.dkim.name} in the zone ${params.dkim.zone}, then waits until ${spec?.senderDomainDkim?.unit} signs mail from ${params.senderDomain}.` : params.senderDomain ? ` The product's check answered that mail from ${params.senderDomain} is signed.` : ""}` +
+          dmarcPlanSentence(params) +
           `${params.senderDomain ? " The domain's SPF record must allow the platform's mail server, which is the domain owner's to set." : ""}` +
           issuerNote,
         steps: steps.map((s) => ({ name: s.name, title: s.title })),
@@ -282,6 +293,6 @@ export function makeTenantSetSenderDomainDef(ports: TenantSetSenderDomainPorts):
       };
     },
     steps: (params) => tenantSetSenderDomainSteps(ports, params),
-    cleanups: (params) => [restoreSenderDomainCleanup(ports, params), unbindIssuerCleanup(ports, params), removeDkimRecordCleanup(ports, params)],
+    cleanups: (params) => [restoreSenderDomainCleanup(ports, params), unbindIssuerCleanup(ports, params), removeDkimRecordCleanup(ports, params), removeDmarcRecordCleanup(ports, params)],
   };
 }
