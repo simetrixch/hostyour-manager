@@ -64,6 +64,8 @@ import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { memberApplication } from "./tenant-fanout.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { TENANT_BRINGS, type UnitSize } from "#unit/shared/unit-size.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
+import { tenantBundleManifest } from "./engine-line.ts";
 
 /** One build unit the tenant run onboards or re-releases before it fans out. Frozen into the run
  *  params at plan time; the credential id is present only for a unit already registered. Every
@@ -357,6 +359,9 @@ export interface RefreshImagesParams {
   appsImage?: string | undefined;
   /** The size a new stage is created at; absent for a standing tenant, whose registration says it. */
   size?: UnitSize | undefined;
+  /** The website's site is one the tenant's own bundle lists under its folder, which the template may not:
+   *  the re-render judges it against the bundle at the tag the build wrote. */
+  siteFromBundle?: boolean | undefined;
 }
 
 /** After the builds: the fan-out rendered again against the books branch, where the bumps wrote the
@@ -381,6 +386,16 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
       const standing = p.size ? undefined : (await ports.registrations.readTenant(p.stage, p.guid))?.entry;
       const quota = p.size ? resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS) : standing?.quota;
       if (!quota) throw errValidation(`tenant ${p.guid} has no registration at ${p.stage} to read its quota from`);
+      // The plan judged the site against the bundle the tenant stood at; the build has since written a
+      // new release of it. Judged against the template instead, T4 would hold the site to a folder that
+      // does not list it, so a bundle that cannot be read fails here and never falls back to the template.
+      // The registration is read for a standing tenant only, so a new stage's size has none to name the bundle.
+      let bundle: AppsManifest | null = null;
+      if (p.siteFromBundle) {
+        if (p.size) throw errValidation(`the website's site is listed by the tenant's own bundle, which only a standing tenant's registration names, and this run creates a stage of tenant ${p.guid} at size ${p.size}`);
+        if (!standing?.appsRepo || !appsImageTag) throw errValidation(`the website's site is listed by the tenant's own bundle, but the registration of tenant ${p.guid} at ${p.stage} names no apps repository`);
+        bundle = await tenantBundleManifest(ports, { appsRepo: standing.appsRepo, appsImageTag }, ctx.signal);
+      }
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
@@ -388,6 +403,7 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           stage: p.stage,
           quota, size: p.size ?? standing?.size,
           apps: p.apps,
+          ...(bundle ? { bundle } : {}),
           ...(p.isStandingTenant ? { isStandingTenant: true } : {}),
           ...(p.members ? { members: p.members } : {}),
           ...(p.identityProvider ? { identityProvider: p.identityProvider } : {}),

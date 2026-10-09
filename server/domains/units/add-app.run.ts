@@ -196,7 +196,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     // bundle was just built at, then the new app's pinned images must EXIST in the tenant cluster's
     // registrations before the pointer append fans it out. A probe — an image no build unit above
     // produced fails the run naming every absent tag.
-    ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, demo: p.demo, registryHost: p.registryHost, requiredImages: p.requiredImages, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
+    ...tenantImageSteps(ports, { guid: p.guid, domain: p.domain, stage: p.stage, subdomain: p.subdomain, apps: [app], seedUsers: p.seedUsers, demo: p.demo, registryHost: p.registryHost, requiredImages: p.requiredImages, siteFromBundle: p.siteFromBundle, ...(p.appsImage !== undefined ? { appsImage: p.appsImage } : {}) }, runtime),
     {
       name: "apply-appproject",
       title: "Apply the new member's isolation AppProject and admission policy",
