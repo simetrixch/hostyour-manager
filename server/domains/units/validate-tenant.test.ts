@@ -357,6 +357,7 @@ describe("validateTenant", () => {
     const throwingRepo: RepoReader = {
       cloneAtRef: async () => { throw errValidation("clone failed: authentication required"); },
       readFile: async () => null,
+      readFileBytes: async () => null,
       listDir: async () => [],
       isExecutable: async () => false,
       dispose: async () => {},

@@ -15,13 +15,13 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, sep } from "node:path";
+import { join } from "node:path";
 import { errValidation } from "../../kernel/errors.ts";
 import { PRODUCT_BRANCH } from "../../../shared/branches.ts";
 import type { BranchScope, ClonedRepo, CommitInput, RepoFileWrite, RepoWriter, RepoCheckout, PlatformRepo, RepoReader } from "./port.ts";
 import { runGit, withAskpass } from "./git-exec.ts";
 import { readWorkdirFileCommit } from "./git-file-commit.ts";
-import { isWorkdirFileExecutable, listWorkdirDir, readWorkdirFile, readWorkdirFileHistory, stageWorkdirChanges } from "./git-workdir.ts";
+import { disposeTempWorkdir, isWorkdirFileExecutable, listWorkdirDir, readWorkdirBytes, readWorkdirFile, readWorkdirFileHistory, stageWorkdirChanges } from "./git-workdir.ts";
 
 const SHA40 = /^[0-9a-f]{40}$/;
 const BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
@@ -116,6 +116,10 @@ export class GitRepoReader implements RepoReader {
     return readWorkdirFile(workdir, relPath);
   }
 
+  async readFileBytes(workdir: string, relPath: string): Promise<Uint8Array | null> {
+    return readWorkdirBytes(workdir, relPath);
+  }
+
   async listDir(workdir: string, relPath: string): Promise<string[]> {
     return listWorkdirDir(workdir, relPath);
   }
@@ -125,10 +129,7 @@ export class GitRepoReader implements RepoReader {
   }
 
   async dispose(workdir: string): Promise<void> {
-    const abs = resolve(workdir);
-    const tmp = resolve(tmpdir());
-    if (!abs.startsWith(tmp + sep)) throw errValidation(`refusing to remove a directory outside the OS temp dir`);
-    await rm(abs, { recursive: true, force: true, maxRetries: 3 });
+    await disposeTempWorkdir(workdir);
   }
 
   async listTags(input: { repoURL: string; credentialId?: string; signal?: AbortSignal }): Promise<{ name: string; commit: string }[]> {
@@ -641,9 +642,6 @@ export class GitRepoWriter implements RepoWriter {
   }
 
   async dispose(workdir: string): Promise<void> {
-    const abs = resolve(workdir);
-    const tmp = resolve(tmpdir());
-    if (!abs.startsWith(tmp + sep)) throw errValidation(`refusing to remove a directory outside the OS temp dir`);
-    await rm(abs, { recursive: true, force: true, maxRetries: 3 });
+    await disposeTempWorkdir(workdir);
   }
 }

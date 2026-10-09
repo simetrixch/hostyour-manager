@@ -17,6 +17,9 @@ export interface ClonedRepo {
 export interface RepoReader {
   cloneAtRef(input: { repoURL: string; ref: string; credentialId?: string; signal?: AbortSignal }): Promise<ClonedRepo>;
   readFile(workdir: string, relPath: string): Promise<string | null>;
+  /** The file's bytes as the clone holds them, or null where readFile answers null. A copy that must
+   *  land unchanged reads these, since a file that is not UTF-8 text would not survive readFile. */
+  readFileBytes(workdir: string, relPath: string): Promise<Uint8Array | null>;
   /** List the immediate entry names (files + subdirs) directly under `relPath`, or [] when the
    *  directory is absent. The generic directory primitive the tenant app-type catalog reads
    *  (charts/example-engine/values-<app>.yaml — app-catalog.ts): the name filtering/exclusion logic
@@ -118,9 +121,10 @@ export interface RepoCheckout {
   branch: string; // the resolved default branch (main/master/…) — the ref commitPush pushes to
 }
 
-/** One file a RepoWriter commit writes. `executable` sets its mode: true is 100755, false is
- *  100644; left out, git keeps the mode of the file as it stands, and a new file lands as 100644. */
-export type RepoFileWrite = { path: string; content: string; executable?: boolean };
+/** One file a RepoWriter commit writes: text as UTF-8, bytes as they are. `executable` sets its mode:
+ *  true is 100755, false is 100644; left out, git keeps the mode of the file as it stands, and a new
+ *  file lands as 100644. */
+export type RepoFileWrite = { path: string; content: string | Uint8Array; executable?: boolean };
 
 /** The Manager's writer of a repository it does not own: the release-kit lifecycle
  *  (onboarding commits release/ + the workflow into the repository, removal git-rm's them).

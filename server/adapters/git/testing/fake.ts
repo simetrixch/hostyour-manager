@@ -13,10 +13,17 @@ function dirPrefix(relPath: string): string {
   return dir === "" || dir === "." ? "" : `${dir}/`;
 }
 
+/** A file's content as the real readFile answers it: bytes decoded as UTF-8, an invalid byte as U+FFFD. */
+const asText = (content: string | Uint8Array): string => typeof content === "string" ? content : Buffer.from(content).toString("utf8");
+const asBytes = (content: string | Uint8Array): Uint8Array => typeof content === "string" ? Buffer.from(content, "utf8") : content;
+const sameContent = (a: string | Uint8Array | undefined, b: string | Uint8Array): boolean => a !== undefined && Buffer.from(asBytes(a)).equals(asBytes(b));
+
 /** The scripted content a FakeRepoReader serves for a single clone (the resolved SHA + the files). */
 export interface FakeRepoReaderScript {
   resolvedSha?: string;
   files?: Record<string, string>;
+  /** Files held as bytes, such as an image that is not UTF-8 text; readFile decodes them as git's checkout would. */
+  bytes?: Record<string, Uint8Array>;
   /** The paths git records as executable (100755); every other file reads as 100644. */
   executable?: readonly string[];
   /** What listTags answers for the repository, each tag with the commit it peels to. */
@@ -59,7 +66,13 @@ export class FakeRepoReader implements RepoReader {
   }
 
   async readFile(workdir: string, relPath: string): Promise<string | null> {
-    return this.scriptOf(workdir).files?.[relPath] ?? null;
+    const bytes = this.scriptOf(workdir).bytes?.[relPath];
+    return this.scriptOf(workdir).files?.[relPath] ?? (bytes ? asText(bytes) : null);
+  }
+
+  async readFileBytes(workdir: string, relPath: string): Promise<Uint8Array | null> {
+    const text = this.scriptOf(workdir).files?.[relPath];
+    return this.scriptOf(workdir).bytes?.[relPath] ?? (text === undefined ? null : asBytes(text));
   }
 
   // Immediate children of relPath, DERIVED from the scripted files map (no extra script surface): every
@@ -69,7 +82,8 @@ export class FakeRepoReader implements RepoReader {
   async listDir(workdir: string, relPath: string): Promise<string[]> {
     const prefix = dirPrefix(relPath);
     const names = new Set<string>();
-    for (const p of Object.keys(this.scriptOf(workdir).files ?? {})) {
+    const script = this.scriptOf(workdir);
+    for (const p of [...Object.keys(script.files ?? {}), ...Object.keys(script.bytes ?? {})]) {
       if (!p.startsWith(prefix)) continue;
       const seg = p.slice(prefix.length).split("/")[0];
       if (seg) names.add(seg);
@@ -280,8 +294,8 @@ export interface FakeRepoWriterCommit {
 export class FakeRepoWriter implements RepoWriter {
   readonly opened: { repoURL: string; credentialId: string }[] = [];
   readonly commits: FakeRepoWriterCommit[] = [];
-  // "repoURL\0path" -> content
-  private readonly store = new Map<string, string>();
+  // "repoURL\0path" -> content, as it was written
+  private readonly store = new Map<string, string | Uint8Array>();
   // "repoURL\0path" of every file git would record as executable (100755)
   private readonly executables = new Set<string>();
   private readonly branch: string;
@@ -321,7 +335,7 @@ export class FakeRepoWriter implements RepoWriter {
     const out: Record<string, string> = {};
     for (const [k, v] of this.store) {
       if (!k.startsWith(`${repoURL}\0`)) continue;
-      out[k.slice(repoURL.length + 1)] = v;
+      out[k.slice(repoURL.length + 1)] = asText(v);
     }
     return out;
   }
@@ -337,7 +351,8 @@ export class FakeRepoWriter implements RepoWriter {
   }
 
   async readFile(workdir: string, relPath: string): Promise<string | null> {
-    return this.store.get(`${this.repoOf(workdir)}\0${relPath}`) ?? null;
+    const content = this.store.get(`${this.repoOf(workdir)}\0${relPath}`);
+    return content === undefined ? null : asText(content);
   }
 
   async listDir(workdir: string, relPath: string): Promise<string[]> {
@@ -378,7 +393,7 @@ export class FakeRepoWriter implements RepoWriter {
       const key = `${repoURL}\0${w.path}`;
       // Left out, the mode stays what the file had (the real adapter's git add), and a new file is 100644.
       const executable = w.executable ?? this.executables.has(key);
-      if (this.store.get(key) !== w.content || this.executables.has(key) !== executable) {
+      if (!sameContent(this.store.get(key), w.content) || this.executables.has(key) !== executable) {
         this.store.set(key, w.content);
         if (executable) this.executables.add(key);
         else this.executables.delete(key);
