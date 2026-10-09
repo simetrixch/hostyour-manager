@@ -14,7 +14,7 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 import { bundleReleaseTag, engineLineRefusal, repositoryEngine, versionLine } from "./engine-line.ts";
-import { sameApprovals, stagePinsOf, tenantVersionParts, versionRefusal, withChosenVersions, type Approvals } from "./tenant-versions.ts";
+import { sameApprovals, stagePinsAndNamesOf, tenantVersionParts, versionRefusal, withChosenVersions, type Approvals } from "./tenant-versions.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 
 export type LineMovePorts = Pick<TenantOnboardPorts, "repo" | "deployCredentialId" | "registrations" | "attestedBuilds" | "registryProbe" | "channelStages">;
@@ -146,7 +146,7 @@ export async function readLineMove(
   }
   input.log(`registry probes: ${images.length} images, ${Math.round(performance.now() - tProbes)} ms`);
   const tPins = performance.now();
-  const pins = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(stage, chart), entry.members);
+  const pins = await stagePinsAndNamesOf((chart) => ports.registrations.listPinnedBuilds(stage, chart), entry.members);
   input.log(`pins of the stage: ${Math.round(performance.now() - tPins)} ms`);
   const approvedTags = withChosenVersions(entry.approvedTags, pins, Object.fromEntries(part.builds.map((b) => [b.name, partTag])));
   const mismatch = engineLineRefusal(bundle.engine, approvedTags);
