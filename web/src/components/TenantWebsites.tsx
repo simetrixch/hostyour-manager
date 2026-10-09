@@ -1,7 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
+import type { TenantStatus } from "../../../shared/enums.ts";
 import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteConfirm } from "../tenantAppRows.ts";
+import { appPurgeable } from "../tenantRows.ts";
 import { addTenantWebsite, setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
@@ -10,17 +12,19 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
  *  its site, the form that adds one, the dialog that moves one to another domain or gives it alias
  *  domains, and the dialog that moves one to another site of the tenant's bundle. A website is typed without `www.`: it is served at `<domain>`, and `www.<domain>` and each
  *  alias with its `www.` redirect there. It is named
- *  after its site when it is added. Every action only PLANS its run and hands off to the Run screen. */
+ *  after its site when it is added. A website the tenant removed keeps its row here, with the purge of
+ *  its leftovers (`onPurge`) while it stands offboarded. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
   tenantId: string;
   catalog: TenantAppCatalogView | null;
   /** The live websites (listedWebsites): a domain is null where only the inventory could name the website. */
   websites: readonly { name: string; site: string; domain: string | null; aliases: readonly string[] }[];
-  /** The websites the tenant removed: name, site and the run that removed each. */
-  removed: readonly { name: string; site: string; lastRunId: string | null }[];
+  /** The websites the tenant removed: name, site, status (offboarded until purged) and the run that removed each. */
+  removed: readonly { name: string; site: string; status: TenantStatus; lastRunId: string | null }[];
   busy: boolean;
   act: (fn: () => Promise<{ runId: string }>) => Promise<void>;
   onRemove: (app: string) => void;
+  onPurge: (app: string) => void;
   onRecordPackagesReader: (owner: string, token: string) => Promise<void>;
 }) {
   const { tenantId, catalog, busy, act } = props;
@@ -93,6 +97,11 @@ export function TenantWebsites(props: {
                     <Link className="btn" to={`/runs/${w.lastRunId}`}>
                       Last run →
                     </Link>
+                  )}
+                  {appPurgeable(w.status) && (
+                    <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onPurge(w.name)}>
+                      Purge
+                    </button>
                   )}
                 </span>
               </div>
