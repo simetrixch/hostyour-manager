@@ -47,7 +47,7 @@ import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
 import { tenantBundleManifest } from "../domains/units/engine-line.ts";
-import { ensureTenantAppDatabases } from "../domains/units/tenant-app-databases.ts";
+import { ensureTenantAppDatabases, type TenantManifestReader } from "../domains/units/tenant-app-databases.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantSetWebsiteSiteDef } from "../domains/units/tenant-website-site.run.ts";
@@ -97,7 +97,9 @@ export interface TenantFamily {
   resolver?: ClusterKubeResolver;
   /** The app-type catalog its wizard read route serves. Undefined when the family is not configured. */
   appCatalog?: AppCatalogProvider;
-  /** The reader of one tenant's own catalog. Undefined without the family or without a GitHub App. */
+  /** The apps manifest of one tenant's own bundle at the release it stands at, read with the deploy
+   *  repository's credential (engine-line.ts tenantBundleManifest). Undefined when the family is not configured. */
+  readTenantManifest?: TenantManifestReader;
   /** The deploy repository URL its live read resolves the fan-out's pin against. Undefined when the family is
    *  not configured. */
   deployRepoUrl?: string;
@@ -419,13 +421,12 @@ export function buildTenantOnboarding(
   // ponytail: every view of the offer writes its part times at info; lower them to debug once the slow part is fixed.
   const lineMoves = (db: Db, tenantId: string, signal?: AbortSignal): Promise<LineMoveView> => readTenantLineMoves(onboardPorts, db, tenantId, signal, (line) => logger.info({ tenantId }, line));
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
-  // Each standing tenant's lists off its own bundle, read with the deploy repository's credential as the
-  // engine line is (engine-line.ts tenantBundleManifest).
+  // A tenant's own bundle, read with the deploy repository's credential as the engine line is
+  // (engine-line.ts tenantBundleManifest): the standing tenants' database lists and the tenant page's
+  // website sites come off it.
+  const readTenantManifest: TenantManifestReader = (bundle, signal) => tenantBundleManifest({ repo, deployCredentialId: onboardPorts.deployCredentialId }, bundle, signal);
   const writeTenantAppDatabases = async (db: Db): Promise<void> => {
-    await ensureTenantAppDatabases({
-      db, registrations: tenantRegistrations, logger,
-      readTenantManifest: (bundle, signal) => tenantBundleManifest({ repo, deployCredentialId: onboardPorts.deployCredentialId }, bundle, signal),
-    });
+    await ensureTenantAppDatabases({ db, registrations: tenantRegistrations, logger, readTenantManifest });
   };
   // A unit registered after the start is watched from the next start; a release of it before then is
   // caught by that start's check.
@@ -450,5 +451,5 @@ export function buildTenantOnboarding(
     readTenantSpec: (signal) => readTenantSpec(onboardPorts, signal ? { signal } : {}),
     unitCall, resolver, deployRepoUrl: repoURL, argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
   };
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, installationIssuers, appCatalog, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, installationIssuers, appCatalog, readTenantManifest, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
 }

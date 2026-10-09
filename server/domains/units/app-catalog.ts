@@ -8,6 +8,7 @@
 // primitive: one apps repository, one credential. A standing tenant is offered the same template
 // catalog when an app is added (api-tenant-app-catalog.ts): what the template names can be added,
 // and tenant-apps-repo carries the folder into the tenant's own repository (hostyour-manager#215).
+// A website folder the tenant's own bundle carries offers that bundle's sites instead (withBundleSites).
 //
 // WHERE NO MANIFEST STANDS — the deploy repository declares no template, or the template carries no apps.yaml
 // yet — the catalog is what it was before the manifest existed: the engine chart's
@@ -25,6 +26,7 @@ import { APPS_MANIFEST_PATH, parseAppsManifest, type AppEntry, type AppsManifest
 import { ConsumerManifestSchema, tenantAppsTemplate, type TenantSpec } from "../../../shared/consumer.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
+import { bundleFolderSites } from "./engine-line.ts";
 import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
 import { npmrcPackageScopes } from "#unit/server/repo-identity.ts";
 
@@ -124,6 +126,14 @@ export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppCat
     ...(input.signal ? { signal: input.signal } : {}),
   });
   return read.manifest ? { ...read.manifest, packageScopes: read.packageScopes } : standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
+}
+
+/** The catalog a tenant that runs its own bundle is held to: each website folder the bundle carries
+ *  offers the sites the bundle lists under it, since the bundle serves them and may name sites the
+ *  template never offered. Everything else stays the template's: a folder the bundle does not carry
+ *  comes from the template with the template's sites, and a folder only the bundle lists is not added. */
+export function withBundleSites<C extends AppsManifest>(catalog: C, bundle: AppsManifest | null): C {
+  return { ...catalog, apps: catalog.apps.map((a) => { const sites = a.sites && bundleFolderSites(bundle, a.name); return sites ? { ...a, sites: [...sites] } : a; }) };
 }
 
 /** What a single catalog fetch needs: the same deploy repository ref + read credential validateTenant clones

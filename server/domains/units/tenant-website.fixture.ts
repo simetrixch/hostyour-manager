@@ -5,7 +5,8 @@ import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrat
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, db, seedClusters } from "./add-app.fixture.ts";
+import type { AddAppPorts } from "./add-app.run.ts";
+import { GUID, db, ports, scriptBundle, seedClusters } from "./add-app.fixture.ts";
 
 // The live tenant the website runs are tried on: its clusters, its registration with websites beside
 // erp, and the template catalog whose website folder carries the sites main and shop.
@@ -16,6 +17,14 @@ export const WEBSITE_APPS = {
   "webs/main/website.json": "{}\n",
   "webs/shop/website.json": "{}\n",
 };
+/** The ports of a website add-app run: the fixture's tenant runs a bundle created from the template, so
+ *  at the release it stands at the bundle carries the website folder as the template does. */
+export function websitePorts(over: Parameters<typeof ports>[0] = {}, template: Record<string, string> = WEBSITE_APPS): AddAppPorts {
+  const prt = ports(over, template);
+  scriptBundle(prt, { "apps.yaml": template["apps.yaml"]! });
+  return prt;
+}
+
 /** The live tenant of the fixture, on path routing: a website's hosts point at its zone, which has a
  *  record of its own only there. */
 export function seedWebsiteTenant(): void {

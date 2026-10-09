@@ -22,11 +22,12 @@ import type { HelmRenderer } from "../../adapters/helm/port.ts";
 import type { MemberRouting, Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { gateT5Fit } from "./gates/tenant-fit.ts";
 import { gateT6SecretOrder } from "./gates/tenant-secret-order.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
-import { readAppCatalog } from "./app-catalog.ts";
+import { readAppCatalog, withBundleSites } from "./app-catalog.ts";
 import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
 import { deployPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
@@ -72,6 +73,10 @@ export interface ValidateTenantRequest {
   /** Each app's database list as the caller read it off the tenant's own repository (a standing tenant,
    *  tenant-app-databases.ts standingAppDatabases); absent, the template catalog's list of its folder. */
   appDatabases?: Readonly<Record<string, readonly string[]>>;
+  /** The apps manifest of the tenant's own bundle where add-app serves a website from it: T4 holds the
+   *  website's site to the sites the bundle lists under its folder, not to the template's
+   *  (app-catalog.ts withBundleSites). */
+  bundle?: AppsManifest | null;
   probeGuid: string; // the throwaway guid the fan-out is rendered at
   /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
@@ -332,7 +337,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       images = collectContainerImages(docsByMember.flatMap((m) => m.docs));
       const t2 = gateT2Render(renders);
       const t3 = gateT3Isolation(docsByMember);
-      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: req.members ? req.members.map((m) => m.name).filter((name) => !req.apps.some((a) => a.name === name)) : t1.spec.members.map((m) => m.name), catalog, ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
+      const t4 = gateT4Apps({ apps: req.apps, members, renderedMembers, standingMembers: req.members ? req.members.map((m) => m.name).filter((name) => !req.apps.some((a) => a.name === name)) : t1.spec.members.map((m) => m.name), catalog: withBundleSites(catalog, req.bundle ?? null), ...(req.isStandingTenant ? { isStandingTenant: true } : {}) });
       const t5 = gateT5Fit(docsByMember, req.quota);
       const t6 = gateT6SecretOrder(docsByMember);
       for (const g of [t2, t3, t4, t5, t6]) {

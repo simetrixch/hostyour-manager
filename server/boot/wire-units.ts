@@ -41,6 +41,7 @@ import { makeSetReleaseDef, type SetReleasePorts } from "../domains/units/set-re
 import type { LifecyclePorts } from "../domains/units/lifecycle.ts";
 import type { TenantBuildDeps } from "../domains/units/tenant-builds.ts";
 import type { AppCatalogProvider } from "../domains/units/app-catalog.ts";
+import type { TenantManifestReader } from "../domains/units/tenant-app-databases.ts";
 import type { UnitPorts } from "#unit/server/plugin.ts";
 import type { RelocationPorts } from "#unit/server/relocation.ts";
 import { readAuthoritativeTtl } from "../adapters/dns/authoritative-ttl.ts";
@@ -127,10 +128,10 @@ export interface UnitsWiring {
    *  /api/tenants/app-catalog can offer the wizard the apps of the apps repository's apps.yaml.
    *  Undefined when tenant onboarding is not configured — the catalog route then serves { apps: [] }. */
   appCatalog?: AppCatalogProvider;
-  /** ONE tenant's own catalog — its bundle's apps.yaml, read under the `github-app` credential its
-   *  build registration names — threaded to the route GET /api/tenants/:id/app-catalog; the SAME
-   *  closure the tenant-add-app plan judges against. Undefined without tenant onboarding or without
-   *  the App; the route then answers { apps: [], reason }. */
+  /** ONE tenant's own bundle apps.yaml at the release it stands at, threaded to the route
+   *  GET /api/tenants/:id/app-catalog so a website folder offers the sites the bundle lists.
+   *  Undefined when tenant onboarding is not configured; the route then answers { apps: [], reason }. */
+  readTenantManifest?: TenantManifestReader;
   /** The shared activation client (the unit plugin's, ONE for the whole manager), threaded to
    *  registerTenantRoutes so the operator-driven POST /api/tenants/:id/invite-admin can call a
    *  tenant's own example-auth first-admin bootstrap. Present wherever the families are built. */
@@ -312,6 +313,7 @@ export function buildUnits(
     ...(tenant.deployRepoUrl ? { deployRepoUrl: tenant.deployRepoUrl } : {}),
     ...(tenant.installationIssuers ? { installationIssuers: tenant.installationIssuers } : {}),
     ...(tenant.appCatalog ? { appCatalog: tenant.appCatalog } : {}),
+    ...(tenant.readTenantManifest ? { readTenantManifest: tenant.readTenantManifest } : {}),
     ...(tenant.tenantRegistrations ? { tenantRegistrations: tenant.tenantRegistrations } : {}),
     ...(tenant.versions ? { tenantVersions: tenant.versions } : {}),
     ...(tenant.lineMoves ? { tenantLineMoves: tenant.lineMoves } : {}),

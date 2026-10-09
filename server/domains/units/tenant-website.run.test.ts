@@ -11,7 +11,7 @@ import { and, eq } from "drizzle-orm";
 import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
-import { tenantRegistrationWrite } from "./tenant-registrations.ts";
+import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { FakePlatformRepo, FakeRepoReader, FakeRepoWriter } from "../../adapters/git/testing/fake.ts";
 import { tenantAppsRepoURL } from "./tenant-apps-tree.ts";
 import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
@@ -19,8 +19,8 @@ import type { CredentialStore } from "../../security/store.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant, tenantWith } from "./tenant-website.fixture.ts";
+import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seededPlatformRepo, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
+import { WEBSITE_APPS, seedWebsiteTenant, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
 
 // A website of a live tenant, added, moved and removed: named after its site, running the bundle's
 // folder `web`, served at <domain> with www.<domain> redirecting there, its hosts pointed at the
@@ -31,6 +31,9 @@ useMemoryDb();
 const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch" };
 const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
+
+/** The registrations of the fixture's tenant when it runs no bundle of its own yet. */
+const withoutBundle = (): TenantRegistrations => new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" }));
 
 /** A second live tenant's registration on the same books branch, serving a website at `domain`. */
 function seedOtherTenantWebsite(repo: FakePlatformRepo, domain: string): void {
@@ -43,7 +46,7 @@ function seedOtherTenantWebsite(repo: FakePlatformRepo, domain: string): void {
 describe("add-app for a website", () => {
   it("plans a website named after its site, running the web folder, with the records of both its hosts", async () => {
     seedWebsiteTenant();
-    const def = makeAddAppDef(ports({ dns: new FakeDnsProvider() }, WEBSITE_APPS));
+    const def = makeAddAppDef(websitePorts({ dns: new FakeDnsProvider() }));
     const result = await def.planStream!(WEBSITE, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") return;
@@ -59,13 +62,15 @@ describe("add-app for a website", () => {
     expect(result.plan.summary).toContain("website of site main, served at example.ch, and www.example.ch redirects there");
   });
 
-  it("carries only the site it serves into the tenant's bundle, and lists only that site", async () => {
+  // A tenant without a bundle of its own gets the site's folder from the template.
+  it("carries only the site it serves from the template into the bundle of a tenant without one, and lists only that site", async () => {
     seedWebsiteTenant();
     const sites = { "webs/main/website.json": "{}\n", "webs/shop/website.json": "{}\n" };
-    const prt = ports({ dns: new FakeDnsProvider() }, { ...WEBSITE_APPS, ...sites });
+    const prt = ports({ dns: new FakeDnsProvider(), registrations: withoutBundle() }, { ...WEBSITE_APPS, ...sites });
     const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
     if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
     const p = result.params;
+    expect(p.siteFromBundle).toBe(false);
     const writer = new FakeRepoWriter();
     prt.onboard = () => ({ ports: { consumerRepo: writer } }) as unknown as ReturnType<NonNullable<typeof prt.onboard>>;
     const creds = { list: async () => [{ id: "cred_app", subject: { kind: "owner" } }] } as unknown as CredentialStore;
@@ -89,23 +94,23 @@ describe("add-app for a website", () => {
   it("takes the numbered name of a site whose id the tenant already carries, and refuses the id itself", async () => {
     seedWebsiteTenant();
     const registrations = tenantWith([{ name: "main" }]);
-    const def = makeAddAppDef(ports({ registrations, dns: new FakeDnsProvider() }, WEBSITE_APPS));
+    const def = makeAddAppDef(websitePorts({ registrations, dns: new FakeDnsProvider() }));
     await expect(def.planStream!(WEBSITE, planCtx())).rejects.toThrow(/app "main" already exists/);
     const result = await def.planStream!({ ...WEBSITE, app: "main-2" }, planCtx());
     expect(result.outcome === "planned" && result.params.app).toBe("main-2");
   });
 
-  it("refuses a website whose site the catalog carries no folder for under webs/, naming the folder", async () => {
+  it("refuses a website whose site the catalog carries no folder for under webs/, naming the folder, for a tenant without a bundle", async () => {
     seedWebsiteTenant();
     const withoutSite = { "apps.yaml": WEBSITE_APPS["apps.yaml"], "webs/shop/website.json": "{}\n" };
-    await expect(makeAddAppDef(ports({}, withoutSite)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/carries no webs\/main\/ although its apps\.yaml names it/);
+    await expect(makeAddAppDef(ports({ registrations: withoutBundle() }, withoutSite)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/carries no webs\/main\/ although its apps\.yaml names it/);
   });
 
   it("lists an address record at a website host in the plan, replaces it with the CNAME, and writes it back on abort", async () => {
     seedWebsiteTenant();
     const dns = new FakeDnsProvider();
     dns.seed("www.example.ch", "A", "192.0.2.10");
-    const result = await makeAddAppDef(ports({ dns }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx());
+    const result = await makeAddAppDef(websitePorts({ dns })).planStream!(WEBSITE, planCtx());
     if (result.outcome !== "planned") throw new Error("the website was not planned");
     expect(result.params.websiteReplacing).toEqual([{ name: "www.example.ch", type: "A", content: "192.0.2.10", proxied: false, ttl: 1 }]);
     expect(result.plan.summary).toContain("It deletes A www.example.ch → 192.0.2.10, which this installation did not write, and an abort writes it back.");
@@ -121,7 +126,7 @@ describe("add-app for a website", () => {
   it("writes no record for a website on the tenant's own domain, whose records tenant-set-own-domain holds", async () => {
     seedWebsiteTenant();
     const own = tenantWith([], { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] });
-    const result = await makeAddAppDef(ports({ registrations: own }, WEBSITE_APPS)).planStream!(WEBSITE, planCtx());
+    const result = await makeAddAppDef(websitePorts({ registrations: own })).planStream!(WEBSITE, planCtx());
     expect(result.outcome === "planned" && result.params.websiteRecordHosts).toEqual([]);
   });
 
