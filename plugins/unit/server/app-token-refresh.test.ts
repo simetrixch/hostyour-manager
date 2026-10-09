@@ -257,6 +257,50 @@ describe("refreshAppTokens", () => {
   });
 });
 
+// A CI-ONLY UNIT'S BUILD NAMESPACE has no release pipeline, so ESO renders two of the three build
+// Secrets there, and refreshBuildSecrets refuses to ask for one the namespace does not hold.
+describe("refreshAppTokens — a CI-only unit", () => {
+  const CI_SECRETS = ["build-git-https", "build-npmrc"] as const;
+  const row = (name: string) => ({ name, ready: true, reason: "SecretSynced", targetSecret: name, refreshTime: "2026-01-01T00:00:00Z", remoteKeys: [] });
+  const plane = () => new FakeClusterReader({
+    externalSecretsByNamespace: {
+      "ci-check-build": CI_SECRETS.map(row),
+      "acme-apps-build": BUILD_TARGET_SECRETS.map(row),
+    },
+  });
+  async function mixed(): Promise<Registrations> {
+    const reg = new Registrations(new FakePlatformRepo());
+    const unit = (name: string) => ({ name, repoURL: `https://github.com/acme/${name}.git`, owner: "acme", onboardedAt: "2026-01-01T00:00:00Z", suspended: false, quiesced: false });
+    await reg.createBuildRegistration({ unit: unit("ci-check"), builds: [], runId: "run_ci" }, () => undefined);
+    await reg.commitRegistration({ unit: unit("acme-apps"), builds: ["acme-apps"], runId: "run_2" });
+    return reg;
+  }
+
+  it("rewrites its repo-pat and asks ESO for the two Secrets it holds, counts it refreshed, and leaves bump-git-https to the units that release", async () => {
+    const { store } = fakeStore({ value: "ghs_unit" });
+    const { seeder, written } = fakeSeeder();
+    const { logger, errors } = fakeLogger();
+    const kube = plane();
+    const githubApp = app();
+    const r = await refreshAppTokens({ store, owners, registrations: await mixed(), seeder, kube, logger, deployRepo: { repoURL: "https://github.com/acme/deploy.git" }, githubApp });
+    expect(r).toEqual({ refreshed: ["ci-check", "acme-apps", DEPLOY_BUMP_UNIT], failed: [] });
+    expect(written.map((w) => w.consumerName)).toEqual(["ci-check", "acme-apps", DEPLOY_BUMP_UNIT]);
+    // Planted innocent in the same tick: the unit that builds asks for all three, and for the bump
+    // entry's Secret once more behind the deploy repository rewrite.
+    expect(kube.refreshedExternalSecrets).toEqual([
+      "ci-check-build/build-git-https", "ci-check-build/build-npmrc",
+      ...refreshesOf("acme-apps"),
+      "acme-apps-build/bump-git-https",
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: a refresh of the full three Secrets in a CI-only namespace fails the unit", async () => {
+    const kube = plane();
+    await expect(refreshBuildSecrets(kube, "ci-check", BUILD_TARGET_SECRETS)).rejects.toThrow(/no ExternalSecret in ci-check-build writes bump-git-https/);
+  });
+});
+
 describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
   it("asks ESO to write exactly the three Secrets again, through the ExternalSecret that writes each, in the declared order, and deletes none", async () => {
     const kube = new FakeClusterReader({ externalSecretsByNamespace: { "acme-apps-build": [
