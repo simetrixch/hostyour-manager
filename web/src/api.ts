@@ -17,7 +17,7 @@ import type { ConsumerLiveView, TenantLiveView, ConsumerLiveProbeView } from "..
 import type { ServerReachView } from "../../shared/api-types-reach.ts";
 // The onboard wizard's two read views: the channel table (served literally from the platform repo's
 // clusters/platform/values-common.yaml) and what the prefill answers, identity included.
-import type { ChannelStagesView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
+import type { ChannelStagesView, CiOnlyUnitView, ConsumerSecretOfferView, OnboardPrefillView } from "../../shared/api-types-onboard.ts";
 import type { LatestBackupsView, UnitBackupView } from "../../shared/api-types-backups.ts";
 import type { LineMoveView } from "../../shared/api-types-line-move.ts";
 import type { MailDkimPublishInput, MailDmarcPublishInput, MailDnsPublishInput, MailDnsView, MailEnvelopeSpfPublishInput } from "../../shared/mail.ts";
@@ -263,7 +263,8 @@ export interface ConsumerView {
   /** When a writer last moved the row: a lifecycle run, a relocation, the scheduled check (#224). */
   updatedAt: number;
 }
-export interface OnboardInput {
+/** The request of a unit that deploys or builds: it names the stage the release lands on. */
+export interface ReleaseOnboardInput {
   consumerName: string;
   repoURL: string;
   /** The unit's own stage, for both forms — the namespace, the host, the registration path and the
@@ -278,6 +279,14 @@ export interface OnboardInput {
   // No credential rides the request: the unit's identity is its owner's, recorded on the
   // Owners page and derived from the owner of the repository URL (#220).
 }
+/** The request of a unit that only runs CI: no stage, cluster, size or release. */
+export interface CiOnlyOnboardInput {
+  form: "ci-only";
+  consumerName: string;
+  repoURL: string;
+  owner: string;
+}
+export type OnboardInput = ReleaseOnboardInput | CiOnlyOnboardInput;
 /** What the wizard's "Check the repository" sends (POST /api/consumers/prefill): the repository,
  *  whose release tags are read once with the owner's identity and not kept. */
 export interface OnboardPrefillInput {
@@ -297,6 +306,8 @@ export const prefillOnboard = (input: OnboardPrefillInput): Promise<OnboardPrefi
   post<OnboardPrefillView>("/api/consumers/prefill", input as unknown as Record<string, unknown>);
 export const onboardConsumer = (input: OnboardInput): Promise<{ runId: string }> =>
   post<{ runId: string }>("/api/consumers", input as unknown as Record<string, unknown>);
+export const listCiOnlyUnits = (): Promise<CiOnlyUnitView[]> => req<CiOnlyUnitView[]>("/api/consumers/ci-only");
+export const offboardCiOnlyUnit = (name: string): Promise<{ runId: string }> => post(`/api/consumers/ci-only/${encodeURIComponent(name)}/offboard`);
 export const offboardConsumer = (appId: string): Promise<{ runId: string }> => post(`/api/consumers/${appId}/offboard`);
 /** The by-NAME identity a purge (force-offboard) targets — an orphaned consumer has no appId/row, so
  *  purge is keyed on name + stage + cluster (the G1 identity law), never a path :appId. */

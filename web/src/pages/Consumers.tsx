@@ -26,6 +26,7 @@ import { ClosedStageLine } from "../components/closed-stage.tsx";
 import { ChosenConsumerEnvironment } from "../components/ConsumerCardHead.tsx";
 import { OffboardConsumerDialog, siblingStages } from "../components/OffboardConsumerDialog.tsx";
 import { groupEnvironments } from "../tenantRows.ts";
+import { CiOnlyUnits } from "../components/CiOnlyUnits.tsx";
 import { OffboardedConsumers, ConsumerBackupDialog, ConsumerRelocationDialog } from "../components/ConsumerRelocation.tsx";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -338,6 +339,7 @@ export function Consumers() {
           </ul>
         )}
 
+        <CiOnlyUnits />
         <OffboardedConsumers rows={offboardedRows} runs={runs} onRestore={(c) => setRelocFor({ c, kind: "restore" })} />
       </div>
 

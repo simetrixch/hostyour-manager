@@ -1,11 +1,11 @@
 import { useState, useEffect, type ChangeEvent, type FormEvent } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import type { ChannelStagesView, OnboardPrefillView } from "../../../shared/api-types-onboard.ts";
-import type { Stage } from "../../../shared/enums.ts";
 import { listOnboardTargets, getChannelStages, onboardConsumer, prefillOnboard, recordOwnerCredential, type OnboardTargetView } from "../api.ts";
 import { OwnerCredentialStep } from "../components/OwnerCredentialStep.tsx";
 import { addStageForm, admittedStage } from "../consumerAddStage.ts";
-import { DEFAULT_UNIT_SIZE, seededSizes, type UnitSize } from "#unit/shared/unit-size.ts";
+import { onboardInput, type OnboardKind } from "../onboardInput.ts";
+import { DEFAULT_UNIT_SIZE, seededSizes } from "#unit/shared/unit-size.ts";
 
 const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
@@ -44,9 +44,11 @@ export function ConsumerOnboard() {
   const [adding] = useState(() => addStageForm(params));
   const [form, setForm] = useState({ consumerName: "", repoURL: "", stage: "", clusterId: "", owner: "", chartPath: "deploy/chart", size: DEFAULT_UNIT_SIZE as string, ...(adding ? { ...adding, size: "" } : {}) });
   // Deployable (the manifest declares a chart → pick a cluster) vs build-only (no chart → the stage
-  // alone says where the one triggered release run puts the release). The server checks the choice
-  // against the manifest's own shape.
-  const [buildOnly, setBuildOnly] = useState(false);
+  // alone says where the one triggered release run puts the release) vs CI only (nothing is released:
+  // no stage, cluster or size). The server checks the first two against the manifest's own shape.
+  const [kind, setKind] = useState<OnboardKind>("deployable");
+  const buildOnly = kind !== "deployable";
+  const ciOnly = kind === "ci-only";
   const [targets, setTargets] = useState<OnboardTargetView[] | null>(null);
   // The channel table, read from the config route — platform/values-common.yaml global.channelStages
   // verbatim. Which channels exist and which stages each admits comes from HERE, never a local copy.
@@ -139,15 +141,7 @@ export function ConsumerOnboard() {
     setBusy(true);
     setError(null);
     try {
-      const { runId } = await onboardConsumer({
-        consumerName: form.consumerName.trim(),
-        repoURL: form.repoURL.trim(),
-        stage: form.stage as Stage,
-        ...(buildOnly ? {} : { clusterId: form.clusterId }),
-        owner: form.owner.trim(),
-        ...(form.chartPath.trim() ? { chartPath: form.chartPath.trim() } : {}),
-        size: form.size as UnitSize,
-      });
+      const { runId } = await onboardConsumer(onboardInput(kind, form));
       nav(`/runs/${runId}`); // the Run screen streams the live gate report + the approve card
     } catch (err) {
       setError(msg(err));
@@ -163,7 +157,7 @@ export function ConsumerOnboard() {
     if (prefill !== null && form.repoURL.trim() === readURL) return;
     void readRepository();
   };
-  const namespace = form.consumerName && form.stage ? `${form.consumerName}-${form.stage}` : "<name>-<stage>";
+  const namespace = ciOnly ? `${form.consumerName || "<name>"}-build` : form.consumerName && form.stage ? `${form.consumerName}-${form.stage}` : "<name>-<stage>";
 
   return (
     <section className="page">
@@ -232,47 +226,52 @@ export function ConsumerOnboard() {
               Defaults to the repo name, editable.
             </span>
           </label>
-          <div className="field">
-            <span className="field__label">Version</span>
-            <span className="field__hint">
-              {prefill?.version ? (
-                <>
-                  <code>
-                    {prefill.version}-{prefill.channel}
-                  </code>{" "}
-                  — {prefill.versionSource}; channel: {prefill.channelSource}.{" "}
-                </>
-              ) : null}
-              Not typed: the Manager reads the release when the onboarding is planned. A unit another stage of
-              which runs a release gets that release, as it stands; its first stage gets the next number after
-              the repository&apos;s release tags, on stable, which the repo&apos;s release script mints as{" "}
-              <code>{"<version>-stable-<timestamp>"}</code>.
-            </span>
-          </div>
-          <label className="field">
-            <span className="field__label">Stage</span>
-            <select value={form.stage} onChange={set("stage")} required>
-              <option value="" disabled>
-                {channel === null ? "Read the repository first" : "Choose a stage"}
-              </option>
-              {admittedStages.map((s) => (
-                <option key={s} value={s}>
-                  {s}
+          {!ciOnly && (
+            <>
+            <div className="field">
+              <span className="field__label">Version</span>
+              <span className="field__hint">
+                {prefill?.version ? (
+                  <>
+                    <code>
+                      {prefill.version}-{prefill.channel}
+                    </code>{" "}
+                    — {prefill.versionSource}; channel: {prefill.channelSource}.{" "}
+                  </>
+                ) : null}
+                Not typed: the Manager reads the release when the onboarding is planned. A unit another stage of
+                which runs a release gets that release, as it stands; its first stage gets the next number after
+                the repository&apos;s release tags, on stable, which the repo&apos;s release script mints as{" "}
+                <code>{"<version>-stable-<timestamp>"}</code>.
+              </span>
+            </div>
+            <label className="field">
+              <span className="field__label">Stage</span>
+              <select value={form.stage} onChange={set("stage")} required>
+                <option value="" disabled>
+                  {channel === null ? "Read the repository first" : "Choose a stage"}
                 </option>
-              ))}
-            </select>
-            <span className="field__hint">
-              The unit&apos;s OWN stage — its namespace, host, registration file and Vault path all carry it, whatever cluster it
-              lands on. Only the stages the release&apos;s channel admits are offered.
-            </span>
-          </label>
+                {admittedStages.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+              <span className="field__hint">
+                The unit&apos;s OWN stage — its namespace, host, registration file and Vault path all carry it, whatever cluster it
+                lands on. Only the stages the release&apos;s channel admits are offered.
+              </span>
+            </label>
+            </>
+          )}
           <label className="field">
             <span className="field__label">Form</span>
-            <select value={buildOnly ? "build-only" : "deployable"} onChange={(e) => setBuildOnly(e.target.value === "build-only")}>
+            <select value={kind} onChange={(e) => setKind(e.target.value as OnboardKind)}>
               <option value="deployable">Deploys itself (manifest declares a chart)</option>
               <option value="build-only">Build-only (no chart — deployed elsewhere)</option>
+              <option value="ci-only">CI only (runs the repository&apos;s checks on each push, releases nothing)</option>
             </select>
-            <span className="field__hint">Checked against the manifest: a repo with a chart needs a target cluster, one without gets only its build.</span>
+            <span className="field__hint">Checked against the manifest: a repo with a chart needs a target cluster, one without gets only its build. A CI-only repo needs <code>scripts/check.sh</code> and nothing else.</span>
           </label>
           {!buildOnly && (
             <label className="field">
@@ -338,8 +337,7 @@ export function ConsumerOnboard() {
               (!buildOnly && noTargets) ||
               !form.consumerName ||
               !form.repoURL ||
-              channel === null ||
-              !form.stage ||
+              (!ciOnly && (channel === null || !form.stage)) ||
               !targetChosen ||
               !form.owner ||
               (!buildOnly && !form.size)
