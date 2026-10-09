@@ -25,7 +25,7 @@ const TEMPLATE = {
 async function tree(chosen: readonly string[], sites: Readonly<Record<string, readonly string[]>>, over: { files?: Record<string, string>; catalogOnly?: readonly string[] } = {}): Promise<string[]> {
   const repo = new FakeRepoReader({ files: over.files ?? TEMPLATE });
   const { workdir } = await repo.cloneAtRef({ repoURL: "https://github.com/acme/template.git", ref: "HEAD" });
-  return (await readTemplateTree(repo, workdir, { templateApps: parseAppsManifest(TEMPLATE_APPS).apps, catalogOnly: over.catalogOnly ?? [], chosen, sites })).map((f) => f.path).sort();
+  return (await readTemplateTree(repo, workdir, { templateApps: parseAppsManifest(TEMPLATE_APPS).apps, catalogOnly: over.catalogOnly ?? [], chosen, sites, stands: async () => false })).map((f) => f.path).sort();
 }
 
 describe("readTemplateTree — the apps a tenant chose and the sites a run serves", () => {

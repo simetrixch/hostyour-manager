@@ -306,7 +306,7 @@ describe("write-tree — the tree from the template into the tenant's repository
     expect(files["package.json"]).toBe('{ "name": "acme-apps", "edited": true }\n');
     expect(parseAppsManifest(files["apps.yaml"]!).apps.map((a) => a.name)).toEqual(["erp", "web"]);
     expect(h.consumerRepo.commits).toHaveLength(2);
-    expect(h.consumerRepo.commits[1]).toMatchObject({ message: `Add web to ${UNIT} from the catalog`, write: [{ path: "apps/web/site.json", content: "{}\n" }, { path: "apps.yaml", content: files["apps.yaml"] }] });
+    expect(h.consumerRepo.commits[1]).toMatchObject({ message: `Add web to ${UNIT} from the catalog`, write: [{ path: "apps/web/site.json", content: Buffer.from("{}\n") }, { path: "apps.yaml", content: files["apps.yaml"] }] });
     expect(h.consumerRepo.commits[1]!.remove).toBeUndefined();
     // Nothing changed: no commit at all.
     const logs: string[] = [];

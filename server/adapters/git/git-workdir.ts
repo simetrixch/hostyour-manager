@@ -3,7 +3,8 @@
 // whether it comes from a registration path, a values-chain path or a consumer's own chart path. Kept
 // beside git-exec.ts (the process layer) and out of git.ts (the roles), which is what keeps that file
 // inside its line budget.
-import { chmod, mkdir, readdir, readFile as fsReadFile, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readdir, readFile as fsReadFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { dirname, relative, resolve, sep } from "node:path";
 import { errValidation } from "../../kernel/errors.ts";
 import { runGit } from "./git-exec.ts";
@@ -20,9 +21,22 @@ export function safePath(workdir: string, relPath: string): string {
   return abs;
 }
 
+// Removes a disposable checkout, and refuses any directory outside the OS temp dir, where no clone is made.
+export async function disposeTempWorkdir(workdir: string): Promise<void> {
+  const abs = resolve(workdir);
+  const tmp = resolve(tmpdir());
+  if (!abs.startsWith(tmp + sep)) throw errValidation(`refusing to remove a directory outside the OS temp dir`);
+  await rm(abs, { recursive: true, force: true, maxRetries: 3 });
+}
+
+// The text reading of readWorkdirBytes, for every role that reads a file as UTF-8.
+export async function readWorkdirFile(workdir: string, relPath: string): Promise<string | null> {
+  return (await readWorkdirBytes(workdir, relPath))?.toString("utf8") ?? null;
+}
+
 // Shared by every role: null when absent (or a directory), errValidation when the path — or a
 // symlink inside the checkout — would land outside the workdir.
-export async function readWorkdirFile(workdir: string, relPath: string): Promise<string | null> {
+export async function readWorkdirBytes(workdir: string, relPath: string): Promise<Buffer | null> {
   const abs = safePath(workdir, relPath);
   let real: string;
   try {
@@ -35,7 +49,7 @@ export async function readWorkdirFile(workdir: string, relPath: string): Promise
   const root = await realpath(resolve(workdir));
   if (real !== root && !real.startsWith(root + sep)) throw errValidation(`path escapes the workdir (symlink): "${relPath}"`);
   try {
-    return await fsReadFile(real, "utf8");
+    return await fsReadFile(real);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT" || code === "EISDIR" || code === "ENOTDIR") return null;
@@ -106,7 +120,7 @@ export async function stageWorkdirChanges(
     const abs = safePath(workdir, w.path);
     if (abs === resolve(workdir)) throw errValidation(`invalid write path: "${w.path}"`);
     await mkdir(dirname(abs), { recursive: true });
-    await writeFile(abs, w.content, "utf8");
+    await writeFile(abs, w.content);
     if (w.executable !== undefined) await chmod(abs, w.executable ? 0o755 : 0o644);
   }
   if (writes.length > 0) await run(["add", "--", ...writes.map((w) => w.path)]);

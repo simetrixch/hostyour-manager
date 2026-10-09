@@ -321,6 +321,27 @@ describe("GitRepoWriter", () => {
     expect(modeOnOrigin()).toBe("100644");
   });
 
+  it("PLANTED DEFECT: commits bytes that are not UTF-8 unchanged, and a reader hands them back unchanged", async () => {
+    const { originDir, originURL } = makeConsumerOrigin("master");
+    const path = "apps/workshop/files/bike.jpg";
+    const jpeg = Uint8Array.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0xff, 0xd9]);
+    const repo = makeConsumer();
+    const s = await repo.open({ repoURL: originURL, credentialId: "cred_x" });
+    try {
+      await repo.commitPush({ workdir: s.workdir, branch: s.branch, credentialId: "cred_x", message: "image", write: [{ path, content: jpeg }] });
+    } finally {
+      await repo.dispose(s.workdir);
+    }
+    const reader = new GitRepoReader({ allowFileURLs: true });
+    const clone = await reader.cloneAtRef({ repoURL: pathToFileURL(originDir).href, ref: "master" });
+    try {
+      expect([...(await reader.readFileBytes(clone.workdir, path))!]).toEqual([...jpeg]);
+      expect(await reader.readFileBytes(clone.workdir, "apps/workshop/files")).toBeNull(); // a directory, as readFile answers it
+    } finally {
+      await reader.dispose(clone.workdir);
+    }
+  });
+
   it(
     "resolves the default branch (not hardcoded main), create-only writes, is empty-diff no-op, and removes",
     async () => {

@@ -30,7 +30,8 @@ export function tenantAppsRepoURL(org: string, bundle: string, subdomain: string
 
 export interface TreeFile {
   path: string;
-  content: string;
+  /** The bytes git stores, so an image or any other file that is not UTF-8 text lands unchanged. */
+  content: Uint8Array;
   /** Whether the template's git records the file as executable, which the copy keeps. */
   executable: boolean;
 }
@@ -64,9 +65,10 @@ export async function missingBundleFolders(repo: RepoReader, workdir: string, in
  *  the paths the catalog keeps for itself (its apps.yaml's `catalogOnly`, such as its handbook);
  *  under `apps/` everything but the folders of the chosen apps; and under `webs/` everything but the
  *  folders of the sites a chosen app carries: a website folder the run serves sites of carries only
- *  those, one it names none for carries every site its entry lists. A chosen app or a served site
- *  whose folder the catalog lacks refuses the copy before anything is read. */
-export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly { name: string; sites?: readonly string[] | undefined }[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites }): Promise<TreeFile[]> {
+ *  those, one it names none for carries every site its entry lists. A path `stands` says the tenant's
+ *  repository already carries is neither read nor copied: the repository is the tenant's. A chosen
+ *  app or a served site whose folder the catalog lacks refuses the copy before anything is read. */
+export async function readTemplateTree(repo: RepoReader, workdir: string, input: { templateApps: readonly { name: string; sites?: readonly string[] | undefined }[]; catalogOnly: readonly string[]; chosen: readonly string[]; sites: ServedSites; stands: (path: string) => Promise<boolean> }): Promise<TreeFile[]> {
   const missing = await missingBundleFolders(repo, workdir, input);
   if (missing.length > 0) throw errValidation(`the catalog carries no ${missing.join(", ")}, so it is not in the layout this Manager copies (apps/<app>/ and webs/<site>/) and nothing is written into the tenant's repository`);
   const chosen = new Set(input.chosen);
@@ -79,16 +81,13 @@ export async function readTemplateTree(repo: RepoReader, workdir: string, input:
       if (skipped.has(path)) continue;
       if (dir === BUNDLE_APPS_DIR && !chosen.has(name)) continue;
       if (dir === BUNDLE_WEBS_DIR && !carried.has(name)) continue;
-      const content = await repo.readFile(workdir, path);
+      if (await input.stands(path)) continue;
+      const content = await repo.readFileBytes(workdir, path);
       if (content === null) {
         // A name the reader cannot read as a file is a directory (the reader answers null for one).
         await walk(path);
         continue;
       }
-      // ponytail: the reader serves TEXT. A byte git stores that is not UTF-8 arrives here as U+FFFD
-      // and would be written back changed — refused by name rather than copied wrong. A binary asset
-      // in the bundle needs a git-native copy on the RepoWriter port.
-      if (content.includes("�")) throw errValidation(`${path} of the template is not UTF-8 text — this run copies text files only and would corrupt it`);
       out.push({ path, content, executable: await repo.isExecutable(workdir, path) });
     }
   };

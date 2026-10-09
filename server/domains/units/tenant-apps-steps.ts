@@ -107,7 +107,7 @@ async function appCredentialId(ctx: StepCtx, runtime: TenantAppsRepoRuntime): Pr
  *  (how its bundle is built). Cloned the way the catalog reads it (app-catalog.ts readAppsManifest):
  *  at its default branch head, with the deploy repository's own credential — the template is no unit and has
  *  no credential of its own. */
-async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; missing: (chosen: readonly string[], sites: ServedSites) => Promise<string[]>; tree: (chosen: readonly string[], sites: ServedSites) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
+async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, signal: AbortSignal): Promise<{ appsYaml: string; npmrc: string | null; manifest: ConsumerManifest; missing: (chosen: readonly string[], sites: ServedSites) => Promise<string[]>; tree: (chosen: readonly string[], sites: ServedSites, stands: (path: string) => Promise<boolean>) => Promise<TreeFile[]>; dispose: () => Promise<void> }> {
   const repo = ports.repo;
   const cloned = await repo.cloneAtRef({ repoURL: templateRepoURL, ref: DEFAULT_BRANCH_HEAD, ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}), signal });
   try {
@@ -123,7 +123,7 @@ async function readTemplate(ports: TenantOnboardPorts, templateRepoURL: string, 
       npmrc: await repo.readFile(cloned.workdir, ".npmrc"),
       manifest: manifest.data,
       missing: (chosen, sites) => missingBundleFolders(repo, cloned.workdir, { chosen, sites }),
-      tree: (chosen, sites) => readTemplateTree(repo, cloned.workdir, { templateApps: catalog.apps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites }),
+      tree: (chosen, sites, stands) => readTemplateTree(repo, cloned.workdir, { templateApps: catalog.apps, catalogOnly: catalog.catalogOnly ?? [], chosen, sites, stands }),
       dispose: () => repo.dispose(cloned.workdir),
     };
   } catch (e) {
@@ -200,21 +200,22 @@ export function tenantAppsRepoSteps(ports: TenantOnboardPorts, p: TenantAppsStep
         const writer = ports.onboard?.()?.ports.consumerRepo;
         if (!writer) throw errValidation(`${unit} needs the consumer repository writer to commit its tree, and the consumer onboarding is not wired on this manager — the gate-runner and the git/kube/vault adapters must be wired first`);
         const credentialId = await appCredentialId(ctx, runtime);
-        const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
-        let files: TreeFile[];
-        try {
-          files = p.templateSuppliesNoFile ? [] : await template.tree(chosen, sites);
-        } finally {
-          await template.dispose();
-        }
-        const build = template.manifest.builds.find((b) => b.name === p.templateBuild);
-        if (!build) throw errValidation(`${p.templateRepoURL} declares no build named ${p.templateBuild} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
         const session = await writer.open({ repoURL: url, credentialId, signal: ctx.signal });
         try {
-          // A path that stands is left as it stands, whatever it says: this run ADDS what the
-          // repository lacks and never overwrites or removes — the repository is the tenant's.
-          const write: RepoFileWrite[] = [];
-          for (const f of files) if ((await writer.readFile(session.workdir, f.path)) === null) write.push(f);
+          // A path that stands is left as it stands, whatever it says, and its template file is not
+          // even read: this run ADDS what the repository lacks and never overwrites or removes — the
+          // repository is the tenant's.
+          const stands = async (path: string): Promise<boolean> => (await writer.readFile(session.workdir, path)) !== null;
+          const template = await readTemplate(ports, p.templateRepoURL, ctx.signal);
+          let files: TreeFile[];
+          try {
+            files = p.templateSuppliesNoFile ? [] : await template.tree(chosen, sites, stands);
+          } finally {
+            await template.dispose();
+          }
+          const build = template.manifest.builds.find((b) => b.name === p.templateBuild);
+          if (!build) throw errValidation(`${p.templateRepoURL} declares no build named ${p.templateBuild} in its ${CONSUMER_MANIFEST_PATH} — the tenant's build takes its containerfile from that entry`);
+          const write: RepoFileWrite[] = [...files];
           const manifest = await writer.readFile(session.workdir, CONSUMER_MANIFEST_PATH);
           const stages = p.stages ?? template.manifest.envs;
           if (manifest === null) {
