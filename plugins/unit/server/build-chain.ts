@@ -8,7 +8,7 @@
 // adds its own on top of them in the family that deploys.
 import { z } from "zod";
 import type { Step } from "#core/server/executor/types.ts";
-import { STAGE } from "#core/shared/enums.ts";
+import { STAGE, type Stage } from "#core/shared/enums.ts";
 import { RELEASE_CHANNEL, RELEASE_VERSION_RE } from "#core/shared/release.ts";
 import { GateReportSchema, UngatedOnboardSchema } from "#core/shared/gates.ts";
 import type { GitHubConsumer } from "./adapters/github-consumer/port.ts";
@@ -20,7 +20,7 @@ import type { BuildPlaneFqdnResolver } from "#core/server/domains/inventory/clus
 import type { ChannelStages } from "#core/server/domains/inventory/channel-stages.ts";
 import type { Registrations } from "./registrations.ts";
 import { preflightScopesStep } from "./preflight-scopes.ts";
-import { writeBuildRegistrationStep, recordBuildOnlyStep } from "./build-registration.ts";
+import { writeBuildRegistrationStep, recordBuildOnlyStep, recordCiOnlyStep } from "./build-registration.ts";
 import { seedRepoPatStep } from "./seed-repo-pat.ts";
 import { awaitBuildNamespaceStep } from "./await-build-namespace.ts";
 import { injectReleaseKitStep } from "./inject-release-kit.ts";
@@ -95,6 +95,30 @@ export const BuildOnlyParams = BuildParamsBase.extend({
   ungated: UngatedOnboardSchema.optional(),
 });
 export type BuildOnlyParams = z.infer<typeof BuildOnlyParams>;
+
+/** The CI-ONLY form: a repository whose pushes run its own `scripts/check.sh` on the build plane and
+ *  nothing else. It builds no image and releases nothing, so it carries none of what a release is
+ *  made of (version, channel, stage, builds, a gate report). `builds` is the empty list the
+ *  registration states, and an empty `builds` with no stage file is how every reader tells the unit
+ *  apart (registrations.ts isCiOnly). `domain` is the master, which names the build plane the
+ *  webhook points at; `resolvedSha` is the default-branch head the plan read, which the packages
+ *  reader check clones. */
+export const CiOnlyParams = z.object({
+  form: z.literal("ci-only"),
+  consumerName: unitNameSchema,
+  repoURL: repoURLSchema,
+  repoCredentialId: z.string().min(1),
+  owner: z.string().min(1),
+  resolvedSha: z.string().regex(/^[0-9a-f]{40}$/),
+  domain: z.string().min(1),
+  builds: z.tuple([]),
+});
+export type CiOnlyParams = z.infer<typeof CiOnlyParams>;
+
+/** What the teardown of a unit's registration and webhook reads of any form's params: the identity
+ *  of the unit, and the stage only where the form has one. */
+export type BuildUnitRef = Pick<BuildParams, "consumerName" | "repoURL" | "repoCredentialId"> &
+  ({ form: "deployable"; stage: Stage } | { form: Exclude<BuildParams["form"], "deployable"> | "ci-only" });
 
 /** The Manager-side clients the build steps drive (master-local; no SSH): the build namespace, the
  *  build webhook and the release pipeline all stand on the cluster this Manager runs on, whatever
@@ -189,5 +213,22 @@ export function buildOnlySteps(ports: BuildPorts, p: BuildOnlyParams, release: R
     setupWebhookStep(ports, p),
     ...releaseSteps(ports, p, release),
     recordBuildOnlyStep(ports, p, release),
+  ];
+}
+
+/** The CI-only chain: the build registration with no builds, the repo PAT the check clones with, the
+ *  build namespace GitOps renders from that registration, and the push webhook. There is no gate
+ *  run (the gates judge a deploy manifest the repository does not have), no release kit and no
+ *  release: nothing is built and nothing is deployed. Waiting for the build Application to be
+ *  Synced and Healthy is also the proof that the unit's ci Pipeline stands, because the chart
+ *  renders it with the namespace. */
+export function ciOnlySteps(ports: BuildPorts, p: CiOnlyParams): Step[] {
+  return [
+    preflightScopesStep(ports, p),
+    writeBuildRegistrationStep(ports, p),
+    seedRepoPatStep(ports, p),
+    awaitBuildNamespaceStep(ports, p),
+    setupWebhookStep(ports, p),
+    recordCiOnlyStep(ports, p),
   ];
 }

@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { putReleaseStep, triggerReleaseStep, watchReleaseBuildStep, type ReleaseCycleRuntime } from "#unit/server/release-cycle.ts";
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
-import type { OnboardPorts, OnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
+import type { OnboardPorts, ReleaseOnboardParams, DeployableOnboardParams } from "./onboard.run.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
@@ -46,12 +46,12 @@ function portsWith(over: Partial<OnboardPorts> = {}): OnboardPorts {
   } as unknown as OnboardPorts;
 }
 
-const params = (): OnboardParams =>
+const params = (): ReleaseOnboardParams =>
   ({
     form: "deployable", consumerName: "acme", repoURL: REPO, repoCredentialId: "cred_pat",
     version: "1.0.0", channel: "stable", stage: "prod", clusterId: "cls_1",
     chartPath: "deploy/chart", argoAppName: "acme-prod", builds: ["acme-api"],
-  }) as unknown as OnboardParams;
+  }) as unknown as ReleaseOnboardParams;
 
 const creds: CredentialStore = { open: () => Promise.resolve(Buffer.from("github_pat_test", "utf8")) } as unknown as CredentialStore;
 

@@ -39,6 +39,11 @@ import { appReachesRepoURL } from "./repo-identity.ts";
  *  (the package read). A refresh request on that ExternalSecret makes it read Vault again. */
 export const BUILD_TARGET_SECRETS = ["build-git-https", "bump-git-https", "build-npmrc"] as const;
 
+/** The two of them that exist in the build namespace of a CI-only unit: the ci pipeline clones with
+ *  `build-git-https` and installs with `build-npmrc`, and nothing renders the bump credential where
+ *  no release runs. */
+export const CI_ONLY_TARGET_SECRETS = ["build-git-https", "build-npmrc"] as const;
+
 /** The entry the release pipeline's bump pushes the deploy repository's books branch with
  *  (hostyour-cloud consumer-build externalsecret-bump.yaml reads secret/build/deploy/repo-pat): the
  *  seeder addresses it as the "unit" named deploy, which is exactly its path. */
@@ -118,19 +123,20 @@ export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "lis
 export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ refreshed: string[]; failed: string[] }> {
   const refreshed: string[] = [];
   const failed: string[] = [];
-  const units: { unit: string; repoURL: string }[] = [];
+  const units: { unit: string; repoURL: string; ciOnly: boolean }[] = [];
   const buildUnits: string[] = [];
   try {
-    for (const { unit, entry } of await deps.registrations.listBuildRegistrations()) {
-      buildUnits.push(unit);
-      units.push({ unit, repoURL: entry.repoURL });
+    for (const { unit, entry, ciOnly } of await deps.registrations.listBuildRegistrations()) {
+      // The deploy repository's bump token is asked for in the namespaces that have a bump credential.
+      if (!ciOnly) buildUnits.push(unit);
+      units.push({ unit, repoURL: entry.repoURL, ciOnly });
     }
   } catch (err) {
     deps.logger.error({ err: err instanceof Error ? err.message : String(err) }, "the repo-pat refresh could not read which units are registered — no repo-pat was rewritten this time");
     return { refreshed, failed };
   }
   const unrequested: string[] = [];
-  for (const { unit, repoURL } of units) {
+  for (const { unit, repoURL, ciOnly } of units) {
     // THE UNIT'S OWN FAILURE (#240): a repository the App no longer reaches — deleted by hand, moved,
     // its owner's PAT forgotten — is that unit's, logged by name and counted failed; the other units
     // and the deploy repository's entry go on, because a refresh that stops at one leaves every other clone
@@ -156,7 +162,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
       continue;
     }
     try {
-      await refreshBuildSecrets(deps.kube, unit);
+      await refreshBuildSecrets(deps.kube, unit, ciOnly ? CI_ONLY_TARGET_SECRETS : BUILD_TARGET_SECRETS);
       refreshed.push(unit);
     } catch (err) {
       failed.push(unit);

@@ -66,7 +66,7 @@ export async function syncReleaseKit(
   }
 }
 
-/** At boot: the current kit into the repository of every registered unit and of every library the
+/** At boot: the current kit into the repository of every registered unit that releases and of every library the
  *  deploy repository names, so a release made there by hand runs the kit this Manager ships. NEVER
  *  rejects: boot starts it unawaited behind the listener, and a repository that fails is logged by
  *  name while the others go on. */
@@ -91,7 +91,12 @@ export async function syncReleaseKits(deps: {
   } catch (err) {
     deps.logger.error({ err: message(err) }, "the release kit was synced into no registered unit: the registrations could not be read");
   }
-  for (const { unit, entry } of units) {
+  for (const { unit, entry, ciOnly } of units) {
+    // A CI-only unit has no release: the kit would add a workflow and scripts nothing can run.
+    if (ciOnly) {
+      deps.logger.info({ unit, repoURL: entry.repoURL }, "release kit not synced into this unit's repository: it is CI-only and releases nothing");
+      continue;
+    }
     try {
       const synced = await syncReleaseKit(deps.writer, { repoURL: entry.repoURL, credentialId: await deps.credentialFor(entry.repoURL), message: commitMessage });
       if (synced.changed) deps.logger.info({ unit, repoURL: entry.repoURL, branch: synced.branch, commit: synced.commit, written: synced.written, removed: synced.removed }, "release kit synced into the unit's repository");

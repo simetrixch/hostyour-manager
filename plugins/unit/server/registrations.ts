@@ -68,6 +68,15 @@ function relayValues(unit: string, stage: Stage, apiHost: string, port: number):
 const guard = makeRegistrationGuard(REGISTRATION_GUARD, "registrations/<unit>/(dev|test|prod|build).yaml");
 const relayGuard = makeRegistrationGuard(/^installation\/values\/postfix-(dev|test|prod)\.yaml$/, "installation/values/postfix-(dev|test|prod).yaml");
 
+/** WHETHER A UNIT RUNS CI AND NOTHING ELSE: its build registration states that it builds nothing, and
+ *  no stage file deploys it. That one definition is the whole marker — the build plane renders a ci
+ *  pipeline and no release pipeline for such a unit, so the release kit must not be written into its
+ *  repository and the build Secrets only a release reads do not exist in its namespace. A unit that
+ *  deploys from a stage file is never CI-only, whatever its builds. */
+export function isCiOnly(entry: Pick<ConsumerRegistration, "builds">, stages: readonly Stage[]): boolean {
+  return entry.builds !== undefined && entry.builds.length === 0 && stages.length === 0;
+}
+
 export interface RegistrationRead {
   entry: ConsumerRegistration;
 }
@@ -197,16 +206,19 @@ export class Registrations {
   /** Every BUILD registration the branch carries — `registrations/<unit>/build.yaml`, parsed — in
    *  directory order. A unit without one (deploy-only) is not listed. THROWS on a build.yaml that
    *  does not read or does not validate, naming the file: every reader of this set (the build-name
-   *  uniqueness check, the App-token refresh) would otherwise run over a set that silently shrank. */
-  async listBuildRegistrations(): Promise<{ unit: string; entry: ConsumerRegistration }[]> {
+   *  uniqueness check, the App-token refresh) would otherwise run over a set that silently shrank.
+   *  `ciOnly` is isCiOnly read in the same turn as the file, so a reader that must leave the
+   *  release machinery out of such a unit (the kit sync, the token refresh) never decides on two trees. */
+  async listBuildRegistrations(): Promise<{ unit: string; entry: ConsumerRegistration; ciOnly: boolean }[]> {
     return this.repo.withBranch(this.branch, async (books) => {
-      const registrations: { unit: string; entry: ConsumerRegistration }[] = [];
+      const registrations: { unit: string; entry: ConsumerRegistration; ciOnly: boolean }[] = [];
       for (const unit of await books.listDir("registrations")) {
         const path = buildPath(unit);
         const raw = await books.readFile(path);
         if (raw === null) continue;
         try {
-          registrations.push({ unit, entry: ConsumerRegistrationSchema.parse(parseRegistration(raw)) });
+          const entry = ConsumerRegistrationSchema.parse(parseRegistration(raw));
+          registrations.push({ unit, entry, ciOnly: isCiOnly(entry, await this.stagesIn(books, unit)) });
         } catch (e) {
           throw errValidation(`${path} is not a readable build registration, so the build-name uniqueness check cannot be trusted: ${e instanceof Error ? e.message : String(e)}`);
         }
@@ -365,7 +377,7 @@ export class Registrations {
       const unit = raw === null ? input.unit : ConsumerRegistrationSchema.parse(parseRegistration(raw));
       beforeCommit();
       return books.commit({
-        message: `register(${input.unit.name}): build ${input.builds.join(", ")} ${trailer(input.runId)}`,
+        message: `register(${input.unit.name}): build ${input.builds.length ? input.builds.join(", ") : "none"} ${trailer(input.runId)}`,
         write: [{ path, content: serializePointer(ConsumerRegistrationSchema, { ...unit, removing: false, builds: input.builds }) }],
       });
     });

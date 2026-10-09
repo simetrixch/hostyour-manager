@@ -32,4 +32,11 @@ describe("ConsumerOnboard as a consumer's Add stage", () => {
     expect(html).toContain("Onboard a consumer app");
     expect(html).toContain('<option value="small" selected="">small</option>');
   });
+  it("offers the CI-only form beside the other two, and keeps the stage, cluster and size fields for the default form", () => {
+    const html = render("");
+    expect(html).toContain('<option value="ci-only">');
+    expect(html).toContain("scripts/check.sh");
+    expect(html).toContain('<span class="field__label">Stage</span>');
+    expect(html).toContain('<span class="field__label">Target cluster</span>');
+  });
 });

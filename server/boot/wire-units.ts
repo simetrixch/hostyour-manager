@@ -31,6 +31,7 @@ import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeOnboardDef, type OnboardPorts } from "../domains/units/onboard.run.ts";
 import { makeOffboardDef } from "../domains/units/offboard.run.ts";
 import { makePurgeDef } from "../domains/units/purge.run.ts";
+import { makeOffboardCiOnlyDef } from "../domains/units/offboard-ci-only.run.ts";
 import { makeAdoptConsumerDef } from "../domains/units/adopt-consumer.run.ts";
 import { makeSuspendDef, makeResumeDef } from "../domains/units/suspend-resume.run.ts";
 import { makeRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
@@ -527,6 +528,9 @@ function buildConsumerOnboarding(
     // purge / force-offboard removes ONE STAGE's footprint BY NAME even with no inventory row (the
     // orphaned-partial-onboard case). Same ports as offboard.
     makePurgeDef({ ...lifecyclePorts, seeder, github, consumerRepo, buildRbac, repoCredential, ...(dns ? { dns } : {}) }),
+    // The unit that only runs CI has no row and no stage, so neither removal above can name it. It
+    // reads the webhook back, which needs the build-plane address the onboarding wrote it for.
+    makeOffboardCiOnlyDef({ ...onboardPorts, githubApp }),
     // adopt-consumer reconstructs a DETECTED consumer's missing apps row FROM its GitOps pointer
     // — the recovery twin of purge, keyed on the same name+stage+cluster with
     // the same narrow lifecycle port set (registrations read + resolver for attest-target/attest-live).

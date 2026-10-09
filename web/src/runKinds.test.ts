@@ -8,7 +8,7 @@ import type { RunKind } from "../../shared/enums.ts";
 
 describe("CONSUMER_RUN_KINDS", () => {
   it("is exactly the consumer lifecycle kinds (incl. purge — force-offboard by name — adopt-consumer — row reconstruction from the registration — restart-workloads, the relocation run kinds backup/restore/migrate and the nightly backup)", () => {
-    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-nightly-backup", "consumer-offboard", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-domain", "consumer-set-release", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
+    expect([...CONSUMER_RUN_KINDS].sort()).toEqual(["consumer-adopt", "consumer-backup", "consumer-migrate", "consumer-nightly-backup", "consumer-offboard", "consumer-offboard-ci-only", "consumer-onboard", "consumer-purge", "consumer-restart-workloads", "consumer-restore", "consumer-resume", "consumer-set-domain", "consumer-set-release", "consumer-set-secrets", "consumer-set-size", "consumer-suspend"]);
   });
 
   it("keeps onboard — the run that targets a cluster, not the app (would vanish under a targetId filter)", () => {
@@ -16,7 +16,7 @@ describe("CONSUMER_RUN_KINDS", () => {
   });
 
   it("keeps every consumer lifecycle run kind", () => {
-    for (const k of ["consumer-onboard", "consumer-offboard", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-backup", "consumer-restore", "consumer-migrate"] as const) {
+    for (const k of ["consumer-onboard", "consumer-offboard", "consumer-offboard-ci-only", "consumer-purge", "consumer-adopt", "consumer-suspend", "consumer-resume", "consumer-restart-workloads", "consumer-set-size", "consumer-backup", "consumer-restore", "consumer-migrate"] as const) {
       expect(CONSUMER_RUN_KINDS.has(k)).toBe(true);
     }
   });

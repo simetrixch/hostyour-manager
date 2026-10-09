@@ -10,6 +10,9 @@ import { errUpstream } from "../../kernel/errors.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { Logger } from "../../kernel/logger.ts";
+import { seedQuota } from "#unit/shared/unit-size.ts";
+import { Registrations } from "#unit/server/registrations.ts";
+import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 
 // Focused tests for the onboard `inject-release-kit` step + the shared offboard/purge removal helper
 // (impl: plugins/unit/server/inject-release-kit.ts). Kept apart from onboard.run.test.ts so each file stays within the
@@ -247,6 +250,25 @@ describe("syncReleaseKits at boot (a unit released by hand runs the kit that sta
     expect(writer.commits[0]!.remove).toEqual(["release/stale.sh"]);
     for (const f of RELEASE_KIT_FILES) expect(writer.filesFor(OLD)[f.path]).toBe(f.content);
     expect(failed).toEqual(["lost"]);
+  });
+
+  it("leaves a CI-only unit's repository alone and still writes the kit into a unit that builds and into a chart-only unit with an empty build list", async () => {
+    const CI = "https://github.com/x/ci-check.git";
+    const BUILDS = "https://github.com/x/builds.git";
+    const CHART_ONLY = "https://github.com/x/chart-only.git";
+    const reg = new Registrations(new FakePlatformRepo());
+    const named = (repoURL: string) => ({ name: repoURL.split("/").pop()!.replace(".git", ""), repoURL, suspended: false, quiesced: false });
+    await reg.createBuildRegistration({ unit: named(CI), builds: [], runId: "run_1" }, () => undefined);
+    await reg.createBuildRegistration({ unit: named(BUILDS), builds: ["builds-api"], runId: "run_2" }, () => undefined);
+    // An empty build list is not the marker alone: this unit deploys from a stage file.
+    await reg.commitRegistration({ unit: named(CHART_ONLY), builds: [], deploy: { stage: "prod", chartPath: "deploy/chart", cluster: "s1", host: "chart-only", databases: [], keyPatterns: [], channelPatterns: [], services: [], size: "small", mongodb: "shared", quota: seedQuota("small") }, runId: "run_3" });
+    const writer = new FakeRepoWriter();
+    const infos: string[] = [];
+    const logger = { info: (_o: unknown, msg: string) => infos.push(msg), error: () => undefined } as unknown as Logger;
+    await syncReleaseKits({ registrations: reg, writer, version: "0.8.0", logger, credentialFor: async () => "cred_x", libraryRepos: async () => [], refuseWorkflow: () => null });
+    expect(writer.commits.map((c) => c.repoURL).sort()).toEqual([BUILDS, CHART_ONLY].sort());
+    expect(writer.filesFor(CI)).toEqual({});
+    expect(infos.some((m) => m.includes("CI-only"))).toBe(true);
   });
 
   // The deploy repository's libraryRepos: repositories no registration names, synced the same way,

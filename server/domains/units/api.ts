@@ -11,12 +11,14 @@ import { errNotConfigured, errNotFound, errValidation } from "../../kernel/error
 import { SLAVE_ROLES, type Stage } from "../../../shared/enums.ts";
 import type { OrphanScanView, DetectedScanView, VersionsView } from "../../../shared/api-types.ts";
 import type { LineMoveView } from "../../../shared/api-types-line-move.ts";
-import type { ChannelStagesView } from "../../../shared/api-types-onboard.ts";
+import type { ChannelStagesView, CiOnlyUnitView } from "../../../shared/api-types-onboard.ts";
 import type { ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { errText } from "./live-recon.ts";
 import { getRunParams } from "../../executor/read.ts";
 import type { PlatformRepo } from "../../adapters/git/port.ts";
 import { OnboardRequest } from "./onboard.run.ts";
+import { CiOnlyPlanRequest } from "./onboard-ci-only.ts";
+import { OffboardCiOnlyParams } from "./offboard-ci-only.run.ts";
 import { PurgeParams } from "./purge.run.ts";
 import { AdoptConsumerParams } from "./adopt-consumer.run.ts";
 import { RestoreParams, TenantRestoreParams } from "./restore.run.ts";
@@ -201,6 +203,24 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
 
   app.get("/api/consumers/targets", (c) => c.json(targetClusters(db)));
 
+  // The units that only run CI, read off the registration tree: they have no apps row to list. Static
+  // path, registered before the :appId routes so it is never shadowed.
+  app.get("/api/consumers/ci-only", async (c) => {
+    if (!registrations) throw errNotConfigured("onboarding is not configured on this manager — the registrations that say where a unit stands are not wired");
+    const units = (await registrations.listBuildRegistrations()).filter((r) => r.ciOnly);
+    return c.json(units.map(({ entry }) => ({ name: entry.name, repoUrl: entry.repoURL, owner: entry.owner ?? null, onboardedAt: entry.onboardedAt ?? null })) satisfies CiOnlyUnitView[]);
+  });
+
+  // Offboard of one of them. The run needs the repository for the steps after the registration is gone,
+  // so the route reads it off the registration instead of asking the operator for it.
+  app.post("/api/consumers/ci-only/:name/offboard", async (c) => {
+    if (!onboardingEnabled || !registrations) throw errNotConfigured("onboarding is not configured on this manager");
+    const name = c.req.param("name");
+    const read = await registrations.readBuildRegistration(name);
+    if (read === null) throw errNotFound(`build registration of ${name}`);
+    return c.json(await executor.plan("consumer-offboard-ci-only", OffboardCiOnlyParams.parse({ consumerName: name, repoURL: read.entry.repoURL })), 201);
+  });
+
   // The channel table the onboard wizard reads: which stages a release channel may reach.
   // The source is LITERALLY the platform repo's clusters/platform/values-common.yaml → global.channelStages —
   // the ONE literal table, enforced in the release pipeline at the point that writes; the manager
@@ -217,7 +237,15 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
   // `planned` (approve to deploy) or `failed` (rejected, the full report frozen for inspection).
   app.post("/api/consumers", async (c) => {
     if (!onboardingEnabled) throw errNotConfigured("onboarding is not configured on this manager — the gate-runner and git/kube/vault adapters must be wired first");
-    const parsed = OnboardRequest.safeParse(await c.req.json().catch(() => ({})));
+    const body: unknown = await c.req.json().catch(() => ({}));
+    if ((body as { form?: unknown } | null)?.form === "ci-only") {
+      // The CI only form releases nothing, so no version is read: only the identity is chosen and sealed.
+      const ciOnly = CiOnlyPlanRequest.omit({ repoCredentialId: true }).safeParse(body);
+      if (!ciOnly.success) throw errValidation(`invalid onboard request: ${ciOnly.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+      const repoCredentialId = await resolveRepoCredentialId({ repoURL: ciOnly.data.repoURL, githubApp, owners: (org) => readOwnerIdentity(db, org), store, signal: c.req.raw.signal });
+      return c.json(await executor.planStreamed("consumer-onboard", { ...ciOnly.data, repoCredentialId }), 201);
+    }
+    const parsed = OnboardRequest.safeParse(body);
     if (!parsed.success) throw errValidation(`invalid onboard request: ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
     // The repository's identity is chosen and sealed BEFORE the run exists: planStreamed persists
     // its raw params verbatim (params_json), so only the sealed reference may enter the executor.

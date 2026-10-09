@@ -2,7 +2,7 @@
 // plugins/unit/server/inject-release-kit.ts) so the run file stays a thin orchestrator; the gates themselves live in
 // validate.ts — this step only runs them and holds the outcome against the approved facts.
 import type { Step } from "../../executor/types.ts";
-import type { OnboardPorts, OnboardParams } from "./onboard.run.ts";
+import type { OnboardPorts, ReleaseOnboardParams } from "./onboard.run.ts";
 import { validateOnboard, type OnboardTarget } from "./validate.ts";
 import { standingHostFrom } from "#unit/server/unit-dns.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -18,7 +18,7 @@ import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
  *  the secret specs (the create-only Vault seed) and the activation (the call the minted bootstrap
  *  token is sent to) — so a drift in those rejects the run instead of committing facts nobody
  *  approved. */
-export function checkStep(ports: OnboardPorts, p: OnboardParams): Step {
+export function checkStep(ports: OnboardPorts, p: ReleaseOnboardParams): Step {
   return {
     name: "check",
     title: "Check the repo against the concept (the gates)",

@@ -35,8 +35,9 @@ import {
 import { watchDeploymentStep } from "./onboard-watch-deployment.ts";
 import { checkStep } from "./onboard-check.ts";
 import { StandingBuildOnlyParams, hasStandingBuildOnly, standingBuildOnlySteps } from "./onboard-standing-build.ts";
+import { planCiOnly } from "./onboard-ci-only.ts";
 import {
-  BuildParamsBase, BuildOnlyParams, buildOnlySteps, DEFAULT_BRANCH_HEAD, unitNameSchema, repoURLSchema, type BuildPorts,
+  BuildParamsBase, BuildOnlyParams, CiOnlyParams, buildOnlySteps, ciOnlySteps, DEFAULT_BRANCH_HEAD, unitNameSchema, repoURLSchema, type BuildPorts,
 } from "#unit/server/build-chain.ts";
 import { admitFirstMasterUngated, planUngatedFirstMaster } from "./first-master.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
@@ -150,9 +151,9 @@ export const DeployableOnboardParams = BuildParamsBase.extend({
 });
 export type DeployableOnboardParams = z.infer<typeof DeployableOnboardParams>;
 
-export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyParams, StandingBuildOnlyParams])
+export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardParams, BuildOnlyParams, StandingBuildOnlyParams, CiOnlyParams])
   .superRefine((p, ctx) => {
-    if (p.form === "deployable") return;
+    if (p.form === "deployable" || p.form === "ci-only") return;
     if ((p.report === undefined) === (p.ungated === undefined)) {
       ctx.addIssue({
         code: "custom",
@@ -162,6 +163,9 @@ export const OnboardParams = z.discriminatedUnion("form", [DeployableOnboardPara
     }
   });
 export type OnboardParams = z.infer<typeof OnboardParams>;
+/** The forms that release: every one carries a stage, a version and a channel, which the CI-only form
+ *  has none of. */
+export type ReleaseOnboardParams = Exclude<OnboardParams, { form: "ci-only" }>;
 
 /** The Manager-side clients the steps drive (master-local; no SSH). The kube clients are no
  *  longer injected directly: the steps resolve the RIGHT clusterReader/argoReader/projectWriter +
@@ -289,6 +293,7 @@ function deployableSteps(ports: OnboardPorts, p: DeployableOnboardParams): Step[
 
 
 function onboardSteps(ports: OnboardPorts, p: OnboardParams): Step[] {
+  if (p.form === "ci-only") return ciOnlySteps(ports, p);
   if (p.form === "standing-build-only") return standingBuildOnlySteps(ports, p, checkStep(ports, { ...p, form: "build-only" }));
   // The check step RE-RUNS the gates at the current head, so the one onboarding admitted without a
   // gate has no check to run: leaving it in would dispatch at execute time the very sandbox the plan
@@ -402,6 +407,9 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     // A pass resolves the augmented params + the plan; a rejection freezes the full report so the
     // failed run shows every expected/found/reason and stays soft-deletable.
     planStream: async (rawParams, ctx) => {
+      // The CI only form has no stage, version or channel, so it is told apart before the release
+      // request below would refuse it for lacking them.
+      if ((rawParams as { form?: unknown } | null)?.form === "ci-only") return planCiOnly(ports, ctx, rawParams);
       // The API handler already swapped the raw PAT for a sealed reference (OnboardPlanRequest) —
       // a raw repoPat here would mean it reached params_json, so the schema simply has no such field.
       const req = OnboardPlanRequest.parse(rawParams);
@@ -624,7 +632,7 @@ export function makeOnboardDef(ports: OnboardPorts): RunDefinition<OnboardParams
     // named here so the executor can resolve it), and WHETHER they may run — a full un-deploy must
     // never fire for a run whose consumer has meanwhile gone live or been recorded.
     cleanups: (params) =>
-      params.form === "standing-build-only" ? [] : params.form === "build-only"
+      params.form === "standing-build-only" ? [] : params.form === "build-only" || params.form === "ci-only"
         ? buildOnlyCleanups(ports, params)
         : [...deployableOnboardCleanups(ports, params), removeCeremonySecretsCleanup(ports, () => ({ stage: params.stage, consumerName: params.consumerName }))],
     assertAbortable: (params, deps) => assertOnboardAbortable(ports, params, deps.db),
