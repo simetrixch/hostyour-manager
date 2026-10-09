@@ -18,6 +18,7 @@ import type { MongodbMode } from "#unit/shared/unit-size.ts";
 import type { MongodbSeedInput, VaultSeeder, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { DeployableOnboardParams } from "./onboard.run.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // What the manifest's `mongodb` word DOES, at run level. It decides two things that must agree: the
 // registration the appset renders the instance from, and whether a credential is seeded at all. A
@@ -80,6 +81,7 @@ function ports(mongodb: MongodbMode, seeder?: RecordingSeeder): OnboardPorts {
     registrations: new Registrations(platformRepo()),
     channelStages: async () => CHANNEL_STAGES,
     seeder: (seeder ?? {}) as unknown as VaultSeeder,
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader(),
       argoReader: new FakeMasterArgoReader(),

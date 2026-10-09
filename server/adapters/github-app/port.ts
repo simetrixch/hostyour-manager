@@ -23,12 +23,27 @@ export interface CreateRepositoryInput {
   signal?: AbortSignal;
 }
 
+/** What a scoped installation token is limited to: repository NAMES (no owner) of the installation
+ *  and the level of the `contents` permission. */
+export interface ScopedInstallationTokenInput {
+  repositories: string[];
+  permissions: { contents: "read" | "write" };
+  signal?: AbortSignal;
+}
+
 export interface GitHubApp {
   /** The installation access token (POST /app/installations/{id}/access_tokens), cached only while it
    *  has at least TOKEN_MIN_VALIDITY_MS of life left and minted afresh after that. The value is a credential:
    *  it is handed to the consumer port's per-call `token` and never logged. The credential store
    *  opens a `github-app` credential through this, so a token is never stored past its hour. */
   installationToken(signal?: AbortSignal): Promise<string>;
+  /** An installation access token LIMITED to the named repositories and permissions (the same POST
+   *  with a body naming them), minted afresh at every call and never cached: it is a credential
+   *  handed to a build pod, which must reach no repository but its unit's own. The Manager's
+   *  own callers keep `installationToken`, whose reach is the whole installation. Throws
+   *  GitHubAppError carrying GitHub's message where it refuses, a repository the installation does not reach
+   *  or a permission the App does not hold included. */
+  scopedInstallationToken(input: ScopedInstallationTokenInput): Promise<string>;
   /** A stable, non-secret fingerprint of this identity — the App id and the installation id —
    *  which a sealed `github-app` credential carries in place of a token's fingerprint, so an audit
    *  row names WHICH App acted. */

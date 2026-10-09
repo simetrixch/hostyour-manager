@@ -105,7 +105,7 @@ function onboardPorts(): OnboardPorts {
     registrations: lifecycle.registrations,
     channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn,
-    seeder: fakeSeeder(),
+    seeder: fakeSeeder(), githubApp: new FakeGitHubApp(),
     // Reuse the lifecycle resolver so onboard drives the same master-local fakes.
     resolver: lifecycle.resolver,
     tenantSubdomains: async () => [], dns: emptyZone(),

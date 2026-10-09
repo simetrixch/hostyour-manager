@@ -70,7 +70,7 @@ function harness(over: { manifest?: string; ports?: Partial<TenantOnboardPorts>;
   const buildPlane = new FakeBuildPlane();
   buildPlane.seedReleaseRun(UNIT, { runName: `${UNIT}-release-1`, releaseTag: "0.1.000-stable-20260101000000", succeeded: true, imageTag: IMAGE_TAG });
   const buildCluster = new FakeBuildPlaneClusterReader(UNIT);
-  const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane, buildClusterReader: buildCluster });
+  const onboard = onboardPorts({ repo: unitReader, consumerRepo, github, buildPlane, buildClusterReader: buildCluster, githubApp });
   const ports: TenantOnboardPorts = {
     seeder: fakeTenantSeeder(),
     repo: deployReader,
@@ -360,7 +360,8 @@ describe("create-repository and onboard-build-only — a github-app credential a
     const onboard = h.ports.onboard!()!.ports;
     const registration = await onboard.registrations.readBuildRegistration(UNIT);
     expect(registration?.entry).toMatchObject({ name: UNIT, repoURL: TENANT_URL, owner: SUBDOMAIN, builds: [UNIT] });
-    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two", packages: "ghp_packages_org" }]);
+    // `push` is the token the shared App minted for the unit's own repository (the seed step pins what it asked for).
+    expect(h.seeder.buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_hour_two", packages: "ghp_packages_org", push: "ghs_hour_two_scoped_1" }]);
     expect(h.seeder.refreshedRepoPats).toEqual([]);
     expect(h.buildCluster.secretWrites).toEqual([]);
     expect(h.github.created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_hour_two" }]);
@@ -395,7 +396,7 @@ describe("create-repository and onboard-build-only — a github-app credential a
     expect(await h.ports.onboard!()!.ports.registrations.readBuildRegistration(UNIT)).toBeNull();
     // Not the create-only seed: the entry stands from the onboarding and holds a dead token.
     expect(h.seeder.buildRepoPats).toEqual([]);
-    expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun", packages: "ghp_packages_org" }]);
+    expect(h.seeder.refreshedRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_rerun", packages: "ghp_packages_org", push: "ghs_rerun_scoped_1" }]);
     // ESO asked to write the three again in ITS build namespace behind the rewrite, nothing deleted,
     // and the dispatch only after it wrote them — a clone that started before would read the dead token.
     expect([h.buildCluster.refreshedExternalSecrets, h.buildCluster.secretWrites]).toEqual([["build-git-https", "bump-git-https", "build-npmrc"].map((name) => `${UNIT}-build/${name}`), []]);

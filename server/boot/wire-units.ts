@@ -450,6 +450,7 @@ function buildConsumerOnboarding(
       return tenantRegistrations.listTenantSubdomains();
     },
     seeder,
+    githubApp,
     ...(installationStore ? { installationStore } : {}),
     resolver,
     // A CONSTANT, and the report says so rather than calling it a confirmation. Nothing here probes
@@ -530,7 +531,7 @@ function buildConsumerOnboarding(
     makePurgeDef({ ...lifecyclePorts, seeder, github, consumerRepo, buildRbac, repoCredential, ...(dns ? { dns } : {}) }),
     // The unit that only runs CI has no row and no stage, so neither removal above can name it. It
     // reads the webhook back, which needs the build-plane address the onboarding wrote it for.
-    makeOffboardCiOnlyDef({ ...onboardPorts, githubApp }),
+    makeOffboardCiOnlyDef(onboardPorts),
     // adopt-consumer reconstructs a DETECTED consumer's missing apps row FROM its GitOps pointer
     // — the recovery twin of purge, keyed on the same name+stage+cluster with
     // the same narrow lifecycle port set (registrations read + resolver for attest-target/attest-live).

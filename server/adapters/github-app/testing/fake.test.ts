@@ -26,10 +26,21 @@ describe("FakeGitHubApp", () => {
     expect(fake.created).toEqual([input]);
   });
 
+  it("records every scoped mint and answers a token distinct from the installation token and from the earlier scoped ones", async () => {
+    const fake = new FakeGitHubApp();
+    fake.token = "ghs_scripted";
+    const a = await fake.scopedInstallationToken({ repositories: ["one"], permissions: { contents: "write" } });
+    const b = await fake.scopedInstallationToken({ repositories: ["two"], permissions: { contents: "read" } });
+    expect(new Set([a, b, fake.token]).size).toBe(3);
+    expect(fake.scopedMints).toEqual([{ repositories: ["one"], permissions: { contents: "write" } }, { repositories: ["two"], permissions: { contents: "read" } }]);
+  });
+
   it("throws the scripted failure from every call", async () => {
     const fake = new FakeGitHubApp();
     fake.failWith = new Error("fake: the installation is suspended");
     await expect(fake.installationToken()).rejects.toThrow(/suspended/);
+    await expect(fake.scopedInstallationToken({ repositories: ["one"], permissions: { contents: "write" } })).rejects.toThrow(/suspended/);
+    expect(fake.scopedMints).toEqual([]);
     await expect(fake.installationOrg()).rejects.toThrow(/suspended/);
     await expect(fake.createRepository({ org: "acme", name: "x", description: "", private: true })).rejects.toThrow(/suspended/);
   });

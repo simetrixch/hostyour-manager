@@ -174,7 +174,7 @@ describe("onboard run definition", () => {
     expect(cred?.stringData.username).toBe("hostyour-cloud");
 
     // seed-repo-pat wrote the stage-free build credential (local Vault)
-    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test" }]);
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test", push: "github_pat_test" }]);
 
     // record-inventory wrote the apps row — provenance "manager", the SAME word create-tenant writes
     // for a tenant (create-tenant.run.test.ts asserts it on the other side), so one query answers about
@@ -201,7 +201,7 @@ describe("onboard run definition", () => {
     expect(await prt.registrations.listAttestedBuildNames("someone-else")).toEqual([{ unit: "acme", build: "acme-api" }]);
 
     // the repo-pat seed ATTESTED the existing path instead of writing again
-    expect(seeder.buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test" }]);
+    expect(seeder.buildRepoPats).toEqual([{ consumerName: "acme", pat: "github_pat_test", packages: "github_pat_test", push: "github_pat_test" }]);
     expect(logs.some((l) => l.includes("attested and left untouched"))).toBe(true);
 
     // NOTHING is written by hand. The two build-namespace grants stand inside the Application

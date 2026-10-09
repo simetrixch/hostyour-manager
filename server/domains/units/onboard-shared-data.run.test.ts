@@ -14,6 +14,7 @@ import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import { ConsumerRegistrationSchema, type ConsumerManifest } from "../../../shared/consumer.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // The onboarding plan refuses a registration that would share a database on the cluster's shared
 // MongoDB with a registration already standing there: one stage would read, and act on, the other's
@@ -62,6 +63,7 @@ function ports(repo: FakePlatformRepo): OnboardPorts {
     registrations: new Registrations(repo),
     channelStages: async () => CHANNEL_STAGES,
     seeder: {} as unknown as VaultSeeder,
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({ clusterReader: new FakeClusterReader(), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" }),
     tenantSubdomains: async () => [],
     dns: emptyZone(),

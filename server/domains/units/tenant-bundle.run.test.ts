@@ -282,6 +282,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     const onboard = onboardPorts({ repo: unitReader, consumerRepo, github: new FakeGitHubConsumer(), buildPlane });
     const buildRbac = new FakeBuildRbacWriter();
     const prt = ports({ onboard: () => ({ ports: onboard }), buildRbac });
+    onboard.githubApp = prt.githubApp; // one App behind both the tenant family and the unit's build
     const result = await planned(prt);
     // After the build the render carries the bundle at the built tag, as the real chart would.
     (prt.helm as FakeHelmRenderer).setDocs(withBundle(BUILT_TAG));
@@ -297,7 +298,7 @@ describe("tenant-create execute — one pass creates the repository, builds the 
     // webhook and the dispatch each opened it to the token the App mints — nothing stored.
     expect(creds.seals).toEqual([]); // no row per unit (#226)
     expect((await onboard.registrations.readBuildRegistration(UNIT))?.entry).toMatchObject({ repoURL: TENANT_URL, builds: [UNIT] }); // no credential id on the entry (#226)
-    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test" }]); // the owner's packages reader opens to the store's fallback
+    expect((onboard.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: UNIT, pat: "ghs_minted_for_this_pass", packages: "ghp_test", push: "ghs_minted_for_this_pass_scoped_1" }]); // the owner's packages reader opens to the store's fallback
     expect((onboard.github as FakeGitHubConsumer).created.map((c) => ({ repo: c.repo, token: c.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect((onboard.github as FakeGitHubConsumer).dispatches.map((d) => ({ repo: d.repo, token: d.token }))).toEqual([{ repo: UNIT, token: "ghs_minted_for_this_pass" }]);
     expect(buildPlane.releaseWatches).toEqual([{ unit: UNIT, version: "0.1.000", channel: "stable" }]);

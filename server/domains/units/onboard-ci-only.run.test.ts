@@ -121,6 +121,7 @@ describe("execution of a CI-only onboarding", () => {
     expect(await prt.registrations.readUnitStages("acme")).toEqual([]);
     expect((await prt.registrations.listBuildRegistrations()).find((r) => r.unit === "acme")?.ciOnly).toBe(true);
     expect((prt.seeder as FakeSeeder).buildRepoPats.map((p) => p.consumerName)).toEqual(["acme"]);
+    expect((prt.seeder as FakeSeeder).buildRepoPats[0]).not.toHaveProperty("push"); // nothing releases, so nothing pushes
     const github = prt.github as FakeGitHubConsumer;
     expect(github.hooksFor("x", "acme")).toHaveLength(1);
     expect(github.dispatches).toEqual([]);
