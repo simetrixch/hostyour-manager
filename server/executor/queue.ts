@@ -1,6 +1,6 @@
 import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { runs, runLocks } from "../db/schema/runs.ts";
+import { runs, runLocks, steps } from "../db/schema/runs.ts";
 import type { QueuedRunView } from "../../shared/api-types.ts";
 import { dedupeClaims, deriveServerLocks, lockConflicts, type TakenClaim } from "./locks.ts";
 import { defaultTargets } from "./run-targets.ts";
@@ -48,6 +48,19 @@ function walkQueue(db: Db, hasSecrets: HasSecrets): { slots: QueueSlot[]; taken:
 
 export function listQueuedRuns(db: Db, hasSecrets: HasSecrets): QueuedRunView[] {
   return walkQueue(db, hasSecrets).slots.map((s) => s.view);
+}
+
+/** A run that ended in the middle, failed or cancelled, and so keeps its locks until it is retried,
+ *  aborted or deleted. `failedStep` is the step's title as the run page shows it, and null where no step
+ *  failed (a run cancelled between two steps). */
+export interface FailedHolder { runId: string; kind: string; status: "failed" | "cancelled"; failedStep: string | null; error: string | null }
+
+/** The run `runId`, when it ended in the middle; nothing for a run that is still going. */
+export function findFailedHolder(db: Db, runId: string): FailedHolder | undefined {
+  const run = db.select({ kind: runs.kind, status: runs.status, error: runs.error }).from(runs).where(eq(runs.id, runId)).get();
+  if (!run || (run.status !== "failed" && run.status !== "cancelled")) return undefined;
+  const step = db.select({ title: steps.title }).from(steps).where(and(eq(steps.runId, runId), eq(steps.status, "failed"))).orderBy(asc(steps.ordinal)).get();
+  return { runId, kind: run.kind, status: run.status, failedStep: step?.title ?? null, error: run.error };
 }
 
 /** What a run of `claims` would wait for if it joined the end of the line now. */
