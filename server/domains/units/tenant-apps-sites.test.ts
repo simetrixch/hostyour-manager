@@ -39,6 +39,10 @@ describe("readTemplateTree — the apps a tenant chose and the sites a run serve
     expect(await tree(["erp"], {})).toEqual(["apps/erp/package.json"]);
   });
 
+  it("copies no site of a website folder the run names with an empty list: the tenant's own bundle serves the site", async () => {
+    expect(await tree(["web"], { web: [] })).toEqual(["apps/web/content/entities/webPage.entity.json", "apps/web/package.json"]);
+  });
+
   it("PLANTED INNOCENT: a website folder the run names no sites for carries every site its entry lists, and no other", async () => {
     const paths = await tree(["web"], {});
     expect(paths.filter((p) => p.startsWith("webs/"))).toEqual(["webs/digitaplatform/website.json", "webs/show/webpages.json", "webs/show/website.json", "webs/simplidigita-ai/website.json"]);
@@ -93,6 +97,13 @@ describe("mergeAppsManifest — the sites an entry lists", () => {
     expect(sitesOf(second.content, "web")).toEqual(["show", "simplidigita-ai"]);
     // Served again: nothing to add, the file is left as it stands.
     expect(mergeAppsManifest(TEMPLATE_APPS, second.content, ["web"], { web: ["show"] }).sitesAdded).toEqual([]);
+  });
+
+  it("leaves a standing entry as it stands where the run names its folder with an empty list", () => {
+    const current = "apps:\n  - name: web\n    title: Website\n    sites: [show, veloluck]\n";
+    const { content, added, sitesAdded } = mergeAppsManifest(TEMPLATE_APPS, current, ["web"], { web: [] });
+    expect([added, sitesAdded]).toEqual([[], []]);
+    expect(sitesOf(content, "web")).toEqual(["show", "veloluck"]);
   });
 
   it("PLANTED INNOCENT: an entry the run names no sites for keeps the template's list, as before", () => {

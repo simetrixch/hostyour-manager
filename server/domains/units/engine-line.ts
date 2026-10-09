@@ -111,6 +111,18 @@ export async function tenantBundleManifest(ports: RepositoryRead, bundle: { apps
   return parseAppsManifest(text);
 }
 
+/** The sites a bundle manifest lists under the website folder `folder`, or undefined where the bundle
+ *  carries no such folder or lists no sites under it. */
+export function bundleFolderSites(manifest: AppsManifest | null, folder: string): readonly string[] | undefined {
+  return manifest?.apps.find((a) => a.name === folder)?.sites;
+}
+
+/** The refusal of a site that the release a bundle's image tag was built from does not list under
+ *  `folder`: a website of that site would serve an empty site. */
+export function bundleLacksSite(bundle: { appsRepo: string; appsImageTag: string }, folder: string, site: string): string {
+  return `release ${bundleReleaseTag(bundle.appsImageTag)} of ${bundle.appsRepo} lists no site ${site} under its folder ${folder}, so the website would serve an empty site`;
+}
+
 /** The engine of the bundle a run builds: the tenant's own repository at its head where one stands,
  *  and the catalog's where none does. */
 export async function builtBundleEngine(ports: RepositoryRead, standingRepoURL: string | undefined, catalog: AppsEngine | undefined, ctx: PlanLog): Promise<AppsEngine | undefined> {

@@ -16,7 +16,9 @@ import { seedCredentialRow } from "../../security/store.fixture.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { registerTenantAppCatalogRoute, type TenantAppCatalogApiDeps } from "./api-tenant-app-catalog.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import { bundleReleaseTag, tenantBundleManifest } from "./engine-line.ts";
+import { newWebsiteName, websiteFolder } from "../../../web/src/tenantAppRows.ts";
 import { testMembers, STANDING_MEMBER_NAMES, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
@@ -59,7 +61,8 @@ function registrationsWith(bundle: { appsRepo?: string; appsImage?: string; apps
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
 
-async function serve(deps: Omit<TenantAppCatalogApiDeps, "db" | "store" | "githubApp">): Promise<{ app: Hono<AppEnv>; cookie: string }> {
+/** The route over `deps`, with a bundle reader that finds no bundle unless the deps bring one; `null` wires none. */
+async function serve(deps: Omit<TenantAppCatalogApiDeps, "db" | "store" | "githubApp">, reader: TenantAppCatalogApiDeps["readTenantManifest"] | null = async () => null): Promise<{ app: Hono<AppEnv>; cookie: string }> {
   const session = new SessionCodec(db.db, config);
   const githubApp = new FakeGitHubApp();
   githubApp.org = "example-org";
@@ -67,7 +70,7 @@ async function serve(deps: Omit<TenantAppCatalogApiDeps, "db" | "store" | "githu
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
     registerAuth: () => undefined,
-    registerProtected: (a) => registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...deps }),
+    registerProtected: (a) => registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(reader ? { readTenantManifest: reader } : {}), ...deps }),
   });
   const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
   return { app, cookie };
@@ -90,7 +93,7 @@ describe("GET /api/tenants/:id/app-catalog", () => {
 
   it("answers the template's apps, each marked deployed where the registration's apps[] names it — with a bundle and without one alike", async () => {
     const template = { list: async () => CATALOG };
-    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template });
+    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template, readTenantManifest: async () => ({ apps: [{ name: "erp", title: "ERP", description: "", selections: {} }] }) });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
     // An answered catalog names the tenant's websites even where there are none, so an absent list
@@ -132,6 +135,9 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     expect((await read(unwired.app, unwired.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("tenant onboarding is not configured") });
     const noReader = await serve({ registrations: registrationsWith() });
     expect((await read(noReader.app, noReader.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("reads no app catalog") });
+    // A Manager that can read the template and not a tenant's bundle cannot tell the tenant's sites.
+    const noBundleReader = await serve({ registrations: registrationsWith(), appCatalog: { list: async () => CATALOG } }, null);
+    expect((await read(noBundleReader.app, noBundleReader.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("reads no app catalog") });
     const notOnboarded = await serve({ registrations: new TenantRegistrations(new FakePlatformRepo()), appCatalog: { list: async () => CATALOG } });
     expect((await read(notOnboarded.app, notOnboarded.cookie)).body).toEqual({ apps: [], reason: expect.stringContaining("is not onboarded") });
   });
@@ -140,5 +146,70 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: { list: async () => { throw new Error("clone failed: authentication required"); } } });
     expect((await read(app, cookie)).body).toEqual({ apps: [], error: "clone failed: authentication required" });
     expect((await read(app, cookie, "tnt_none")).status).toBe(404);
+  });
+});
+
+// A website folder the tenant's own bundle carries offers the sites that bundle lists at the release the
+// tenant stands at: the bundle serves them, and may list sites the template never offered.
+describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bundle", () => {
+  const RELEASE = bundleReleaseTag(TEST_BUNDLE.appsImageTag);
+  const WEBSITE_CATALOG: AppCatalog = {
+    packageScopes: [],
+    apps: [CATALOG.apps[0]!, { name: "web", title: "Website", description: "", selections: {}, sites: ["show", "workshop-web"] }],
+  };
+  const bundleManifest = (folder: string): string => `apps:\n  - name: erp\n    title: ERP\n${folder}`;
+  const WEBSITE_FOLDER = (sites: string[]): string => `  - name: web\n    title: Website\n    sites: [${sites.join(", ")}]\n`;
+
+  /** A tenant serving the sites show and veloluck, with the bundle given (the empty pair for none). */
+  function websiteRegistrations(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): TenantRegistrations {
+    const repo = new FakePlatformRepo();
+    const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show", domain: "show.example.ch" }, { name: "veloluck", folder: "web", site: "veloluck", domain: "veloluck.example.ch" }];
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...bundle });
+    const w = tenantRegistrationWrite("prod", GUID, registration);
+    repo.seed(repo.booksBranch, w.path, w.content);
+    return new TenantRegistrations(repo);
+  }
+
+  /** The reader the Manager wires, over a fake repository whose bundle stands at its release with `files` (none: unreadable). */
+  function bundleReader(files?: Record<string, string>): { repo: FakeRepoReader; readTenantManifest: NonNullable<TenantAppCatalogApiDeps["readTenantManifest"]> } {
+    const repo = new FakeRepoReader();
+    if (files) repo.scriptFor(`${TEST_BUNDLE.appsRepo}@${RELEASE}`, { files });
+    return { repo, readTenantManifest: (bundle, signal) => tenantBundleManifest({ repo }, bundle, signal) };
+  }
+  const sitesOf = (body: TenantAppCatalogView): string[] | undefined => body.apps.find((a) => a.name === "web")?.sites;
+
+  it("offers a site the bundle lists at its release and the template does not list, and none of the template's own", async () => {
+    const { repo, readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "veloluck"])) });
+    const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
+    const { body } = await read(app, cookie);
+    expect(sitesOf(body)).toEqual(["show", "simplidigita-ai", "veloluck"]);
+    expect(repo.clones.map((c) => `${c.repoURL}@${c.ref}`)).toEqual([`${TEST_BUNDLE.appsRepo}@${RELEASE}`]);
+  });
+
+  it("PLANTED INNOCENT: the add form offers the bundle's site the tenant does not serve yet, and not the ones it serves", async () => {
+    const { readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "veloluck"])) });
+    const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
+    const { body } = await read(app, cookie);
+    expect(websiteFolder(body.apps, body.websites)?.sites).toEqual(["simplidigita-ai"]);
+    expect(newWebsiteName({ apps: body.apps, ...(body.members ? { members: body.members } : {}) }, "simplidigita-ai")).toBe("simplidigita-ai");
+  });
+
+  it("PLANTED INNOCENT: a tenant without a bundle is offered the template's sites, and its bundle is not read", async () => {
+    const { repo, readTenantManifest } = bundleReader();
+    const { app, cookie } = await serve({ registrations: websiteRegistrations({ appsImage: "", appsImageTag: "" }), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
+    expect(sitesOf((await read(app, cookie)).body)).toEqual(["show", "workshop-web"]);
+    expect(repo.clones).toEqual([]);
+  });
+
+  it("keeps the template's sites for a website folder the bundle does not carry, which the add run takes from the template", async () => {
+    const { readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest("") });
+    const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
+    expect(sitesOf((await read(app, cookie)).body)).toEqual(["show", "workshop-web"]);
+  });
+
+  it("PLANTED DEFECT: answers { apps: [], error } for a bundle that cannot be read, never the template's sites", async () => {
+    const { readTenantManifest } = bundleReader();
+    const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
+    expect((await read(app, cookie)).body).toEqual({ apps: [], error: `${TEST_BUNDLE.appsRepo} carries no apps.yaml at ${RELEASE}, so the apps the tenant runs cannot be read` });
   });
 });

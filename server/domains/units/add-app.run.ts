@@ -19,7 +19,7 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import { memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
-import { tenantAppsUnit } from "./tenant-apps-tree.ts";
+import { tenantAppsUnit, type ServedSites } from "./tenant-apps-tree.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
 import { NO_GITHUB_APP, resolveTenantAppsUnit, tenantAppsRepoSteps, TenantAppsUnitSchema } from "./tenant-apps-steps.ts";
@@ -33,7 +33,8 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
-import { builtBundleEngine, throwEngineLineRefusal } from "./engine-line.ts";
+import { builtBundleEngine, bundleFolderSites, bundleLacksSite, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import { seedTenantAppKeyStep } from "./tenant-app-keys.ts";
 import { assertAddAppAbortable, revertAppendCleanup } from "./add-app-abort.ts";
 
@@ -108,6 +109,9 @@ export const AddAppParams = z.object({
   demo: z.boolean().default(false), // the tenant is a demo: the new member renders with tenant.demo
   // A website's folder, site and domain, written into its apps[] entry.
   website: z.object({ folder: appName, site: siteId, domain: publicFqdn }).optional(),
+  // The website's site is one the tenant's own bundle lists under its folder: the bundle already carries
+  // `webs/<site>`, so the bundle steps ask the template for no folder of it.
+  siteFromBundle: z.boolean().default(false),
   // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
   websiteRecordHosts: z.array(publicFqdn).default([]),
   // The records standing at those hosts that this run replaces; an abort writes them back.
@@ -150,6 +154,11 @@ export const AddAppRequest = z.object({
 });
 export type AddAppRequest = z.infer<typeof AddAppRequest>;
 
+/** The sites the template supplies to the bundle steps for a website: its own site, or none where the
+ *  tenant's bundle lists it. Naming the folder with an empty list keeps the steps from falling back to
+ *  every site the template's entry lists. */
+const templateSites = (website: { folder: string; site: string }, siteFromBundle: boolean): ServedSites => ({ [website.folder]: siteFromBundle ? [] : [website.site] });
+
 function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
   const ns = memberNamespace(p.guid, p.app, p.stage); // the NEW member's own namespace — no sibling is touched
   // What the bundle steps hand the steps after them: the built tag, and the image set and sync units
@@ -179,7 +188,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     // steps, composed here).
     ...(p.appsUnit
       ? [
-        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)], ...(p.website ? { sites: { [p.website.folder]: [p.website.site] } } : {}) }, runtime),
+        ...tenantAppsRepoSteps(ports, { ...p.appsUnit, subdomain: p.subdomain, guid: p.guid, stage: p.stage, owner: p.owner, apps: [appFolder(app)], ...(p.website ? { sites: templateSites(p.website, p.siteFromBundle) } : {}) }, runtime),
         recordAppsRepoStep(ports, { subdomain: p.subdomain, guid: p.guid, stage: p.stage, org: p.appsUnit.org, bundle: p.appsUnit.templateBuild }, runtime),
       ]
       : []),
@@ -368,6 +377,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
       const website = req.folder !== undefined && req.site !== undefined && req.domain !== undefined ? { folder: req.folder, site: req.site, domain: req.domain } : undefined;
+      let bundle: AppsManifest | null = null;
       if (website) {
         if (current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) throw errValidation(`site "${website.site}" already runs in tenant ${tc.guid}`);
         if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
@@ -380,7 +390,14 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
           if (problem !== null) throw errValidation(problem);
         }
         await refuseOffStageHosts(ports.dns, [website.domain], tc.stage, ctx);
+        // A tenant whose own bundle lists the website's folder serves the site from that bundle, at the
+        // release it stands at, the way tenant-set-website-site judges it. A folder the bundle lacks
+        // comes from the template, with the template's sites.
+        bundle = await tenantBundleManifest(ports, current.entry, ctx.signal);
+        const listed = bundleFolderSites(bundle, website.folder);
+        if (listed && !listed.includes(website.site)) throw errValidation(bundleLacksSite({ appsRepo: current.entry.appsRepo!, appsImageTag: current.entry.appsImageTag! }, website.folder, website.site));
       }
+      const siteFromBundle = website !== undefined && bundleFolderSites(bundle, website.folder) !== undefined;
       // Every app lives in the tenant's own bundle, and the deploy repository's TEMPLATE names what can be
       // added (#213, #215): the app is judged against the template's catalog, and the bundle steps
       // carry its folder and entry into the tenant's repository — creating the repository where
@@ -394,11 +411,14 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], ...(website ? { sites: { [website.folder]: [website.site] } } : {}), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], ...(website ? { sites: templateSites(website, siteFromBundle) } : {}), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
       const hasBundle = Boolean(current.entry.appsRepo && standingImage === appsImage && standingTag);
+      // The bundle the site was judged against is the one this run extends; a registration naming
+      // another is stale, and the run would create a repository from the template without the site's folder.
+      if (siteFromBundle && !hasBundle) throw errValidation(`the website's site is listed by ${current.entry.appsRepo}, but the registration names the image ${standingImage}, and this run builds ${appsUnit.org}/${appsImage} — correct the registration's bundle first`);
       const appsImageTag = hasBundle ? standingTag! : placeholderTagFromChain(clusterValueFiles);
       ctx.log(hasBundle
         ? `tenant ${tc.guid}'s bundle ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL}, is built and recorded before the member is fanned out`
@@ -414,6 +434,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
           ref: ports.registrations.branch,
           stage: tc.stage,
           apps: [{ name: req.app, ...website, seedReference: req.seedReference, seedDemo: req.seedDemo, selections: req.selections }],
+          ...(bundle ? { bundle } : {}),
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           quota: current.entry.quota, size: current.entry.size,
@@ -486,6 +507,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         seedUsers: current.entry.seedUsers,
         demo: current.entry.demo === true,
         ...(website ? { website } : {}),
+        siteFromBundle,
         websiteRecordHosts: website ? websiteRecordHosts(website.domain, [], current.entry) : [],
         websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, [], current.entry), ctx.signal) : [],
       };

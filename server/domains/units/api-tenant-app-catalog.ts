@@ -8,7 +8,8 @@ import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import type { AppCatalogProvider } from "./app-catalog.ts";
+import { withBundleSites, type AppCatalogProvider } from "./app-catalog.ts";
+import type { TenantManifestReader } from "./tenant-app-databases.ts";
 import { packagesReaderView } from "#unit/server/owners.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps the
@@ -16,7 +17,9 @@ import { packagesReaderView } from "#unit/server/owners.ts";
 // where the tenant's registration names it in apps[]. The tenant page offers the undeployed ones to
 // tenant-add-app, which judges the choice against the same template catalog (T4) and carries the
 // app's folder into the tenant's own repository (tenant-apps-repo), so what the page offers and
-// what the plan accepts are one thing (hostyour-manager#213, #215). A READ: it degrades with
+// what the plan accepts are one thing. A website folder the tenant's own
+// bundle carries offers the sites that bundle lists at the release it stands at (withBundleSites),
+// which tenant-add-app judges the site against too. A READ: it degrades with
 // `reason` where there is nothing to read by design and with `error` where the read failed
 // (TenantAppCatalogView says why neither may render as "no apps").
 export interface TenantAppCatalogApiDeps {
@@ -27,23 +30,26 @@ export interface TenantAppCatalogApiDeps {
   githubApp: Pick<GitHubApp, "installationOrg">;
   registrations?: TenantRegistrations;
   appCatalog?: AppCatalogProvider;
+  /** The apps manifest of a tenant's own bundle, or null where it runs none; throws where the bundle cannot be read. */
+  readTenantManifest?: TenantManifestReader;
 }
 
 const errText = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantAppCatalogApiDeps): void {
-  const { db, store, githubApp, registrations, appCatalog } = deps;
+  const { db, store, githubApp, registrations, appCatalog, readTenantManifest } = deps;
   app.get("/api/tenants/:id/app-catalog", async (c) => {
     const id = c.req.param("id");
     const tenant = db.select({ guid: tenants.guid, stage: tenants.stage }).from(tenants).where(eq(tenants.id, id)).get();
     if (!tenant) throw errNotFound(`tenant ${id}`);
     const none = (reason: string): Response => c.json({ apps: [], reason } satisfies TenantAppCatalogView);
     if (!registrations) return none("tenant onboarding is not configured on this manager — it needs DEPLOY_REPO and the platform repository (GITHUB_REPO, GITHUB_WRITE_PAT)");
-    if (!appCatalog) return none("this Manager reads no app catalog — the deploy repository's template is what an app is chosen from");
+    if (!appCatalog || !readTenantManifest) return none("this Manager reads no app catalog — the deploy repository's template is what an app is chosen from");
     try {
       const current = await registrations.readTenant(tenant.stage, tenant.guid);
       if (!current) return none(`tenant ${tenant.guid} is not onboarded (no registration at ${tenant.stage})`);
       const template = await appCatalog.list(c.req.raw.signal);
+      const catalog = withBundleSites(template, await readTenantManifest(current.entry, c.req.raw.signal));
       const deployed = new Set([...current.entry.apps, ...current.entry.members].map((a) => a.name));
       // The packages reader is asked for exactly where it is needed: the template routes a scope to
       // GitHub Packages and the owner records no reader. Absent scopes, nothing is asked (#233).
@@ -51,7 +57,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
         ? await (async () => { const owner = await githubApp.installationOrg(c.req.raw.signal); return { owner, scopes: template.packageScopes, recorded: await packagesReaderView({ db, store }, owner) }; })()
         : undefined;
       const websites = current.entry.apps.flatMap((a) => (a.site && a.domain ? [{ name: a.name, site: a.site, domain: a.domain, ...(a.aliases ? { aliases: a.aliases } : {}) }] : []));
-      return c.json({ apps: template.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), websites, members: current.entry.members.map((m) => m.name), ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
+      return c.json({ apps: catalog.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), websites, members: current.entry.members.map((m) => m.name), ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
     } catch (e) {
       return c.json({ apps: [], error: errText(e) } satisfies TenantAppCatalogView);
     }

@@ -10,7 +10,7 @@ import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import type { AddAppPorts } from "./add-app.run.ts";
-import { bundleReleaseTag, engineLineRefusal, tenantBundleManifest } from "./engine-line.ts";
+import { bundleFolderSites, bundleLacksSite, bundleReleaseTag, engineLineRefusal, tenantBundleManifest } from "./engine-line.ts";
 import { standingAppDatabases } from "./tenant-app-databases.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 
@@ -107,8 +107,8 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
       if (target.ts14 < runs.ts14) throw errValidation(`the bundle ${req.appsImageTag} is older than ${previousAppsImageTag}, the bundle the tenant runs`);
       const release = bundleReleaseTag(req.appsImageTag);
       const manifest = await tenantBundleManifest(ports, { appsRepo, appsImageTag: req.appsImageTag }, ctx.signal);
-      if (!manifest?.apps.find((a) => a.name === entry.folder)?.sites?.includes(req.site)) {
-        throw errValidation(`release ${release} of ${appsRepo} lists no site ${req.site} under its folder ${entry.folder}, so the website would serve an empty site`);
+      if (!manifest || !bundleFolderSites(manifest, entry.folder)?.includes(req.site)) {
+        throw errValidation(bundleLacksSite({ appsRepo, appsImageTag: req.appsImageTag }, entry.folder, req.site));
       }
       const offLine = engineLineRefusal(manifest.engine, current.entry.approvedTags);
       if (offLine !== null) throw errValidation(`the bundle ${req.appsImageTag}: ${offLine}`);

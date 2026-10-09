@@ -19,6 +19,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
+import { bundleReleaseTag } from "./engine-line.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
@@ -115,6 +116,11 @@ export function seededPlatformRepo(bundle: { appsRepo?: string; appsImage?: stri
 // The kube clients ride behind the resolver now: fold the per-test fakes (argo/cluster/
 // projects) into a FakeClusterKubeResolver whose master path resolves to argoNamespace "argocd".
 type FakeKube = { argo?: FakeMasterArgoReader; cluster?: FakeClusterReader; projects?: FakeMasterProjectWriter };
+
+/** A tenant's own bundle as the reader finds it at the release its standing tag was built from. */
+export function scriptBundle(prt: Pick<AddAppPorts, "repo">, files: Record<string, string>, repoURL: string = TEST_BUNDLE.appsRepo): void {
+  (prt.repo as FakeRepoReader).scriptFor(`${repoURL}@${bundleReleaseTag(TEST_BUNDLE.appsImageTag)}`, { resolvedSha: SHA, files });
+}
 
 export function ports(over: Partial<AddAppPorts> & FakeKube = {}, template: Record<string, string> = TEMPLATE_APPS()): AddAppPorts {
   const { argo, cluster, projects, ...portOver } = over;

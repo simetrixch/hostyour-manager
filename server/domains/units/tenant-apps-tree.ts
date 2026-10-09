@@ -35,8 +35,9 @@ export interface TreeFile {
   executable: boolean;
 }
 
-/** The sites a run serves, per app folder: the site of each website it adds. A folder it names no
- *  sites for carries every site its entry lists, and its entry as the template spells it. */
+/** The sites a run serves from the template, per app folder: the site of each website it adds. A folder
+ *  the run does not name carries every site its entry lists, and its entry as the template spells it.
+ *  A folder named with an empty list carries none: the tenant's own bundle serves the site. */
 export type ServedSites = Readonly<Record<string, readonly string[]>>;
 
 /** Where a bundle keeps its apps and its websites' content: `apps/<app>/` and `webs/<site>/`. */

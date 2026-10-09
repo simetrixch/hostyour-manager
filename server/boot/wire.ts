@@ -404,8 +404,8 @@ export async function wire(): Promise<Wired> {
       const repositoryRoutes = { executor, onboardingEnabled: units.enabled, db: db.db, store, ...(units.github ? { github: units.github } : {}), ...(platformRepo ? { channelStages: () => readChannelStages(platformRepo) } : {}), githubApp };
       registerConsumerSecretsRoute(a, repositoryRoutes);
       registerConsumerReleaseRoute(a, repositoryRoutes);
-      // One tenant's own catalog, read through the same closure tenant-add-app judges against.
-      registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}) });
+      // One tenant's own catalog: the template's apps, and the sites its own bundle lists, which tenant-add-app judges a website's site against.
+      registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.readTenantManifest ? { readTenantManifest: units.readTenantManifest } : {}) });
       registerResetRoutes(a, {
         config, db: db.db, sqlite: db.sqlite, store, logger,
         github,
