@@ -24,7 +24,6 @@ export const TenantSetWebsiteMainParams = TenantSetWebsiteMainRequest.extend({
   guid,
   clusterId: z.string().startsWith("cls_"),
   members: z.array(memberName).min(1),
-  previousRunId: z.string().nullable(),
 });
 export type TenantSetWebsiteMainParams = z.infer<typeof TenantSetWebsiteMainParams>;
 
@@ -56,7 +55,8 @@ function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetWebsiteMainPara
       run: async (ctx) => {
         const { tc, entry } = await currentTenant(ports, p, ctx);
         const owner = ownerRun(ctx, p.tenantId);
-        if (owner !== ctx.runId && (owner !== p.previousRunId || mainOf(entry) !== p.previous)) {
+        // Only the mark decides: every run on the tenant, a Versions run among them, moves lastRunId.
+        if (owner !== ctx.runId && mainOf(entry) !== p.previous) {
           throw errValidation("the main website changed since this change was planned — plan it again");
         }
         ctx.registerCleanup(restoreMainWebsite(ports, p));
@@ -101,7 +101,7 @@ export function makeTenantSetWebsiteMainDef(ports: TenantOnboardPorts): RunDefin
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-      const params = { ...request, previous: mainOf(current.entry), previousRunId: ownerRun(ctx, request.tenantId) ?? null, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
+      const params = { ...request, previous: mainOf(current.entry), guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentTenant(ports, params, ctx);
       const website = current.entry.apps.find((a) => a.name === request.app);
       if (!website?.folder || !website.site || !website.domain) throw errValidation(`app "${request.app}" of tenant ${tc.subdomain} is no website — only a website can be the main website`);
