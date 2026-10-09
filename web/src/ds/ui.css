@@ -530,13 +530,6 @@
   accent-color: var(--accent);
 }
 
-/* Nested per-app "Seed data" toggle, shown under a selected app in the create-tenant wizard. */
-.checkbox-field--nested {
-  margin-inline-start: var(--sp-5);
-  font-size: var(--fs-2);
-  color: var(--text-2);
-}
-
 /* Consumer lifecycle status badges (Consumers list) — reuse the shared .badge dot machinery. */
 .badge--active {
   --c: var(--ok);

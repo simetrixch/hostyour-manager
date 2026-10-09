@@ -1,18 +1,21 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantWebsiteView } from "../../../shared/apps-manifest.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
 import { newWebsiteName, typedAliases, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteConfirm } from "../tenantAppRows.ts";
 import { appPurgeable } from "../tenantRows.ts";
-import { addTenantWebsite, setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
+import { setTenantWebsiteDomain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
+import { TenantDeployWebsiteDialog } from "./TenantDeployWebsiteDialog.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its address and
- *  its site, the form that adds one, the dialog that moves one to another domain or gives it alias
- *  domains, and the dialog that moves one to another site of the tenant's bundle. A website is typed without `www.`: it is served at `<domain>`, and `www.<domain>` and each
- *  alias with its `www.` redirect there. It is named
- *  after its site when it is added. A website the tenant removed keeps its row here, with the purge of
+ *  its site, a row with Deploy for every site of the tenant's bundle that is not deployed, the dialog
+ *  that moves one to another domain or gives it alias domains, and the dialog that moves one to
+ *  another site of the tenant's bundle. A website is typed without `www.`: it is served at `<domain>`,
+ *  and `www.<domain>` and each alias with its `www.` redirect there. It is named after its site when it
+ *  is deployed. Deploy waits while the owner's packages reader is not recorded, and the step that
+ *  records it stands below the list. A website the tenant removed keeps its row here, with the purge of
  *  its leftovers (`onPurge`) while it stands offboarded. Every action only PLANS its run and hands off to the Run screen. */
 export function TenantWebsites(props: {
   tenantId: string;
@@ -31,8 +34,7 @@ export function TenantWebsites(props: {
   const folder = catalog ? websiteFolder(catalog.apps, catalog.websites) : null;
   const websites = props.websites;
   const unknownDomain = unknownDomainText(catalog);
-  const [domain, setDomain] = useState("");
-  const [site, setSite] = useState("");
+  const [deploying, setDeploying] = useState<string | null>(null);
   const [moving, setMoving] = useState<TenantWebsiteView | null>(null);
   const [next, setNext] = useState("");
   const [aliasText, setAliasText] = useState("");
@@ -42,100 +44,78 @@ export function TenantWebsites(props: {
   const [bundleTag, setBundleTag] = useState("");
   const siteTyped = nextSite.trim().toLowerCase();
   const tagTyped = bundleTag.trim().toLowerCase();
-  const typed = domain.trim().toLowerCase();
   const nextTyped = next.trim().toLowerCase();
-  const named = catalog && site ? newWebsiteName(catalog, site) : "";
   // The bundle installs private packages with the owner's reader, asked where none is recorded yet.
   const reader = catalog?.packagesReader;
   const readerMissing = reader !== undefined && reader.recorded === null;
-  const submit = (e: FormEvent) => {
-    e.preventDefault();
-    if (folder?.sites?.includes(site) && typed) void act(() => addTenantWebsite(tenantId, { app: named, domain: typed, site, folder: folder.name }));
-  };
   if (!folder && websites.length === 0 && props.removed.length === 0) return null;
   return (
     <>
       <h3 className="steps-panel__title">Websites</h3>
-      {websites.length === 0 && props.removed.length === 0 ? (
-        <div className="empty">
-          <p>No website yet.</p>
-        </div>
-      ) : (
-        <ul className="rows">
-          {websites.map((w) => (
-            <li key={w.name}>
-              <div className="row">
-                <span className="row__title">{w.name}</span>
-                <span className="row__meta">
-                  {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : unknownDomain} · site {w.site}
-                  {w.aliases.length > 0 && ` · aliases ${w.aliases.join(", ")}`}
-                </span>
-                <span className="row__end">
-                  {w.domain !== null && (
-                    <button type="button" className="btn" disabled={busy} onClick={() => { const domain = w.domain!; setNext(domain); setAliasText(w.aliases.join(", ")); setMoving({ name: w.name, site: w.site, domain, aliases: [...w.aliases] }); }}>
-                      Domain and aliases…
-                    </button>
-                  )}
-                  <button type="button" className="btn" disabled={busy} onClick={() => { setNextSite(""); setBundleTag(""); setResiting({ name: w.name, site: w.site }); }}>
-                    Site…
+      <ul className="rows">
+        {websites.map((w) => (
+          <li key={w.name}>
+            <div className="row">
+              <span className="row__title">{w.name}</span>
+              <span className="row__meta">
+                {w.domain !== null ? <a href={`https://${w.domain}/`} target="_blank" rel="noreferrer">{w.domain}</a> : unknownDomain} · site {w.site}
+                {w.aliases.length > 0 && ` · aliases ${w.aliases.join(", ")}`}
+              </span>
+              <span className="row__end">
+                {w.domain !== null && (
+                  <button type="button" className="btn" disabled={busy} onClick={() => { const domain = w.domain!; setNext(domain); setAliasText(w.aliases.join(", ")); setMoving({ name: w.name, site: w.site, domain, aliases: [...w.aliases] }); }}>
+                    Domain and aliases…
                   </button>
-                  <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
-                    Remove
+                )}
+                <button type="button" className="btn" disabled={busy} onClick={() => { setNextSite(""); setBundleTag(""); setResiting({ name: w.name, site: w.site }); }}>
+                  Site…
+                </button>
+                <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onRemove(w.name)}>
+                  Remove
+                </button>
+              </span>
+            </div>
+          </li>
+        ))}
+        {props.removed.map((w) => (
+          <li key={w.name}>
+            <div className="row">
+              <span className="chip">removed</span>
+              <span className="row__title">{w.name}</span>
+              <span className="row__meta">site {w.site}</span>
+              <span className="row__end">
+                {w.lastRunId && (
+                  <Link className="btn" to={`/runs/${w.lastRunId}`}>
+                    Last run →
+                  </Link>
+                )}
+                {appPurgeable(w.status) && (
+                  <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onPurge(w.name)}>
+                    Purge
                   </button>
-                </span>
-              </div>
-            </li>
-          ))}
-          {props.removed.map((w) => (
-            <li key={w.name}>
-              <div className="row">
-                <span className="chip">removed</span>
-                <span className="row__title">{w.name}</span>
-                <span className="row__meta">site {w.site}</span>
-                <span className="row__end">
-                  {w.lastRunId && (
-                    <Link className="btn" to={`/runs/${w.lastRunId}`}>
-                      Last run →
-                    </Link>
-                  )}
-                  {appPurgeable(w.status) && (
-                    <button type="button" className="btn btn--danger" disabled={busy} onClick={() => props.onPurge(w.name)}>
-                      Purge
-                    </button>
-                  )}
-                </span>
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+                )}
+              </span>
+            </div>
+          </li>
+        ))}
+        {folder?.sites?.map((s) => (
+          <li key={`bundle-${s}`}>
+            <div className="row">
+              <span className="chip">in the bundle</span>
+              <span className="row__title">{s}</span>
+              <span className="row__meta">not deployed</span>
+              <span className="row__end">
+                <button type="button" className="btn btn--primary" disabled={busy || readerMissing} onClick={() => setDeploying(s)}>
+                  Deploy
+                </button>
+              </span>
+            </div>
+          </li>
+        ))}
+      </ul>
       {folder && readerMissing && <OwnerCredentialStep owner={reader.owner} need={{ kind: "packages-reader", scopes: reader.scopes }} onRecord={props.onRecordPackagesReader} subject="The bundle" />}
-      {folder && (
-        <form className="field" onSubmit={submit}>
-          <label className="field__label" htmlFor="tenant-add-website">
-            Add website
-          </label>
-          <span className="field__hint">
-            The domain without www: the site is served at {typed || "<domain>"}, and www.{typed || "<domain>"} redirects there.
-            {named ? ` The website is named ${named}.` : ""}
-          </span>
-          <input id="tenant-add-website" className="input" placeholder="example.com" value={domain} onChange={(e) => setDomain(e.target.value)} disabled={busy} />
-          <select className="input" value={site} onChange={(e) => setSite(e.target.value)} disabled={busy} aria-label="Site">
-            <option value="" disabled>
-              Choose its site
-            </option>
-            {(folder.sites ?? []).map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-          <div className="actions">
-            <button type="submit" className="btn btn--primary" disabled={busy || !typed || !folder.sites?.includes(site) || readerMissing}>
-              Add website
-            </button>
-          </div>
-        </form>
+      {catalog && folder && deploying && (
+        <TenantDeployWebsiteDialog tenantId={tenantId} folder={folder.name} site={deploying} name={newWebsiteName(catalog, deploying)} act={act} onClose={() => setDeploying(null)} />
       )}
       {moving && (
         <ConfirmDialog

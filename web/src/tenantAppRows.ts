@@ -79,7 +79,7 @@ export function unknownDomainText(catalog: Pick<TenantAppCatalogView, "websites"
   return "domain unknown: the tenant's registration names no website of this name";
 }
 
-/** The apps the add-app control offers: the bundle's undeployed ones, in catalog order, no website
+/** The apps whose row offers Deploy: the bundle's undeployed ones, in catalog order, no website
  *  folder among them. */
 export function undeployedApps(catalog: readonly TenantCatalogAppView[], members: readonly string[] = []): TenantCatalogAppView[] {
   return catalog.filter((a) => !a.deployed && !members.includes(a.name) && a.sites === undefined);
