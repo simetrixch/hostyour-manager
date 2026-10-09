@@ -494,6 +494,11 @@ export class KubeClusterReader implements ClusterReader {
     return claims.listPersistentVolumeClaims(this.core, namespace);
   }
 
+  /** See kube-claims.ts. NEEDS a live cluster. */
+  async listServiceClaims(namespace: string): Promise<string[]> {
+    return claims.listServiceClaims(this.custom, namespace);
+  }
+
   /** Who mounts which claim, off the Deployments' and StatefulSets' pod templates — see
    *  claimUsersOf. NEEDS a live cluster. */
   async listClaimUsers(namespace: string): Promise<ClaimUser[]> {

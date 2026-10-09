@@ -5,6 +5,7 @@ import { clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
+import type { ClusterReader } from "../../adapters/kube/port.ts";
 import { memberAppProject, memberApplication, memberNamespace } from "./tenant-fanout.ts";
 import { tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
@@ -14,8 +15,11 @@ import { RemoveAppParams, tenantLocks } from "./tenant-lifecycle.run.ts";
 // tenant-purge-app: tenant-remove-app takes an app off a standing tenant and keeps, on purpose, its
 // record (marked offboarded), its AppProject, its admission policy and its Vault keys, since its data
 // and backups may still need them. The purge deletes exactly those of that one app, named in the plan
-// before anyone approves, and the record last, so a run that fails halfway can run again. It refuses
-// an app whose namespace or Application still stands (the app is still deployed: remove it first).
+// before anyone approves, and the record last, so a run that fails halfway can run again. It also
+// deletes the app's member namespace where one stands empty: remove-app prunes the app's ServiceClaims,
+// so the service-provisioner has already dropped its databases, and the namespace it leaves behind
+// holds nothing. It refuses an app whose Application stands, or whose namespace still holds a workload
+// or a ServiceClaim (the app is still deployed: remove it first).
 
 /** Only a standing tenant's app is purged: a settled tenant's restore brings its app rows back by
  *  name, and an unfinished tenant never deployed its apps. */
@@ -41,6 +45,8 @@ interface ClusterLeftovers {
   former?: string;
   project?: string;
   policy?: string;
+  /** The member namespace, where it stands with no workload and no ServiceClaim in it. */
+  namespace?: string;
 }
 
 /** What of the app still stands and the purge deletes: per cluster, and its Vault keys; and each former
@@ -49,6 +55,16 @@ interface AppLeftovers {
   clusters: ClusterLeftovers[];
   vaultKeys: string[];
   unread: string[];
+}
+
+/** What a standing member namespace still holds that makes the app deployed: its workloads, of any
+ *  replica count, and its ServiceClaims, whose databases the namespace's delete would drop. */
+async function namespaceHolds(clusterReader: ClusterReader, namespace: string): Promise<string[]> {
+  const [{ workloads }, claims] = await Promise.all([clusterReader.smoke(namespace), clusterReader.listServiceClaims(namespace)]);
+  return [
+    ...(workloads.length > 0 ? [`workload(s) ${workloads.map((w) => w.name).join(", ")}`] : []),
+    ...(claims.length > 0 ? [`ServiceClaim(s) ${claims.join(", ")}`] : []),
+  ];
 }
 
 /** Every check a purge needs before it deletes, read now: the tenant stands, the app is offboarded,
@@ -82,15 +98,18 @@ async function readLeftovers(ports: TenantLifecyclePorts, db: Db, tenantId: stri
   const read = async (cluster: { id: string; domain: string }, former: boolean): Promise<void> => {
     const { clusterReader, argoReader, projectWriter, argoNamespace } = await ports.resolver.resolve(cluster.id);
     const where = former ? ` on ${cluster.domain}` : "";
-    if (await clusterReader.readNamespaceAnnotations(namespace)) deployed.push(`namespace ${namespace}${where}`);
+    const namespaceStands = (await clusterReader.readNamespaceAnnotations(namespace)) !== null;
+    const holds = namespaceStands ? await namespaceHolds(clusterReader, namespace) : [];
+    if (holds.length > 0) deployed.push(`namespace ${namespace}${where} holds ${holds.join(" and ")}`);
     if (await argoReader.getApplication(argoNamespace, application)) deployed.push(`ArgoCD Application ${application}${where}`);
     const left: ClusterLeftovers = {
       clusterId: cluster.id,
       ...(former ? { former: cluster.domain } : {}),
       ...((await projectWriter.appProjectExists(argoNamespace, project)) ? { project } : {}),
       ...((await clusterReader.admissionPolicyExists(policy)) ? { policy } : {}),
+      ...(namespaceStands && holds.length === 0 ? { namespace } : {}),
     };
-    if (left.project || left.policy) onClusters.push(left);
+    if (left.project || left.policy || left.namespace) onClusters.push(left);
   };
   for (const cluster of own) await read(cluster, false);
   for (const cluster of others) {
@@ -107,14 +126,18 @@ async function readLeftovers(ports: TenantLifecyclePorts, db: Db, tenantId: stri
 const describeLeftovers = (tc: TenantCluster, left: AppLeftovers): string[] => [
   ...left.clusters.flatMap((c) => {
     const where = c.former ? ` on ${c.former}` : "";
-    return [...(c.project ? [`AppProject ${c.project}${where}`] : []), ...(c.policy ? [`admission policy ${c.policy} with its binding${where}`] : [])];
+    return [
+      ...(c.project ? [`AppProject ${c.project}${where}`] : []),
+      ...(c.policy ? [`admission policy ${c.policy} with its binding${where}`] : []),
+      ...(c.namespace ? [`empty namespace ${c.namespace}${where}`] : []),
+    ];
   }),
   ...left.vaultKeys.map((key) => `Vault key ${tc.stage}/tenants/${tc.guid}/${key}`),
 ];
 
 /** The former clusters that could not be read, said where the person approves and in the run's log. */
 const unreadNote = (left: AppLeftovers): string =>
-  left.unread.map((u) => `; not read: ${u}; its AppProject and policy, if any, stay`).join("");
+  left.unread.map((u) => `; not read: ${u}; its AppProject, policy and namespace, if any, stay`).join("");
 
 function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): Step[] {
   const { tenantId, app } = params;
@@ -122,7 +145,7 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
     attestTenantTargetStep(ports, tenantId),
     {
       name: "delete-app-objects",
-      title: "Delete the app's AppProject, admission policy and Vault keys",
+      title: "Delete the app's AppProject, admission policy, empty namespace and Vault keys",
       run: async (ctx) => {
         // Read again: the tenant or the app may have changed between the plan and its approval.
         const { tc, left } = await readLeftovers(ports, ctx.db, tenantId, app);
@@ -130,6 +153,7 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
           const { projectWriter, clusterReader, argoNamespace } = await ports.resolver.resolve(c.clusterId);
           if (c.project) await projectWriter.deleteAppProject(argoNamespace, c.project);
           if (c.policy) await clusterReader.deleteAdmissionPolicy(c.policy);
+          if (c.namespace) await clusterReader.deleteNamespace(c.namespace);
         }
         const { deleted } = left.vaultKeys.length > 0 ? await ports.seeder!.deleteTenantAppKeys({ stage: tc.stage, guid: tc.guid, app }) : { deleted: [] };
         const gone = describeLeftovers(tc, { ...left, vaultKeys: deleted });

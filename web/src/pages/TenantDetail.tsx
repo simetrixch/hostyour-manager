@@ -318,7 +318,7 @@ export function TenantDetail() {
           onCancel={() => setPurgeApp(null)}
           onConfirm={() => { const a = purgeApp; setPurgeApp(null); void act(() => planRun("tenant-purge-app", { tenantId: t.id, app: a })); }}
         >
-          <p>The plan names what of the app still stands and is deleted: its AppProject, its admission policy with its binding, its Vault keys, and last its record. Nothing of another app is touched. It refuses while the app is still deployed.</p>
+          <p>The plan names what of the app still stands and is deleted: its AppProject, its admission policy with its binding, its member namespace where it stands empty, its Vault keys, and last its record. Nothing of another app is touched. It refuses while the app is still deployed.</p>
         </ConfirmDialog>
       )}
 
