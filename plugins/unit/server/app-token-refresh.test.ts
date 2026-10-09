@@ -1,9 +1,9 @@
 // The repo-pat refresh (app-token-refresh.ts): every unit whose build registration names a
 // credential has its build repo-pat rewritten with the value the store opens to now — a token minted
-// for the App, the PAT itself for a pat unit — beside its owner's packages reader, and ESO asked to
-// write its three build Secrets again behind the rewrite; one unit's failure is logged and the rest go
-// on; nothing rejects.
-import { describe, it, expect } from "vitest";
+// for the App, the PAT itself for a pat unit — beside its owner's packages reader and the `push` token
+// that writes the unit's own repository (none for a CI-only unit), and ESO asked to write its three
+// build Secrets again behind the rewrite; one unit's failure is logged and the rest go on; nothing rejects.
+import { describe, it, expect, vi } from "vitest";
 import type { Logger } from "#core/server/kernel/logger.ts";
 import type { CredentialStore } from "#core/server/security/store.ts";
 import type { BuildRepoPatSeedInput } from "./adapters/vault/seeder-port.ts";
@@ -11,6 +11,7 @@ import { FakePlatformRepo } from "#core/server/adapters/git/testing/fake.ts";
 import { FakeClusterReader } from "#core/server/adapters/kube/testing/fake.ts";
 import { Registrations } from "./registrations.ts";
 import { FakeGitHubApp } from "#core/server/adapters/github-app/testing/fake.ts";
+import { GitHubAppError } from "#core/server/adapters/github-app/port.ts";
 import { BUILD_TARGET_SECRETS, DEPLOY_BUMP_UNIT, readBuildSecretRefreshTimes, refreshAppTokens, refreshBuildSecrets, refreshUnitRepoPat } from "./app-token-refresh.ts";
 import type { OwnerIdentityReader } from "./repo-identity.ts";
 
@@ -140,11 +141,18 @@ describe("refreshAppTokens", () => {
     const { logger, errors, warns, infos } = fakeLogger();
     const kube = buildPlane();
     const reg = await registrations();
-    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
+    const githubApp = app();
+    expect(await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp })).toEqual({ refreshed: ["acme-apps", "shop", "beta-apps"], failed: [] });
     expect(written).toEqual([
-      { consumerName: "acme-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
-      { consumerName: "shop", pat: "github_pat_shop", packages: "ghp_packages_acme" }, // the PAT itself, and the reader of its owner (#230)
-      { consumerName: "beta-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme" },
+      // `pat` is what the store opens to, unchanged; `push` is the token the App minted for the unit's own repository.
+      { consumerName: "acme-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme", push: "ghs_fake_installation_token_scoped_1" },
+      { consumerName: "shop", pat: "github_pat_shop", packages: "ghp_packages_acme", push: "github_pat_shop" }, // the PAT itself in all three, and the reader of its owner
+      { consumerName: "beta-apps", pat: "ghs_minted_at_tick_1", packages: "ghp_packages_acme", push: "ghs_fake_installation_token_scoped_2" },
+    ]);
+    // One mint per App unit, none for the PAT unit: the repository NAME alone, and the write right alone.
+    expect(githubApp.scopedMints).toEqual([
+      { repositories: ["acme-apps"], permissions: { contents: "write" } },
+      { repositories: ["beta-apps"], permissions: { contents: "write" } },
     ]);
     expect(opened).toEqual(["cred_app", "cred_pkg", "cred_pat", "cred_pkg", "cred_app", "cred_pkg"]); // the unit's credential and the owner's packages reader, per unit
     // The ExternalSecret that writes each of the three, in ITS build namespace. No Secret is deleted
@@ -158,7 +166,7 @@ describe("refreshAppTokens", () => {
     // and asks ESO again, because ESO reads Vault at no other moment.
     minted.value = "ghs_minted_at_tick_2";
     await refreshAppTokens({ store, owners, registrations: reg, seeder, kube, logger, githubApp: app() });
-    expect(written.at(-1)).toEqual({ consumerName: "beta-apps", pat: "ghs_minted_at_tick_2", packages: "ghp_packages_acme" });
+    expect(written.at(-1)).toEqual({ consumerName: "beta-apps", pat: "ghs_minted_at_tick_2", packages: "ghp_packages_acme", push: "ghs_fake_installation_token_scoped_2" });
     expect(kube.refreshedExternalSecrets).toHaveLength(18);
   });
 
@@ -182,6 +190,29 @@ describe("refreshAppTokens", () => {
     expect(errors[0]).toContain('"unit":"gone"');
     expect(errors[0]).toContain("has no identity");
     expect(errors[0]).toContain("owner nobody records no repository PAT");
+  });
+
+  // A REFUSED SCOPED MINT IS THAT UNIT'S FAILURE: GitHub refuses it where the installation does not
+  // reach the repository or the App lacks the write right. The unit's entry is not written at all (a
+  // `pat` without its `push` beside it would be a half-refreshed entry), and the others go on.
+  it("counts a unit whose scoped mint GitHub refuses as failed by name, writes nothing for it and asks no refresh of its Secrets, and refreshes the others", async () => {
+    const { store } = fakeStore({ value: "ghs_x" });
+    const { seeder, written } = fakeSeeder();
+    const { logger, errors } = fakeLogger();
+    const kube = buildPlane();
+    const githubApp = app();
+    const mint = githubApp.scopedInstallationToken.bind(githubApp);
+    githubApp.scopedInstallationToken = async (input) => {
+      if (input.repositories[0] === "acme-apps") throw new GitHubAppError("GitHub POST /app/installations/42/access_tokens → 422: The permissions requested are not granted to this installation.", 422);
+      return mint(input);
+    };
+    expect(await refreshAppTokens({ store, owners, registrations: await registrations(), seeder, kube, logger, githubApp })).toEqual({ refreshed: ["shop", "beta-apps"], failed: ["acme-apps"] });
+    expect(written.map((w) => w.consumerName)).toEqual(["shop", "beta-apps"]);
+    expect(kube.refreshedExternalSecrets).toEqual([...refreshesOf("shop"), ...refreshesOf("beta-apps")]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain('"unit":"acme-apps"');
+    expect(errors[0]).toContain("permissions requested are not granted");
+    expect(errors[0]).not.toContain("ghs_x");
   });
 
   it("logs the unit whose write fails, with its name, asks no refresh of its Secrets, and refreshes the others", async () => {
@@ -285,6 +316,12 @@ describe("refreshAppTokens — a CI-only unit", () => {
     const r = await refreshAppTokens({ store, owners, registrations: await mixed(), seeder, kube, logger, deployRepo: { repoURL: "https://github.com/acme/deploy.git" }, githubApp });
     expect(r).toEqual({ refreshed: ["ci-check", "acme-apps", DEPLOY_BUMP_UNIT], failed: [] });
     expect(written.map((w) => w.consumerName)).toEqual(["ci-check", "acme-apps", DEPLOY_BUMP_UNIT]);
+    // The CI-only unit pushes nothing: its entry holds no `push` and no write token was minted for it,
+    // while the unit that releases, in the same tick, has its own. The deploy repository's entry stays on `pat`.
+    expect(written[0]).not.toHaveProperty("push");
+    expect(written[1]).toHaveProperty("push", "ghs_fake_installation_token_scoped_1");
+    expect(written[2]).not.toHaveProperty("push");
+    expect(githubApp.scopedMints).toEqual([{ repositories: ["acme-apps"], permissions: { contents: "write" } }]);
     // Planted innocent in the same tick: the unit that builds asks for all three, and for the bump
     // entry's Secret once more behind the deploy repository rewrite.
     expect(kube.refreshedExternalSecrets).toEqual([
@@ -335,13 +372,38 @@ describe("refreshBuildSecrets / readBuildSecretRefreshTimes", () => {
 });
 
 describe("refreshUnitRepoPat", () => {
-  it("opens both credentials under the purpose given, writes them as the unit's entry (pat, packages) and zeroes both", async () => {
+  const target = { name: "acme-apps", repoURL: "https://github.com/acme/acme-apps.git", ciOnly: false };
+
+  it("opens both credentials under the purpose given, writes them as the unit's entry (pat, packages, push) and zeroes them — the owner's PAT is its own push token", async () => {
     const handed: Buffer[] = [];
-    const store: Pick<CredentialStore, "open"> = { open: async (id, use) => { expect(use.purpose).toBe("consumer-onboard:refresh-repo-pat"); const b = Buffer.from(`token-of-${id}`); handed.push(b); return b; } };
+    const store: Pick<CredentialStore, "open" | "list"> = { list: async () => [], open: async (id, use) => { expect(use.purpose).toBe("consumer-onboard:refresh-repo-pat"); const b = Buffer.from(`token-of-${id}`); handed.push(b); return b; } };
     const { seeder, written } = fakeSeeder();
-    await refreshUnitRepoPat({ store, seeder }, "acme-apps", "cred_app", "cred_pkg", { purpose: "consumer-onboard:refresh-repo-pat" });
-    expect(written).toEqual([{ consumerName: "acme-apps", pat: "token-of-cred_app", packages: "token-of-cred_pkg" }]);
+    const githubApp = new FakeGitHubApp();
+    await refreshUnitRepoPat({ store, seeder, githubApp }, target, "cred_pat", "cred_pkg", { purpose: "consumer-onboard:refresh-repo-pat" });
+    expect(written).toEqual([{ consumerName: "acme-apps", pat: "token-of-cred_pat", packages: "token-of-cred_pkg", push: "token-of-cred_pat" }]);
+    expect(githubApp.scopedMints).toEqual([]); // a PAT cannot be limited by the Manager, so nothing is minted for it
     expect(handed).toHaveLength(2);
     expect(handed.every((b) => b.every((x) => x === 0))).toBe(true);
+  });
+
+  it("zeroes the push token it minted for an App unit, after the write", async () => {
+    const { store } = fakeStore({ value: "ghs_minted" });
+    const { seeder, written } = fakeSeeder();
+    const copies: { text: string; buffer: Buffer }[] = [];
+    const real = Buffer.from.bind(Buffer) as (...a: unknown[]) => Buffer;
+    const spy = vi.spyOn(Buffer, "from").mockImplementation(((...a: unknown[]) => {
+      const buffer = real(...a);
+      if (typeof a[0] === "string") copies.push({ text: a[0], buffer });
+      return buffer;
+    }) as never);
+    try {
+      await refreshUnitRepoPat({ store, seeder, githubApp: new FakeGitHubApp() }, target, "cred_app", null, { purpose: "app-token-refresh" });
+    } finally {
+      spy.mockRestore();
+    }
+    expect(written).toEqual([{ consumerName: "acme-apps", pat: "ghs_minted", packages: "", push: "ghs_fake_installation_token_scoped_1" }]);
+    const minted = copies.find((c) => c.text === "ghs_fake_installation_token_scoped_1");
+    expect(minted).toBeDefined();
+    expect(minted!.buffer.every((x) => x === 0)).toBe(true);
   });
 });

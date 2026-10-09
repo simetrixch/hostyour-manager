@@ -103,6 +103,18 @@ describe("VaultSelfSeeder build repo-pat (stage-free)", () => {
     });
   });
 
+  it("writes the push token beside pat and packages when the input carries one, and no push key when it does not", async () => {
+    await withSelf(async (seeder) => {
+      await seeder.refreshBuildRepoPat(patInput({ push: "ghs_scoped_write" }));
+      expect(vault.recorded.at(-2)!.body).toEqual({ data: { pat: "github_pat_x", packages: "ghp_packages_reader", push: "ghs_scoped_write" } });
+      await seeder.seedBuildRepoPat(patInput({ push: "ghs_scoped_write" }));
+      expect(vault.recorded.at(-2)!.body).toEqual({ data: { pat: "github_pat_x", packages: "ghp_packages_reader", push: "ghs_scoped_write" }, options: { cas: 0 } });
+      // Vault replaces the whole entry, so an entry written without `push` holds none: a CI-only unit's.
+      await seeder.refreshBuildRepoPat(patInput());
+      expect(vault.recorded.at(-2)!.body).not.toHaveProperty("data.push");
+    });
+  });
+
   it("ATTESTS an existing path: the cas conflict answers created:false, nothing is overwritten", async () => {
     server.removeAllListeners("request");
     server.on("request", (req, res) => {

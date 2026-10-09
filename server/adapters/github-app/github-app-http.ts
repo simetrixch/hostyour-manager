@@ -4,7 +4,7 @@
 // PKCS#8 one, which the jose importer this process uses for sessions does not. Mirrors the consumer
 // client's request/header/error style (Bearer, x-github-api-version, user-agent).
 import { createPrivateKey, createSign, type KeyObject } from "node:crypto";
-import type { GitHubApp, CreateRepositoryInput } from "./port.ts";
+import type { GitHubApp, CreateRepositoryInput, ScopedInstallationTokenInput } from "./port.ts";
 import { GitHubAppError } from "./port.ts";
 import { fingerprintSecret } from "../../security/fingerprint.ts";
 
@@ -86,16 +86,30 @@ export class HttpGitHubApp implements GitHubApp {
     return fingerprintSecret(Buffer.from(`github-app:${this.opts.appId}:${this.opts.installationId}`, "utf8"));
   }
 
-  async installationToken(signal?: AbortSignal): Promise<string> {
-    if (this.token && Date.now() < this.token.expiresAt - TOKEN_MIN_VALIDITY_MS) return this.token.value;
+  /** One mint: the POST that answers an installation token. A `scope` is the JSON body that limits it
+   *  to repositories and permissions; without one the token reaches the whole installation. */
+  private async mintToken(scope: Pick<ScopedInstallationTokenInput, "repositories" | "permissions"> | undefined, signal: AbortSignal | undefined): Promise<{ value: string; expiresAt: number }> {
     const path = `${this.installationPath}/access_tokens`;
-    const res = await this.send(this.appJwt(), path, { method: "POST", ...(signal ? { signal } : {}) });
+    const res = await this.send(this.appJwt(), path, {
+      method: "POST",
+      ...(scope ? { headers: { "content-type": "application/json" }, body: JSON.stringify({ repositories: scope.repositories, permissions: scope.permissions }) } : {}),
+      ...(signal ? { signal } : {}),
+    });
     if (!res.ok) throw new GitHubAppError(`GitHub POST ${path} → ${res.status}: ${await HttpGitHubApp.ghMessage(res)}`, res.status);
     const body = (await res.json()) as { token?: string; expires_at?: string };
     const expiresAt = Date.parse(body.expires_at ?? "");
     if (!body.token || Number.isNaN(expiresAt)) throw new GitHubAppError(`GitHub POST ${path} returned no token with an expires_at`);
-    this.token = { value: body.token, expiresAt };
-    return body.token;
+    return { value: body.token, expiresAt };
+  }
+
+  async installationToken(signal?: AbortSignal): Promise<string> {
+    if (this.token && Date.now() < this.token.expiresAt - TOKEN_MIN_VALIDITY_MS) return this.token.value;
+    this.token = await this.mintToken(undefined, signal);
+    return this.token.value;
+  }
+
+  async scopedInstallationToken(input: ScopedInstallationTokenInput): Promise<string> {
+    return (await this.mintToken(input, input.signal)).value;
   }
 
   async installationOrg(signal?: AbortSignal): Promise<string> {

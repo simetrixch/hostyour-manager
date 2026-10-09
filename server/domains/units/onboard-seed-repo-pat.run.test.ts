@@ -14,6 +14,7 @@ import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { ports, buildSecretRows, FakeBuildPlaneClusterReader, FakeSeeder, BUILD_SECRETS_MATERIALIZED_AT } from "./onboard.fixture.ts";
 import { FakeClusterReader } from "../../adapters/kube/testing/fake.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
+import type { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
 
@@ -40,7 +41,11 @@ function ctx(logs: string[], token = "ghs_minted_now"): StepCtx {
   return {
     runId: "run_onb", stepName: "refresh-repo-pat", db: db.db,
     // The one credential opens to the token of the moment; the owner's packages reader to its own.
-    creds: { open: async (id: string) => { opened.push(id); return Buffer.from(id === "cred_pkg_x" ? "ghp_packages_x" : token, "utf8"); } } as unknown as StepCtx["creds"],
+    // `cred_app` is the App's one row, which is how the step knows the unit's repository is the App's.
+    creds: {
+      open: async (id: string) => { opened.push(id); return Buffer.from(id === "cred_pkg_x" ? "ghp_packages_x" : token, "utf8"); },
+      list: async () => [{ id: "cred_app", kind: "github-app", label: "GitHub App (x)", fingerprint: "sha256:app", subject: { kind: "owner", id: "x" }, purpose: "repository-identity" }],
+    } as unknown as StepCtx["creds"],
     params: params(), secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,
     ssh: () => Promise.reject(new Error("no ssh")), openPasswordSession: () => Promise.reject(new Error("no ssh")),
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
@@ -66,12 +71,13 @@ describe("onboard refresh-repo-pat step", () => {
     const logs: string[] = [];
     await run(ctx(logs));
     expect(order).toEqual(["vault", "refresh", "refresh", "refresh"]);
-    expect(seeder.refreshedRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_minted_now", packages: "ghp_packages_x" }]);
+    // The unit's repository is the App's, so `push` is a token minted for that repository alone.
+    expect(seeder.refreshedRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_minted_now", packages: "ghp_packages_x", push: "ghs_fake_installation_token_scoped_1" }]);
     expect(kube.refreshedExternalSecrets).toEqual(REFRESHES);
     expect(kube.secretWrites).toEqual([]);
     // The order is the mechanism: a refresh asked BEFORE the rewrite would make ESO write the dead
     // value, so the rewrite is logged first and the request after it.
-    expect(logs.findIndex((l) => l.includes("rewritten (properties pat, packages)"))).toBeLessThan(logs.findIndex((l) => l.includes("in acme-build again")));
+    expect(logs.findIndex((l) => l.includes("rewritten (properties pat, packages, push)"))).toBeLessThan(logs.findIndex((l) => l.includes("in acme-build again")));
     expect(logs.at(-1)).toContain("build-git-https, bump-git-https, build-npmrc written again in acme-build");
     // Read before the request and again after it — never off the Ready bit.
     expect(kube.listedExternalSecrets.length).toBeGreaterThanOrEqual(2);
@@ -152,10 +158,31 @@ describe("onboard seed-repo-pat step — the packages reader where a scope is ro
     const prt = ports();
     const logs: string[] = [];
     await seedRepoPatStep(prt, params()).run(ctx(logs, "ghs_repo"));
-    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_repo", packages: "" }]);
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_repo", packages: "", push: "ghs_fake_installation_token_scoped_1" }]);
     expect(logs.some((l) => l.includes("routes no scope to GitHub Packages — no packages reader needed"))).toBe(true);
     const routed = ports({ repo: new FakeRepoReader({ resolvedSha: SHA, files: { ".npmrc": "@x:registry=https://npm.pkg.github.com\n" } }) });
     await expect(seedRepoPatStep(routed, params()).run(ctx([], "ghs_repo")))
       .rejects.toThrow(/owner x records no packages reader, and x\/acme installs private npm packages of @x from GitHub Packages .* consumer wizard/);
+  });
+});
+
+// `push` is the token that writes the unit's own repository. The seed mints it for a unit the App
+// reaches, and a CI-only unit — which has no release to push from — gets none, whoever reaches it.
+describe("onboard seed-repo-pat step — the push token", () => {
+  const unit = { consumerName: "acme", repoURL: "https://github.com/x/acme.git", resolvedSha: SHA, repoCredentialId: "cred_app" };
+
+  it("seeds a token the App minted for the unit's repository alone, with the write right alone", async () => {
+    const prt = ports();
+    await seedRepoPatStep(prt, unit).run(ctx([], "ghs_repo"));
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toEqual([{ consumerName: "acme", pat: "ghs_repo", packages: "ghp_packages_x", push: "ghs_fake_installation_token_scoped_1" }]);
+    expect((prt.githubApp as FakeGitHubApp).scopedMints).toEqual([{ repositories: ["acme"], permissions: { contents: "write" } }]);
+  });
+
+  it("seeds a CI-only unit with no push, and mints nothing for it", async () => {
+    const prt = ports();
+    await seedRepoPatStep(prt, { ...unit, form: "ci-only" }).run(ctx([], "ghs_repo"));
+    expect((prt.seeder as FakeSeeder).buildRepoPats).toHaveLength(1);
+    expect((prt.seeder as FakeSeeder).buildRepoPats[0]).not.toHaveProperty("push");
+    expect((prt.githubApp as FakeGitHubApp).scopedMints).toEqual([]);
   });
 });

@@ -109,6 +109,61 @@ describe("github-app adapter — the App's JWT and the installation token", () =
   });
 });
 
+// A SCOPED TOKEN REACHES ONLY WHAT IT NAMES. The same mint endpoint, but the body names the
+// repositories and the permissions, and the answer is the caller's alone: it is never kept for the
+// next call, and it never replaces the whole-installation token the Manager's own callers hold.
+describe("github-app adapter — scopedInstallationToken", () => {
+  const MINT = "POST /app/installations/42/access_tokens";
+  const scope = { repositories: ["acme-apps"], permissions: { contents: "write" as const } };
+
+  it("sends the repositories and the permissions as the JSON body of the mint, signed with the App's JWT, and answers the token", async () => {
+    const stub = stubFetch({ [MINT]: { status: 201, body: { token: "ghs_scoped", expires_at: expiresAt(T0 + 3_600_000) } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    expect(await client.scopedInstallationToken(scope)).toBe("ghs_scoped");
+    const seen = stub.seen[0]!;
+    expect(JSON.parse(seen.body!)).toEqual({ repositories: ["acme-apps"], permissions: { contents: "write" } });
+    expect(seen.headers["content-type"]).toBe("application/json");
+    expect(verifies(bearerOf(seen), publicKey)).toBe(true);
+  });
+
+  it("mints afresh at every call and leaves the whole-installation token's cache alone", async () => {
+    vi.useFakeTimers({ now: T0, toFake: ["Date"] });
+    try {
+      const stub = stubFetch({ [MINT]: { status: 201, body: { token: "ghs_all", expires_at: expiresAt(T0 + 3_600_000) } } });
+      const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+      expect(await client.installationToken()).toBe("ghs_all");
+      expect(stub.seen[0]!.body).toBeUndefined(); // the whole-installation mint names no repository
+      stub.routes[MINT] = { status: 201, body: { token: "ghs_one", expires_at: expiresAt(T0 + 3_600_000) } };
+      expect(await client.scopedInstallationToken(scope)).toBe("ghs_one");
+      stub.routes[MINT] = { status: 201, body: { token: "ghs_two", expires_at: expiresAt(T0 + 3_600_000) } };
+      expect(await client.scopedInstallationToken(scope)).toBe("ghs_two");
+      expect(stub.seen).toHaveLength(3);
+      // The scoped tokens were not cached as THE installation token: the next unscoped call serves the first.
+      expect(await client.installationToken()).toBe("ghs_all");
+      expect(stub.seen).toHaveLength(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("surfaces GitHub's own message and status when the mint is refused (a repository the installation does not reach answers 422)", async () => {
+    const stub = stubFetch({ [MINT]: { status: 422, body: { message: "Validation Failed", errors: [{ message: "The repository 'ghost' is not accessible to this installation" }] } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    const err = await client.scopedInstallationToken({ ...scope, repositories: ["ghost"] }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(GitHubAppError);
+    expect((err as GitHubAppError).status).toBe(422);
+    expect((err as GitHubAppError).message).toMatch(/Validation Failed: The repository 'ghost' is not accessible/);
+  });
+
+  it("refuses a mint that answers no token or no expires_at", async () => {
+    const stub = stubFetch({ [MINT]: { status: 201, body: { token: "ghs_one" } } });
+    const client = new HttpGitHubApp({ ...APP, fetchImpl: stub.fetchImpl });
+    await expect(client.scopedInstallationToken(scope)).rejects.toThrow(/expires_at/);
+    stub.routes[MINT] = { status: 201, body: { expires_at: expiresAt(T0) } };
+    await expect(client.scopedInstallationToken(scope)).rejects.toThrow(/returned no token/);
+  });
+});
+
 describe("github-app adapter — installationOrg", () => {
   it("reads account.login off the installation with the App's JWT, and keeps it", async () => {
     const stub = stubFetch({ "GET /app/installations/42": { status: 200, body: { id: 42, account: { login: "example-org", type: "Organization" } } } });

@@ -21,16 +21,24 @@
 // WHICH units: every build registration. The credential each unit's repository is reached with is
 // the owner's, resolved from the URL at every tick (repo-identity.ts resolveRepoCredentialId, #226):
 // the App's one row, or the owner's repository PAT row; what the id opens to is the store's business.
+//
+// THE ENTRY HOLDS A SECOND REPOSITORY TOKEN, `push`: the one that WRITES the unit's own repository.
+// For an App unit it is minted limited to that repository with `contents: write`
+// (GitHubApp.scopedInstallationToken), so a pod holding it can push nowhere else in the
+// installation, whereas `pat` is the Manager's own installation-wide token. For a PAT unit it is the
+// PAT itself, which the Manager cannot limit. A CI-only unit pushes nothing, so its entry has no `push`.
 import type { Logger } from "#core/server/kernel/logger.ts";
 import type { CredentialStore, UseContext } from "#core/server/security/store.ts";
-import type { VaultSeeder } from "./adapters/vault/seeder-port.ts";
+import type { BuildRepoPatSeedInput, VaultSeeder } from "./adapters/vault/seeder-port.ts";
 import type { ClusterReader, ExternalSecretRow } from "#core/server/adapters/kube/port.ts";
+import { appIdentityRowId } from "#core/server/security/app-identity.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import type { Registrations } from "./registrations.ts";
 import { unitBuildNamespace } from "./build-rbac.ts";
 import { packagesReaderFor, resolveRepoCredentialId, type OwnerIdentityReader } from "./repo-identity.ts";
 import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
 import { appReachesRepoURL } from "./repo-identity.ts";
+import { parseGitHubOwnerRepo } from "./github-repo-url.ts";
 
 /** The three Secrets of a unit's build namespace that carry its repo-pat, by the `target.name` of
  *  the ExternalSecret that materializes each — hostyour-cloud
@@ -60,7 +68,7 @@ export interface AppTokenRefreshDeps {
    *  write from the App on every tick (#197). Absent ⇒ no tenant family. */
   deployRepo?: { repoURL: string } | undefined;
   /** The platform's GitHub App — measured against the deploy repository and minting the bump token. */
-  githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken" | "installationOrg">;
+  githubApp: Pick<GitHubApp, "reachesRepository" | "installationToken" | "scopedInstallationToken" | "installationOrg">;
   /** The build plane's cluster reader — the master's own, the cluster this Manager runs on. Absent
    *  on a Manager whose kube is not wired: the entries are still rewritten, and the refresh request
    *  that would carry them into the Secrets is logged as skipped, per unit. */
@@ -68,19 +76,55 @@ export interface AppTokenRefreshDeps {
   logger: Logger;
 }
 
-/** ONE unit's entry, rewritten with the value its credential opens to now — a token minted by the
- *  App for a `github-app` credential. The value is zeroed after the write and never logged. Throws
- *  where the open or the write fails. Writes Vault only: the refresh request that lets the value reach
- *  the pipeline is `refreshBuildSecrets`, called by both callers after this succeeded. */
-export async function refreshUnitRepoPat(deps: { store: Pick<CredentialStore, "open">; seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: string, credentialId: string, packagesCredentialId: string | null, use: UseContext): Promise<void> {
-  const token = await deps.store.open(credentialId, use);
-  const packages = packagesCredentialId ? await deps.store.open(packagesCredentialId, use).catch((e: unknown) => { token.fill(0); throw e; }) : Buffer.alloc(0);
+/** The unit a repo-pat entry belongs to, as far as its values go: its name, the repository its
+ *  `push` token is limited to, and whether it has a release to push from at all. */
+export interface UnitRepoPatTarget {
+  name: string;
+  repoURL: string;
+  ciOnly: boolean;
+}
+
+/** What opening a unit's repo-pat values needs: the store, and the App that mints the `push` token of
+ *  a unit whose credential is the App. */
+export interface UnitRepoPatDeps {
+  store: Pick<CredentialStore, "open" | "list">;
+  githubApp: Pick<GitHubApp, "scopedInstallationToken">;
+}
+
+/** Opens the values of ONE unit's repo-pat entry and hands them to `write`: `pat` and `packages` as
+ *  the store opens them now (a fresh installation token for a `github-app` credential), and `push` —
+ *  a token minted for the unit's own repository with `contents: write` where the credential is the
+ *  App's row, the PAT itself where it is the owner's, none for a CI-only unit. Every value is zeroed
+ *  after `write` and none is logged. Throws where an open or the mint fails (a repository the
+ *  installation does not reach, an App without the permission), and then `write` is not called. */
+export async function withUnitRepoPat<T>(deps: UnitRepoPatDeps, unit: UnitRepoPatTarget, credentialId: string, packagesCredentialId: string | null, use: UseContext, write: (input: BuildRepoPatSeedInput) => Promise<T>): Promise<T> {
+  const held: Buffer[] = [];
   try {
-    await deps.seeder.refreshBuildRepoPat({ consumerName: unit, pat: token.toString("utf8"), packages: packages.toString("utf8") });
+    const pat = await deps.store.open(credentialId, use);
+    held.push(pat);
+    const packages = packagesCredentialId ? await deps.store.open(packagesCredentialId, use) : Buffer.alloc(0);
+    held.push(packages);
+    let push: Buffer | undefined;
+    if (!unit.ciOnly) {
+      if (credentialId === (await appIdentityRowId(deps.store))) {
+        push = Buffer.from(await deps.githubApp.scopedInstallationToken({ repositories: [parseGitHubOwnerRepo(unit.repoURL).repo], permissions: { contents: "write" } }), "utf8");
+        held.push(push);
+      } else {
+        push = pat;
+      }
+    }
+    return await write({ consumerName: unit.name, pat: pat.toString("utf8"), packages: packages.toString("utf8"), ...(push ? { push: push.toString("utf8") } : {}) });
   } finally {
-    token.fill(0);
-    packages.fill(0);
+    for (const value of held) value.fill(0);
   }
+}
+
+/** ONE unit's entry, rewritten with the values its credential opens to now (withUnitRepoPat): a token
+ *  minted by the App for a `github-app` credential, and the push token beside it. Throws where the open,
+ *  the mint or the write fails. Writes Vault only: the refresh request that lets the value reach
+ *  the pipeline is `refreshBuildSecrets`, called by both callers after this succeeded. */
+export async function refreshUnitRepoPat(deps: UnitRepoPatDeps & { seeder: Pick<VaultSeeder, "refreshBuildRepoPat"> }, unit: UnitRepoPatTarget, credentialId: string, packagesCredentialId: string | null, use: UseContext): Promise<void> {
+  await withUnitRepoPat(deps, unit, credentialId, packagesCredentialId, use, (input) => deps.seeder.refreshBuildRepoPat(input));
 }
 
 /** Whether `row` is the ExternalSecret that writes the Secret `target`: its `target.name`, or its own
@@ -113,7 +157,7 @@ export async function readBuildSecretRefreshTimes(kube: Pick<ClusterReader, "lis
 }
 
 /** Every unit whose build registration names a credential, refreshed one by one: a
- *  unit whose open or write fails is logged with its name and the rest go on, and a registration
+ *  unit whose open, mint or write fails is logged with its name and the rest go on, and a registration
  *  tree that cannot be read is logged as one failure. After each rewrite ESO is asked to write the
  *  unit's three build Secrets again, which is what makes its `OnChange` ExternalSecrets fetch the new
  *  value — a unit whose request fails is logged with its name and counted failed, because its clone
@@ -150,7 +194,7 @@ export async function refreshAppTokens(deps: AppTokenRefreshDeps): Promise<{ ref
       continue;
     }
     try {
-      await refreshUnitRepoPat(deps, unit, credentialId, packagesReaderFor(deps.owners, repoURL), { purpose: "app-token-refresh" });
+      await refreshUnitRepoPat(deps, { name: unit, repoURL, ciOnly }, credentialId, packagesReaderFor(deps.owners, repoURL), { purpose: "app-token-refresh" });
     } catch (err) {
       failed.push(unit);
       deps.logger.error({ unit, credentialId, err: err instanceof Error ? err.message : String(err) }, "the App token of this unit could not be rewritten into its build repo-pat — its next release clones with the value that stands, which dies an hour after it was minted");

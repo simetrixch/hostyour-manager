@@ -252,7 +252,8 @@ export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<strin
     runId, stepName, db: db.db,
     creds: {
       open: async () => Buffer.from("ghp_owner"),
-      list: async () => [{ id: "cred_pat_x", kind: "pat", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" }],
+      // Filtered by kind like the store: asked for the App's row it finds none, so the unit's repository is the owner's PAT's.
+      list: async (filter?: { kind?: string }) => [{ id: "cred_pat_x", kind: "pat", subject: { kind: "owner", id: "x" }, purpose: "repository-pat" }].filter((r) => !filter?.kind || r.kind === filter.kind),
     } as unknown as CredentialStore,
     params: p,
     secrets: { get: () => undefined, wipe: () => undefined }, signal: new AbortController().signal, logger: {} as unknown as Logger,

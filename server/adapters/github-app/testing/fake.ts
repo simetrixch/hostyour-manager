@@ -2,7 +2,7 @@
 // owner are scripted, the repositories are a set keyed `org/name` so createRepository is
 // genuinely idempotent (a seeded or already created name answers {created:false}), and every create
 // that made a repository is recorded so a test can assert what a run created and where.
-import type { GitHubApp, CreateRepositoryInput } from "../port.ts";
+import type { GitHubApp, CreateRepositoryInput, ScopedInstallationTokenInput } from "../port.ts";
 
 export class FakeGitHubApp implements GitHubApp {
   /** What installationToken answers — the value a test expects to see handed on as a per-call PAT. */
@@ -23,6 +23,8 @@ export class FakeGitHubApp implements GitHubApp {
   readonly reachable = new Map<string, boolean>();
   /** Only the calls that actually created a repository — not the idempotent-skip calls. */
   readonly created: CreateRepositoryInput[] = [];
+  /** Every scoped mint asked for, in order: what a test asserts a token was limited to. */
+  readonly scopedMints: Pick<ScopedInstallationTokenInput, "repositories" | "permissions">[] = [];
 
   /** Pre-seed a standing repository so a test can drive the already-exists path. */
   seedRepository(org: string, name: string): void {
@@ -37,6 +39,14 @@ export class FakeGitHubApp implements GitHubApp {
   async installationToken(): Promise<string> {
     if (this.failWith) throw this.failWith;
     return this.token;
+  }
+
+  /** A token distinct from `token` and from every earlier scoped one, so a test sees which of them a
+   *  value written elsewhere came from. */
+  async scopedInstallationToken(input: ScopedInstallationTokenInput): Promise<string> {
+    if (this.failWith) throw this.failWith;
+    this.scopedMints.push({ repositories: input.repositories, permissions: input.permissions });
+    return `${this.token}_scoped_${this.scopedMints.length}`;
   }
 
   async installationOrg(): Promise<string> {

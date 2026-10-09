@@ -19,6 +19,7 @@ import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "#unit/server
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { consumerSecretEntry, listSecretWrites } from "../../db/secret-writes.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // Focused tests for the post-onboard `activate` step (impl: onboard-activate.ts). Kept apart from
 // onboard.run.test.ts so each file stays within the per-file line budget; the harness below is a
@@ -108,6 +109,7 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
     channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod" }),
     seeder: new FakeSeeder(),
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader({
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },

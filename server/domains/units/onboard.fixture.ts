@@ -12,6 +12,7 @@ import type { ExternalSecretRow } from "../../adapters/kube/port.ts";
 import { BUILD_TARGET_SECRETS } from "#unit/server/app-token-refresh.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { FakeGitHubConsumer } from "#unit/server/adapters/github-consumer/testing/fake.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import { FakeBuildPlane } from "../../adapters/build-plane/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import type { GateReport } from "../../../shared/gates.ts";
@@ -167,6 +168,7 @@ export function ports(over: Partial<OnboardPorts> & FakeKube = {}): OnboardPorts
     channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
     seeder: new FakeSeeder(),
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },

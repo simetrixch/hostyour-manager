@@ -4,7 +4,6 @@ import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { KV_MOUNT } from "../../adapters/vault/port.ts";
 import { MASTER_ARGO_NAMESPACE } from "../inventory/cluster-kube.ts";
 import { resolveMasterCluster } from "../inventory/read.ts";
-import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import { unitBuildNamespace } from "#unit/server/build-rbac.ts";
 import { removeConsumerWebhook } from "#unit/server/build-webhook.ts";
 import { parseGitHubOwnerRepo } from "#unit/server/github-repo-url.ts";
@@ -34,9 +33,7 @@ export const OffboardCiOnlyParams = z.object({
 });
 export type OffboardCiOnlyParams = z.infer<typeof OffboardCiOnlyParams>;
 
-export type OffboardCiOnlyPorts = Pick<BuildPorts, "registrations" | "seeder" | "github" | "buildArgo" | "argoWatchTimeoutMs" | "resolveBuildPlaneFqdn" | "webhookSubdomain"> & {
-  githubApp?: GitHubApp;
-};
+export type OffboardCiOnlyPorts = Pick<BuildPorts, "registrations" | "seeder" | "githubApp" | "github" | "buildArgo" | "argoWatchTimeoutMs" | "resolveBuildPlaneFqdn" | "webhookSubdomain">;
 
 /** The registration this run is about, or the reason it may not touch it. Asked at plan time and again
  *  as the first step, because the tree can change between the approve and the run. */

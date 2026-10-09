@@ -160,7 +160,7 @@ export class VaultSelfSeeder implements VaultSeeder {
       const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
         method: "POST",
         headers: { "x-vault-token": token, "content-type": "application/json" },
-        body: JSON.stringify({ data: { pat: input.pat, packages: input.packages }, ...(options ? { options } : {}) }),
+        body: JSON.stringify({ data: { pat: input.pat, packages: input.packages, ...(input.push !== undefined ? { push: input.push } : {}) }, ...(options ? { options } : {}) }),
       });
       if (res.ok) return { created: true };
       const detail = await res.text().catch(() => "");

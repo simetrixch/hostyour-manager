@@ -14,6 +14,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
 // head, and the facts the approval froze — builds, databases, services, secret specs,
@@ -70,6 +71,7 @@ function ports(over: Partial<OnboardPorts> = {}): OnboardPorts {
     registrations: new Registrations(platformRepo()),
     channelStages: async () => CHANNEL_STAGES,
     seeder: {} as unknown as VaultSeeder,
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({
       clusterReader: new FakeClusterReader(),
       argoReader: new FakeMasterArgoReader(),

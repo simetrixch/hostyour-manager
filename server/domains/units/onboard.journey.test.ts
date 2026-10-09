@@ -28,6 +28,7 @@ import type { GateReport, GateResult } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
@@ -89,6 +90,7 @@ function fakePorts(over: Partial<OnboardPorts> = {}): OnboardPorts {
     channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod" }),
     seeder: noSeeder,
+    githubApp: new FakeGitHubApp(),
     // The steps resolve their kube clients per target cluster; the master path resolves to
     // the master-local fakes + argoNamespace "argocd", behavior-identical to the pre-resolver wiring.
     resolver: new FakeClusterKubeResolver({

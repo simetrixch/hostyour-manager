@@ -28,6 +28,7 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, PostgresSecretDeleteInput } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
+import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // ABORT-WITH-CLEANUP on a consumer onboard, driven through the REAL executor (planStreamed -> approve
 // -> fail -> abort) — the consumer mirror of create-tenant-abort.run.test.ts. Four properties, each a
@@ -172,6 +173,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     channelStages: async () => CHANNEL_STAGES,
     resolveBuildPlaneFqdn: seedClusterMaps(platform, { "s1.example": "prod", "m1.example": "prod" }),
     seeder,
+    githubApp: new FakeGitHubApp(),
     resolver: new FakeClusterKubeResolver({ clusterReader: cluster, argoReader: argo, projectWriter: projects, argoNamespace: "argocd" }),
     tenantSubdomains: async () => [],
     declareListening: true,

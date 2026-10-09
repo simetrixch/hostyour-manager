@@ -38,7 +38,7 @@ export interface VaultSeedInput {
   data: Record<string, string>;
 }
 
-/** The BUILD-tier repo-PAT write (one PAT per unit): property `pat` at
+/** The BUILD-tier repo-PAT write: properties `pat`, `packages` and `push` at
  *  secret/build/<consumerName>/repo-pat — the entry the unit's consumer-build ExternalSecrets
  *  (build-git-https, build-npmrc, the bump credential) read. Stage-free by construction: a build is
  *  one image per release, never one per stage. The seed and the refresh take the same input. */
@@ -48,6 +48,10 @@ export interface BuildRepoPatSeedInput {
    *  installation token or the owner's repository PAT — property `pat`, what the clone and
    *  the bump read. */
   pat: string;
+  /** The token that WRITES the unit's own repository (the release's push to its delivery branch):
+   *  property `push`. Absent for a unit whose build never pushes (a CI-only unit), and then the
+   *  entry holds no `push` at all. */
+  push?: string;
   /** The owner's packages reader (opened the same way): property `packages`, what the
    *  build's `.npmrc` reads — an App token reads no private package (#220). */
   packages: string;

@@ -74,7 +74,7 @@ describe("consumer-restore: the unit's build parts", () => {
     const w = world();
     const logs: string[] = [];
     await runBuildSteps(w, logs);
-    expect(w.seeder.buildRepoPats).toEqual([{ consumerName: CONSUMER, pat: "ghp_owner", packages: "" }]);
+    expect(w.seeder.buildRepoPats).toEqual([{ consumerName: CONSUMER, pat: "ghp_owner", packages: "", push: "ghp_owner" }]);
     // The packages reader is decided by the .npmrc at the commit the default branch stands at.
     expect(w.repo.clones).toEqual(expect.arrayContaining([
       { repoURL: "https://github.com/x/acme.git", ref: "HEAD", credentialId: "cred_pat_x" },

@@ -16,6 +16,7 @@ import type { BuildPlane } from "#core/server/adapters/build-plane/port.ts";
 import type { MasterArgoReader, ClusterReader } from "#core/server/adapters/kube/port.ts";
 import type { RepoReader, RepoWriter } from "#core/server/adapters/git/port.ts";
 import type { VaultSeeder } from "./adapters/vault/seeder-port.ts";
+import type { GitHubApp } from "#core/server/adapters/github-app/port.ts";
 import type { BuildPlaneFqdnResolver } from "#core/server/domains/inventory/cluster-marking.ts";
 import type { ChannelStages } from "#core/server/domains/inventory/channel-stages.ts";
 import type { Registrations } from "./registrations.ts";
@@ -127,6 +128,9 @@ export interface BuildPorts {
   repo: RepoReader;
   registrations: Registrations;
   seeder: VaultSeeder;
+  /** The platform's GitHub App, which mints the `push` token of the unit's repo-pat entry limited to
+   *  the unit's own repository (seed-repo-pat.ts). */
+  githubApp: GitHubApp;
   argoWatchTimeoutMs: number;
   /** How long the release PipelineRun may take to APPEAR on the build plane after the deploy ref was
    *  pushed (a webhook delivery of seconds); the build itself is followed without a clock. */
