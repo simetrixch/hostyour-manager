@@ -125,9 +125,9 @@ describe("the Deploy dialog's Hauptseite unter /", () => {
     await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenLastCalledWith("tnt_1", expect.objectContaining({ main: true })));
   });
 
-  it("says the website answers at / once ticked, names the website that loses the mark, and says nothing of it unticked", () => {
+  it("says the website becomes the main website once ticked, names the website that loses the mark, and says nothing of it unticked", () => {
     const text = textOf(dialog({ firstWebsite: true, mainWebsite: "old-site" }));
-    expect(text).toContain("answers at / of the tenant's domain and is the tenant's main website");
+    expect(text).toContain("it becomes the tenant's main website");
     expect(text).toContain("old-site is the main website now and loses it");
     expect(textOf(dialog({ firstWebsite: true, mainWebsite: null }))).not.toContain("loses it");
     hooks.states = [];

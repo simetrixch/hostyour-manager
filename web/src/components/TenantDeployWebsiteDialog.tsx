@@ -38,7 +38,7 @@ export function TenantDeployWebsiteDialog(props: {
       </label>
       <p>
         The site {site} is served at {typed || "<domain>"}, and www.{typed || "<domain>"} redirects there. The website is named {name}.
-        {main && ` With the mark, it answers at / of the tenant's domain and is the tenant's main website.${mainWebsite !== null ? ` ${mainWebsite} is the main website now and loses it.` : ""}`}
+        {main && ` With the mark, it becomes the tenant's main website.${mainWebsite !== null ? ` ${mainWebsite} is the main website now and loses it.` : ""}`}
       </p>
     </ConfirmDialog>
   );

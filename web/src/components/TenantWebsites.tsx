@@ -166,7 +166,7 @@ export function TenantWebsites(props: {
             <span className="field__label">Hauptseite unter /</span>
           </label>
           <p>
-            {resiting.main ? "This is the main website; mark another website to move it." : "With the mark and no site typed, the website answers at / of the tenant's domain and is the tenant's main website; the website that holds it now loses it."}
+            {resiting.main ? "This is the main website; mark another website to move it." : "With the mark and no site typed, the website becomes the tenant's main website, and the website that holds it now loses it."}
           </p>
           {siteConfirm.why !== null && <p>{siteConfirm.why}</p>}
           <p>
