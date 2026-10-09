@@ -26,6 +26,7 @@ function render(removed: ReturnType<typeof removedSite>[]): string {
 }
 const rowOf = (html: string, name: string): string => html.split("<li>").find((li) => li.includes(`<span class="row__title">${name}</span>`)) ?? "";
 const purges = (html: string): number => html.split(">Purge</button>").length - 1;
+const deploys = (html: string): number => html.split(">Deploy</button>").length - 1;
 
 describe("the Websites section on a tenant with a loaded catalog", () => {
   it("offers Purge on a removed website that was offboarded, and on no other row", () => {
@@ -45,5 +46,16 @@ describe("the Websites section on a tenant with a loaded catalog", () => {
     const html = render([removedSite("simetrix-ch", "offboarded"), removedSite("digitaplatform-com", "purged")]);
     expect(rowOf(html, "simetrix-ch")).toContain(">Purge</button>");
     expect(rowOf(html, "digitaplatform-com")).not.toContain("Purge");
+  });
+});
+
+describe("the Websites section offers Deploy on a site of the bundle that is not deployed", () => {
+  it("lists the site as an in-the-bundle row with Deploy, and no Deploy on the live website or a removed one", () => {
+    const html = render([removedSite("digitaplatform-com", "offboarded")]);
+    expect(rowOf(html, "simetrix-ch")).toContain("in the bundle");
+    expect(rowOf(html, "simetrix-ch")).toContain(">Deploy</button>");
+    expect(rowOf(html, "simplidigita-ai")).not.toContain("Deploy");
+    expect(rowOf(html, "digitaplatform-com")).not.toContain("Deploy");
+    expect(deploys(html)).toBe(1);
   });
 });

@@ -122,8 +122,8 @@ export interface TenantAppCatalogView {
    *  websites included. A new website is named clear of these and of the catalog's apps. */
   members?: string[];
   /** Present where the template's `.npmrc` routes scopes to GitHub Packages: the owner whose reader
-   *  the bundle's build installs them with, and whether one is recorded. The add-app form asks for
-   *  the token while `recorded` is null — the FIRST tenant onboarding asks, none after (#233). */
+   *  the bundle's build installs them with, and whether one is recorded. The tenant page asks for
+   *  the token, and holds every Deploy, while `recorded` is null — the FIRST tenant onboarding asks, none after. */
   packagesReader?: PackagesReaderView;
   reason?: string;
   error?: string;

@@ -10,7 +10,7 @@ type Which = "packages-reader" | "repository-pat";
  * THE INSTALLATION'S SETTINGS: what was answered once and is shown here, replaceable, never entered
  * ahead of time. Every tenant belongs to the one owner the platform's GitHub App is installed with;
  * a consumer is an owner of its own. Each owner's credentials were asked for in the onboarding that
- * needed them (the tenant's Add app form, the consumer wizard — #233, #237, #238) and stand here
+ * needed them (the tenant page's Deploy buttons, the consumer wizard) and stand here
  * afterwards: the PACKAGES READER (a token that reads the owner's private npm packages — GitHub
  * grants the App no access to a private package whatever its permissions say) and the REPOSITORY
  * PAT (the repository identity only where the App does not reach the owner's repositories). A

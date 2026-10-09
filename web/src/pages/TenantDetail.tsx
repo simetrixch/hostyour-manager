@@ -3,14 +3,13 @@ import { Link, useNavigate, useParams } from "react-router";
 import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
-  getTenant, setTenantFollowReleases, getTenantAppCatalog, addTenantApp, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
+  getTenant, setTenantFollowReleases, getTenantAppCatalog, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
   setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants, planRun,
   type TenantDetailView, type TenantView,
 } from "../api.ts";
 import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
 import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { listedWebsites, removedWebsites } from "../tenantAppRows.ts";
-import { TenantAddAppForm, type TenantAddAppChoice } from "../components/TenantAddAppForm.tsx";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
@@ -32,8 +31,8 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 /** Per-tenant detail. Renders the apps the deploy repository's template offers (read by
  *  GET /api/tenants/:id/app-catalog) folded with the inventory's per-app rows, each marked deployed
- *  or not (tenantAppRows.ts); the add-app control (TenantAddAppForm) offers the undeployed ones with
- *  their selections and fans ONE into the live tenant; and the tenant-wide lifecycle actions
+ *  or not (tenantAppRows.ts); a row of the bundle that is not deployed offers Deploy (TenantAppList),
+ *  with the selections of its entry, and fans ONE into the live tenant; and the tenant-wide lifecycle actions
  *  (suspend / resume / offboard). Every action plans a Run and hands off to the generic Run screen —
  *  add-app streams the T1..T4 subset validation; remove-app and the lifecycle triggers plan
  *  synchronously. Offboard is guarded by a typed-guid confirm: it prunes the whole fan-out, so the
@@ -120,12 +119,8 @@ export function TenantDetail() {
     }
   }
 
-  const addApp = (choice: TenantAddAppChoice): void => {
-    const { name, ...selections } = choice;
-    void act(() => addTenantApp(tenantId, name, selections));
-  };
-  // The packages reader the first tenant onboarding asks for (#233): recorded as the owner's, then
-  // the catalog is read again so the form stops asking.
+  // The packages reader the first tenant onboarding asks for: recorded as the owner's, then
+  // the catalog is read again so the Deploy buttons stop waiting.
   const recordPackagesReader = async (owner: string, token: string): Promise<void> => {
     await recordOwnerCredential(owner, "packages-reader", token);
     setCatalog(await getTenantAppCatalog(tenantId));
@@ -232,9 +227,7 @@ export function TenantDetail() {
       </div>
 
       <div>{!unfinished && !settled && <TenantStageActions tenant={t} />}<h3 className="steps-panel__title">Apps</h3></div>
-      <TenantAppList tenant={t} catalog={catalog} editable={!settled && !unfinished} busy={busy} onRemove={setRemoveApp} onPurge={setPurgeApp} />
-
-      {!settled && !unfinished && <TenantAddAppForm catalog={catalog} busy={busy} onAdd={addApp} onRecordPackagesReader={recordPackagesReader} />}
+      <TenantAppList tenant={t} catalog={catalog} editable={!settled && !unfinished} busy={busy} act={act} onRemove={setRemoveApp} onPurge={setPurgeApp} onRecordPackagesReader={recordPackagesReader} />
 
       {!settled && !unfinished && <TenantWebsites tenantId={tenantId} catalog={catalog} websites={listedWebsites(catalog, t.apps)} removed={removedWebsites(t.apps)} busy={busy} act={act} onRemove={setRemoveApp} onPurge={setPurgeApp} onRecordPackagesReader={recordPackagesReader} />}
 

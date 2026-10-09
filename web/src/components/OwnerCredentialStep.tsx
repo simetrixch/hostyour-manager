@@ -12,8 +12,8 @@ interface Props {
   subject: string;
 }
 
-/** THE ONE STEP THAT ASKS FOR AN OWNER'S CREDENTIAL — in the tenant's Add app form (#233) and in the
- *  consumer wizard (#237, #238) alike: shown only while the measurement demands it (a scope routed to
+/** THE ONE STEP THAT ASKS FOR AN OWNER'S CREDENTIAL — beside the tenant page's Deploy buttons and in the
+ *  consumer wizard alike: shown only while the measurement demands it (a scope routed to
  *  GitHub Packages with no reader recorded; a repository the App does not reach with no PAT
  *  recorded); asked once per owner, shown and replaced under Settings afterwards. The token goes to
  *  the record call and nowhere else.
