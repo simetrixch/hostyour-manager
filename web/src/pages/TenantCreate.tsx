@@ -47,7 +47,7 @@ export function TenantCreate() {
     setError(null);
     try {
       const { runId } = await createTenant({
-        clusterId: form.clusterId,
+        clusterId: choices[0]!.clusterId,
         stage: selectedStages[0]!,
         stages: choices.map(({ stage, clusterId }) => ({ stage, clusterId })),
         subdomain: form.subdomain.trim(),
@@ -128,7 +128,7 @@ export function TenantCreate() {
           </label>
           <label className="field">
             <span className="field__label">Default machine</span>
-            <select value={form.clusterId} onChange={chooseCluster} required>
+            <select value={form.clusterId} onChange={chooseCluster}>
               <option value="" disabled>
                 {targets === null ? "Loading…" : "Choose a cluster"}
               </option>
@@ -138,7 +138,7 @@ export function TenantCreate() {
                 </option>
               ))}
             </select>
-            <span className="field__hint">Any active cluster; the domain is taken from it.</span>
+            <span className="field__hint">Any active cluster, for each stage that has no machine of its own; TEST and PROD each choose theirs.</span>
           </label>
           <fieldset className="field">
             <legend className="field__label">Stages</legend>
@@ -229,7 +229,7 @@ export function TenantCreate() {
         </div>
 
         <div className="form-foot">
-          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || !form.clusterId || choices.some((c) => !c.clusterId) || !form.owner || !form.size}>
+          <button type="submit" className="btn btn--primary" disabled={busy || noTargets || !form.subdomain || selectedStages.length === 0 || choices.some((c) => !c.clusterId) || !form.owner || !form.size}>
             {busy ? "Validating…" : "Validate & plan"}
           </button>
         </div>

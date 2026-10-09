@@ -22,8 +22,8 @@ const { TenantCreate } = await import("./TenantCreate.tsx");
 
 const machines = ["apps1", "apps2", "apps3"].map((name, i) => ({ id: `cls_${i + 1}`, domain: `${name}.example`, stage: "prod", status: i === 2 ? "removed" : "active" }));
 const form = { subdomain: "acme", displayName: "", owner: "team-acme", clusterId: "cls_1", adminEmail: "", size: "small" };
-const seed = (selected: Stage[], chosen: Partial<Record<Stage, string>> = {}): void => {
-  hooks.states = [form, selected, chosen, false, machines, false, null]; hooks.cursor = 0;
+const seed = (selected: Stage[], chosen: Partial<Record<Stage, string>> = {}, defaultMachine = form.clusterId): void => {
+  hooks.states = [{ ...form, clusterId: defaultMachine }, selected, chosen, false, machines, false, null]; hooks.cursor = 0;
 };
 const render = (): string => { hooks.cursor = 0; return renderToStaticMarkup(createElement(TenantCreate)); };
 /** What one stage's machine select shows: the machines it offers and the one it stands on, if any. */
@@ -85,6 +85,19 @@ describe("the create wizard keeps TEST off the machine of PROD", () => {
     seed(["dev", "prod"]);
     await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
     expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ stages: [{ stage: "dev", clusterId: "cls_1" }, { stage: "prod", clusterId: "cls_1" }] }));
+  });
+
+  it("PLANTED DEFECT: TEST and PROD with their own machines need no default machine", async () => {
+    seed(["test", "prod"], { test: "cls_2", prod: "cls_1" }, "");
+    expect(submitDisabled(render())).toBe(false);
+    hooks.cursor = 0;
+    await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
+    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ clusterId: "cls_2", stages: [{ stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }));
+  });
+
+  it("PLANTED INNOCENT: DEV without a machine of its own still waits for the default machine", () => {
+    seed(["dev"], {}, "");
+    expect(submitDisabled(render())).toBe(true);
   });
 
   it("forgets the machine of a stage that is unselected, so selecting it again cannot bring back a conflicting choice", () => {
