@@ -209,6 +209,15 @@ describe("tenant-set-website-main", () => {
     expect(await holders(prt.registrations)).toEqual(["blog-site"]);
   });
 
+  it("writes the mark when another run changed the tenant but not its main website", async () => {
+    seedClusters();
+    const prt = ports({ registrations: tenantWith([SHOP, BLOG]) });
+    const { def, p } = await planned(prt);
+    db.db.update(tenants).set({ lastRunId: "run_versions" }).where(eq(tenants.id, "tnt_1")).run();
+    await step(def, p, "write-main-website").run(ctx(params(), "write-main-website", []));
+    expect(await holders(prt.registrations)).toEqual(["blog-site"]);
+  });
+
   it("refuses a queued plan after another run moved the mark, but retries its own write", async () => {
     seedClusters();
     const prt = ports({ registrations: tenantWith([SHOP, BLOG]) });

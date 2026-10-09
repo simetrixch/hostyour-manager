@@ -14,7 +14,6 @@ import { readStandingTenant } from "./tenant-standing.ts";
 export const TenantSetDemoRequest = z.object({ tenantId: z.string().startsWith("tnt_"), demo: z.boolean() });
 export const TenantSetDemoParams = TenantSetDemoRequest.extend({
   previous: z.boolean(), guid, clusterId: z.string().startsWith("cls_"), members: z.array(memberName).min(1),
-  previousRunId: z.string().nullable(),
 });
 export type TenantSetDemoParams = z.infer<typeof TenantSetDemoParams>;
 
@@ -45,7 +44,8 @@ function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
       run: async (ctx) => {
         const { tc, entry } = await currentDemo(ports, p, ctx);
         const owner = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, p.tenantId)).get();
-        if (owner?.lastRunId !== ctx.runId && (owner?.lastRunId !== p.previousRunId || (entry.demo ?? false) !== p.previous)) {
+        // Only the demo flag decides: every run on the tenant, a Versions run among them, moves lastRunId.
+        if (owner?.lastRunId !== ctx.runId && (entry.demo ?? false) !== p.previous) {
           throw errValidation("demo mode changed since this switch was planned — plan it again");
         }
         ctx.registerCleanup(restoreDemo(ports, p));
@@ -90,8 +90,7 @@ export function makeTenantSetDemoDef(ports: TenantOnboardPorts): RunDefinition<T
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-      const owner = ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, request.tenantId)).get();
-      const params = { ...request, previous: current.entry.demo ?? false, previousRunId: owner?.lastRunId ?? null, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
+      const params = { ...request, previous: current.entry.demo ?? false, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentDemo(ports, params, ctx);
       const steps = demoSteps(ports, params);
       return { outcome: "planned", params, plan: {

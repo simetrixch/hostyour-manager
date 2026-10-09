@@ -91,15 +91,24 @@ describe("standing tenant demo switch", () => {
     expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
   });
 
-  it("refuses a queued plan after another run changes demo on and back off", async () => {
+  it("switches demo when another run changed the tenant but not its demo mode", async () => {
+    seedClusters();
+    const prt = ports();
+    const { def, p } = await planned(prt, true);
+    db.db.update(tenants).set({ lastRunId: "run_versions" }).where(eq(tenants.id, "tnt_1")).run();
+    await def.steps(p).find((s) => s.name === "write-demo")!.run(ctx(params(), "write-demo", []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
+  });
+
+  it("switches demo after another run turned it on and back off, since the flag is as planned", async () => {
     seedClusters();
     const prt = ports();
     const { def, p } = await planned(prt, true);
     await prt.registrations.setDemo("prod", GUID, true, "run_on");
     await prt.registrations.setDemo("prod", GUID, false, "run_off");
     db.db.update(tenants).set({ lastRunId: "run_off" }).where(eq(tenants.id, "tnt_1")).run();
-    await expect(def.steps(p).find((s) => s.name === "write-demo")!.run(ctx(params(), "write-demo", []))).rejects.toThrow(/demo mode changed/);
-    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBeUndefined();
+    await def.steps(p).find((s) => s.name === "write-demo")!.run(ctx(params(), "write-demo", []));
+    expect((await prt.registrations.readTenant("prod", GUID))?.entry.demo).toBe(true);
   });
 
   it("retries and undoes a switch after the git commit succeeds but its caller fails", async () => {
