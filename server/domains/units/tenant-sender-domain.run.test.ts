@@ -90,6 +90,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
       expect(getRun(h.db.db, runId)?.steps.map((st) => st.name)).toEqual([
         "attest-target",
         "publish-dkim-record",
+        "publish-dmarc-record",
         "await-dkim-signing",
         "bind-issuer",
         "write-sender-domain",
