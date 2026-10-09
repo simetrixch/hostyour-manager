@@ -11,14 +11,14 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { readStandingTenant } from "./tenant-standing.ts";
 
-// `tenant-set-main-website` — make one deployed website the tenant's main website: the one served at `/`
+// `tenant-set-website-main` — make one deployed website the tenant's main website: the one served at `/`
 // of the tenant's domain. The mark is `main` on the website's apps[] entry, which every member chart reads
 // off `tenant.apps`, so the run writes it (and clears it on the website that held it) in one commit and
 // waits until every member's Application renders it. Ownership of the write follows tenant-set-demo:
 // the tenant row's lastRunId, so a cleanup gives the mark back only while this run's write still stands.
 
-export const TenantSetMainWebsiteRequest = z.object({ tenantId: z.string().startsWith("tnt_"), app: appName });
-export const TenantSetMainWebsiteParams = TenantSetMainWebsiteRequest.extend({
+export const TenantSetWebsiteMainRequest = z.object({ tenantId: z.string().startsWith("tnt_"), app: appName });
+export const TenantSetWebsiteMainParams = TenantSetWebsiteMainRequest.extend({
   /** The website that held the mark when the run was planned, or null where none did. */
   previous: appName.nullable(),
   guid,
@@ -26,13 +26,13 @@ export const TenantSetMainWebsiteParams = TenantSetMainWebsiteRequest.extend({
   members: z.array(memberName).min(1),
   previousRunId: z.string().nullable(),
 });
-export type TenantSetMainWebsiteParams = z.infer<typeof TenantSetMainWebsiteParams>;
+export type TenantSetWebsiteMainParams = z.infer<typeof TenantSetWebsiteMainParams>;
 
 const mainOf = (entry: TenantRegistration): string | null => entry.apps.find((a) => a.main)?.name ?? null;
-const currentTenant = (ports: TenantOnboardPorts, p: TenantSetMainWebsiteParams, ctx: Pick<StepCtx, "db">) => readStandingTenant(ports, p, ctx, "the main website");
+const currentTenant = (ports: TenantOnboardPorts, p: TenantSetWebsiteMainParams, ctx: Pick<StepCtx, "db">) => readStandingTenant(ports, p, ctx, "the main website");
 const ownerRun = (ctx: Pick<StepCtx, "db">, tenantId: string): string | null | undefined => ctx.db.select({ lastRunId: tenants.lastRunId }).from(tenants).where(eq(tenants.id, tenantId)).get()?.lastRunId;
 
-function restoreMainWebsite(ports: TenantOnboardPorts, p: TenantSetMainWebsiteParams): Cleanup {
+function restoreMainWebsite(ports: TenantOnboardPorts, p: TenantSetWebsiteMainParams): Cleanup {
   return {
     name: "restore-main-website", title: p.previous ? `Give the main website back to ${p.previous}` : "Leave the tenant without a main website",
     run: async (ctx) => {
@@ -41,14 +41,14 @@ function restoreMainWebsite(ports: TenantOnboardPorts, p: TenantSetMainWebsitePa
         ctx.log("meta", `tenant ${tc.guid} no longer carries this run's main website — left as it is`);
         return;
       }
-      const { commit } = await ports.registrations.setMainWebsite(tc.stage, tc.guid, p.previous, ctx.runId);
+      const { commit } = await ports.registrations.setWebsiteMain(tc.stage, tc.guid, p.previous, ctx.runId);
       await refreshTenantApplications(ports.resolver, tc.clusterId, p.members.map((m) => memberApplication(tc.guid, m, tc.stage)), ctx);
       ctx.log("meta", `tenant ${tc.guid}: main website restored to ${p.previous ?? "none"} (${commit})`);
     },
   };
 }
 
-function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetMainWebsiteParams): Step[] {
+function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetWebsiteMainParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
     {
@@ -62,7 +62,7 @@ function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetMainWebsitePara
         ctx.registerCleanup(restoreMainWebsite(ports, p));
         // Persist ownership before git commits, so a crash after that commit can retry or undo it.
         ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
-        const { commit } = await ports.registrations.setMainWebsite(tc.stage, tc.guid, p.app, ctx.runId);
+        const { commit } = await ports.registrations.setWebsiteMain(tc.stage, tc.guid, p.app, ctx.runId);
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${tc.guid}: main website ${p.previous ?? "none"} → ${p.app}; members ${p.members.join(", ")} (${commit})`);
         await refreshTenantApplications(ports.resolver, tc.clusterId, p.members.map((m) => memberApplication(tc.guid, m, tc.stage)), ctx);
@@ -92,12 +92,12 @@ function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetMainWebsitePara
   ];
 }
 
-export function makeTenantSetMainWebsiteDef(ports: TenantOnboardPorts): RunDefinition<TenantSetMainWebsiteParams> {
+export function makeTenantSetWebsiteMainDef(ports: TenantOnboardPorts): RunDefinition<TenantSetWebsiteMainParams> {
   return {
-    kind: "tenant-set-main-website", paramsSchema: TenantSetMainWebsiteParams, mutating: true,
-    plan: () => { throw errInternal("tenant-set-main-website is planned via planStream"); },
+    kind: "tenant-set-website-main", paramsSchema: TenantSetWebsiteMainParams, mutating: true,
+    plan: () => { throw errInternal("tenant-set-website-main is planned via planStream"); },
     planStream: async (raw, ctx) => {
-      const request = TenantSetMainWebsiteRequest.parse(raw);
+      const request = TenantSetWebsiteMainRequest.parse(raw);
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
@@ -108,7 +108,7 @@ export function makeTenantSetMainWebsiteDef(ports: TenantOnboardPorts): RunDefin
       if (params.previous === request.app) throw errValidation(`website "${request.app}" is already the main website of tenant ${tc.subdomain}`);
       const steps = mainWebsiteSteps(ports, params);
       return { outcome: "planned", params, plan: {
-        kind: "tenant-set-main-website", targetKind: "tenant", targetId: request.tenantId,
+        kind: "tenant-set-website-main", targetKind: "tenant", targetId: request.tenantId,
         summary: `Make website "${request.app}" the main website of tenant ${tc.subdomain}, served at / of the tenant's domain. ${params.previous ? `Website "${params.previous}" stops being it` : "No website is the main website today"}; the registration is written in one commit, and the run waits until every member of the tenant renders it. An abort gives the mark back.`,
         steps: steps.map((s) => ({ name: s.name, title: s.title })), targets: [], locks: tenantLocks(ports.registrations), warnings: [], requiredSecrets: [],
       } };

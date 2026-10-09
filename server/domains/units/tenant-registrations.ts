@@ -334,8 +334,8 @@ export class TenantRegistrations {
 
   /** Mark one website as the tenant's main website and clear the mark everywhere else (null clears it
    *  everywhere), in one commit. Writing the marks that stand writes the same bytes, which the books
-   *  branch takes as no commit. tenant-set-main-website. */
-  async setMainWebsite(stage: Stage, guid: string, app: string | null, runId: string): Promise<{ commit: string }> {
+   *  branch takes as no commit. tenant-set-website-main. */
+  async setWebsiteMain(stage: Stage, guid: string, app: string | null, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     if (app !== null && !current.entry.apps.some((a) => a.name === app && isWebsite(a))) throw errValidation(`app "${app}" of tenant "${guid}" is no website`);

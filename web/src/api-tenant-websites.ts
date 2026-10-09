@@ -9,5 +9,5 @@ export const addTenantWebsite = (tenantId: string, website: { app: string; domai
 export const setTenantWebsiteSite = (tenantId: string, app: string, site: string, appsImageTag: string): Promise<{ runId: string }> => post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/site`, { site, appsImageTag });
 /** Plan tenant-set-website-domain: the website moves to another domain, or gets other alias domains. */
 export const setTenantWebsiteDomain = (tenantId: string, app: string, domain: string, aliases: readonly string[]): Promise<{ runId: string }> => post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/domain`, { domain, aliases });
-/** Plan tenant-set-main-website: the deployed website becomes the tenant's main website, served at `/` of its domain. */
+/** Plan tenant-set-website-main: the deployed website becomes the tenant's main website, served at `/` of its domain. */
 export const setTenantMainWebsite = (tenantId: string, app: string): Promise<{ runId: string }> => post<{ runId: string }>(`/api/tenants/${tenantId}/websites/${encodeURIComponent(app)}/main`, {});

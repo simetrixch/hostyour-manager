@@ -132,7 +132,7 @@ describe("buildUnits enable gates (wire-units.ts)", () => {
     const wiring = buildUnits(...setup({ KUBECONFIG_PATH: file }));
     expect(wiring.enabled).toBe(true);
     expect(wiring.tenantEnabled).toBe(true);
-    expect(wiring.defs).toHaveLength(43); // 16 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, set-domain, set-secrets, set-release, backup/restore/migrate, the nightly backup, the CI-only offboard) + 27 tenant (those 13, plus check-tenants, tenant-apps-repo, tenant-set-routing, tenant-set-own-domain, tenant-set-website-domain, tenant-set-website-site, tenant-refresh-members, tenant-line-move, tenant-set-sender-domain, tenant-set-display-name, tenant-set-demo, tenant-purge-app, tenant-set-google-translation and tenant-set-main-website)
+    expect(wiring.defs).toHaveLength(43); // 16 consumer (incl. purge, adopt-consumer, restart-workloads, set-size, set-domain, set-secrets, set-release, backup/restore/migrate, the nightly backup, the CI-only offboard) + 27 tenant (those 13, plus check-tenants, tenant-apps-repo, tenant-set-routing, tenant-set-own-domain, tenant-set-website-domain, tenant-set-website-site, tenant-refresh-members, tenant-line-move, tenant-set-sender-domain, tenant-set-display-name, tenant-set-demo, tenant-purge-app, tenant-set-google-translation and tenant-set-website-main)
   });
 
   it("registers the CI-only offboard as a consumer run kind, since neither the row-driven nor the stage-driven removal can name that unit", () => {

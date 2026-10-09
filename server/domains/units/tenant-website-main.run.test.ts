@@ -8,7 +8,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { makeAddAppDef } from "./add-app.run.ts";
 import { revertAppendCleanup } from "./add-app-abort.ts";
-import { makeTenantSetMainWebsiteDef } from "./tenant-website-main.run.ts";
+import { makeTenantSetWebsiteMainDef } from "./tenant-website-main.run.ts";
 import { ctx, db, GUID, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
 import { WEBSITE_APPS, seedWebsiteTenant, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
 
@@ -59,17 +59,17 @@ describe("the main website in the registration", () => {
     expect(await holders(registrations)).toEqual(["shop-site"]);
   });
 
-  it("setMainWebsite moves the mark in one commit, writes the same entry for the mark that stands, and refuses an app that is no website", async () => {
+  it("setWebsiteMain moves the mark in one commit, writes the same entry for the mark that stands, and refuses an app that is no website", async () => {
     const repo = new FakePlatformRepo();
     const registrations = tenantWith([SHOP, BLOG], undefined, repo);
-    await registrations.setMainWebsite("prod", GUID, "blog-site", "run_set");
+    await registrations.setWebsiteMain("prod", GUID, "blog-site", "run_set");
     expect(await holders(registrations)).toEqual(["blog-site"]);
     expect(repo.commits).toHaveLength(1);
     const standing = (await registrations.readTenant("prod", GUID))!.entry;
-    await registrations.setMainWebsite("prod", GUID, "blog-site", "run_set");
+    await registrations.setWebsiteMain("prod", GUID, "blog-site", "run_set");
     expect((await registrations.readTenant("prod", GUID))!.entry).toEqual(standing);
-    await expect(registrations.setMainWebsite("prod", GUID, "erp", "run_set")).rejects.toThrow(/is no website/);
-    await registrations.setMainWebsite("prod", GUID, null, "run_set");
+    await expect(registrations.setWebsiteMain("prod", GUID, "erp", "run_set")).rejects.toThrow(/is no website/);
+    await registrations.setWebsiteMain("prod", GUID, null, "run_set");
     expect(await holders(registrations)).toEqual([]);
   });
 });
@@ -122,7 +122,7 @@ describe("add-app for a website marked main", () => {
   });
 });
 
-describe("tenant-set-main-website", () => {
+describe("tenant-set-website-main", () => {
   const MARK = { tenantId: "tnt_1", app: "blog-site" };
   /** Every member renders the apps as the registration carries them, the way the member charts read `tenant.apps`. */
   const rendering = (marked: string | null, members = ["auth", "jobs", "report", "erp", "shop-site", "blog-site"]): Map<string, ArgoAppStatus> =>
@@ -131,17 +131,17 @@ describe("tenant-set-main-website", () => {
       syncSources: [{ repoURL: "https://github.com/acme/acme-deploy.git", revision: "abc", path: `charts/example-${m}`, valuesObject: { tenant: { apps: ["shop-site", "blog-site"].map((name) => ({ name, ...(name === marked ? { main: true } : {}) })) } } }],
     } as ArgoAppStatus]));
   async function planned(prt: ReturnType<typeof ports>, request: Record<string, unknown> = MARK) {
-    const def = makeTenantSetMainWebsiteDef(prt);
+    const def = makeTenantSetWebsiteMainDef(prt);
     const result = await def.planStream!(request, planCtx());
     if (result.outcome !== "planned") throw new Error("expected a main website plan");
     return { def, p: result.params };
   }
-  const step = (def: ReturnType<typeof makeTenantSetMainWebsiteDef>, p: Parameters<typeof def.steps>[0], name: string) => def.steps(p).find((s) => s.name === name)!;
+  const step = (def: ReturnType<typeof makeTenantSetWebsiteMainDef>, p: Parameters<typeof def.steps>[0], name: string) => def.steps(p).find((s) => s.name === name)!;
 
   it("plans the website that holds the mark today and names it in the summary", async () => {
     seedClusters();
     const prt = ports({ registrations: tenantWith([SHOP, BLOG]) });
-    const result = await makeTenantSetMainWebsiteDef(prt).planStream!(MARK, planCtx());
+    const result = await makeTenantSetWebsiteMainDef(prt).planStream!(MARK, planCtx());
     expect(result.outcome === "planned" && result.params).toMatchObject({ app: "blog-site", previous: "shop-site", members: ["auth", "jobs", "report", "erp", "shop-site", "blog-site"] });
     expect(result.outcome === "planned" && result.plan.summary).toContain('Website "shop-site" stops being it');
     expect(result.outcome === "planned" && result.plan.steps.map((s) => s.name)).toEqual(["attest-target", "write-main-website", "watch-members"]);

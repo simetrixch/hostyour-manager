@@ -18,12 +18,12 @@ describe("POST /api/tenants/:id/websites/:app/main", () => {
     return { post: async (path) => app.request(path, { method: "POST" }), planned };
   }
 
-  it("plans tenant-set-main-website for the website the path names", async () => {
+  it("plans tenant-set-website-main for the website the path names", async () => {
     const r = route();
     const response = await r.post("/api/tenants/tnt_1/websites/example-ch/main");
     expect(response.status).toBe(201);
     expect(await response.json()).toEqual({ runId: "run_1" });
-    expect(r.planned).toEqual([{ kind: "tenant-set-main-website", params: { tenantId: "tnt_1", app: "example-ch" } }]);
+    expect(r.planned).toEqual([{ kind: "tenant-set-website-main", params: { tenantId: "tnt_1", app: "example-ch" } }]);
   });
 
   it("refuses a tenant id and a website name the run cannot hold, and a manager without tenant onboarding", async () => {

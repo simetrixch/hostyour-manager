@@ -51,7 +51,7 @@ import { ensureTenantAppDatabases, type TenantManifestReader } from "../domains/
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantSetWebsiteSiteDef } from "../domains/units/tenant-website-site.run.ts";
-import { makeTenantSetMainWebsiteDef } from "../domains/units/tenant-website-main.run.ts";
+import { makeTenantSetWebsiteMainDef } from "../domains/units/tenant-website-main.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
 import { makeTenantLineMoveDef } from "../domains/units/tenant-line-move.run.ts";
 import { readTenantLineMoves } from "../domains/units/tenant-line-move.ts";
@@ -380,7 +380,7 @@ export function buildTenantOnboarding(
     makeTenantSetDisplayNameDef(onboardPorts),
     makeTenantSetDemoDef(onboardPorts),
     // Which deployed website is the tenant's main one: a registration mark every member renders.
-    makeTenantSetMainWebsiteDef(onboardPorts),
+    makeTenantSetWebsiteMainDef(onboardPorts),
     // The tenant's own apps repository, created from the deploy repository's apps bundle through the GitHub App
     // and onboarded build-only through the consumer family's chain (the same late-handed ports the
     // build units ride) — the SAME port set, because it reads the deploy repository and the template the way
