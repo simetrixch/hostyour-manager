@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
-import { customerHostProblem, recordsToReplace, replacementSentence, restoreReplacedRecords, ReplacedRecord, mailRecordHashes } from "./own-domain-records.ts";
+import { customerHostProblem, provisionOwnDomainRecord, recordsToReplace, replacementSentence, restoreReplacedRecords, ReplacedRecord, mailRecordHashes } from "./own-domain-records.ts";
+import type { TenantCluster } from "./lifecycle.ts";
+import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
+import { removeBookedRecords } from "#unit/server/unit-dns.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
@@ -201,6 +204,43 @@ describe("a replaced record is written back as it stood", () => {
     await dns.upsertRecord({ name: "www.shop.example", type: "CNAME", content: ZONE });
     await dns.createRecord({ name: "api.shop.example", type: "CNAME", content: ZONE });
     expect(await dns.listStandingRecords({ name: "api.shop.example", type: "CNAME" })).toEqual([{ content: ZONE, proxied: false, ttl: 1 }]);
+  });
+});
+
+describe("an own host already pointing at the tenant's zone", () => {
+  // A tenant replaced on the same subdomain had the same zone, so its own host's record already points
+  // where the new tenant's would.
+  const REPLACED = "a1a1a1a1a1a1";
+  const GUID = "b2b2b2b2b2b2";
+  const ZONE = "shop.test.digitacloud.app";
+  const HOST = "test.shop.example";
+  let db: DbHandle;
+  let dns: FakeDnsProvider;
+  const logs: string[] = [];
+  const ctx = () => ({ db: db.db, runId: "run_own", signal: new AbortController().signal, log: (_s: string, line: string) => logs.push(line) }) as unknown as StepCtx;
+  const tc = { guid: GUID, subdomain: "shop", stage: "test" } as TenantCluster;
+
+  beforeEach(() => {
+    db = openDb(":memory:");
+    dns = new FakeDnsProvider();
+    logs.length = 0;
+    dns.seed(HOST, "CNAME", ZONE);
+  });
+
+  it("PLANTED DEFECT: takes over a record booked for the replaced tenant, so that tenant's purge leaves it standing", async () => {
+    recordDnsWrite(db.db, { name: HOST, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: REPLACED, stage: "test" }, runId: "run_old" });
+    await provisionOwnDomainRecord(ctx(), { dns }, tc, "digitacloud.app", HOST, []);
+    expect(findDnsWrite(db.db, { name: HOST, type: "CNAME" })).toMatchObject({ act: "adopted", owner: { kind: "tenant", name: GUID, stage: "test" }, runId: "run_own" });
+    expect(logs).toContain(`${HOST} already points at ${ZONE}, booked for the tenant ${REPLACED} — adopted for tenant ${GUID}, so it goes with this tenant`);
+    await removeBookedRecords(ctx(), { dns, owner: { kind: "tenant", name: REPLACED, stage: "test" }, except: [] });
+    expect(dns.record(HOST, "CNAME")).toBe(ZONE);
+  });
+
+  it("PLANTED INNOCENT: leaves a record the book already names as this tenant's as it is", async () => {
+    recordDnsWrite(db.db, { name: HOST, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "test" }, runId: "run_first" });
+    await provisionOwnDomainRecord(ctx(), { dns }, tc, "digitacloud.app", HOST, []);
+    expect(findDnsWrite(db.db, { name: HOST, type: "CNAME" })).toMatchObject({ act: "inserted", runId: "run_first" });
+    expect(logs).toEqual([`${HOST} already points at ${ZONE}`]);
   });
 });
 

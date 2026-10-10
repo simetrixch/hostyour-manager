@@ -14,7 +14,7 @@ import type { Db } from "../../db/client.ts";
 import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
 import { DnsZoneUnknownError, type StandingDnsRecord } from "../../adapters/dns/port.ts";
 import type { TenantCluster, TenantLifecyclePorts } from "./lifecycle.ts";
-import { isTenantRecord, removeBookedRecord, tenantZone } from "#unit/server/unit-dns.ts";
+import { isBookedFor, isTenantRecord, removeBookedRecord, tenantZone } from "#unit/server/unit-dns.ts";
 import { prodHostOf, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import { sleep } from "#unit/server/release-cycle.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
@@ -177,10 +177,17 @@ export async function provisionOwnDomainRecord(ctx: StepCtx, ports: RecordPorts,
     throw errValidation(`${domain} stands as CNAME ${standing}, which the plan did not list and the book of DNS writes does not name tenant ${tc.guid}'s — plan the run again`);
   }
   if (standing === zone) {
-    if (findDnsWrite(ctx.db, { name: domain, type: "CNAME" }) === null) {
-      recordDnsWrite(ctx.db, { name: domain, type: "CNAME", content: zone, act: "updated", owner: { kind: "tenant", name: tc.guid, stage: tc.stage }, runId: ctx.runId });
+    // A record at this tenant's zone serves this tenant, whoever the book names: a tenant this one
+    // replaced on the same subdomain had the same zone. Left booked for that one, its purge would take
+    // the record from under this tenant.
+    const owner = { kind: "tenant" as const, name: tc.guid, stage: tc.stage };
+    if (isBookedFor(ctx.db, domain, owner)) {
+      ctx.log("meta", `${domain} already points at ${zone}`);
+      return;
     }
-    ctx.log("meta", `${domain} already points at ${zone}`);
+    const booked = findDnsWrite(ctx.db, { name: domain, type: "CNAME" });
+    recordDnsWrite(ctx.db, { name: domain, type: "CNAME", content: zone, act: "adopted", owner, runId: ctx.runId });
+    ctx.log("meta", `${domain} already points at ${zone}${booked === null ? "" : `, booked for the ${booked.owner.kind} ${booked.owner.name}`} — adopted for tenant ${tc.guid}, so it goes with this tenant`);
     return;
   }
   // A CNAME stands alone under its name, so an address record there goes first.
