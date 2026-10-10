@@ -170,10 +170,10 @@ describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bun
   const bundleManifest = (folder: string): string => `apps:\n  - name: erp\n    title: ERP\n${folder}`;
   const WEBSITE_FOLDER = (sites: string[]): string => `  - name: web\n    title: Website\n    sites: [${sites.join(", ")}]\n`;
 
-  /** A tenant serving the sites show and veloluck, with the bundle given (the empty pair for none). */
+  /** A tenant serving the sites show and cycleshop, with the bundle given (the empty pair for none). */
   function websiteRegistrations(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): TenantRegistrations {
     const repo = new FakePlatformRepo();
-    const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show" }, { name: "veloluck", folder: "web", site: "veloluck" }];
+    const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show" }, { name: "cycleshop", folder: "web", site: "cycleshop" }];
     const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...bundle });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
@@ -189,15 +189,15 @@ describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bun
   const sitesOf = (body: TenantAppCatalogView): string[] | undefined => body.apps.find((a) => a.name === "web")?.sites;
 
   it("offers a site the bundle lists at its release and the template does not list, and none of the template's own", async () => {
-    const { repo, readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "veloluck"])) });
+    const { repo, readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "cycleshop"])) });
     const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
     const { body } = await read(app, cookie);
-    expect(sitesOf(body)).toEqual(["show", "simplidigita-ai", "veloluck"]);
+    expect(sitesOf(body)).toEqual(["show", "simplidigita-ai", "cycleshop"]);
     expect(repo.clones.map((c) => `${c.repoURL}@${c.ref}`)).toEqual([`${TEST_BUNDLE.appsRepo}@${RELEASE}`]);
   });
 
   it("PLANTED INNOCENT: the add form offers the bundle's site the tenant does not serve yet, and not the ones it serves", async () => {
-    const { readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "veloluck"])) });
+    const { readTenantManifest } = bundleReader({ "apps.yaml": bundleManifest(WEBSITE_FOLDER(["show", "simplidigita-ai", "cycleshop"])) });
     const { app, cookie } = await serve({ registrations: websiteRegistrations(), appCatalog: { list: async () => WEBSITE_CATALOG }, readTenantManifest });
     const { body } = await read(app, cookie);
     expect(websiteFolder(body.apps, body.websites)?.sites).toEqual(["simplidigita-ai"]);

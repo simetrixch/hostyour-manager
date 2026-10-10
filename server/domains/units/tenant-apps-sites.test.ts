@@ -100,10 +100,10 @@ describe("mergeAppsManifest — the sites an entry lists", () => {
   });
 
   it("leaves a standing entry as it stands where the run names its folder with an empty list", () => {
-    const current = "apps:\n  - name: web\n    title: Website\n    sites: [show, veloluck]\n";
+    const current = "apps:\n  - name: web\n    title: Website\n    sites: [show, cycleshop]\n";
     const { content, added, sitesAdded } = mergeAppsManifest(TEMPLATE_APPS, current, ["web"], { web: [] });
     expect([added, sitesAdded]).toEqual([[], []]);
-    expect(sitesOf(content, "web")).toEqual(["show", "veloluck"]);
+    expect(sitesOf(content, "web")).toEqual(["show", "cycleshop"]);
   });
 
   it("PLANTED INNOCENT: an entry the run names no sites for keeps the template's list, as before", () => {
