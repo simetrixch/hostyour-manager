@@ -8,7 +8,7 @@
 // tenant-registrations.ts registrationPath).
 
 import type { Stage } from "../../shared/enums.ts";
-import { findStagePlacementConflict, tenantStagesNeedSeparateMachines } from "../../shared/tenant-stage-placement.ts";
+import { clusterServesStage } from "../../shared/cluster-stage.ts";
 
 /** The placeholder that stands where the tenant's guid will be. It is a PLACEHOLDER on purpose and must
  *  stay one that cannot be mistaken for an identifier: the guid does not exist yet when this is rendered
@@ -76,17 +76,20 @@ export function tenantPlacement(
   };
 }
 
+/** The machines a tenant stage may be placed on: those that serve its stage, which leaves no choice
+ *  the server would refuse. */
+export function machinesServing<T extends { stage: string }>(targets: readonly T[], stage: Stage): T[] {
+  return targets.filter((t) => clusterServesStage(t.stage, stage));
+}
+
 /** The machine of each selected stage in the create wizard, and the machines it may be given. The
- *  default machine stands in for a stage that has not chosen its own, except where the tenant also
- *  has the stage that must stand apart from it (TEST and PROD): those two never share a default, so
- *  each is chosen. A machine another selected stage stands on is not offered to a stage that must
- *  stand apart from it, which leaves no pair of choices the server would refuse. */
-export function stageMachineChoices<T extends { id: string }>(
+ *  default machine stands in for a stage that has not chosen its own only where it serves that stage. */
+export function stageMachineChoices<T extends { id: string; stage: string }>(
   selected: readonly Stage[], chosen: Partial<Record<Stage, string>>, defaultClusterId: string, targets: readonly T[],
 ): { stage: Stage; clusterId: string; offered: T[] }[] {
-  const placed = selected.map((stage) => ({
-    stage,
-    clusterId: chosen[stage] || (selected.some((other) => tenantStagesNeedSeparateMachines(stage, other)) ? "" : defaultClusterId),
-  }));
-  return placed.map(({ stage, clusterId }) => ({ stage, clusterId, offered: targets.filter((t) => !findStagePlacementConflict(placed, stage, t.id)) }));
+  return selected.map((stage) => {
+    const offered = machinesServing(targets, stage);
+    const clusterId = chosen[stage] || (offered.some((t) => t.id === defaultClusterId) ? defaultClusterId : "");
+    return { stage, clusterId, offered };
+  });
 }

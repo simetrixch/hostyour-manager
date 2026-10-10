@@ -8,6 +8,7 @@ import {
   type TenantDetailView, type TenantView,
 } from "../api.ts";
 import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
+import { machinesServing } from "../tenantPlacement.ts";
 import { TenantEnvironmentBar } from "../components/TenantEnvironmentBar.tsx";
 import { listedWebsites, removedWebsites } from "../tenantAppRows.ts";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
@@ -454,7 +455,7 @@ export function TenantDetail() {
           kind="restore"
           confirmLabel="Plan restore"
           currentClusterId={relocT.clusterId}
-          loadTargets={listTenantTargets}
+          loadTargets={async () => machinesServing(await listTenantTargets(), relocT.stage)}
           loadGenerations={() => listTenantBackups(tenantId)}
           onCancel={() => setRelocT(null)}
           onConfirm={(targetClusterId, generation) => { setRelocT(null); void act(() => restoreTenant(tenantId, targetClusterId, chosenGeneration(generation))); }}

@@ -14,7 +14,7 @@ vi.mock("react", async (original) => ({
     return [slots[i] as S, (next: S) => { slots[i] = next; }];
   },
 }));
-const api = vi.hoisted(() => ({ listTenants: vi.fn(), listTenantTargets: vi.fn() }));
+const api = vi.hoisted(() => ({ listTenantTargets: vi.fn() }));
 vi.mock("../api.ts", async (original) => ({ ...(await original<typeof import("../api.ts")>()), ...api }));
 const { TenantMoveAction, TenantMoveConfirm } = await import("./TenantMoveAction.tsx");
 
@@ -41,21 +41,21 @@ describe("the Move dialog's wiring", () => {
 });
 
 describe("the Move dialog's machine list", () => {
-  const targets = ["cls_prod", "cls_dev", "cls_free", "cls_elsewhere"].map((id) => ({ id }));
-  const listed = async (rows: TenantView[]): Promise<string[]> => {
+  const targets = [["cls_prod", "prod"], ["cls_test", "test"], ["cls_test2", "test"], ["cls_dev", "dev"]].map(([id, stage]) => ({ id, stage }));
+  const listed = async (tenant: TenantView): Promise<string[]> => {
     slots.length = 0; slot = 0;
-    api.listTenants.mockResolvedValue(rows);
+    slots[0] = true; // past the typed confirmation PROD asks first
     api.listTenantTargets.mockResolvedValue(targets);
-    const dialog = TenantMoveConfirm({ tenant: all[1]!, onCancel: () => undefined, onConfirm: () => undefined }) as ReactElement<{ loadTargets: () => Promise<{ id: string }[]> }>;
+    const dialog = TenantMoveConfirm({ tenant, onCancel: () => undefined, onConfirm: () => undefined }) as ReactElement<{ loadTargets: () => Promise<{ id: string }[]> }>;
     return (await dialog.props.loadTargets()).map((t) => t.id);
   };
-  const other = { ...row("prod"), id: "tnt_other", guid: "other", clusterId: "cls_elsewhere" };
 
-  it("PLANTED DEFECT: leaves out the machine PROD of the same tenant stands on", async () => {
-    expect(await listed([...all, other])).toEqual(["cls_dev", "cls_free", "cls_elsewhere"]);
+  it("PLANTED DEFECT: offers TEST no PROD machine, and PROD no TEST machine", async () => {
+    expect(await listed(row("test"))).toEqual(["cls_test", "cls_test2"]);
+    expect(await listed(row("prod"))).toEqual(["cls_prod"]);
   });
 
-  it("PLANTED INNOCENT: keeps the machine of a purged PROD and the machine of a DEV", async () => {
-    expect(await listed([all[1]!, { ...all[0]!, status: "purged" }, { ...row("dev"), clusterId: "cls_dev" }])).toEqual(["cls_prod", "cls_dev", "cls_free", "cls_elsewhere"]);
+  it("PLANTED INNOCENT: offers DEV the machine that serves dev", async () => {
+    expect(await listed(row("dev"))).toEqual(["cls_dev"]);
   });
 });

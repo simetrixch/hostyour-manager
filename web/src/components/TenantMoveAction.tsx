@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
-import { listTenants, listTenantTargets, type TenantView } from "../api.ts";
+import { listTenantTargets, type TenantView } from "../api.ts";
+import { machinesServing } from "../tenantPlacement.ts";
 import { chosenForMove, movableEnvironments, typedConfirmation } from "../tenantRows.ts";
 import { ConfirmDialog } from "./ConfirmDialog.tsx";
 import { RelocationTargetDialog } from "./RelocationTargetDialog.tsx";
@@ -36,9 +36,8 @@ export function TenantMoveAction({ tenant, environments, onCancel, onConfirm }: 
   );
 }
 
-/** Move the chosen environment. Its siblings are read with the targets, to keep the stages that must
- *  stand apart off each other's machine. On PROD the operator first types the guid and the environment,
- *  as for an offboard or a purge. */
+/** Move the chosen environment onto a machine that serves its stage. On PROD the operator first types
+ *  the guid and the environment, as for an offboard or a purge. */
 export function TenantMoveConfirm({ tenant, onCancel, onConfirm }: {
   tenant: TenantView;
   onCancel: () => void;
@@ -53,11 +52,7 @@ export function TenantMoveConfirm({ tenant, onCancel, onConfirm }: {
   if (!typed) return <TypeToConfirm title={title} expected={typedConfirmation(tenant)} confirmLabel="Choose target machine" onCancel={onCancel} onConfirm={() => setTyped(true)}>{copy}</TypeToConfirm>;
   return <RelocationTargetDialog
     title={title} kind="move" confirmLabel="Plan stage move" currentClusterId={tenant.clusterId}
-    loadTargets={async () => {
-      const [all, targets] = await Promise.all([listTenants(), listTenantTargets()]);
-      const siblings = all.filter((t) => t.guid === tenant.guid);
-      return targets.filter((target) => !findStagePlacementConflict(siblings, tenant.stage, target.id));
-    }}
+    loadTargets={async () => machinesServing(await listTenantTargets(), tenant.stage)}
     onCancel={onCancel} onConfirm={(target) => onConfirm(tenant, target)}
   >
     {copy}

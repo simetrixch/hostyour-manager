@@ -250,7 +250,7 @@ export type CreateTenantParams = z.infer<typeof CreateTenantParams>;
  *  the target cluster row, never trusted from input. */
 export const CreateTenantRequest = z.object({
   clusterId: z.string().startsWith("cls_"),
-  // The tenant's stage owns its registration, member namespaces and Vault path independently of the machine's stage.
+  // The tenant's stage owns its registration, member namespaces and Vault path; its machine must serve that stage (resolveTenantCluster).
   stage: z.enum(STAGE),
   stages: z.array(z.object({ stage: z.enum(STAGE), clusterId: z.string().startsWith("cls_") })).min(1).max(3).refine((stages) => new Set(stages.map((s) => s.stage)).size === stages.length, "choose each stage only once").optional(),
   sourceTenantId: z.string().startsWith("tnt_").optional(),

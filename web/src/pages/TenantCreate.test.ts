@@ -20,7 +20,9 @@ vi.mock("react-router", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("../api.ts", () => api);
 const { TenantCreate } = await import("./TenantCreate.tsx");
 
-const machines = ["apps1", "apps2", "apps3"].map((name, i) => ({ id: `cls_${i + 1}`, domain: `${name}.example`, stage: "prod", status: i === 2 ? "removed" : "active" }));
+// apps4 is removed; every other machine is active and serves the one stage it names.
+const machines = [["apps1", "prod"], ["apps2", "test"], ["apps3", "dev"], ["apps4", "prod"], ["apps5", "prod"]]
+  .map(([name, stage], i) => ({ id: `cls_${i + 1}`, domain: `${name}.example`, stage, status: name === "apps4" ? "removed" : "active" }));
 const form = { subdomain: "acme", displayName: "", owner: "team-acme", clusterId: "cls_1", adminEmail: "", size: "small" };
 const seed = (selected: Stage[], chosen: Partial<Record<Stage, string>> = {}, defaultMachine = form.clusterId): void => {
   hooks.states = [{ ...form, clusterId: defaultMachine }, selected, chosen, false, machines, false, null]; hooks.cursor = 0;
@@ -41,63 +43,42 @@ function elements(node: ReactNode, type: string): ReactElement<{ type?: string; 
 
 beforeEach(() => { vi.clearAllMocks(); api.createTenant.mockResolvedValue({ runId: "run_1" }); });
 
-describe("the create wizard keeps TEST off the machine of PROD", () => {
-  it("PLANTED DEFECT: the default machine does not put TEST and PROD on one machine", () => {
+describe("the create wizard offers each stage only the machines that serve it", () => {
+  const submit = () => elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
+
+  it("PLANTED DEFECT: TEST is offered no PROD machine, and PROD no TEST machine", () => {
     seed(["test", "prod"]);
     const html = render();
-    expect(machineSelect(html, "test").selected).toBe("");
-    expect(machineSelect(html, "prod").selected).toBe("");
+    expect(machineSelect(html, "prod")).toEqual({ offered: ["cls_1", "cls_5"], selected: "cls_1" });
+    expect(machineSelect(html, "test")).toEqual({ offered: ["cls_2"], selected: "" });
     expect(submitDisabled(html)).toBe(true);
   });
 
-  it("PLANTED DEFECT: a machine one of the pair stands on is not offered to the other", () => {
-    seed(["test", "prod"], { prod: "cls_1" });
+  it("PLANTED DEFECT: the default machine does not stand in for a stage it does not serve", async () => {
+    seed(["dev"]);
     const html = render();
-    expect(machineSelect(html, "prod")).toEqual({ offered: ["cls_1", "cls_2"], selected: "cls_1" });
-    expect(machineSelect(html, "test")).toEqual({ offered: ["cls_2"], selected: "" });
-    seed(["test", "prod"], { prod: "cls_1", test: "cls_2" });
-    expect(machineSelect(render(), "prod").offered).toEqual(["cls_1"]);
-    expect(submitDisabled(render())).toBe(false);
-  });
-
-  it("PLANTED INNOCENT: DEV and PROD share the default machine and every active machine is offered to both", () => {
-    seed(["dev", "prod"]);
-    const html = render();
-    expect(machineSelect(html, "dev")).toEqual({ offered: ["cls_1", "cls_2"], selected: "cls_1" });
-    expect(machineSelect(html, "prod")).toEqual({ offered: ["cls_1", "cls_2"], selected: "cls_1" });
-    expect(submitDisabled(html)).toBe(false);
-  });
-
-  it("PLANTED DEFECT: submits each stage on the machine chosen for it, never the default", async () => {
-    seed(["test", "prod"], { test: "cls_2", prod: "cls_1" });
-    await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
-    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ stages: [{ stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }));
-  });
-
-  it("PLANTED DEFECT: submits nothing while a stage has no machine, instead of giving TEST the default PROD stands on", async () => {
-    seed(["test", "prod"], { prod: "cls_1" });
-    await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
+    expect(machineSelect(html, "dev")).toEqual({ offered: ["cls_3"], selected: "" });
+    expect(submitDisabled(html)).toBe(true);
+    hooks.cursor = 0;
+    await submit();
     expect(api.createTenant).not.toHaveBeenCalled();
     expect(hooks.states[6]).toBe("Choose a machine for every stage.");
   });
 
-  it("PLANTED INNOCENT: submits DEV on the default machine beside PROD on it", async () => {
-    seed(["dev", "prod"]);
-    await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
-    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ stages: [{ stage: "dev", clusterId: "cls_1" }, { stage: "prod", clusterId: "cls_1" }] }));
-  });
-
-  it("PLANTED DEFECT: TEST and PROD with their own machines need no default machine", async () => {
-    seed(["test", "prod"], { test: "cls_2", prod: "cls_1" }, "");
+  it("PLANTED INNOCENT: submits each stage on a machine of its own stage, the default standing in for PROD", async () => {
+    seed(["dev", "test", "prod"], { dev: "cls_3", test: "cls_2" });
     expect(submitDisabled(render())).toBe(false);
     hooks.cursor = 0;
-    await elements(TenantCreate() as ReactElement, "form")[0]!.props.onSubmit({ preventDefault: () => undefined });
-    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ clusterId: "cls_2", stages: [{ stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }));
+    await submit();
+    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ stages: [{ stage: "dev", clusterId: "cls_3" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }));
   });
 
-  it("PLANTED INNOCENT: DEV without a machine of its own still waits for the default machine", () => {
-    seed(["dev"], {}, "");
-    expect(submitDisabled(render())).toBe(true);
+  it("PLANTED INNOCENT: TEST and PROD with their own machines need no default machine", async () => {
+    seed(["test", "prod"], { test: "cls_2", prod: "cls_5" }, "");
+    expect(submitDisabled(render())).toBe(false);
+    hooks.cursor = 0;
+    await submit();
+    expect(api.createTenant).toHaveBeenCalledWith(expect.objectContaining({ clusterId: "cls_2", stages: [{ stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_5" }] }));
   });
 
   it("forgets the machine of a stage that is unselected, so selecting it again cannot bring back a conflicting choice", () => {
