@@ -108,7 +108,7 @@ function fakeTenantSeeder(): VaultSeeder {
     seedBuildRepoPat: () => Promise.reject(new Error("a tenant run never seeds a repo pat itself")),
     refreshBuildRepoPat: () => Promise.reject(new Error("a tenant run never refreshes a repo pat itself")),
     deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
-    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {},
+    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {}, replaceTenantE2ePassword: async () => {}, deleteTenantE2ePassword: async () => {},
   };
 }
 function ports(over: Partial<TenantOnboardPorts> = {}): TenantOnboardPorts {

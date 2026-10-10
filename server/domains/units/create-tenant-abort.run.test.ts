@@ -167,6 +167,8 @@ function fakeTenantSeeder(): VaultSeeder {
     replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {},
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
+    replaceTenantE2ePassword: async () => {},
+    deleteTenantE2ePassword: async () => {},
   };
 }
 

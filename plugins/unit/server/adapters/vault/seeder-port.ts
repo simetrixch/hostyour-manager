@@ -254,6 +254,20 @@ export interface GoogleTranslationWriteInput {
   /** Every property, the empty text for one the operator left blank. */
   data: Record<GoogleTranslationProperty, string>;
 }
+
+/** Where a demo tenant's end-to-end password stands: beside the key folders below the tenant's
+ *  entry, which the tenant's members read through their templated policy, and the one leaf the
+ *  end-to-end task on the master is granted. */
+export function tenantE2ePasswordPath(stage: string, guid: string): string {
+  return `${stage}/tenants/${guid}/e2e`;
+}
+
+export interface TenantE2ePasswordWriteInput {
+  stage: Stage;
+  guid: string;
+  /** The minted value. It is written and forgotten: never logged, checkpointed, stored or answered. */
+  password: string;
+}
 export type TenantAppKeyKind = (typeof TENANT_APP_KEY_KINDS)[number];
 
 export interface TenantAppKeySeedInput {
@@ -358,6 +372,17 @@ export interface VaultSeeder {
   /** Remove a tenant's Google translation settings, all versions (purge). An absent entry (404) is
    *  ok; every other non-2xx fails the run. */
   deleteTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<void>;
+  /** REPLACE a demo tenant's end-to-end password, <stage>/tenants/<guid>/e2e with the one property
+   *  `password`: created where absent, replaced where it stands, no check-and-set, because writing
+   *  again is the rotation and the tenant's auth applies the value at its next start. A leaf of its
+   *  own and not a property of the tenant's entry, because a Vault policy grants a path: the
+   *  end-to-end task on the master may read this leaf, and never the tenant's signing key beside it.
+   *  Write-only: nothing is read. */
+  replaceTenantE2ePassword(input: TenantE2ePasswordWriteInput): Promise<void>;
+  /** Remove a tenant's end-to-end password, all versions (demo off, purge), so nothing can sign in
+   *  to a tenant that is no demo with it. An absent entry (404) is ok; every other non-2xx fails the
+   *  run. */
+  deleteTenantE2ePassword(input: TenantCryptoDeleteInput): Promise<void>;
   /** Remove every tenant app key of one tenant, of every kind (purge), found by listing the key names
    *  under it, so the key of an app this manager no longer knows goes too; with `app`, that app's keys
    *  only (the purge of one removed app). Answers what it removed, each as <kind>/<app>. */

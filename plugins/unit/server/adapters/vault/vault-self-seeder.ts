@@ -1,5 +1,5 @@
-import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind, GoogleTranslationWriteInput } from "./seeder-port.ts";
-import { GOOGLE_TRANSLATION_PROPERTIES, TENANT_APP_KEY_KINDS } from "./seeder-port.ts";
+import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome, PostgresSeedInput, PostgresSecretDeleteInput, MongodbSeedInput, MongodbSecretDeleteInput, RedisSeedInput, RedisSecretDeleteInput, MariadbSeedInput, MariadbSecretDeleteInput, BuildRepoPatSeedInput, BuildRepoPatDeleteInput, AppSecretsDeleteInput, TenantCryptoSeedInput, TenantCryptoDeleteInput, TenantAppKeySeedInput, TenantAppKeyKind, GoogleTranslationWriteInput, TenantE2ePasswordWriteInput } from "./seeder-port.ts";
+import { GOOGLE_TRANSLATION_PROPERTIES, TENANT_APP_KEY_KINDS, tenantE2ePasswordPath } from "./seeder-port.ts";
 import { appName } from "#core/shared/tenant.ts";
 import { KV_MOUNT, VaultError } from "#core/server/adapters/vault/port.ts";
 import { vaultRevokeSelf, vaultSelfLogin, type VaultSelfAuth } from "./vault-self-login.ts";
@@ -319,6 +319,32 @@ export class VaultSelfSeeder implements VaultSeeder {
       const path = tenantGoogleTranslationPath(input.stage, input.guid);
       const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${path}`, { method: "DELETE", headers: { "x-vault-token": token } });
       if (!res.ok && res.status !== 404) throw new VaultError(`vault Google translation settings delete failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async replaceTenantE2ePassword(input: TenantE2ePasswordWriteInput): Promise<void> {
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantE2ePasswordPath(input.stage, input.guid);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "POST",
+        headers: { "x-vault-token": token, "content-type": "application/json" },
+        body: JSON.stringify({ data: { password: input.password } }),
+      });
+      if (!res.ok) throw new VaultError(`vault end-to-end password put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
+  async deleteTenantE2ePassword(input: TenantCryptoDeleteInput): Promise<void> {
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantE2ePasswordPath(input.stage, input.guid);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/metadata/${path}`, { method: "DELETE", headers: { "x-vault-token": token } });
+      if (!res.ok && res.status !== 404) throw new VaultError(`vault end-to-end password delete failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
     } finally {
       await this.revoke(addr, token).catch(() => undefined);
     }
