@@ -30,11 +30,11 @@ const tenant = (status: TenantDetailView["status"]): TenantDetailView => ({
   id: "tnt_1", guid: "tenant1guid", subdomain: "simetrix", stage: "prod", status, clusterId: "cls_1", domain: "apps2.example", suspended: false, approvedTags: {},
   apps: [
     { id: "tna_erp", name: "erp", status: "offboarded", lastRunId: "run_erp", site: null, creation: 1 },
-    { id: "tna_site", name: "simetrix-ch", status: "offboarded", lastRunId: "run_site", site: "simetrix-ch", creation: 1 },
+    { id: "tna_site", name: "example-com", status: "offboarded", lastRunId: "run_site", site: "example-com", creation: 1 },
   ],
 } as TenantDetailView);
 const catalog: TenantAppCatalogView = {
-  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["simetrix-ch"] }],
+  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com"] }],
   websites: [],
   members: ["web"],
 };
@@ -76,11 +76,11 @@ describe("Purge on the tenant page", () => {
   it("opens one confirmation for a removed website, as for an app, and plans the same run for it", async () => {
     const page = await loaded("active");
     expect(find(page, ConfirmDialog)).toBeUndefined();
-    find<{ onPurge: (app: string) => void }>(page, TenantWebsites)!.props.onPurge("simetrix-ch");
-    expect(dialog()?.props.title).toBe(tenantConfirmTitle.purgeApp(tenant("active"), "simetrix-ch"));
+    find<{ onPurge: (app: string) => void }>(page, TenantWebsites)!.props.onPurge("example-com");
+    expect(dialog()?.props.title).toBe(tenantConfirmTitle.purgeApp(tenant("active"), "example-com"));
     dialog()!.props.onConfirm();
     await vi.waitFor(() => expect(navigate).toHaveBeenCalledWith("/runs/run_purge"));
-    expect(api.planRun).toHaveBeenCalledWith("tenant-purge-app", { tenantId: "tnt_1", app: "simetrix-ch" });
+    expect(api.planRun).toHaveBeenCalledWith("tenant-purge-app", { tenantId: "tnt_1", app: "example-com" });
     expect(find(render(), ConfirmDialog)).toBeUndefined();
   });
 

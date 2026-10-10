@@ -29,7 +29,7 @@ const CATALOG: AppsManifest = {
 
 const erp = { name: "erp", seedReference: true, seedDemo: false, selections: { extra: true } };
 const crm = { name: "crm", seedReference: false, seedDemo: false, selections: {} };
-const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", seedReference: false, seedDemo: false, selections: {} };
+const site = { name: "example-com", folder: "web", site: "example-com", seedReference: false, seedDemo: false, selections: {} };
 
 function registration(apps: TenantRegistration["apps"], appsRepo = "https://github.com/acme/catalog-acme.git"): TenantRegistration {
   return {
@@ -88,7 +88,7 @@ describe("the boot pass over every standing tenant's app database lists", () => 
 
   it("commits once per tenant whose lists differ: none for a tenant already current, an unregistered one or an offboarded one", async () => {
     await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent });
-    expect(repo.commits.map((c) => c.message)).toEqual([`app-databases(${STALE}): erp [core, sales], crm [], simetrix-ch [content] [boot]`]);
+    expect(repo.commits.map((c) => c.message)).toEqual([`app-databases(${STALE}): erp [core, sales], crm [], example-com [content] [boot]`]);
     expect(await appsOf(GONE)).toEqual([erp]);
     // A second boot finds every list standing.
     expect(await ensureTenantAppDatabases({ db: db.db, registrations, readTenantManifest: readOwn, logger: silent })).toEqual({ written: [], failed: [`prod/${BROKEN}`] });

@@ -30,7 +30,7 @@ function find(node: ReactNode, match: (el: El) => boolean): El[] {
 }
 const deployButtons = (node: ReactNode): El[] => find(node, (el) => el.type === "button" && el.props.children === "Deploy");
 
-const folder = { name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["simetrix-ch", "simplidigita-ai"] };
+const folder = { name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] };
 const catalog: TenantAppCatalogView = { apps: [folder], websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }], members: ["web", "simplidigita-ai"] };
 const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", main: false }];
 const act = vi.fn(async (fn: () => Promise<{ runId: string }>) => { await fn(); });
@@ -40,7 +40,7 @@ const section = (over: Partial<Parameters<typeof TenantWebsites>[0]> = {}): Reac
 };
 const dialog = (over: Partial<Parameters<typeof TenantDeployWebsiteDialog>[0]> = {}): El => {
   hooks.cursor = 0;
-  return TenantDeployWebsiteDialog({ tenantId: "tnt_1", folder: "web", site: "simetrix-ch", name: "simetrix-ch", firstWebsite: false, mainWebsite: null, act, onClose: vi.fn(), ...over }) as El;
+  return TenantDeployWebsiteDialog({ tenantId: "tnt_1", folder: "web", site: "example-com", name: "example-com", firstWebsite: false, mainWebsite: null, act, onClose: vi.fn(), ...over }) as El;
 };
 
 const mainBox = (el: El): El => find(el, (e) => e.type === "input" && (e.props as { type?: string }).type === "checkbox")[0]!;
@@ -52,17 +52,17 @@ beforeEach(() => { hooks.states = []; hooks.cursor = 0; vi.clearAllMocks(); api.
 describe("the Websites section offers Deploy on a bundle site that is not deployed", () => {
   it("PLANTED DEFECT: Deploy stands on the not-deployed site's row only, never on a deployed website", () => {
     const rows = find(section(), (el) => el.type === "li");
-    expect(rows.map((li) => li.key)).toEqual(["simplidigita-ai", "bundle-simetrix-ch"]);
+    expect(rows.map((li) => li.key)).toEqual(["simplidigita-ai", "bundle-example-com"]);
     expect(deployButtons(rows[0])).toHaveLength(0);
     expect(deployButtons(rows[1])).toHaveLength(1);
     expect(deployButtons(section())).toHaveLength(1);
   });
 
   it("PLANTED INNOCENT: a bundle whose every site is deployed shows no Deploy button", () => {
-    const deployedAll: TenantAppCatalogView = { ...catalog, websites: [...catalog.websites!, { name: "simetrix-ch", site: "simetrix-ch" }] };
-    const both = [...live, { name: "simetrix-ch", site: "simetrix-ch", main: false }];
+    const deployedAll: TenantAppCatalogView = { ...catalog, websites: [...catalog.websites!, { name: "example-com", site: "example-com" }] };
+    const both = [...live, { name: "example-com", site: "example-com", main: false }];
     const rows = find(section({ catalog: deployedAll, websites: both }), (el) => el.type === "li");
-    expect(rows.map((li) => li.key)).toEqual(["simplidigita-ai", "simetrix-ch"]);
+    expect(rows.map((li) => li.key)).toEqual(["simplidigita-ai", "example-com"]);
     expect(deployButtons(section({ catalog: deployedAll, websites: both }))).toHaveLength(0);
   });
 
@@ -74,11 +74,11 @@ describe("the Websites section offers Deploy on a bundle site that is not deploy
   });
 
   it("opens the dialog of the row's own site, named clear of the tenant's members, and closes it again", () => {
-    const clash = { ...catalog, members: [...catalog.members!, "simetrix-ch"] };
+    const clash = { ...catalog, members: [...catalog.members!, "example-com"] };
     deployButtons(section({ catalog: clash }))[0]!.props.onClick();
     const open = find(section({ catalog: clash }), (el) => el.type === TenantDeployWebsiteDialog);
     expect(open).toHaveLength(1);
-    expect(open[0]!.props).toMatchObject({ tenantId: "tnt_1", folder: "web", site: "simetrix-ch", name: "simetrix-ch-2" });
+    expect(open[0]!.props).toMatchObject({ tenantId: "tnt_1", folder: "web", site: "example-com", name: "example-com-2" });
     open[0]!.props.onClose();
     expect(find(section({ catalog: clash }), (el) => el.type === TenantDeployWebsiteDialog)).toHaveLength(0);
   });
@@ -89,19 +89,19 @@ describe("the Deploy dialog of a website", () => {
     const confirm = dialog();
     expect(confirm.type).toBe(ConfirmDialog);
     expect(confirm.props.confirmLabel).toBe("Deploy");
-    expect(textOf(confirm)).toContain("served at /web/simetrix-ch of the tenant's host");
+    expect(textOf(confirm)).toContain("served at /web/example-com of the tenant's host");
     confirm.props.onConfirm();
     await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledTimes(1));
-    expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch", site: "simetrix-ch", folder: "web", main: false });
+    expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "example-com", site: "example-com", folder: "web", main: false });
     hooks.states = [];
     expect(textOf(dialog({ firstWebsite: true }))).toContain("served at / of the tenant's host");
   });
 
   it("PLANTED INNOCENT: a name that differs from the site is the app name", async () => {
     const onClose = vi.fn();
-    dialog({ name: "simetrix-ch-2", onClose }).props.onConfirm();
+    dialog({ name: "example-com-2", onClose }).props.onConfirm();
     expect(onClose).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch-2", site: "simetrix-ch", folder: "web", main: false }));
+    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "example-com-2", site: "example-com", folder: "web", main: false }));
   });
 });
 

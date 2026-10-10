@@ -18,9 +18,9 @@ describe("VaultSelfSeeder tenant app keys", () => {
 
   it("writes a website's revalidate secret into its own entry beside the Password field keys", async () => {
     await withSelf(async (seeder) => {
-      expect(await seeder.seedTenantAppKey({ ...keyInput, kind: "revalidate-secret", app: "simetrix-ch", data: { "revalidate-secret": "c2Vj" } })).toEqual({ created: true });
+      expect(await seeder.seedTenantAppKey({ ...keyInput, kind: "revalidate-secret", app: "example-com", data: { "revalidate-secret": "c2Vj" } })).toEqual({ created: true });
       const put = vault.recorded.find((r) => r.method === "POST" && r.url.includes("/data/"));
-      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/revalidate-secret/simetrix-ch", body: { data: { "revalidate-secret": "c2Vj" }, options: { cas: 0 } } });
+      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/revalidate-secret/example-com", body: { data: { "revalidate-secret": "c2Vj" }, options: { cas: 0 } } });
     });
   });
 
@@ -88,17 +88,17 @@ describe("VaultSelfSeeder tenant app keys", () => {
 
   it("purges every key of every kind it lists under the tenant, including an app the manager no longer knows", async () => {
     vault.metaLists["prod/tenants/g1/password-field-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp", "retired"] } }) };
-    vault.metaLists["prod/tenants/g1/revalidate-secret"] = { status: 200, body: JSON.stringify({ data: { keys: ["simetrix-ch"] } }) };
-    vault.metaLists["prod/tenants/g1/form-signing-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["simetrix-ch"] } }) };
+    vault.metaLists["prod/tenants/g1/revalidate-secret"] = { status: 200, body: JSON.stringify({ data: { keys: ["example-com"] } }) };
+    vault.metaLists["prod/tenants/g1/form-signing-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["example-com"] } }) };
     vault.metaLists["prod/tenants/g1/service-key"] = { status: 200, body: JSON.stringify({ data: { keys: ["erp"] } }) };
     await withSelf(async (seeder) => {
       expect(await seeder.deleteTenantAppKeys({ stage: "prod", guid: "g1" }))
-        .toEqual({ deleted: ["password-field-key/erp", "password-field-key/retired", "revalidate-secret/simetrix-ch", "form-signing-key/simetrix-ch", "service-key/erp"] });
+        .toEqual({ deleted: ["password-field-key/erp", "password-field-key/retired", "revalidate-secret/example-com", "form-signing-key/example-com", "service-key/erp"] });
       expect(vault.recorded.filter((r) => r.method === "DELETE").map((r) => r.url)).toEqual([
         "/v1/secret/metadata/prod/tenants/g1/password-field-key/erp",
         "/v1/secret/metadata/prod/tenants/g1/password-field-key/retired",
-        "/v1/secret/metadata/prod/tenants/g1/revalidate-secret/simetrix-ch",
-        "/v1/secret/metadata/prod/tenants/g1/form-signing-key/simetrix-ch",
+        "/v1/secret/metadata/prod/tenants/g1/revalidate-secret/example-com",
+        "/v1/secret/metadata/prod/tenants/g1/form-signing-key/example-com",
         "/v1/secret/metadata/prod/tenants/g1/service-key/erp",
       ]);
     });
