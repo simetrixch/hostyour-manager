@@ -11,7 +11,7 @@ import { TenantWebsites } from "./TenantWebsites.tsx";
 // purge can be offered.
 
 const catalog: TenantAppCatalogView = {
-  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["simetrix-ch", "simplidigita-ai"] }],
+  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] }],
   websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }],
   members: ["web"],
 };
@@ -30,8 +30,8 @@ const deploys = (html: string): number => html.split(">Deploy</button>").length 
 
 describe("the Websites section on a tenant with a loaded catalog", () => {
   it("offers Purge on a removed website that was offboarded, and on no other row", () => {
-    const html = render([removedSite("simetrix-ch", "offboarded")]);
-    expect(rowOf(html, "simetrix-ch")).toContain(">Purge</button>");
+    const html = render([removedSite("example-com", "offboarded")]);
+    expect(rowOf(html, "example-com")).toContain(">Purge</button>");
     expect(rowOf(html, "simplidigita-ai")).not.toContain("Purge");
     expect(purges(html)).toBe(1);
   });
@@ -43,8 +43,8 @@ describe("the Websites section on a tenant with a loaded catalog", () => {
   });
 
   it("offers Purge on the offboarded one of two removed websites only", () => {
-    const html = render([removedSite("simetrix-ch", "offboarded"), removedSite("digitaplatform-com", "purged")]);
-    expect(rowOf(html, "simetrix-ch")).toContain(">Purge</button>");
+    const html = render([removedSite("example-com", "offboarded"), removedSite("digitaplatform-com", "purged")]);
+    expect(rowOf(html, "example-com")).toContain(">Purge</button>");
     expect(rowOf(html, "digitaplatform-com")).not.toContain("Purge");
   });
 });
@@ -52,8 +52,8 @@ describe("the Websites section on a tenant with a loaded catalog", () => {
 describe("the Websites section offers Deploy on a site of the bundle that is not deployed", () => {
   it("lists the site as an in-the-bundle row with Deploy, and no Deploy on the live website or a removed one", () => {
     const html = render([removedSite("digitaplatform-com", "offboarded")]);
-    expect(rowOf(html, "simetrix-ch")).toContain("in the bundle");
-    expect(rowOf(html, "simetrix-ch")).toContain(">Deploy</button>");
+    expect(rowOf(html, "example-com")).toContain("in the bundle");
+    expect(rowOf(html, "example-com")).toContain(">Deploy</button>");
     expect(rowOf(html, "simplidigita-ai")).not.toContain("Deploy");
     expect(rowOf(html, "digitaplatform-com")).not.toContain("Deploy");
     expect(deploys(html)).toBe(1);
