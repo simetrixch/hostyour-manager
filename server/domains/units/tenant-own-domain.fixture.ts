@@ -33,8 +33,8 @@ export const ZONE = "acme.example.com";
 export const OWN = "www.customer.test";
 export const OTHER = "shop.customer.test";
 export const BARE = "customer.test";
-/** The address the own-domain run waits on: the tenant web server's health at the host's root. */
-export const healthAt = (host: string): string => `https://${host}/health`;
+/** The address the own-domain run waits on: the health of the tenant's identity provider, `auth`, at the host. */
+export const healthAt = (host: string): string => `https://${host}/auth/health`;
 export const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
 

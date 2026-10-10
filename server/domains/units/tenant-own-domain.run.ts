@@ -11,7 +11,7 @@ import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type Ten
 import { refuseOffStageHosts } from "./stage-hosts.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantZone } from "#unit/server/unit-dns.ts";
-import { aliasHosts, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
+import { aliasHosts, tenantMemberUrl, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import {
   checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord,
@@ -124,6 +124,13 @@ function tenantHost(tc: TenantCluster, apex: string, domain: string): string {
   return domain || tenantZone(tc.subdomain, tc.stage, apex);
 }
 
+/** What the wait asks at a host: the health of the tenant's identity provider. Every tenant runs that
+ *  member, and its Ingress requests the host's certificate, so its 2xx proves the host is served with
+ *  it. A website's server is no such member: a tenant without a website runs none. */
+function idpHealthUrl(tc: TenantCluster, apex: string, domain: string): string {
+  return `${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, domain)}/health`;
+}
+
 /** On abort: put the previous own domain and redirect hosts back on the registration and the row. */
 function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnDomainParams): Cleanup {
   return {
@@ -200,8 +207,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        // The tenant web server, a standing member of every tenant, answers /health at the host's root.
-        const url = `https://${tenantHost(tc, apex, p.ownDomain)}/health`;
+        const url = idpHealthUrl(tc, apex, p.ownDomain);
         const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
         // The probe does not follow a redirect, so a redirect host answers with the 3xx itself.
@@ -286,7 +292,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         targetId: params.tenantId,
         summary:
           `${params.previous === params.ownDomain ? "Re-apply" : `Move tenant ${tc.guid} from ${params.previous || zone} to`} ${newHost} (${tc.domain}, ${tc.stage}): ` +
-          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until https://${newHost}/health answers with a 2xx` +
+          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until ${idpHealthUrl(tc, apex, params.ownDomain)} answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +

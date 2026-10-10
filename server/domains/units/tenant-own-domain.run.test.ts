@@ -25,6 +25,14 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(h.dns.record(ZONE, "CNAME")).toBe(CLUSTER);
   });
 
+  it("PLANTED DEFECT: finishes on a tenant without a website: it waits on the identity provider every tenant runs, never on the host's root", async () => {
+    const h = await make({ answers: [OWN] });
+    const runId = await move(h, OWN, "");
+    expect(getRun(h.db.db, runId)?.status).toBe("succeeded");
+    expect(h.probe.probed).toContain(`https://${OWN}/auth/health`);
+    expect(h.probe.probed).not.toContain(`https://${OWN}/health`);
+  });
+
   it("sets redirect hosts beside the domain: a record each, recorded, and a redirect awaited at each", async () => {
     const h = await make({ answers: [OWN], redirecting: [BARE] });
     const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE] });
