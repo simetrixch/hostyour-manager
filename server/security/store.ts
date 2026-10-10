@@ -388,33 +388,4 @@ export class CredentialStore {
     const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.creation, credentials.id).all();
     return rows.map(toRef);
   }
-
-  /** Reset support: the Vault KV ref ids referenced by ANY credential row (revoked included; a purged
-   *  row references none).
-   *  Read-only — the rows themselves fall in the wipe transaction (db/reset.ts). Empty unless
-   *  Vault is the backend (plaintext/keyfile stores keep the value inline, nothing to clean up). */
-  collectVaultRefs(): string[] {
-    if (!this.vault) return [];
-    return this.db.select().from(credentials).all()
-      .flatMap((r) => (r.encryptedBlob?.startsWith(VAULT_REF_PREFIX) ? [r.encryptedBlob.slice(VAULT_REF_PREFIX.length)] : []));
-  }
-
-  /** Best-effort Vault cleanup AFTER the wipe committed (the rows are already gone). Never throws.
-   *  Returns the KV ref ids that could NOT be deleted — an orphaned value is not "harmless" (it may
-   *  be a live private SSH key), so it is surfaced to the operator to delete by hand, never a
-   *  silent swallow. Values themselves are never logged. */
-  async deleteVaultValues(ids: string[]): Promise<string[]> {
-    if (!this.vault) return [];
-    const orphans: string[] = [];
-    for (const id of ids) {
-      try {
-        await this.vault.delete(id);
-      } catch (err) {
-        orphans.push(id);
-        this.logger.warn({ ref: id, err: err instanceof Error ? err.message : String(err) },
-          "reset: Vault value NOT deleted — orphaned credential value, delete this KV ref by hand");
-      }
-    }
-    return orphans;
-  }
 }

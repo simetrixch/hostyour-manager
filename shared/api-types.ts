@@ -472,7 +472,6 @@ export interface BranchDiffView {
 /** POST /api/reset body. `confirm` must be the literal string "RESET". */
 export interface ResetRequest {
   confirm: string;
-  wipeDb: boolean;
   deleteBranches: string[];
   /** Explicit opt-in: without it the master's own install branch is refused. */
   includeMaster: boolean;
@@ -488,7 +487,7 @@ export interface ResetBranchOutcome {
 
 /** Cluster-map cleanup on the books branch (clusters/active/<fqdn>.yaml). Carries no failure: the map removal
  *  runs ahead of the branch deletes, so its failure REFUSES the whole request and there is no result
- *  to report. Null when the step did not run at all; `removed: []` when it ran and found nothing. */
+ *  to report. `removed: []` when it found nothing to remove. */
 export interface ResetPointerOutcome {
   branch: string;
   removed: string[];
@@ -496,18 +495,10 @@ export interface ResetPointerOutcome {
 }
 
 export interface ResetResult {
-  /** True when every requested action succeeded. */
+  /** True when every requested branch was deleted. */
   ok: boolean;
   branches: ResetBranchOutcome[];
-  pointers: ResetPointerOutcome | null;
-  db:
-    | { wiped: true; rows: Record<string, number>; backupFile: string; vaultOrphans: string[] }
-    /** `error` is set only when a wipe was asked for and FAILED. The wipe is one transaction, so the
-     *  database is then the one the reset started with — but the branches above are already gone, and
-     *  the response carries their shas so they can be pushed back. */
-    | { wiped: false; error?: string };
-  /** The role=master row was re-seeded in-process after the wipe (seed-master.ts is idempotent). */
-  reseeded: boolean;
+  pointers: ResetPointerOutcome;
 }
 
 /** GET /api/tenants/:id/versions and GET /api/consumers/:appId/versions — what the Versions dialog

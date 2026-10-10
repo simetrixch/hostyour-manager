@@ -6,7 +6,7 @@ import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessO
 import { bootPhases } from "./boot-phases.ts";
 import { scheduleTenantCheck } from "./check-tenants-schedule.ts";
 import { scheduleNightlyBackup } from "./nightly-backup-schedule.ts";
-import { seedMaster, stopMasterReconcile } from "./seed-master.ts";
+import { seedMaster } from "./seed-master.ts";
 import { unitPlugin, unitPorts } from "#unit/server/plugin.ts";
 import { CloudflareDns } from "../adapters/dns/cloudflare-dns.ts";
 import { createApp } from "../http/app.ts";
@@ -397,12 +397,7 @@ export async function wire(): Promise<Wired> {
       registerConsumerReleaseRoute(a, repositoryRoutes);
       // One tenant's own catalog: the template's apps, and the sites its own bundle lists, which tenant-add-app judges a website's site against.
       registerTenantAppCatalogRoute(a, { db: db.db, store, githubApp, ...(units.tenantRegistrations ? { registrations: units.tenantRegistrations } : {}), ...(units.appCatalog ? { appCatalog: units.appCatalog } : {}), ...(units.readTenantManifest ? { readTenantManifest: units.readTenantManifest } : {}) });
-      registerResetRoutes(a, {
-        config, db: db.db, sqlite: db.sqlite, store, logger,
-        github,
-        reseedMaster: async () => { stopMasterReconcile(); await seedMaster(db.db, store, config, logger); },
-        plugins: compiledPlugins,
-      });
+      registerResetRoutes(a, { config, db: db.db, sqlite: db.sqlite, logger, github });
       // What each active plugin serves, under /api/<its name>, and the names of the active ones.
       registerPluginRoutes(a, active, { executor });
       registerSpa(a, spaDistDir()); // LAST — the SPA fallback is the catch-all
