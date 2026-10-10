@@ -81,8 +81,16 @@ export async function runGit(args: string[], opts: RunGitOptions): Promise<strin
       windowsHide: true,
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
-    if (opts.input !== undefined) running.child.stdin?.end(opts.input);
+    // A git that exits before it reads all of its input leaves the write on a closed pipe: the EPIPE
+    // is an 'error' event on stdin, and an 'error' event nobody hears ends the whole process. Git's
+    // own exit is the failure to report; the pipe's error is reported where git exited cleanly.
+    let inputError: Error | undefined;
+    if (opts.input !== undefined) {
+      running.child.stdin?.on("error", (e) => { inputError = e; });
+      running.child.stdin?.end(opts.input);
+    }
     const { stdout } = await running;
+    if (inputError) throw inputError;
     return stdout;
   } catch (e) {
     fail(args, e, budgetMs);
