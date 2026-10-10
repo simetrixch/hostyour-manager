@@ -19,7 +19,7 @@
 import { parse as parseYaml } from "yaml";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { HelmRenderer } from "../../adapters/helm/port.ts";
-import type { MemberRouting, Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
@@ -28,7 +28,7 @@ import { gateT5Fit } from "./gates/tenant-fit.ts";
 import { gateT6SecretOrder } from "./gates/tenant-secret-order.ts";
 import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog, withBundleSites } from "./app-catalog.ts";
-import { stageApex, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
+import { stageApex, tenantZone } from "#unit/shared/unit-host.ts";
 import { deployPinFile } from "../../../shared/pin.ts";
 import { unitApexFromChain } from "#unit/server/unit-apex.ts";
 import { gateUnitHost } from "#unit/server/unit-host-gate.ts";
@@ -67,7 +67,6 @@ export interface ValidateTenantRequest {
   members?: readonly TenantMemberRecord[];
   identityProvider?: string;
   ownDomain?: string;
-  routing?: MemberRouting;
   ownDomainRedirects?: readonly string[];
   approvedTags?: Record<string, Record<string, string>>;
   /** Each app's database list as the caller read it off the tenant's own repository (a standing tenant,
@@ -78,7 +77,7 @@ export interface ValidateTenantRequest {
    *  (app-catalog.ts withBundleSites). */
   bundle?: AppsManifest | null;
   probeGuid: string; // the throwaway guid the fan-out is rendered at
-  /** The subdomain the tenant stands on — the members render at `<member>.<subdomain>.<stage apex>`
+  /** The subdomain the tenant stands on — the members render at `<subdomain>.<stage apex>/<member>`
    *  (tenant.zone), so the validation holds the hosts the deploy will serve. */
   subdomain: string;
   /** The IdP's user boot-seed flag the registration will carry; delivered to the members like the deploy does. */
@@ -104,10 +103,10 @@ export interface ValidateTenantRequest {
    *  global.unitApex) — a render without it fails at T2 before any gate can judge the chart. */
   clusterValueFiles: readonly ClusterValueFile[];
   credentialId?: string; // the manager's first-party deploy repository read credential
-  /** The target cluster's FQDN, given by the one caller that will WRITE the tenant's wildcard
-   *  `*.<subdomain>.<stage apex>` (create-tenant's plan). Present ⇒ gate G27 reads the zone under
-   *  that wildcard against the installation's clusters before the run writes anything. Absent for
-   *  add-app and the post-build re-render, which write no record: the wildcard already stands. */
+  /** The target cluster's FQDN, given by the one caller that will WRITE the tenant's zone record
+   *  `<subdomain>.<stage apex>` (create-tenant's plan). Present ⇒ gate G27 reads that zone
+   *  against the installation's clusters before the run writes anything. Absent for
+   *  add-app and the post-build re-render, which write no record: the zone record already stands. */
   clusterFqdn?: string;
 }
 
@@ -282,7 +281,6 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
           appName: member.member,
           subdomain: req.subdomain,
           ownDomain: req.ownDomain ?? "",
-          routing: req.routing ?? t1.spec!.routing,
           ownDomainRedirects: req.ownDomainRedirects ?? [],
           approvedTags: req.approvedTags ?? {},
           stage: req.stage,
@@ -345,12 +343,11 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         streamGate(deps, g);
       }
       appsValidated = req.apps.map((a) => a.name);
-      // G27 reads the ZONE under the tenant's record — the wildcard or the zone itself, as the
-      // product's routing names it (tenantRecordName) — the one obstacle the render gates cannot
+      // G27 reads the tenant's ZONE, the name of its record (tenantZone) — the one obstacle the render gates cannot
       // see, and the one that used to stop create-tenant at provision-dns with the crypto entry,
       // the bucket and the key already written. Same gate, same four readings as the consumer's.
       if (req.clusterFqdn !== undefined) {
-        const host = tenantRecordName(t1.spec.routing, req.subdomain, req.stage, unitApex);
+        const host = tenantZone(req.subdomain, req.stage, unitApex);
         const standing = deps.standingHost ? await deps.standingHost(host, req.clusterFqdn) : null;
         const g27 = gateUnitHost({ host, unitName: req.probeGuid, clusterFqdn: req.clusterFqdn, standing });
         gates.push(g27);

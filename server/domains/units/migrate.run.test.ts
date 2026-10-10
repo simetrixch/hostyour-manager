@@ -12,7 +12,6 @@ import { consumerWorld } from "./relocation-world-consumer.ts";
 import { listBackups } from "../../db/unit-backups.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import { renderTenantArgoSync } from "#unit/server/build-rbac.ts";
-import { publishIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import {
   openFixtureDb, seedClusters, seedMaster, seedConsumerRow, seedTenantRows, seedConsumerRegistration, seedTenantWorld,
   makeFakes, consumerPorts, tenantPorts, driveSteps, stepCtx, jobNames, missing, GUID, CONSUMER, SUBDOMAIN, SOURCE, TARGET,
@@ -331,29 +330,6 @@ describe("tenant-migrate", () => {
     expect(f.buildRbac.get("RoleBinding", "source-argo", `${GUID}-argo-sync`)).toEqual(sourceBinding);
   });
 
-  it("switch-dns repoints the identity provider's issuer host beside the wildcard, where the tenant has a host-routed mark", async () => {
-    seedMaster(db);
-    seedClusters(db);
-    seedTenantRows(db);
-    const f = makeFakes();
-    const ports = tenantPorts(f);
-    await seedTenantWorld(ports.registrations);
-    const params = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURCE.clusterId, targetClusterId: TARGET.clusterId };
-    const switchDns = makeTenantMigrateDef(ports).steps(params).find((s) => s.name === "switch-dns")!;
-    const issuerHost = `auth.${SUBDOMAIN}.example.com`;
-
-    // PLANTED INNOCENT: a tenant without a mark gets no record at the issuer host.
-    await switchDns.run(stepCtx(db, switchDns.name, params, []));
-    expect(f.dns.record(issuerHost, "CNAME")).toBeUndefined();
-
-    const mark = tenantIssuerRecord("_digita-idp", "host", "auth", "prod", SUBDOMAIN, "example.com");
-    await publishIssuerRecord(stepCtx(db, "provision-dns", {}, []), { dns: f.dns, guid: GUID, stage: "prod", record: mark, clusterFqdn: SOURCE.domain, runKind: "tenant-create" });
-    expect(f.dns.record(issuerHost, "CNAME")).toBe(SOURCE.domain);
-    await switchDns.run(stepCtx(db, switchDns.name, params, []));
-    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
-    expect(f.dns.record(issuerHost, "CNAME")).toBe(TARGET.domain);
-  });
-
   it("journey: a tenant with Garage object storage is moved whole — bucket dumped and restored, source CR released via the relocating annotation, source cleared last", async () => {
     seedMaster(db);
     seedClusters(db);
@@ -393,8 +369,8 @@ describe("tenant-migrate", () => {
     expect(jobNames(f.source)).toContain(`reloc-dump-bucket-${GUID}`);
     expect(jobNames(f.target)).toContain(`reloc-restore-bucket-${GUID}`);
     expect(jobNames(f.target)).toContain(`reloc-verify-bucket-${GUID}`);
-    // ONE wildcard record now points at the target.
-    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
+    // ONE zone record now points at the target.
+    expect(f.dns.record(`${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
     // The source fell LAST: databases dropped (the clear job), namespaces reaped. The generation the
     // move took stays on the box.
     expect(jobNames(f.source)).toContain(`reloc-clear-source-${GUID}`);

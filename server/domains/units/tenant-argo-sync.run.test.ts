@@ -21,7 +21,7 @@ import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { RoleManifest, RoleBindingManifest } from "../../adapters/kube/port.ts";
 import type { TenantValidationReport, TenantRegistration } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
 
@@ -93,7 +93,7 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme",
-    members: testMembers(APPS), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
+    members: testMembers(APPS), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
   await registrations.commitTenant({ stage: "prod", guid: GUID, registration, runId: "run_onb" });
@@ -130,7 +130,7 @@ function createParams(over: Partial<CreateTenantParams> = {}): CreateTenantParam
   return CreateTenantParams.parse({
     guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
-    identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+    identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     cluster: "s1", chartsRef: SHA, registryHost: HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], GUID, "prod"), deployRepoUrl: DEPLOY_URL,
@@ -244,7 +244,7 @@ describe("add-app extends the grant", () => {
     const prt = ports({ buildRbac, registrations });
     const oldPlan = createParams();
     const added = addParams({ syncUnits: ["example-platform", "example-crm"] });
-    await makeAddAppDef(addAppPorts(prt)).steps(added).find(s => s.name === "provision-argo-sync")!.run(ctx(added, []));
+    await makeAddAppDef(prt).steps(added).find(s => s.name === "provision-argo-sync")!.run(ctx(added, []));
     await registrations.updateTenantApps("prod", GUID, { op: "append", app: NEW_APP, member: added.member, runId: "run_add" });
 
     await expect(provisionArgoSyncStep(prt, oldPlan, {}).run(ctx(oldPlan, []))).rejects.toThrow("members changed since this run was planned");
@@ -263,7 +263,7 @@ describe("add-app extends the grant", () => {
   it("re-renders it over EVERY member — the live registration's apps plus the one being added", async () => {
     const buildRbac = new FakeBuildRbacWriter();
     const p = addParams();
-    const step = makeAddAppDef(addAppPorts(ports({ buildRbac, registrations: await seededRegistrations() }))).steps(p).find((s) => s.name === "provision-argo-sync")!;
+    const step = makeAddAppDef(ports({ buildRbac, registrations: await seededRegistrations() })).steps(p).find((s) => s.name === "provision-argo-sync")!;
     await step.run(ctx(p, []));
     // A grant that shrank to the new member would leave every sibling Application unsyncable.
     expect(roleOf(buildRbac)?.rules[0]!.resourceNames).toEqual([
@@ -272,7 +272,7 @@ describe("add-app extends the grant", () => {
   });
 
   it("runs before the append, so the new member's Application is never generated without a grant naming it", () => {
-    const names = makeAddAppDef(addAppPorts(ports())).steps(addParams()).map((s) => s.name);
+    const names = makeAddAppDef(ports()).steps(addParams()).map((s) => s.name);
     expect(names.indexOf("provision-argo-sync")).toBe(names.indexOf("apply-appproject") + 1);
     expect(names.indexOf("provision-argo-sync")).toBeLessThan(names.indexOf("append-app"));
   });

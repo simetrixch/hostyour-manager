@@ -29,11 +29,11 @@ const CATALOG: AppsManifest = {
 
 const erp = { name: "erp", seedReference: true, seedDemo: false, selections: { extra: true } };
 const crm = { name: "crm", seedReference: false, seedDemo: false, selections: {} };
-const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", domain: "example.org", seedReference: false, seedDemo: false, selections: {} };
+const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", seedReference: false, seedDemo: false, selections: {} };
 
 function registration(apps: TenantRegistration["apps"], appsRepo = "https://github.com/acme/catalog-acme.git"): TenantRegistration {
   return {
-    cluster: "s1", subdomain: "acme", members: testMembers(apps.map((a) => a.name)), identityProvider: "auth", routing: "host",
+    cluster: "s1", subdomain: "acme", members: testMembers(apps.map((a) => a.name)), identityProvider: "auth",
     ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps, seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1", suspended: false, quiesced: false, appsRepo, appsImage: "catalog-acme", appsImageTag: "0.3.001-stable-20260930120000-abc1234",
   };

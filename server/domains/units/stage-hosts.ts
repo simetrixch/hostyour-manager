@@ -21,7 +21,7 @@ async function zoneOf(dns: DnsProvider | undefined, host: string, signal?: Abort
 
 /** Refuses the first of `typed` — the hosts an operator typed now for a tenant at `stage` — that breaks
  *  the stage rule, naming the host it would be. A caller passes only the hosts typed now: a previous
- *  host a move keeps as an alias, and one a run drops, are not judged. A host no zone of the provider
+ *  host a move retires, and one a run drops, are not judged. A host no zone of the provider
  *  holds, or any host where none is configured, cannot be judged; the plan log says so. */
 export async function refuseOffStageHosts(dns: DnsProvider | undefined, typed: readonly string[], stage: Stage, ctx: PlanLog): Promise<void> {
   for (const host of typed) {

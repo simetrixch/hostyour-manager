@@ -2,7 +2,7 @@
 //
 // THE INVENTORY answers "which records is this installation responsible for": it is DERIVED from
 // the state that does exist (the registrations, the cluster rows, the sender domains) and every row
-// is then READ at the provider — a consumer's host, a tenant's wildcard, the mail records of a
+// is then READ at the provider — a consumer's host, a tenant's zone, the mail records of a
 // sender domain, standing or absent. A stored list could not answer this, because it would go on
 // naming records a hand at the provider has long since changed.
 //

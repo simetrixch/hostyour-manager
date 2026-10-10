@@ -18,7 +18,7 @@
 // (api.ts, invite-admin). This takes the same route with the same grants.
 import { and, eq, inArray } from "drizzle-orm";
 import { z } from "zod";
-import type { MemberRouting, Stage, TenantAdminState } from "../../../shared/enums.ts";
+import type { Stage, TenantAdminState } from "../../../shared/enums.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { RunDefinition, Step, StepCtx } from "../../executor/types.ts";
 import type { TenantHealthReader } from "../../adapters/tenant-health/port.ts";
@@ -62,7 +62,6 @@ interface Candidate {
   stage: Stage;
   domain: string;
   identityProvider: string;
-  routing: MemberRouting;
   ownDomain: string;
   clusterId: string;
 }
@@ -110,7 +109,6 @@ function checkStep(ports: CheckTenantsPorts): Step {
           subdomain: tenants.subdomain,
           stage: tenants.stage,
           identityProvider: tenants.identityProvider,
-          routing: tenants.routing,
           ownDomain: tenants.ownDomain,
           clusterId: tenants.clusterId,
           suspended: tenants.suspended,
@@ -152,11 +150,11 @@ function checkStep(ports: CheckTenantsPorts): Step {
             state = "unreachable";
             because = `the bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns}`;
           } else {
-            // WHERE the tenant's own auth serves: at the address its routing gives its IdP member,
+            // WHERE the tenant's own auth serves: at the address `tenantMemberUrl` gives its IdP member,
             // under the apex off the target cluster's values chain and never off the cluster's own
             // domain — composing from the domain asks a host nothing serves.
             const apex = await ports.resolveUnitApex(t.domain, t.stage);
-            const idpUrl = tenantMemberUrl(t.routing, t.identityProvider, t.stage, t.subdomain, apex, t.ownDomain);
+            const idpUrl = tenantMemberUrl(t.identityProvider, t.stage, t.subdomain, apex, t.ownDomain);
             const answer = await ports.health.read({
               url: `${idpUrl}/api/v1/bootstrap/status`,
               tokenHeader: BOOTSTRAP_TOKEN_HEADER,

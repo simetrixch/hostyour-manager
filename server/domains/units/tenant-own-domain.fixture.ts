@@ -15,14 +15,13 @@ import type { AnyRunDefinition } from "../../executor/types.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
-import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
-import { FakeHelmRenderer } from "../../adapters/helm/testing/fake.ts";
+import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
-import type { MemberRouting, Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 
 
 // The tenant-set-own-domain run driven through the real Executor: a tenant with its registration, its
@@ -34,7 +33,8 @@ export const ZONE = "acme.example.com";
 export const OWN = "www.customer.test";
 export const OTHER = "shop.customer.test";
 export const BARE = "customer.test";
-export const idpAt = (host: string): string => `https://${host}/auth/`;
+/** The address the own-domain run waits on: the tenant web server's health at the host's root. */
+export const healthAt = (host: string): string => `https://${host}/health`;
 export const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
 
@@ -53,13 +53,12 @@ export function useOwnDomainHarness() {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { routing?: MemberRouting; ownDomain?: string; ownDomainRedirects?: string[]; answers?: string[]; redirecting?: string[]; unmanaged?: string[]; stage?: Stage } = {}) {
+  async function make(opts: { ownDomain?: string; ownDomainRedirects?: string[]; answers?: string[]; redirecting?: string[]; unmanaged?: string[]; stage?: Stage } = {}) {
     const stage = opts.stage ?? "prod";
     const dir = mkdtempSync(join(tmpdir(), "mgr-owndomain-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    const routing = opts.routing ?? "path";
     const ownDomain = opts.ownDomain ?? "";
     const ownDomainRedirects = opts.ownDomainRedirects ?? [];
     const reg = new TenantRegistrations(new FakePlatformRepo());
@@ -68,19 +67,19 @@ export function useOwnDomainHarness() {
     dns.unmanaged = opts.unmanaged ?? [];
     dns.seed(ZONE, "CNAME", CLUSTER);
     const probe = new FakePublicProbe(Object.fromEntries([
-      ...(opts.answers ?? []).map((host) => [idpAt(host), OK]),
+      ...(opts.answers ?? []).map((host) => [healthAt(host), OK]),
       ...(opts.redirecting ?? []).map((host) => [`https://${host}/`, REDIRECTS]),
     ]));
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage, domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage,
-      members: ["auth", "jobs", "report"], identityProvider: "auth", routing, ownDomain, ownDomainRedirects, suspended: false, status: "active",
+      members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain, ownDomainRedirects, suspended: false, status: "active",
     }).run();
     await reg.commitTenant({
       stage, guid: GUID, runId: "run_crt",
       registration: {
-        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "", displayName: "",
+        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "", displayName: "",
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });
@@ -92,8 +91,6 @@ export function useOwnDomainHarness() {
       }),
       deployRepoUrl: "https://github.com/acme/acme-deploy.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
       dns, publicDns, probe, routingWaitMs: 0, routingPollMs: 0,
-      // This tenant runs no website, so nothing resolves a website's member here.
-      repo: new FakeRepoReader({}), helm: new FakeHelmRenderer({}), resolveClusterValueFiles: async () => [],
     });
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,

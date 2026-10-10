@@ -440,9 +440,9 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     const keyed: string[] = [];
     await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; } }, new FakeObjectStore(), {
       stage, ...(stage === "test" ? { sourceTenantId: "tnt_prod" } : {}),
-      apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", domain: `${stage}.company.example`, seedReference: false, seedDemo: false, selections: {} }],
+      apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", seedReference: false, seedDemo: false, selections: {} }],
     });
-    expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", `service-key/${APPS[0]!.name}`, "service-key/site", "revalidate-secret/site", "form-signing-key/site"].map((key) => `${stage}/${GUID}/${key}`));
+    expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", `service-key/${APPS[0]!.name}`, "service-key/site", "revalidate-secret/web", "form-signing-key/web"].map((key) => `${stage}/${GUID}/${key}`));
   });
 
   it("writes the tenant's own leaf with every property its members read", async () => {

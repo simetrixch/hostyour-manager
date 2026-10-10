@@ -22,7 +22,7 @@ describe("POST /api/tenants/:id/own-domain", () => {
     h.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
     h.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth",
-      routing: "path", ownDomain: "www.customer.test", ownDomainRedirects: ["customer.test"], suspended: false, status: "active",
+      ownDomain: "www.customer.test", ownDomainRedirects: ["customer.test"], suspended: false, status: "active",
     }).run();
     const planned: unknown[] = [];
     const executor = { planStreamed: async (_kind: string, params: unknown) => { planned.push(params); return { runId: "run_1" }; } } as unknown as Executor;
@@ -35,44 +35,49 @@ describe("POST /api/tenants/:id/own-domain", () => {
 
   it("serves <domain>, redirects www.<domain> there, and takes the row's standing hosts as previous", async () => {
     const r = route();
-    expect((await r.post({ domain: " Shop.Test " })).status).toBe(201);
+    expect((await r.post({ domain: " Shop.Test ", aliases: [] })).status).toBe(201);
     expect(r.planned).toEqual([{
       tenantId: "tnt_1", ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], previous: "www.customer.test", previousRedirects: ["customer.test"],
       ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [],
-      nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null, carriedWebsites: [],
+      nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null,
     }]);
     // The operator's confirmation that the domain lies under another tenant's, as that tenant's subdomain.
-    expect((await r.post({ domain: "shop.test", nestsUnder: " Simetrix " })).status).toBe(201);
+    expect((await r.post({ domain: "shop.test", aliases: [], nestsUnder: " Simetrix " })).status).toBe(201);
     expect(r.planned[1]).toMatchObject({ nestsUnder: "simetrix" });
   });
 
   it("returns the tenant to its zone for an empty domain", async () => {
     const r = route();
-    expect((await r.post({ domain: "" })).status).toBe(201);
-    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [], nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null, carriedWebsites: [] }]);
+    expect((await r.post({ domain: "", aliases: [] })).status).toBe(201);
+    expect(r.planned).toEqual([{ tenantId: "tnt_1", ownDomain: "", ownDomainRedirects: [], previous: "www.customer.test", previousRedirects: ["customer.test"], ownDomainAliases: [], previousAliases: [], replacing: [], mailRecords: [], nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null }]);
   });
 
-  it("takes the alias domains the body names, and keeps the tenant's where it names none", async () => {
+  it("takes the alias domains the body names, and refuses a body that names no list", async () => {
     const r = route();
     expect((await r.post({ domain: "shop.test", aliases: [" Old.Test ", "simetrix.de"] })).status).toBe(201);
     expect(r.planned[0]).toMatchObject({ ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], ownDomainAliases: ["old.test", "simetrix.de"] });
-    r.db.update(tenants).set({ ownDomainAliases: ["simetrix.eu"] }).where(eq(tenants.id, "tnt_1")).run();
-    expect((await r.post({ domain: "shop.test" })).status).toBe(201);
-    expect(r.planned[1]).toMatchObject({ ownDomainAliases: ["simetrix.eu"], previousAliases: ["simetrix.eu"] });
-    expect((await r.post({ domain: "" })).status).toBe(201);
-    expect(r.planned[2]).toMatchObject({ ownDomainAliases: [] });
+    expect((await r.post({ domain: "", aliases: ["old.test"] })).status).toBe(201);
+    expect(r.planned[1]).toMatchObject({ ownDomainAliases: [] });
+    expect((await r.post({ domain: "shop.test" })).status).toBe(400);
     expect((await r.post({ domain: "shop.test", aliases: ["www.old.test"] })).status).toBe(400);
     expect((await r.post({ domain: "shop.test", aliases: ["old.test", "old.test"] })).status).toBe(400);
     expect((await r.post({ domain: "shop.test", aliases: ["shop.test"] })).status).toBe(400);
     expect((await r.post({ domain: "shop.test", aliases: "old.test" })).status).toBe(400);
   });
 
+  it("PLANTED DEFECT: an empty alias list drops every alias the tenant has", async () => {
+    const r = route();
+    r.db.update(tenants).set({ ownDomainAliases: ["simetrix.eu"] }).where(eq(tenants.id, "tnt_1")).run();
+    expect((await r.post({ domain: "shop.test", aliases: [] })).status).toBe(201);
+    expect(r.planned[0]).toMatchObject({ ownDomainAliases: [], previousAliases: ["simetrix.eu"] });
+  });
+
   it("refuses a domain typed with www, and a body without a domain", async () => {
     const r = route();
-    const withWww = await r.post({ domain: "www.shop.test" });
+    const withWww = await r.post({ domain: "www.shop.test", aliases: [] });
     expect(withWww.status).toBe(400);
     expect(await withWww.text()).toContain('type the domain without \\"www.\\" (shop.test)');
-    expect((await r.post({ ownDomain: "www.shop.test" })).status).toBe(400);
+    expect((await r.post({ ownDomain: "www.shop.test", aliases: [] })).status).toBe(400);
     expect(r.planned).toEqual([]);
   });
 });

@@ -3,7 +3,7 @@ import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core
 import { sql } from "drizzle-orm";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
-  STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE, MEMBER_ROUTING,
+  STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE,
   APP_PROVENANCE, CLUSTER_STATUS, PLANE_STATE,
 } from "../../../shared/enums.ts";
 
@@ -213,10 +213,7 @@ export const tenants = sqliteTable("tenants", {
   // replace union all work from rows, and a git read per call to learn a namespace name is a read
   // nobody should pay for. The registration carries it too — that copy is the one the CHARTS read.
   members: text("members", { mode: "json" }).$type<string[]>().notNull(),
-  // How the members are addressed below the zone (MEMBER_ROUTING), beside the IdP for the same reason:
-  // every path that reaches a member composes its address and its DNS record from it, and holds a row.
-  routing: text("routing", { enum: MEMBER_ROUTING }).notNull().default("host"),
-  // The tenant's own domain, or "" where it is reached at its zone — beside the routing for the same
+  // The tenant's own domain, or "" where it is reached at its zone — beside the IdP for the same
   // reason: every path that addresses a member composes its host from it.
   ownDomain: text("own_domain").notNull().default(""),
   ownDomainRedirects: text("own_domain_redirects", { mode: "json" }).$type<string[]>().notNull().default([]),
@@ -259,7 +256,7 @@ export const tenants = sqliteTable("tenants", {
   // and no answer at all say opposite things and one column must not conflate them.
   adminCount: integer("admin_count"),
   adminCheckedAt: integer("admin_checked_at", { mode: "timestamp_ms" }),
-  // What the scheduled check last measured on this tenant (its wildcard record), like apps.checkJson.
+  // What the scheduled check last measured on this tenant (its zone record), like apps.checkJson.
   checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
   createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),

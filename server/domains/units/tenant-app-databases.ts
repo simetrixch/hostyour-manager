@@ -4,8 +4,8 @@
 // Every member of a tenant reads the lists in `tenant.apps`, which the tenant ApplicationSet hands
 // over verbatim from the registration. create-tenant and add-app write a new app's list off the
 // template catalog its entry is copied from. A standing tenant's lists come from its own repository,
-// which may carry apps and sites the template never offered: tenant-refresh-members and
-// tenant-set-website-domain read them there, and the boot pass below writes them into every standing
+// which may carry apps and sites the template never offered: tenant-refresh-members reads
+// them there, and the boot pass below writes them into every standing
 // tenant.
 import { notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";

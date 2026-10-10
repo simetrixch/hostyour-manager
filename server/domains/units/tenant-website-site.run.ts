@@ -20,7 +20,7 @@ import { registryHostFromChain } from "./tenant-values.ts";
 // serve `sites/<site>/` of the tenant's bundle. Every member of the tenant mounts that one bundle, at
 // the registration's appsImageTag. So the run writes the site, the member resolved again with it, and
 // the bundle release that carries the site in ONE commit: no pod boots with a site its bundle does not
-// hold. Nothing is removed — the website keeps its name, domain, databases, secrets and keys.
+// hold. Nothing is removed — the website keeps its name, databases, secrets and keys.
 //
 // The bundle's migration renames the website's stored records at its first boot, so writing the
 // previous site and bundle back would serve an empty site. The run registers no undo, and refuses an
@@ -95,7 +95,7 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
       const entry = current.entry.apps.find((a) => a.name === req.app);
-      if (!entry?.folder || !entry.site || !entry.domain) throw errValidation(`app "${req.app}" of tenant ${tc.guid} is no website — it names no folder, site and domain`);
+      if (!entry?.folder || !entry.site) throw errValidation(`app "${req.app}" of tenant ${tc.guid} is no website — it names no folder and site`);
       if (entry.site === req.site) throw errValidation(`website ${req.app} already serves site ${req.site}`);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.site === req.site);
       if (serving) throw errValidation(`${req.site} is already the site of website "${serving.name}" in tenant ${tc.guid}`);
@@ -127,7 +127,7 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
           repoURL: ports.deployRepoUrl,
           ref: ports.registrations.branch,
           stage: tc.stage,
-          apps: [{ name: req.app, folder: entry.folder, site: req.site, domain: entry.domain, aliases: entry.aliases ?? [], seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
+          apps: [{ name: req.app, folder: entry.folder, site: req.site, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
           isStandingTenant: true,
           appDatabases,
           probeGuid: tc.guid,
@@ -160,10 +160,10 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
           targetKind: "tenant",
           targetId: tc.tenantId,
           summary:
-            `Move website ${req.app} of tenant ${tc.guid} at ${entry.domain} (${tc.domain}, ${tc.stage}) from site ${entry.site} to site ${req.site}, ` +
+            `Move website ${req.app} of tenant ${tc.guid} (${tc.domain}, ${tc.stage}) from site ${entry.site} to site ${req.site}, ` +
             `and the tenant's apps bundle from ${previousAppsImageTag} to ${req.appsImageTag}, in one commit. Every member of the tenant mounts that bundle, ` +
             `so all of them roll onto it, and the website's engine and renderer boot with site ${req.site}. Nothing is removed: the website keeps its name, ` +
-            `domain, databases, secrets and keys. The bundle's migration renames the website's stored records at its first boot, so no abort moves it back: ` +
+            `databases, secrets and keys. The bundle's migration renames the website's stored records at its first boot, so no abort moves it back: ` +
             `a later move needs a release that carries site ${entry.site} and a migration back.`,
           steps: steps.map((s) => ({ name: s.name, title: s.title })),
           targets: [],

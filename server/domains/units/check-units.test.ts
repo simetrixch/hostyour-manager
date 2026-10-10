@@ -50,9 +50,9 @@ describe("check-units", () => {
   it("records every active consumer's and tenant's findings on its row, and the drift among them", async () => {
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
     db.db.insert(apps).values({ id: "app_off", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", repoUrl: "https://github.com/x/gone.git", provenance: "manager", status: "offboarded" }).run();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "shop", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
     const dns = emptyZone();
-    dns.seed("*.acme.example.com", "A", "198.51.100.7"); // the tenant's wildcard moved to an address nobody here carries
+    dns.seed("shop.example.com", "A", "198.51.100.7"); // the tenant's zone record moved to an address nobody here carries
     const github = new FakeGitHubConsumer();
     github.scopeError = true; // the consumer's stored PAT lost admin:repo_hook
     const o = onboardPorts({ github, dns });

@@ -5,7 +5,7 @@ import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 // The Websites section and the dialog of its Deploy button, driven without a DOM: the useState slots
 // are kept by a minimal hook store, and the components are called as functions whose elements are read.
 const hooks = vi.hoisted(() => ({ states: [] as unknown[], cursor: 0 }));
-const api = vi.hoisted(() => ({ addTenantWebsite: vi.fn(), setTenantWebsiteMain: vi.fn(), setTenantWebsiteDomain: vi.fn(), setTenantWebsiteSite: vi.fn() }));
+const api = vi.hoisted(() => ({ addTenantWebsite: vi.fn(), setTenantWebsiteMain: vi.fn(), setTenantWebsiteSite: vi.fn() }));
 vi.mock("react", async (original) => ({
   ...(await original<typeof import("react")>()),
   useState: (initial: unknown) => {
@@ -31,8 +31,8 @@ function find(node: ReactNode, match: (el: El) => boolean): El[] {
 const deployButtons = (node: ReactNode): El[] => find(node, (el) => el.type === "button" && el.props.children === "Deploy");
 
 const folder = { name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["simetrix-ch", "simplidigita-ai"] };
-const catalog: TenantAppCatalogView = { apps: [folder], websites: [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai" }], members: ["web", "simplidigita-ai"] };
-const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai", aliases: [] as string[], main: false }];
+const catalog: TenantAppCatalogView = { apps: [folder], websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }], members: ["web", "simplidigita-ai"] };
+const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", main: false }];
 const act = vi.fn(async (fn: () => Promise<{ runId: string }>) => { await fn(); });
 const section = (over: Partial<Parameters<typeof TenantWebsites>[0]> = {}): ReactNode => {
   hooks.cursor = 0;
@@ -42,7 +42,10 @@ const dialog = (over: Partial<Parameters<typeof TenantDeployWebsiteDialog>[0]> =
   hooks.cursor = 0;
   return TenantDeployWebsiteDialog({ tenantId: "tnt_1", folder: "web", site: "simetrix-ch", name: "simetrix-ch", firstWebsite: false, mainWebsite: null, act, onClose: vi.fn(), ...over }) as El;
 };
-const domainField = (el: El): El => find(el, (e) => e.type === "input")[0]!;
+
+const mainBox = (el: El): El => find(el, (e) => e.type === "input" && (e.props as { type?: string }).type === "checkbox")[0]!;
+const textOf = (node: ReactNode): string => (Array.isArray(node) ? node.map(textOf).join("") : typeof node === "string" ? node : node && typeof node === "object" && "props" in node ? textOf((node as El).props.children) : "");
+const ticked = (el: El): boolean => (mainBox(el).props as { checked?: boolean }).checked === true;
 
 beforeEach(() => { hooks.states = []; hooks.cursor = 0; vi.clearAllMocks(); api.addTenantWebsite.mockResolvedValue({ runId: "run_1" }); });
 
@@ -56,8 +59,8 @@ describe("the Websites section offers Deploy on a bundle site that is not deploy
   });
 
   it("PLANTED INNOCENT: a bundle whose every site is deployed shows no Deploy button", () => {
-    const deployedAll: TenantAppCatalogView = { ...catalog, websites: [...catalog.websites!, { name: "simetrix-ch", site: "simetrix-ch", domain: "simetrix.ch" }] };
-    const both = [...live, { name: "simetrix-ch", site: "simetrix-ch", domain: "simetrix.ch", aliases: [] as string[], main: false }];
+    const deployedAll: TenantAppCatalogView = { ...catalog, websites: [...catalog.websites!, { name: "simetrix-ch", site: "simetrix-ch" }] };
+    const both = [...live, { name: "simetrix-ch", site: "simetrix-ch", main: false }];
     const rows = find(section({ catalog: deployedAll, websites: both }), (el) => el.type === "li");
     expect(rows.map((li) => li.key)).toEqual(["simplidigita-ai", "simetrix-ch"]);
     expect(deployButtons(section({ catalog: deployedAll, websites: both }))).toHaveLength(0);
@@ -82,30 +85,25 @@ describe("the Websites section offers Deploy on a bundle site that is not deploy
 });
 
 describe("the Deploy dialog of a website", () => {
-  it("PLANTED DEFECT: confirms with the typed domain, without www and in lower case, and the site's own name and folder", async () => {
-    domainField(dialog()).props.onChange({ target: { value: "  Example.CH " } });
+  it("PLANTED DEFECT: confirms with the site's own name and folder, and says the path it is served at", async () => {
     const confirm = dialog();
     expect(confirm.type).toBe(ConfirmDialog);
     expect(confirm.props.confirmLabel).toBe("Deploy");
-    expect(confirm.props.confirmDisabled).toBe(false);
+    expect(textOf(confirm)).toContain("served at /web/simetrix-ch of the tenant's host");
     confirm.props.onConfirm();
     await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledTimes(1));
-    expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch", domain: "example.ch", site: "simetrix-ch", folder: "web", main: false });
+    expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch", site: "simetrix-ch", folder: "web", main: false });
+    hooks.states = [];
+    expect(textOf(dialog({ firstWebsite: true }))).toContain("served at / of the tenant's host");
   });
 
-  it("PLANTED INNOCENT: asks for the domain before it can confirm, and a name that differs from the site is the app name", async () => {
-    expect(dialog({ name: "simetrix-ch-2" }).props.confirmDisabled).toBe(true);
-    domainField(dialog({ name: "simetrix-ch-2" })).props.onChange({ target: { value: "simetrix.example" } });
+  it("PLANTED INNOCENT: a name that differs from the site is the app name", async () => {
     const onClose = vi.fn();
     dialog({ name: "simetrix-ch-2", onClose }).props.onConfirm();
     expect(onClose).toHaveBeenCalledTimes(1);
-    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch-2", domain: "simetrix.example", site: "simetrix-ch", folder: "web", main: false }));
+    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", { app: "simetrix-ch-2", site: "simetrix-ch", folder: "web", main: false }));
   });
 });
-
-const mainBox = (el: El): El => find(el, (e) => e.type === "input" && (e.props as { type?: string }).type === "checkbox")[0]!;
-const textOf = (node: ReactNode): string => (Array.isArray(node) ? node.map(textOf).join("") : typeof node === "string" ? node : node && typeof node === "object" && "props" in node ? textOf((node as El).props.children) : "");
-const ticked = (el: El): boolean => (mainBox(el).props as { checked?: boolean }).checked === true;
 
 describe("the Deploy dialog's Hauptseite unter /", () => {
   it("PLANTED DEFECT: is ticked for the tenant's first website and unticked for a later one", () => {
@@ -115,11 +113,9 @@ describe("the Deploy dialog's Hauptseite unter /", () => {
   });
 
   it("PLANTED DEFECT: sends the box as `main` with the request", async () => {
-    domainField(dialog({ firstWebsite: true })).props.onChange({ target: { value: "example.ch" } });
     dialog({ firstWebsite: true }).props.onConfirm();
-    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", expect.objectContaining({ domain: "example.ch", main: true })));
+    await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenCalledWith("tnt_1", expect.objectContaining({ main: true })));
     hooks.states = [];
-    domainField(dialog()).props.onChange({ target: { value: "example.ch" } });
     mainBox(dialog()).props.onChange({ target: { checked: true } });
     dialog().props.onConfirm();
     await vi.waitFor(() => expect(api.addTenantWebsite).toHaveBeenLastCalledWith("tnt_1", expect.objectContaining({ main: true })));

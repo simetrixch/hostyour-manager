@@ -27,7 +27,7 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
-import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
 // declared here and mirrored there — see that file's tenants section for what a mirror costs.
@@ -58,7 +58,7 @@ const yamlWhy = (e: unknown): string => (e instanceof Error ? e.message : String
 type RegisteredApp = TenantRegistration["apps"][number];
 
 /** An apps[] entry that is a website, the only kind that can hold `main`. */
-const isWebsite = (a: RegisteredApp): boolean => Boolean(a.folder && a.site && a.domain);
+const isWebsite = (a: RegisteredApp): boolean => Boolean(a.folder && a.site);
 
 /** `apps` with `main` on `holder` alone, or on none where `holder` is null: the one place the mark is
  *  set, so no write can leave two holders or keep a stale one. */
@@ -88,9 +88,6 @@ export interface ScannedTenant {
    *  product names the members that tenant actually has. */
   members: string[];
   identityProvider: string;
-  /** How the tenant's members are addressed below its zone, off its own registration — what the DNS
-   *  inventory names the tenant's record by (the wildcard or the zone). */
-  routing: MemberRouting;
   /** The tenant's own domain, or "" — the inventory lists its record beside the zone's. */
   ownDomain: string;
   /** The hosts that redirect to the own domain, and its alias domains — the inventory lists their records too. */
@@ -198,7 +195,7 @@ export class TenantRegistrations {
       status: "read",
       entry: {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
-        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, routing: r.data.routing, ownDomain: r.data.ownDomain,
+        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
         senderDomain: r.data.senderDomain ?? "",
       },
@@ -320,7 +317,7 @@ export class TenantRegistrations {
     // A later-added app carries its selections too into the registration's apps[] entry, and its
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
     const left = current.entry.apps.filter((a) => a.name !== app);
-    const appended = [...current.entry.apps, { name: app, ...(website ? { folder: website.folder, site: website.site, domain: website.domain } : {}), seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }];
+    const appended = [...current.entry.apps, { name: app, ...(website ? { folder: website.folder, site: website.site } : {}), seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }];
     const holdsMain = current.entry.apps.some((a) => a.name === app && a.main);
     const apps = op === "append" ? (website?.main ? markMain(appended, app) : appended) : holdsMain ? markMain(left, heirOfMain(left, mainTo)) : left;
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
@@ -378,15 +375,6 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...current.entry, size, quota }, `size(${guid}) ${trailer(runId)}`);
   }
 
-  /** Write how the tenant's members are addressed below its zone. One field of one file, like the
-   *  flips above; writing the routing it already has commits nothing. tenant-set-routing moves the
-   *  DNS record around this write. */
-  async setRouting(stage: Stage, guid: string, routing: MemberRouting, runId: string): Promise<{ commit: string }> {
-    const current = await this.readTenant(stage, guid);
-    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
-  }
-
   async setDemo(stage: Stage, guid: string, demo: boolean, runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
@@ -394,49 +382,15 @@ export class TenantRegistrations {
     return this.write(stage, guid, { ...entry, ...(demo ? { demo: true as const } : {}) }, `demo(${guid}): ${demo} ${trailer(runId)}`);
   }
 
-  /** Write the tenant's own domain ("" = none, the tenant is reached at its zone) and the hosts that
-   *  redirect to it. Two fields of one file, like the flips above; writing what it already has commits
-   *  nothing. tenant-set-own-domain moves the DNS records around this write. */
-  /** Set the tenant's own domain, and move the websites that stand on its own host with it: each one's
-   *  domain and member entry, in the same commit, because a website there is served at the root of the
-   *  tenant's host and has no alias of its own. tenant-set-own-domain. */
-  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[], runId: string, websites: readonly { app: string; domain: string; member: TenantMemberRecord }[] = []): Promise<{ commit: string }> {
+  /** Write the tenant's own domain ("" = none, the tenant is reached at its zone), the hosts that
+   *  redirect to it and its alias domains, in one commit; writing what it already has commits nothing.
+   *  tenant-set-own-domain moves the DNS records around this write. */
+  async setOwnDomain(stage: Stage, guid: string, ownDomain: string, ownDomainRedirects: readonly string[], ownDomainAliases: readonly string[], runId: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const hosts = [ownDomain, ...ownDomainRedirects, ...ownDomainAliases].filter(Boolean).join(", ");
     const { ownDomainAliases: _held, ...entry } = current.entry;
-    const moving = new Map(websites.map((w) => [w.app, w]));
-    const apps = entry.apps.map((a) => {
-      const website = moving.get(a.name);
-      if (!website) return a;
-      const { aliases: _aliases, ...rest } = a;
-      return { ...rest, domain: website.domain };
-    });
-    const members = entry.members.map((m) => moving.get(m.name)?.member ?? m);
-    const carried = websites.length ? `, ${websites.map((w) => `website ${w.app} ${w.domain}`).join(", ")}` : "";
-    return this.write(stage, guid, { ...entry, apps, members, ownDomain, ownDomainRedirects: [...ownDomainRedirects], ...(ownDomainAliases.length ? { ownDomainAliases: [...ownDomainAliases] } : {}) }, `own-domain(${guid}): ${hosts || "none"}${carried} ${trailer(runId)}`);
-  }
-
-  /** Move one website to another domain, or give it other alias domains: its apps[] entry's domain and
-   *  aliases and its member entry, resolved again with them, in one commit, because the member's values carry the domain the chart serves.
-   *  tenant-set-website-domain moves the DNS records around this write. */
-  async setWebsiteDomain(stage: Stage, guid: string, app: string, domain: string, aliases: readonly string[], member: TenantMemberRecord, runId: string, ownDomainAliases?: readonly string[]): Promise<{ commit: string }> {
-    const current = await this.readTenant(stage, guid);
-    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const entry = current.entry.apps.find((a) => a.name === app);
-    if (!entry?.domain) throw errValidation(`app "${app}" of tenant "${guid}" is no website — it names no domain`);
-    if (member.name !== app) throw errValidation(`the member entry is "${member.name}"'s, not website "${app}"'s`);
-    const apps = current.entry.apps.map((a) => {
-      if (a.name !== app) return a;
-      const { aliases: _held, ...rest } = a;
-      return { ...rest, domain, ...(aliases.length ? { aliases: [...aliases] } : {}) };
-    });
-    const members = current.entry.members.map((m) => (m.name === app ? member : m));
-    // A website moving onto the tenant's own domain hands the names it leaves to the own domain's
-    // aliases in the same commit; every other move leaves them as they stand.
-    const { ownDomainAliases: held, ...rest } = current.entry;
-    const own = ownDomainAliases ?? held ?? [];
-    return this.write(stage, guid, { ...rest, ...(own.length ? { ownDomainAliases: [...own] } : {}), apps, members }, `website-domain(${guid}): ${app} ${[domain, ...aliases].join(", ")} ${trailer(runId)}`);
+    return this.write(stage, guid, { ...entry, ownDomain, ownDomainRedirects: [...ownDomainRedirects], ...(ownDomainAliases.length ? { ownDomainAliases: [...ownDomainAliases] } : {}) }, `own-domain(${guid}): ${hosts || "none"} ${trailer(runId)}`);
   }
 
   /** Move one website to another site and the tenant's bundle to a release that carries that site:

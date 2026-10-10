@@ -55,7 +55,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -102,7 +102,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(h.sqlite.prepare("SELECT id, domain, name FROM clusters").all()).toEqual([{ id: "cl_1", domain: "s1.example.com", name: "s1" }]); // 0008: carried, named after its first label
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'clusters' AND name NOT LIKE 'sqlite_%' ORDER BY name").all())
       .toEqual([{ name: "clusters_domain_uq" }, { name: "clusters_name_uq" }, { name: "clusters_server_uq" }, { name: "clusters_slave_id_uq" }]);
-    expect(h.sqlite.prepare("SELECT id, routing FROM tenants").all()).toEqual([{ id: "tnt_1", routing: "host" }]); // 0009: carried, addressed as it was created
+    expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('tenants') WHERE name = 'routing'").all()).toEqual([]); // 0009 added it, 0026 dropped it
     expect(h.sqlite.prepare("SELECT id, own_domain FROM tenants").all()).toEqual([{ id: "tnt_1", own_domain: "" }]); // 0010: carried, at its zone
     expect(h.sqlite.prepare("SELECT id, own_domain_redirects FROM tenants").all()).toEqual([{ id: "tnt_1", own_domain_redirects: "[]" }]); // 0011: carried, none
     expect(h.sqlite.prepare("SELECT id, approved_tags FROM tenants").all()).toEqual([{ id: "tnt_1", approved_tags: "{}" }]); // 0012: carried, none approved
@@ -181,7 +181,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     run.run("run_web", JSON.stringify({ tenantId: "tnt_1", app: "cycleshop-show-digitapla-a9665c", website: { folder: "web", site: "cycleshop", domain: "cycleshop.show.example" } }), 3);
     run.run("run_app", JSON.stringify({ tenantId: "tnt_1", app: "workshop" }), 2);
     // Neither a run of another kind nor another tenant's website of the same name marks the app's row.
-    standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-domain', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
+    standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-site', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
     run.run("run_other", JSON.stringify({ tenantId: "tnt_2", app: "workshop", website: { folder: "web", site: "other-tenant", domain: "w.other.example" } }), 5);
     standing.close();
     const h = openDb(file);

@@ -98,14 +98,11 @@ export interface TenantCatalogAppView extends AppEntry {
   deployed: boolean;
 }
 
-/** One website of a tenant: its app name, the site it serves, the domain it is served at, the
- *  alias domains that redirect there (absent where there is none), and `main` where it is the tenant's
+/** One website of a tenant: its app name, the site it serves, and `main` where it is the tenant's
  *  main website (absent otherwise). */
 export interface TenantWebsiteView {
   name: string;
   site: string;
-  domain: string;
-  aliases?: string[];
   main?: boolean;
 }
 
@@ -117,7 +114,7 @@ export interface TenantWebsiteView {
  *  api-types.ts, which stands at the file-size budget. */
 export interface TenantAppCatalogView {
   apps: TenantCatalogAppView[];
-  /** The tenant's websites, off its registration: each app that names a domain. Present, empty where
+  /** The tenant's websites, off its registration: each app that names a site. Present, empty where
    *  the tenant has none, whenever the catalog answered; absent beside a `reason` or an `error`. */
   websites?: TenantWebsiteView[];
   /** The name of every member the tenant has, off its registration: its standing members and its apps,

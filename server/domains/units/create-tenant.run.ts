@@ -3,7 +3,7 @@ import { makeTenantStagesDef, bundleStageSteps } from "./tenant-stage-plan.ts";
 import { TenantSizeSchema, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
-import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, tenantDisplayName, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { refreshTenantApplications } from "./lifecycle.ts";
@@ -33,7 +33,7 @@ import type { RegistryProbe } from "../../adapters/registry/port.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { publishIssuerRecord, provisionUnitDns, standingHostFrom, tenantIssuerRecord, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { publishIssuerRecord, provisionUnitDns, standingHostFrom, tenantIssuerRecord, tenantZone } from "#unit/server/unit-dns.ts";
 import type { DnsProvider } from "../../adapters/dns/port.ts";
 import type { PublicDns } from "../../adapters/dns/public-dns.ts";
 import { tenantActivateStep } from "./create-tenant-activate.ts";
@@ -120,7 +120,7 @@ export interface TenantOnboardPorts {
    *  admin email but absent ⇒ the step fails loud (a wiring gap, never a silent skip). It is the SAME
    *  HttpActivator instance the consumer onboard uses (wire-units.ts). */
   activator?: Activator;
-  /** The tenant's ONE wildcard DNS record `*.<subdomain>.<stage apex>`: read by gate G27 at the plan
+  /** The tenant's ONE zone DNS record `<subdomain>.<stage apex>`: read by gate G27 at the plan
    *  and written by provision-dns. Optional but UNCONDITIONALLY needed — absent ⇒ G27 fails the plan
    *  (DNS is a mandatory part of the run kind), never a silent skip. */
   dns?: DnsProvider;
@@ -192,11 +192,8 @@ export const CreateTenantStageParams = z.object({
   // from params alone (the armed check calls def.steps({})). The standing members and the app members
   // are one list here — an app is a member — and `apps` above says which of them came from an app.
   members: z.array(TenantMemberRecordSchema).min(1), identityProvider: memberName,
-  // How the members are addressed below the zone, as the product's manifest declared it at
-  // validation — frozen like the members, and written to the registration, the row and the DNS record.
-  routing: z.enum(MEMBER_ROUTING).default("host"),
   // The DNS label the product marks each tenant's identity provider under (tenant spec
-  // issuerRecordLabel), frozen like the routing; absent where the product declares none.
+  // issuerRecordLabel), frozen like the members; absent where the product declares none.
   issuerRecordLabel: z.string().optional(),
   // seedUsers flips the tenant IdP's user boot-seed; displayName is the name the tenant is shown under. Both registration fields.
   seedUsers: z.boolean().default(false), displayName: tenantDisplayName.default(""),
@@ -260,10 +257,9 @@ export const CreateTenantRequest = z.object({
   subdomain: subdomainSchema,
   owner: z.string().min(1),
   // Per-app seed tiers — each selected app's Reference + Demo checkboxes. Absent ⇒ both false.
-  // A website is added to a standing tenant (tenant-add-app), which names it, points its hosts at
-  // the zone and waits for it; an entry that carries a folder, a site, a domain or the main mark is
-  // refused here.
-  apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.domain === undefined && a.main === undefined), { message: "a website is added to a standing tenant with the Deploy button of its row on the tenant's page, never when the tenant is created" }),
+  // A website is added to a standing tenant (tenant-add-app), which names it; an entry that carries a
+  // folder, a site or the main mark is refused here.
+  apps: z.array(TenantAppSchema).default([]).refine((apps) => apps.every((a) => a.folder === undefined && a.site === undefined && a.main === undefined), { message: "a website is added to a standing tenant with the Deploy button of its row on the tenant's page, never when the tenant is created" }),
   // The name the tenant is shown under, "" for none: a member without its own sender domain names
   // the tenant in the From of its mail. Changed later by tenant-set-display-name.
   seedUsers: z.boolean().default(false), displayName: tenantDisplayName.default(""),
@@ -462,17 +458,15 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
       title: "Provision the tenant's public DNS record",
       probe: (ctx) => probeTenantDns(ports, p, ctx),
       run: async (ctx) => {
-        // ONE record per tenant STAGE, named by the tenant's routing (unit-dns.ts tenantRecordName): the
-        // wildcard of its zone for `host`, the zone itself for `path`. A replace with the SAME routing
-        // re-points that record with this upsert (the replacing tenant carries the same subdomain on the
-        // same cluster; a replace across clusters is refused at the plan, tenant-replace.ts). A replace
-        // that changes the routing leaves the old routing's record standing.
+        // ONE record per tenant STAGE, its zone (unit-dns.ts tenantZone). A replace re-points that record
+        // with this upsert (the replacing tenant carries the same subdomain on the same cluster; a
+        // replace across clusters is refused at the plan, tenant-replace.ts).
         const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantRecordName(p.routing, p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+        await provisionUnitDns(ctx, { dns: ports.dns, unit: p.guid, kind: "tenant", stage: p.stage, recordName: tenantZone(p.subdomain, p.stage, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
         // The mark the product's mail service trusts the tenant's identity provider by, published long
         // before `activate` sends the first invite through that service.
         if (p.issuerRecordLabel) {
-          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.identityProvider, p.stage, p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
         } else {
           ctx.log("meta", "the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
         }
@@ -655,7 +649,6 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
         guid,
         // Frozen from the approved validation: the run executes what was approved.
         members: outcome.memberRecords, identityProvider: outcome.identityProvider,
-        routing: outcome.spec?.routing ?? "host",
         ...(outcome.spec?.issuerRecordLabel ? { issuerRecordLabel: outcome.spec.issuerRecordLabel } : {}),
         subdomain: req.subdomain,
         stage: req.stage,

@@ -183,7 +183,7 @@ export interface UnitsWiring {
   platformGitHub?: { owner: string; repo: string };
   /** A cluster's public unit apex (global.unitApex off its values chain), threaded to
    *  registerTenantRoutes so POST /api/tenants/:id/invite-admin addresses the tenant's example-auth at
-   *  `auth.<subdomain>.<unitApex>` — the host the member's chart renders. The SAME resolver the tenant
+   *  `<subdomain>.<unitApex>/auth` — the address the member's chart renders. The SAME resolver the tenant
    *  runs carry, so the route and the create-tenant `activate` step compose one host, not two.
    *  Undefined without the platform repo, which is also when the tenant family stays off. */
   resolveUnitApex?: (domain: string, stage: Stage) => Promise<string>;

@@ -191,7 +191,6 @@ describe("tenant-set-sender-domain through the Executor", () => {
         apps: [],
         members: testMembers(),
         identityProvider: "auth",
-        routing: "host",
         ownDomain: "",
         ownDomainRedirects: [],
         approvedTags: {},
@@ -219,7 +218,7 @@ describe("tenant-set-sender-domain through the Executor", () => {
     await h.reg.commitTenant({
       stage: "prod", guid: "e2e8ymj86dk8", runId: "run_other",
       registration: {
-        cluster: "s1", subdomain: "other", apps: [], members: testMembers(), identityProvider: "auth", routing: "host",
+        cluster: "s1", subdomain: "other", apps: [], members: testMembers(), identityProvider: "auth",
         ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: DOMAIN, displayName: "", seedUsers: false,
         quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
@@ -250,7 +249,6 @@ describe("tenant-set-sender-domain through the Executor", () => {
         apps: [],
         members: testMembers(),
         identityProvider: "auth",
-        routing: "host",
         ownDomain: "",
         ownDomainRedirects: [],
         approvedTags: {},

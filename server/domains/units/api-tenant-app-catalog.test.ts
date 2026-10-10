@@ -104,26 +104,26 @@ describe("GET /api/tenants/:id/app-catalog", () => {
     expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"] });
   });
 
-  it("names the tenant's websites off its registration, each with its site and domain, and every member name a new website stays clear of", async () => {
+  it("names the tenant's websites off its registration, each with its site, and every member name a new website stays clear of", async () => {
     const repo = new FakePlatformRepo();
-    const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
+    const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main" }];
     const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
     const { body } = await read(app, cookie);
-    expect(body.websites).toEqual([{ name: "example-ch", site: "main", domain: "example.ch" }]);
+    expect(body.websites).toEqual([{ name: "example-ch", site: "main" }]);
     expect(body.members).toEqual([...STANDING_MEMBER_NAMES, "erp", "example-ch"]);
   });
 
   it("marks the tenant's main website in the websites it names, and no other", async () => {
     const repo = new FakePlatformRepo();
-    const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main", domain: "example.ch", main: true }, { name: "shop", folder: "web", site: "shop", domain: "shop.example.ch" }];
+    const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main", main: true }, { name: "shop", folder: "web", site: "shop" }];
     const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
-    expect((await read(app, cookie)).body.websites).toEqual([{ name: "example-ch", site: "main", domain: "example.ch", main: true }, { name: "shop", site: "shop", domain: "shop.example.ch" }]);
+    expect((await read(app, cookie)).body.websites).toEqual([{ name: "example-ch", site: "main", main: true }, { name: "shop", site: "shop" }]);
   });
 
   // THE FIRST TENANT ONBOARDING ASKS FOR THE PACKAGES READER, NONE AFTER (#233): the template's
@@ -173,7 +173,7 @@ describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bun
   /** A tenant serving the sites show and veloluck, with the bundle given (the empty pair for none). */
   function websiteRegistrations(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): TenantRegistrations {
     const repo = new FakePlatformRepo();
-    const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show", domain: "show.example.ch" }, { name: "veloluck", folder: "web", site: "veloluck", domain: "veloluck.example.ch" }];
+    const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show" }, { name: "veloluck", folder: "web", site: "veloluck" }];
     const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...bundle });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);

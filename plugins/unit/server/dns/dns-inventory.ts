@@ -1,5 +1,5 @@
 // The DNS inventory: every record this installation is responsible for at the DNS provider, with
-// what stands there now — a consumer's host at every stage, a tenant's wildcard, the mail records
+// what stands there now — a consumer's host at every stage, a tenant's zone, the mail records
 // of a sender domain — DERIVED from the state that does exist and then READ, name by name, at the
 // provider. The book of DNS writes (db/dns-writes.ts) is the other list, and the DNS page shows it
 // first: it carries only what a run of THIS Manager inserted or updated, so it cannot answer for a
@@ -30,10 +30,10 @@
 import type { Db } from "#core/server/db/client.ts";
 import { and, eq } from "drizzle-orm";
 import { clusters, tenants } from "#core/server/db/schema/inventory.ts";
-import { findDnsWrite, listDnsWrites } from "#core/server/db/dns-writes.ts";
+import { listDnsWrites } from "#core/server/db/dns-writes.ts";
 import { DnsZoneUnknownError, type DnsProvider } from "#core/server/adapters/dns/port.ts";
-import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
-import { consumerUnitHost, issuerAddressHost, tenantOwnHosts, tenantRecordName, tenantZone } from "../../shared/unit-host.ts";
+import { STAGE, type Stage } from "#core/shared/enums.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantZone } from "../../shared/unit-host.ts";
 import { MAIL_TXT_RECORD, type MailDnsDomainView, type MailDnsRecord, type MailDnsRow, type MailDnsView } from "#core/shared/mail.ts";
 import type { DnsInventoryView, DnsOwner, DnsRecordRow, DnsRowType } from "#core/shared/dns.ts";
 
@@ -48,9 +48,9 @@ export interface DnsInventoryDeps {
    *  name: the host LABEL it stands on (the registration's `host`, never the name) and the domain it
    *  answers at beside it ("" where it has none). */
   consumers?: (cluster: string, stage: Stage) => Promise<{ name: string; host: string; fqdn: string }[]>;
-  /** Every tenant registered at one stage, with its subdomain, the routing its record is named by
-   *  (the wildcard or the zone) and the short name of the cluster it stands on. */
-  tenants?: (stage: Stage) => Promise<{ subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[]>;
+  /** Every tenant registered at one stage, with its subdomain, its own domain and the short name of
+   *  the cluster it stands on. */
+  tenants?: (stage: Stage) => Promise<{ subdomain: string; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[]>;
   /** The public apex a cluster's units serve under at one stage (`global.unitApex` off its values
    *  chain) — the same resolution the tenant surface makes. */
   unitApex?: (domain: string, stage: Stage) => Promise<string>;
@@ -125,7 +125,7 @@ async function unitRowsOf(
   deps: Required<Pick<DnsInventoryDeps, "dns" | "consumers" | "unitApex">>,
   cluster: { domain: string; name: string },
   stage: Stage,
-  tenants: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[],
+  tenants: { subdomain: string; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[],
 ): Promise<DnsRecordRow[]> {
   const { domain } = cluster;
   const apex = await deps.unitApex(domain, stage);
@@ -138,8 +138,8 @@ async function unitRowsOf(
     // installation's provider manages the domain's zone.
     if (consumer.fqdn !== "") rows.push(...(await managedRow(() => unitRow(deps.dns, owner, consumer.fqdn, host))));
   }
-  for (const { subdomain, routing, ownDomain, ownDomainRedirects, ownDomainAliases } of tenants.filter((t) => t.cluster === cluster.name)) {
-    rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, tenantRecordName(routing, subdomain, stage, apex), domain));
+  for (const { subdomain, ownDomain, ownDomainRedirects, ownDomainAliases } of tenants.filter((t) => t.cluster === cluster.name)) {
+    rows.push(await unitRow(deps.dns, { kind: "tenant", name: subdomain, stage }, tenantZone(subdomain, stage, apex), domain));
     // The own domain's and its redirect hosts' records point at the tenant's zone, not at the cluster.
     // Listed only where this installation's provider manages their zone: a record in a customer's zone
     // is not ours to show.
@@ -170,13 +170,6 @@ async function issuerRecordRows(dns: DnsProvider, db: Db): Promise<DnsRecordRow[
       verdict: standing.length === 0 ? "absent" : standing.includes(w.content) ? "standing" : "other",
       removable: true,
     });
-    // The issuer host's address record beside a host-routed mark (unit-dns.ts publishIssuerRecord),
-    // listed where the book holds it for the mark's tenant, so a removal that failed leaves it here.
-    const address = w.name.startsWith("_") ? issuerAddressHost(w.content) : null;
-    const booked = address === null ? null : findDnsWrite(db, { name: address, type: "CNAME" });
-    if (address !== null && booked !== null && booked.owner.kind === "tenant" && booked.owner.name === w.owner.name) {
-      rows.push(await unitRow(dns, owner, address, booked.content));
-    }
   }
   return rows;
 }
@@ -192,7 +185,7 @@ export async function readDnsInventory(deps: DnsInventoryDeps): Promise<DnsInven
   if (dns && consumers && tenants && unitApex) {
     const clusterRows = deps.db.select({ domain: clusters.domain, name: clusters.name }).from(clusters).all();
     for (const stage of STAGE) {
-      let tenantsAt: { subdomain: string; routing: MemberRouting; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[] = [];
+      let tenantsAt: { subdomain: string; ownDomain: string; ownDomainRedirects: string[]; ownDomainAliases?: string[]; cluster: string }[] = [];
       try {
         tenantsAt = await tenants(stage);
       } catch (e) {

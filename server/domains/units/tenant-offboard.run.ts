@@ -10,7 +10,7 @@ import { attestTenantTargetStep, loadTenantCluster, type TenantLifecyclePorts } 
 import { clearRelocationHold } from "#unit/server/lifecycle.ts";
 import { TenantLifecycleParams, tenantLocks, tenantTeardownMembers, allPruned, lingering, tenantSelector } from "./tenant-lifecycle.run.ts";
 import { deleteTenantArgoSync, deleteTenantMembers, describeTenantMemberDeletes } from "./tenant-teardown.ts";
-import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantZone } from "#unit/server/unit-dns.ts";
 import { removeTenantAppsRegistration } from "./tenant-apps-repo-remove.ts";
 
 // tenant-offboard — the tenant analogue of the consumer
@@ -120,13 +120,12 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
       title: "Remove the tenant's public DNS record",
       run: async (ctx) => {
         // The inverse of create-tenant's provision-dns (no address is left pointing nowhere
-        // — without exception, so this step is fail-CLOSED). The tenant's one record is the one its
-        // recorded routing names (tenantRecordName: the wildcard under host routing, the zone under
-        // path routing); the apex comes off the target cluster's values chain, the same read the
+        // — without exception, so this step is fail-CLOSED). The tenant's one record is its zone
+        // (tenantZone); the apex comes off the target cluster's values chain, the same read the
         // create side made.
         const tc = loadTenantCluster(ctx.db, tenantId);
         const unitApex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        const recordName = tenantRecordName(tc.routing, tc.subdomain, tc.stage, unitApex);
+        const recordName = tenantZone(tc.subdomain, tc.stage, unitApex);
         await removeUnitDns(ctx, { dns: ports.dns, unit: tc.guid, recordName });
         // The own domain's and its redirect hosts' records, where this installation wrote them; one in a
         // zone nobody here manages is the operator's to remove, which is decided before the book forgets

@@ -75,9 +75,9 @@ describe("GET /api/dns", () => {
   it("answers the book to a signed-in operator, each row judged at the provider, and refuses an anonymous request", async () => {
     const { app, db, dns, cookie } = await make();
     recordDnsWrite(db, { name: "post.example.net", type: "CNAME", content: "m1.example.com", act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_1" });
-    recordDnsWrite(db, { name: "*.acme.example.net", type: "CNAME", content: "m1.example.com", act: "updated", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_2" });
+    recordDnsWrite(db, { name: "acme.example.net", type: "CNAME", content: "m1.example.com", act: "updated", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_2" });
     recordDnsWrite(db, { name: "example.com", type: "TXT", content: "v=spf1 ip4:203.0.113.9 -all", act: "inserted", owner: { kind: "mail", name: "example.com" }, runId: "run_3" });
-    dns.seed("*.acme.example.net", "CNAME", "s9.example.com"); // changed by a hand at the provider since the write
+    dns.seed("acme.example.net", "CNAME", "s9.example.com"); // changed by a hand at the provider since the write
     dns.seed("example.com", "TXT", "MS=ms12345678", "v=spf1 ip4:203.0.113.9 -all"); // standing, beside another service's TXT
     expect((await app.request("/api/dns/writes")).status).toBe(401);
     const res = await app.request("/api/dns/writes", { headers: { cookie: `${SESSION_COOKIE}=${cookie}` } });
@@ -86,11 +86,11 @@ describe("GET /api/dns", () => {
     expect(body.rows.map((r) => `${r.act} ${r.type} ${r.name} (${r.owner.kind} ${r.owner.name}${r.owner.stage ? " " + r.owner.stage : ""}) by ${r.runId}: ${r.verdict}`).sort()).toEqual([
       "inserted CNAME post.example.net (consumer post prod) by run_1: standing",
       "inserted TXT example.com (mail example.com) by run_3: standing",
-      "updated CNAME *.acme.example.net (tenant zsjs023ctne0 prod) by run_2: other",
+      "updated CNAME acme.example.net (tenant zsjs023ctne0 prod) by run_2: other",
     ]);
-    const wildcard = body.rows.find((r) => r.name === "*.acme.example.net")!;
-    expect(wildcard.found).toBe("s9.example.com");
-    expect(Date.parse(wildcard.writtenAt)).not.toBeNaN();
+    const zone = body.rows.find((r) => r.name === "acme.example.net")!;
+    expect(zone.found).toBe("s9.example.com");
+    expect(Date.parse(zone.writtenAt)).not.toBeNaN();
     expect(body.rows.find((r) => r.type === "TXT")!.found).toBe("MS=ms12345678 | v=spf1 ip4:203.0.113.9 -all");
     expect(body.skipped).toEqual([]);
     expect(Date.parse(body.readAt)).not.toBeNaN();

@@ -49,7 +49,6 @@ export function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase
       // where their status lives. Derived from the two fields rather than carried as a third, which
       // could drift out of step with them.
       identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
-      routing: p.routing,
       ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
       seedUsers: p.seedUsers,
       displayName: p.displayName,

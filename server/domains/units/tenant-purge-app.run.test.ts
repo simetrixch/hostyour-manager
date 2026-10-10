@@ -38,7 +38,7 @@ function seedTenants(opts: { webStatus?: TenantStatus; tenantStatus?: TenantStat
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
   for (const [id, guid, status] of [["tnt_1", GUID, opts.tenantStatus ?? "active"], ["tnt_2", OTHER_GUID, "active"]] as const) {
     db.db.insert(tenants).values({
-      id, clusterId: "cls_1", guid, subdomain: id, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {},
+      id, clusterId: "cls_1", guid, subdomain: id, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {},
       suspended: false, status,
     }).run();
   }
@@ -86,7 +86,7 @@ async function world(left: { namespace?: boolean; workloads?: string[]; serviceC
   await registrations.commitTenant({
     stage: "prod", guid: GUID, runId: "run_onb",
     registration: {
-      cluster: "s1", members: testMembers(apps), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+      cluster: "s1", members: testMembers(apps), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       subdomain: "simetrix", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });

@@ -148,7 +148,7 @@ function seedSlave(): void {
 
 describe("create-tenant first-admin invite (activate step)", () => {
   const TOKEN_PATH = `${memberNamespace(GUID, "auth", "prod")}/hostyour-app-secrets/AUTH_BOOTSTRAP_TOKEN`;
-  const AUTH_URL = "https://auth.acme.example.com/api/v1/bootstrap/invite-admin";
+  const AUTH_URL = "https://acme.example.com/auth/api/v1/bootstrap/invite-admin";
 
   const activateStep = (prt: TenantOnboardPorts, p: CreateTenantParams) =>
     makeCreateTenantDef(prt).steps(p).find((s) => s.name === "activate")!;
@@ -163,7 +163,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
   });
 
   // The apex is the target cluster's own (global.unitApex off its values chain) — the same value
-  // provision-dns composes the tenant's wildcard `*.<subdomain>.<unitApex>` from, and the same three
+  // provision-dns composes the tenant's zone `<subdomain>.<unitApex>` from, and the same three
   // parts the auth member's chart renders. Composing from `p.domain` instead posts the bootstrap token
   // at a host that resolves nowhere on every cluster that is not itself the apex, which install.sh
   // makes the normal case: it defaults `unit-apex` to the cluster FQDN minus its first label.
@@ -171,7 +171,7 @@ describe("create-tenant first-admin invite (activate step)", () => {
     const activator = new FakeActivator();
     const p = params({ adminEmail: "admin@acme.test" });
     await activateStep(ports({ activator, cluster: withToken(), resolveUnitApex: async () => "zone.example" }), p).run(ctx(p));
-    expect(activator.calls[0]?.url).toBe("https://auth.acme.zone.example/api/v1/bootstrap/invite-admin");
+    expect(activator.calls[0]?.url).toBe("https://acme.zone.example/auth/api/v1/bootstrap/invite-admin");
     expect(activator.calls[0]?.url).not.toContain("s1.example"); // the cluster is reached there; the tenant does not serve there
   });
 
@@ -238,9 +238,9 @@ describe("create-tenant first-admin invite (activate step)", () => {
     const publicDns = new FakePublicDns();
     const p = params({ adminEmail: "admin@acme.test", issuerRecordLabel: "_digita-idp" });
     const step = activateStep(ports({ activator, cluster: withToken(), publicDns }), p);
-    await expect(step.run(ctx(p))).rejects.toThrow(/_digita-idp\.auth\.acme\.example\.com does not resolve to https:\/\/auth\.acme\.example\.com at a public resolver yet .* retry this step once it resolves/);
+    await expect(step.run(ctx(p))).rejects.toThrow(/_digita-idp\.acme\.example\.com does not resolve to https:\/\/acme\.example\.com\/auth at a public resolver yet .* retry this step once it resolves/);
     expect(activator.calls).toHaveLength(0);
-    publicDns.seedTxt("_digita-idp.auth.acme.example.com", "https://auth.acme.example.com");
+    publicDns.seedTxt("_digita-idp.acme.example.com", "https://acme.example.com/auth");
     await step.run(ctx(p));
     expect(activator.calls).toHaveLength(1);
   });

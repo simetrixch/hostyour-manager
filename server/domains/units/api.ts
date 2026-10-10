@@ -380,7 +380,7 @@ export interface TenantApiDeps extends ConsumerApiDeps {
   follower?: TenantFollower;
   /** The public apex (global.unitApex) of a cluster, read off its values chain on the platform repo —
    *  the SAME resolver the tenant runs carry (create-tenant.run.ts TenantOnboardPorts). The invite
-   *  route needs it because a tenant member is addressed at `<member>.<subdomain>.<unitApex>` and the
+   *  route needs it because a tenant member is addressed at `<subdomain>.<unitApex>/<member>` and the
    *  apex is nowhere on the tenants/clusters rows: `clusters.domain` is where the CLUSTER is reached,
    *  while the apex is where its UNITS serve. Absent when tenant onboarding is not wired ⇒ the invite
    *  route answers 501, like the other mutating routes. */
@@ -559,15 +559,15 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const { clusterReader } = await resolver.resolve(found.clusterId);
     const token = await clusterReader.readSecretValue(ns, TENANT_SECRET, BOOTSTRAP_TOKEN_KEY);
     if (!token) throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — cannot invite the first admin`);
-    // WHERE the tenant's own example-auth serves: the address its routing gives the IdP member
-    // (tenantMemberUrl), the one its ingress renders and its record covers. The apex comes off the
+    // WHERE the tenant's own example-auth serves: the address `tenantMemberUrl` gives the IdP
+    // member, the one its ingress renders and its record covers. The apex comes off the
     // target cluster's values chain, never off `found.domain` — that column is where the CLUSTER is reached,
     // and install.sh defaults the apex to the cluster FQDN minus its first label, so composing from
     // the domain posts the bootstrap token at a host nothing serves.
     const result = await inviteOrResendTenantAdmin({
       activator,
       token,
-      idpUrl: tenantMemberUrl(found.routing, found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage), found.ownDomain),
+      idpUrl: tenantMemberUrl(found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage), found.ownDomain),
       email: parsed.data.email,
       signal: c.req.raw.signal,
     });

@@ -80,7 +80,7 @@ describe("tenant-restore", () => {
     expect(names).toContain(`reloc-restore-bucket-${GUID}`);
     expect(names).toContain(`reloc-verify-mongo-${GUID}`);
     // The one wildcard record points at the target cluster.
-    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
+    expect(f.dns.record(`${SUBDOMAIN}.example.com`, "CNAME")).toBe(TARGET.domain);
     // The rows settled LAST: active, on the target.
     const row = db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get();
     expect(row?.status).toBe("active");
@@ -102,7 +102,7 @@ describe("tenant-restore", () => {
 
     // Nothing cleared the folder or the source, nothing switched DNS, nothing settled the rows.
     expect([...jobNames(f.source), ...jobNames(f.target)].find((n) => n.startsWith("reloc-clear-source"))).toBeUndefined();
-    expect(f.dns.record(`*.${SUBDOMAIN}.example.com`, "A")).toBeUndefined();
+    expect(f.dns.record(`${SUBDOMAIN}.example.com`, "A")).toBeUndefined();
     expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_1")).get()?.status).toBe("offboarded");
   });
 

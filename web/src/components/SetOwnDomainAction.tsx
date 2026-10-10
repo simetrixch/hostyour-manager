@@ -7,8 +7,8 @@ import { ConfirmDialog } from "./ConfirmDialog.tsx";
  *  operator types the domain without `www.`: the tenant is served at `<domain>` and `www.<domain>`
  *  redirects there, as each alias domain and its `www.` do, permanently. Confirming only PLANS the run: it points both hosts at the tenant's zone (or names
  *  the record to set where a host's zone is not managed here), records them, and waits until the
- *  identity provider answers at the domain and the www host redirects; the previous hosts' records
- *  are removed only then. */
+ *  tenant web server answers at `/health` of the domain; the previous hosts are retired only then, and
+ *  none of them redirects. */
 export function SetOwnDomainAction(props: {
   subdomain: string;
   ownDomain: string;
@@ -56,7 +56,7 @@ export function SetOwnDomainAction(props: {
               </label>
               <span className="field__hint">
                 Each alias and its www host redirect permanently to the own domain.
-                {moving ? ` ${standing} stays as an alias after the move; a domain that is an alias now cannot become the own domain in the same run.` : ""}
+                {moving ? ` ${standing} and its www host are removed once the new domain answers, and do not redirect; a domain that is an alias now cannot become the own domain in the same run.` : ""}
               </span>
             </p>
           )}
@@ -74,9 +74,8 @@ export function SetOwnDomainAction(props: {
           )}
           <p>
             Every member is then served under a path of this host, which replaces the zone as the tenant&apos;s one
-            host; the zone redirects to it too. The run points both hosts at the zone — or names the record to set
-            where a host&apos;s DNS zone is not managed here — and waits until the identity provider answers at the
-            domain and the www host redirects. Where a host&apos;s DNS zone is not managed here, set its record
+            host. The run points both hosts at the zone — or names the record to set where a host&apos;s DNS zone
+            is not managed here — and waits until the tenant web server answers at /health of the domain. Where a host&apos;s DNS zone is not managed here, set its record
             (a CNAME onto the tenant&apos;s zone) before you approve: from the moment the domain is recorded, the
             tenant answers only there.
           </p>

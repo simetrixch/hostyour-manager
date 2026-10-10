@@ -14,7 +14,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { StepCtx, Cleanup } from "../../executor/types.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName } from "#unit/shared/unit-host.ts";
+import { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
 import { ConsumerRegistrationSchema, type TenantSpec } from "../../../shared/consumer.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
 import { createTestLogger, fakePost, KEPT } from "./tenant-sender-domain.fixture.ts";
@@ -77,7 +77,7 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
   cloud.seed(cloud.booksBranch, "registrations/post/prod.yaml", JSON.stringify(consumer));
 
   const tenantReg = {
-    cluster: "s1", members: structuredClone(testMembers(["web"])), identityProvider: "auth", routing: "host" as const,
+    cluster: "s1", members: structuredClone(testMembers(["web"])), identityProvider: "auth",
     ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain, displayName: "", subdomain: "shop",
     apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {} }], seedUsers: false, quota: TEST_QUOTA,
     resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
@@ -87,14 +87,14 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
 
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "shop", stage: "prod",
-    members: MEMBERS, identityProvider: "auth", senderDomain, routing: "host", ownDomain: "",
+    members: MEMBERS, identityProvider: "auth", senderDomain, ownDomain: "",
     ownDomainRedirects: [], status: "active",
   }).run();
 
   const unitHost = consumerUnitHost("post", "prod", FROM);
-  const tenantHost = tenantRecordName("host", "shop", "prod", FROM);
-  const issuerName = tenantIssuerRecord("_idp", "host", "auth", "prod", "shop", FROM).name;
-  const issuer = tenantMemberUrl("host", "auth", "prod", "shop", FROM, "");
+  const tenantHost = tenantZone("shop", "prod", FROM);
+  const issuerName = tenantIssuerRecord("_idp", "auth", "prod", "shop", FROM).name;
+  const issuer = tenantMemberUrl("auth", "prod", "shop", FROM, "");
 
   dns.seed(unitHost, "CNAME", OLD_HOST);
   recordDnsWrite(db.db, { name: unitHost, type: "CNAME", content: OLD_HOST, act: "inserted", owner: { kind: "consumer", name: "post", stage: "prod" }, runId: "run_seed" });
@@ -107,7 +107,7 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
     await keepUnitCallKey(store, { unit: "post", stage: "prod", key: "POST_MANAGER_KEY", value: KEPT });
   }
 
-  const lists: Record<string, string[]> = opts.lists ?? (senderDomain ? { [senderDomain]: [tenantMemberUrl("host", "auth", "prod", "shop", FROM, "")] } : {});
+  const lists: Record<string, string[]> = opts.lists ?? (senderDomain ? { [senderDomain]: [tenantMemberUrl("auth", "prod", "shop", FROM, "")] } : {});
   const post = fakePost(lists);
 
   const defaultSpec: TenantSpec = {
@@ -115,7 +115,6 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
     perApp: { engine: { chart: "charts/engine" }, front: { chart: "charts/front" } },
     buildRepos: [],
     libraryRepos: [],
-    routing: "host",
     ...(opts.hasIssuersRoute !== false ? { senderDomainIssuers: { url: ISSUERS_ROUTE, unit: "post" } } : {}),
   };
   const spec = opts.customSpec !== undefined ? opts.customSpec : defaultSpec;

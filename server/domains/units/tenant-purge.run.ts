@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
-import { MEMBER_ROUTING, STAGE, type Stage } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 import type { TenantPurgeInput } from "../../../shared/api-types.ts";
 import { guid as guidSchema } from "../../../shared/tenant.ts";
 import { type TenantLifecyclePorts } from "./lifecycle.ts";
@@ -18,7 +18,7 @@ import { tenantLocks, tenantSelector, tenantTeardownMembers } from "./tenant-lif
 import { resolveTeardownTarget } from "./tenant-replace.ts";
 import type { ScannedTenant } from "./tenant-registrations.ts";
 import { tenantTeardownSteps, TenantTeardownTargetSchema, type TenantTeardownOpts, type TenantTeardownTarget } from "./tenant-teardown.ts";
-import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantRecordName } from "#unit/server/unit-dns.ts";
+import { isTenantRecord, removeBookedRecords, removeIssuerRecords, removeUnitDns, tenantZone } from "#unit/server/unit-dns.ts";
 import { tenantE2ePasswordPath } from "#unit/server/adapters/vault/seeder-port.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { forgetSecretEntry, tenantGoogleTranslationEntry } from "../../db/secret-writes.ts";
@@ -271,7 +271,7 @@ function loadPurgeCluster(db: Db, p: TenantPurgeRequest): TenantPurgeCluster {
  *  namespace reap asks the CLUSTER by label, which finds every member namespace including the ones no
  *  source names. `watchNames` follows the members: an Application that still lingers under this guid
  *  is what the settle guard has to see, and one long pruned reads Missing at once.
- *  The subdomain is deliberately NOT read off a settled row: the wildcard `*.<subdomain>.<stage apex>`
+ *  The subdomain is deliberately NOT read off a settled row: the zone `<subdomain>.<stage apex>`
  *  may by now belong to a tenant that took the subdomain after this one was offboarded, and remove-dns
  *  deletes by name. It is left empty; remove-dns reads the emptiness as "no record of this tenant's own
  *  stands" and removes nothing (an offboard already removed it). */
@@ -486,15 +486,12 @@ function tenantDeprovisionSteps(ports: TenantPurgePorts, p: TenantPurgeParams): 
           ctx.log("meta", `tenant ${p.guid} has no subdomain this purge may name (no live inventory row or pointer carries one), so no record under ${apexes.join(", ")} is removed: an offboard removed them for a settled tenant, and a newer tenant may stand on the subdomain by now. A record there written before an earlier purge removed the registration stands until it is removed by hand`);
           return;
         }
-        // The record under EVERY routing, because an orphan's routing is known to no row, but only a
-        // record that is the tenant's own (isTenantRecord): the zone name may be another unit's host.
-        // Removing an absent record is a no-op (removeUnitDns).
-        for (const routing of MEMBER_ROUTING) {
-          const recordName = tenantRecordName(routing, p.target.subdomain, c.stage, unitApex);
-          if (!isTenantRecord(ctx.db, recordName, p.guid)) {
-            ctx.log("meta", `${recordName} is not recorded as tenant ${p.guid}'s own — left standing`);
-            continue;
-          }
+        // Only a record that is the tenant's own (isTenantRecord): the zone name may be another unit's
+        // host. Removing an absent record is a no-op (removeUnitDns).
+        const recordName = tenantZone(p.target.subdomain, c.stage, unitApex);
+        if (!isTenantRecord(ctx.db, recordName, p.guid)) {
+          ctx.log("meta", `${recordName} is not recorded as tenant ${p.guid}'s own — left standing`);
+        } else {
           await removeUnitDns(ctx, { dns: ports.dns, unit: p.guid, recordName });
         }
         // Every other record the book names as this tenant's: its own domain's, where written here.
@@ -645,7 +642,6 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
         .select({
           senderDomain: tenants.senderDomain,
           subdomain: tenants.subdomain,
-          routing: tenants.routing,
           identityProvider: tenants.identityProvider,
         })
         .from(tenants)
@@ -659,7 +655,6 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
         const unitApex = await ports.resolveUnitApex(c.domain, req.stage);
         const issuer = stageServiceIssuer(
           {
-            routing: source.routing,
             identityProvider: source.identityProvider,
             stage: req.stage,
             subdomain: source.subdomain,
@@ -684,7 +679,7 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
           `then delete every namespace labelled platform/tenant=${req.guid} as the backstop reap — which takes each member's ServiceClaim with it, and the service-provisioner drops that claim's databases together with its user — ` +
           `then DESTROY the tenant's Vault crypto entry ${c.stage}/tenants/${req.guid} (its signing keypair, TOTP key, bootstrap token and engine key, every version), withdraw every object-storage key named ${tenantKeyName(req.guid, c.stage)}` +
           (target.subdomain
-            ? ", then remove the tenant's wildcard DNS record"
+            ? ", then remove the tenant's zone DNS record"
             : ", and remove only the DNS records of its own domains that the book of DNS writes names as this tenant's, none under the platform's domain: no live inventory row or pointer names this tenant's subdomain, and a record there may stand for a newer tenant by now") +
           (target.tenantId
             ? ", and only THEN mark the tenant + its app rows PURGED — a distinct state from the \"offboarded\" an offboard leaves, so this tenant reads as deprovisioned rather than merely un-deployed: it drops off the Tenants list and offers no further removal, while its rows are kept as the trace. The rows are settled LAST, so a delete that fails leaves the tenant visible and purgeable"

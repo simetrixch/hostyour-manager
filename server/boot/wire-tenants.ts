@@ -36,7 +36,6 @@ import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "../domains/units/tenant-registrations.ts";
 import { makeTenantRestartWorkloadsDef } from "../domains/units/restart-workloads.run.ts";
 import { makeTenantSetSizeDef } from "../domains/units/set-size.run.ts";
-import { makeTenantSetRoutingDef } from "../domains/units/tenant-routing.run.ts";
 import { makeTenantSetOwnDomainDef } from "../domains/units/tenant-own-domain.run.ts";
 import type { TenantLifecyclePorts } from "../domains/units/lifecycle.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "../domains/units/create-tenant.run.ts";
@@ -49,7 +48,6 @@ import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/unit
 import { tenantBundleManifest } from "../domains/units/engine-line.ts";
 import { ensureTenantAppDatabases, type TenantManifestReader } from "../domains/units/tenant-app-databases.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
-import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantSetWebsiteSiteDef } from "../domains/units/tenant-website-site.run.ts";
 import { makeTenantSetWebsiteMainDef } from "../domains/units/tenant-website-main.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
@@ -78,7 +76,7 @@ import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
 // app, so it gets a longer budget before the set-watch fails loudly.
 const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
 
-// How long the routing move waits for the IdP to answer at its new address, and how often it asks:
+// How long a move of an address waits for it to answer, and how often it asks:
 // the product's charts reach the cluster through the deploy carry and an ArgoCD sync, which take
 // minutes, so the budget is the carry's interval twice over.
 const ROUTING_WAIT_MS = 30 * 60_000;
@@ -286,7 +284,7 @@ export function buildTenantOnboarding(
     // The tenant first-admin invite (create-tenant-activate.ts) — the SAME activation client the consumer
     // family uses (one instance, from buildUnits). Used only when the operator supplies an admin email.
     activator,
-    // The tenant's ONE wildcard record (provision-dns) + the apex it is composed under.
+    // The tenant's ONE zone record (provision-dns) + the apex it is composed under.
     ...(dns ? { dns } : {}),
     // The public resolvers `activate` asks whether the identity provider's DNS mark resolves before
     // the first invite — the way the product's mail service resolves it.
@@ -367,9 +365,8 @@ export function buildTenantOnboarding(
       // registered into the slot by the time the run starts.
       units: () => unitProbes,
     }),
-    makeAddAppDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
-    makeTenantSetWebsiteDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
-    makeTenantSetWebsiteSiteDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    makeAddAppDef(onboardPorts),
+    makeTenantSetWebsiteSiteDef(onboardPorts),
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),
@@ -396,9 +393,8 @@ export function buildTenantOnboarding(
     makeTenantRestartWorkloadsDef(lifecyclePorts),
     // Renders the members at the size asked for, so it reads the deploy repository like create-tenant.
     makeTenantSetSizeDef(onboardPorts),
-    // The routing move reads the IdP at its new address with the same public probe the moves between
-    // clusters read with.
-    makeTenantSetRoutingDef({ ...lifecyclePorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    // The own-domain move reads the IdP at its new address with the same public probe the moves
+    // between clusters read with.
     makeTenantSetOwnDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
     makeOffboardTenantDef(lifecyclePorts),
     // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory

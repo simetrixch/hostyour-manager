@@ -8,8 +8,7 @@ import type { DnsProvider } from "../../adapters/dns/port.ts";
 import { readOnlyPlatformRepo, type PlatformRepo } from "../../adapters/git/port.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { consumerUnitHost, tenantOwnHosts, tenantRecordName, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
-import { websiteHosts } from "./website-domain.ts";
+import { consumerUnitHost, tenantOwnHosts, tenantZone, tenantMemberUrl } from "#unit/shared/unit-host.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
@@ -149,15 +148,15 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
       if (!read) throw errValidation(`tenant ${pointer.guid}/${stage} disappeared while planning`);
       const entry = read.entry, owner = { kind: "tenant", name: pointer.guid, stage };
       const row = db.select().from(tenants).where(and(eq(tenants.guid, pointer.guid), eq(tenants.stage, stage))).get();
-      if (row && (row.clusterId !== cluster.id || row.subdomain !== entry.subdomain || row.routing !== entry.routing || row.ownDomain !== entry.ownDomain || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(entry.ownDomainRedirects))) throw errValidation(`tenant ${pointer.guid}/${stage} inventory disagrees with its registration`);
+      if (row && (row.clusterId !== cluster.id || row.subdomain !== entry.subdomain || row.ownDomain !== entry.ownDomain || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(entry.ownDomainRedirects))) throw errValidation(`tenant ${pointer.guid}/${stage} inventory disagrees with its registration`);
       const identityProvider = entry.identityProvider;
       if (row && row.identityProvider !== identityProvider) throw errValidation(`tenant ${pointer.guid}/${stage} identity-provider inventory disagrees with its registration`);
       const changes = domainChanges(entry, fromDomain, toDomain, ["ownDomain", "ownDomainRedirects", "apps", "members"], path => snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: domain field ${path.join(".")} cannot be safely journaled; its private address must be resolved before cutover`));
       snapshot.registrations.push({ kind: "tenant", name: pointer.guid, stage, changes });
       const ownDomainAfter = movePublicAddress(entry.ownDomain, fromDomain, toDomain), redirectsAfter = entry.ownDomainRedirects.map(h => moveDomain(h, fromDomain, toDomain));
       snapshot.tenants.push({ id: row?.id ?? null, guid: pointer.guid, stage,
-        issuerBefore: tenantMemberUrl(entry.routing, identityProvider, stage, entry.subdomain, cluster.apexBefore, entry.ownDomain),
-        issuerAfter: tenantMemberUrl(entry.routing, identityProvider, stage, entry.subdomain, cluster.apexAfter, ownDomainAfter),
+        issuerBefore: tenantMemberUrl(identityProvider, stage, entry.subdomain, cluster.apexBefore, entry.ownDomain),
+        issuerAfter: tenantMemberUrl(identityProvider, stage, entry.subdomain, cluster.apexAfter, ownDomainAfter),
         cookieBefore: entry.ownDomain ? "" : tenantZone(entry.subdomain, stage, cluster.apexBefore),
         cookieAfter: ownDomainAfter ? "" : tenantZone(entry.subdomain, stage, cluster.apexAfter),
         cookieOverrides: cookieOverrides(entry.members, fromDomain, toDomain),
@@ -165,11 +164,11 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
         senderDomain: entry.senderDomain, zoneBefore: tenantZone(entry.subdomain, stage, cluster.apexBefore),
         zoneAfter: tenantZone(entry.subdomain, stage, cluster.apexAfter), clusterId: cluster.id, members: entry.members.map((m) => m.name) });
       snapshot.coverage.tenants++;
-      await addRecord(tenantRecordName(entry.routing, entry.subdomain, stage, cluster.apexBefore), "CNAME", cluster.fromFqdn, cluster.toFqdn, owner);
+      await addRecord(tenantZone(entry.subdomain, stage, cluster.apexBefore), "CNAME", cluster.fromFqdn, cluster.toFqdn, owner);
       const marks = book.filter(w => w.type === "TXT" && w.name.startsWith("_") && w.owner.kind === "tenant" && w.owner.name === pointer.guid && w.owner.stage === stage);
       if (!marks.length) snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: no booked identity-provider mark`);
       for (const mark of marks) await addRecord(mark.name, "TXT", mark.content, movePublicAddress(mark.content, fromDomain, toDomain), owner);
-      for (const host of new Set([...tenantOwnHosts(entry.ownDomain, entry.ownDomainRedirects, entry.ownDomainAliases), ...entry.apps.flatMap(a => a.domain ? websiteHosts(a.domain, a.aliases) : [])])) {
+      for (const host of new Set(tenantOwnHosts(entry.ownDomain, entry.ownDomainRedirects, entry.ownDomainAliases))) {
         // External web hosts retain their record names; only an installation-zone target is repointed.
         const target = tenantZone(entry.subdomain, stage, cluster.apexBefore);
         await addRecord(host, "CNAME", target, moveDomain(target, fromDomain, toDomain), owner);

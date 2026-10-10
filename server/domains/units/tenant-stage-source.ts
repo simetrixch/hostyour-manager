@@ -19,7 +19,6 @@ import { tenantZone, standingHostFrom } from "#unit/server/unit-dns.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { appIdentityRowId } from "../../security/app-identity.ts";
 import { provisionOwnDomainRecord, recordsToReplace } from "./own-domain-records.ts";
-import { websiteHosts } from "./website-domain.ts";
 import { hostAtStage } from "./stage-hosts.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import { TENANT_BRINGS } from "#unit/shared/unit-size.ts";
@@ -47,24 +46,7 @@ export async function planStandingStage(
   const atStage = (host: string): Promise<string> => hostAtStage(ports.dns, host, source.stage, placement.stage, ctx.signal);
   const ownDomain = await atStage(entry.ownDomain);
   const ownDomainRedirects = await Promise.all(entry.ownDomainRedirects.map(async (host) => host.startsWith("www.") ? `www.${await atStage(host.slice(4))}` : atStage(host)));
-  // A website's alias domains stay with the stage they were given on, as the own domain's do (never
-  // copied): the new stage is given its own with "Domain and aliases…".
-  const apps = await Promise.all(entry.apps.map(async ({ aliases: _aliases, ...app }) => ({ ...app, ...(app.domain ? { domain: await atStage(app.domain) } : {}) })));
-  const domains = new Map(entry.apps.filter((app) => app.domain).map((app) => [app.domain!, apps.find((a) => a.name === app.name)!.domain!]));
-  // The members' values carry the alias list the fanout rendered from `{aliases}`: it goes with its
-  // key, and so does an object the drop leaves empty, as the fanout renders a website without aliases.
-  const aliasHosts = new Set(entry.apps.flatMap((app) => app.aliases ?? []));
-  const DROPPED = Symbol("dropped");
-  const transform = (value: unknown): unknown => {
-    if (typeof value === "string") return domains.get(value) ?? value;
-    if (Array.isArray(value)) return value.length > 0 && value.every((v) => typeof v === "string" && aliasHosts.has(v)) ? DROPPED : value.map(transform);
-    if (value && typeof value === "object") {
-      const entries = Object.entries(value).map(([key, v]) => [key, transform(v)] as const).filter(([, v]) => v !== DROPPED);
-      return entries.length === 0 && Object.keys(value).length > 0 ? DROPPED : Object.fromEntries(entries);
-    }
-    return value;
-  };
-  const members = entry.members.map((member) => ({ ...member, sources: member.sources.map((s) => { const values = transform(s.values); return { ...s, values: (values === DROPPED ? {} : values) as Record<string, unknown> }; }) }));
+  const { apps, members } = entry;
   const pins = await stagePinsOf((chart) => ports.registrations.listPinnedBuilds(placement.stage, chart), members);
   const approvedTags = Object.fromEntries(members.map((member) => [member.name, { ...entry.approvedTags[member.name], ...pins[member.name] }]));
   const channels = await ports.channelStages();
@@ -79,7 +61,7 @@ export async function planStandingStage(
     probeGuid: source.guid, subdomain: entry.subdomain, seedUsers: false, demo: entry.demo === true,
     quota: resolveUnitQuota(ctx.db, request.size, TENANT_BRINGS), size: request.size,
     appsImage: entry.appsImage, appsImageTag: entry.appsImageTag, ownDomain, ownDomainRedirects,
-    approvedTags, routing: entry.routing, clusterValueFiles, clusterFqdn: rc.domain,
+    approvedTags, clusterValueFiles, clusterFqdn: rc.domain,
     ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
   }, { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) });
   if (outcome.verdict !== "pass") return { outcome: "rejected", summary: `Add ${placement.stage} to tenant ${source.guid} rejected: ${outcome.report.gates.filter((g) => g.status !== "pass").map((g) => g.id).join(", ")}`, planJson: outcome.report };
@@ -88,7 +70,7 @@ export async function planStandingStage(
     guid: source.guid, subdomain: entry.subdomain, stage: placement.stage,
     clusterId: rc.clusterId, cluster: rc.cluster, domain: rc.domain, chartsRef: outcome.resolvedSha,
     registryHost, apps, members: outcome.memberRecords, identityProvider: entry.identityProvider,
-    routing: entry.routing, seedUsers: false, demo: entry.demo === true, size: request.size, owner: source.owner,
+    seedUsers: false, demo: entry.demo === true, size: request.size, owner: source.owner,
     // A new stage is shown under the name the stage it is added from carries.
     displayName: entry.displayName,
     report: outcome.report, expectedApps: tenantApplicationSet(members.map((m) => m.name), source.guid, placement.stage),
@@ -133,9 +115,7 @@ export function stageHostsStep(ports: TenantOnboardPorts, p: CreateTenantStagePa
       if (!row) throw errValidation(`tenant ${p.guid} ${p.stage} has no provisional inventory row`);
       const tc = loadTenantCluster(ctx.db, row.id);
       const apex = await ports.resolveUnitApex(p.domain, p.stage);
-      // Every host a website answers at, its www. included, as the Deploy button of a website writes them; a host the own
-      // domain holds is written once.
-      const hosts = [...new Set([p.ownDomain, ...(p.ownDomainRedirects ?? []), ...p.apps.flatMap((app) => (app.domain ? websiteHosts(app.domain) : []))].filter((host): host is string => Boolean(host)))];
+      const hosts = [p.ownDomain, ...(p.ownDomainRedirects ?? [])].filter((host): host is string => Boolean(host));
       for (const host of hosts) {
         const replacements = await recordsToReplace(ctx.db, ports, p.guid, tenantZone(tc.subdomain, tc.stage, apex), [host], ctx.signal);
         if (replacements.length) throw errValidation(`new stage host ${host} already has web records; Add stage replaces no existing host`);

@@ -10,7 +10,7 @@ import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { recordDnsWrite } from "../../db/dns-writes.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { APP_SETTLED_STATUS, TENANT_SETTLED_STATUS, type DnsWriteOwnerKind, type Stage } from "../../../shared/enums.ts";
-import { consumerUnitHost, tenantRecordName } from "#unit/shared/unit-host.ts";
+import { consumerUnitHost, tenantZone } from "#unit/shared/unit-host.ts";
 
 export interface RepointUnitRecordsDeps {
   dns: DnsProvider | undefined;
@@ -19,7 +19,7 @@ export interface RepointUnitRecordsDeps {
 }
 
 /** Every unit record of the cluster that points at `from`, pointed at `to`: each consumer's host and
- *  each tenant's wildcard of the cluster's units that are not settled. Each record is READ before
+ *  each tenant's zone of the cluster's units that are not settled. Each record is READ before
  *  it is written, and one pointing anywhere else is left and named — it is not this cluster's to
  *  move. Every write enters the book of DNS writes, as a unit's own provision-dns does. Answers the
  *  records it moved. */
@@ -45,11 +45,11 @@ export async function repointUnitRecords(
       .all()
       .map((a) => ({ kind: "consumer" as const, owner: a.name, stage: a.stage, record: (apex: string) => consumerUnitHost(a.host, a.stage, apex) })),
     ...ctx.db
-      .select({ guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, routing: tenants.routing })
+      .select({ guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage })
       .from(tenants)
       .where(and(eq(tenants.clusterId, input.clusterId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
       .all()
-      .map((t) => ({ kind: "tenant" as const, owner: t.guid, stage: t.stage, record: (apex: string) => tenantRecordName(t.routing, t.subdomain, t.stage, apex) })),
+      .map((t) => ({ kind: "tenant" as const, owner: t.guid, stage: t.stage, record: (apex: string) => tenantZone(t.subdomain, t.stage, apex) })),
   ];
   const moved: string[] = [];
   for (const unit of units) {

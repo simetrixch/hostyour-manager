@@ -21,8 +21,8 @@ import type { SshFactory } from "../../adapters/ssh/port.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 
 // WHERE the operator-driven first-admin invite (POST /api/tenants/:id/invite-admin) sends the tenant's
-// bootstrap token. A tenant member is addressed at `<member>.<subdomain>.<unitApex>` — the three parts
-// the member's chart renders and the tenant's wildcard DNS record covers — so this route must resolve
+// bootstrap token. A tenant member is addressed at `<subdomain>.<unitApex>/<member>` — the parts
+// the member's chart renders and the tenant's zone DNS record serves — so this route must resolve
 // the TARGET CLUSTER's own apex. `clusters.domain` is a different fact: it is where the CLUSTER is
 // reached, and install.sh defaults `unit-apex` to that FQDN minus its first label, so on every cluster
 // that is not itself the apex a host composed from the domain resolves nowhere and the invite fails
@@ -85,7 +85,7 @@ describe("POST /api/tenants/:id/invite-admin addresses the tenant's own example-
     const { app, cookie, activator } = await makeTenant(APEX);
     expect((await invite(app, cookie)).status).toBe(200);
     const call = activator.calls[0]!;
-    expect(call.url).toBe(`https://auth.acme.${APEX}/api/v1/bootstrap/invite-admin`);
+    expect(call.url).toBe(`https://acme.${APEX}/auth/api/v1/bootstrap/invite-admin`);
     expect(call.url).not.toContain(DOMAIN);
     // The token still rides the header alone — the host is the only thing this fix moves.
     expect(call.tokenHeader).toBe("X-Bootstrap-Token");
@@ -96,7 +96,7 @@ describe("POST /api/tenants/:id/invite-admin addresses the tenant's own example-
     seedTenant();
     const { app, cookie, activator } = await makeTenant(DOMAIN);
     expect((await invite(app, cookie)).status).toBe(200);
-    expect(activator.calls[0]?.url).toBe(`https://auth.acme.${DOMAIN}/api/v1/bootstrap/invite-admin`);
+    expect(activator.calls[0]?.url).toBe(`https://acme.${DOMAIN}/auth/api/v1/bootstrap/invite-admin`);
   });
 
   it("answers 501 with no apex resolver wired — a credential is never posted at a guessed host", async () => {

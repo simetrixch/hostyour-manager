@@ -1,4 +1,4 @@
-// The ZONE under a tenant's wildcard, judged at the PLAN: gate G27 over `*.<subdomain>.<stage apex>`
+// A tenant's ZONE record, judged at the PLAN: gate G27 over `<subdomain>.<stage apex>`
 // (validate-tenant.ts), the same reading provision-dns takes at its own step (unit-dns.ts
 // readStandingHost). A collision with another cluster of this installation used to surface at
 // provision-dns — after seed-tenant-crypto had written the Vault entry, made the bucket and minted a
@@ -33,8 +33,8 @@ import { TEST_QUOTA } from "./tenant-members.fixture.ts";
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
 const SUB = "acme";
-/** The wildcard the plan judges and provision-dns writes: `*.<subdomain>.<stage apex>`, prod being the apex. */
-const WILDCARD = `*.${SUB}.example.com`;
+/** The zone record the plan judges and provision-dns writes: `<subdomain>.<stage apex>`, prod being the apex. */
+const ZONE = `${SUB}.example.com`;
 
 const MANIFEST_YAML = `
 apiVersion: hostyour.cloud/v1
@@ -64,7 +64,7 @@ let db: DbHandle;
 beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
-/** Both clusters of one installation — the names readStandingHost judges a wildcard's CNAME against. */
+/** Both clusters of one installation — the names readStandingHost judges a zone record's CNAME against. */
 function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
@@ -109,7 +109,7 @@ function ctx(p: CreateTenantParams, logs: string[]): StepCtx {
   };
 }
 
-describe("G27 over the tenant's wildcard — validateTenant reads the zone where the plan will write it", () => {
+describe("G27 over the tenant's zone — validateTenant reads the zone where the plan will write it", () => {
   const req = (over: Partial<ValidateTenantRequest> = {}): ValidateTenantRequest => ({
     repoURL: "https://github.com/acme/acme-deploy.git", ref: "master", stage: "prod", apps: [], probeGuid: GUID, subdomain: SUB, clusterValueFiles: CHAIN, clusterFqdn: "s1.example", quota: TEST_QUOTA, ...over,
   });
@@ -118,13 +118,13 @@ describe("G27 over the tenant's wildcard — validateTenant reads the zone where
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }), log: () => {}, signal: new AbortController().signal, ...over,
   });
 
-  it("a leftover of a gone installation passes, names the address it will replace, and asks about the WILDCARD", async () => {
+  it("a leftover of a gone installation passes, names the address it will replace, and asks about the zone", async () => {
     const asked: string[] = [];
     const outcome = await validateTenant(req(), deps({ standingHost: async (host, fqdn) => { asked.push(`${host} on ${fqdn}`); return { kind: "leftover", type: "A", content: "157.90.201.150" }; } }));
-    expect(asked).toEqual([`${WILDCARD} on s1.example`]);
+    expect(asked).toEqual([`${ZONE} on s1.example`]);
     const g27 = outcome.report.gates.find((g) => g.id === "G27");
     expect(g27?.status).toBe("pass");
-    expect(g27?.evidence).toEqual([{ source: "manager", name: WILDCARD, fieldPath: "standing", value: "A 157.90.201.150" }]);
+    expect(g27?.evidence).toEqual([{ source: "manager", name: ZONE, fieldPath: "standing", value: "A 157.90.201.150" }]);
     expect(outcome.verdict).toBe("pass");
   });
 
@@ -149,10 +149,10 @@ describe("G27 over the tenant's wildcard — validateTenant reads the zone where
 });
 
 describe("create-tenant plans the zone before the first write", () => {
-  it("REFUSES a tenant whose wildcard stands at another cluster of this installation — no bucket, no key, no entry", async () => {
+  it("REFUSES a tenant whose zone record stands at another cluster of this installation — no bucket, no key, no entry", async () => {
     const dns = new FakeDnsProvider();
     seedClusters();
-    dns.seed(WILDCARD, "CNAME", "s2.example"); // the same subdomain already served by s2
+    dns.seed(ZONE, "CNAME", "s2.example"); // the same subdomain already served by s2
     const store = new FakeObjectStore();
     const logs: string[] = [];
     const result = await makeCreateTenantDef(ports(dns, store)).planStream!(REQUEST, planCtx(logs));
@@ -165,12 +165,12 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(store.mints).toEqual([]);
   });
 
-  it("a replace whose old tenant serves the wildcard from another cluster is refused by G27, its registration untouched", async () => {
+  it("a replace whose old tenant serves the zone from another cluster is refused by G27, its registration untouched", async () => {
     const dns = new FakeDnsProvider();
     seedClusters();
-    dns.seed(WILDCARD, "CNAME", "s2.example"); // the old tenant's wildcard, provisioned at s2
+    dns.seed(ZONE, "CNAME", "s2.example"); // the old tenant's zone record, provisioned at s2
     const prt = ports(dns);
-    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" } });
+    await prt.registrations.commitTenant({ stage: "prod", guid: "e2e8ymj86dk8", runId: "run_old", registration: { cluster: "s2", subdomain: SUB, members: testMembers([]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: [], seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" } });
     const result = await makeCreateTenantDef(prt).planStream!(REQUEST, planCtx([]));
     expect(result.outcome).toBe("rejected");
     if (result.outcome !== "rejected") return;
@@ -181,7 +181,7 @@ describe("create-tenant plans the zone before the first write", () => {
   it("plans over a leftover and the plan stream carries the G27 line with the record provision-dns will replace", async () => {
     const dns = new FakeDnsProvider();
     seedClusters();
-    dns.seed(WILDCARD, "A", "157.90.201.150"); // an address no cluster of this installation has
+    dns.seed(ZONE, "A", "157.90.201.150"); // an address no cluster of this installation has
     const logs: string[] = [];
     const result = await makeCreateTenantDef(ports(dns)).planStream!(REQUEST, planCtx(logs));
     expect(result.outcome).toBe("planned");
@@ -211,32 +211,32 @@ describe("create-tenant plans the zone before the first write", () => {
     expect(logs.some((l) => l.includes("could not be carried") && l.includes("origin refused the push"))).toBe(true);
   });
 
-  it("provision-dns writes the ONE wildcard as a CNAME onto the cluster, replacing a leftover and saying what stood there", async () => {
+  it("provision-dns writes the ONE zone record as a CNAME onto the cluster, replacing a leftover and saying what stood there", async () => {
     const dns = new FakeDnsProvider();
     seedClusters();
-    dns.seed(WILDCARD, "A", "157.90.201.150");
+    dns.seed(ZONE, "A", "157.90.201.150");
     const prt = ports(dns);
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+      members: testMembers([]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
       report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const logs: string[] = [];
     await makeCreateTenantDef(prt).steps(p).find((s) => s.name === "provision-dns")!.run(ctx(p, logs));
-    // ONE wildcard covers every member host `<member>.<subdomain>.<stage apex>` — members added later
+    // ONE zone record serves every member at `<subdomain>.<stage apex>/<member>` — members added later
     // included — and it names the cluster, never an address.
-    expect(dns.record(WILDCARD, "CNAME")).toBe("s1.example");
-    expect(dns.record(WILDCARD, "A")).toBeUndefined();
+    expect(dns.record(ZONE, "CNAME")).toBe("s1.example");
+    expect(dns.record(ZONE, "A")).toBeUndefined();
     expect(logs.some((l) => l.includes("stood as A 157.90.201.150") && l.includes("replaced with a CNAME onto s1.example"))).toBe(true);
     expect(logs.some((l) => l.includes("a move is a content update of exactly this record"))).toBe(true);
   });
 });
 
 describe("create-tenant marks the identity provider in DNS where the product declares the label", () => {
-  const MARK_NAME = `_digita-idp.auth.${SUB}.example.com`;
+  const MARK_NAME = `_digita-idp.${SUB}.example.com`;
   const createParams = (prt: TenantOnboardPorts, over: Record<string, unknown> = {}) => CreateTenantParams.parse({
     guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: SHA, registryHost: "zot.m1.example",
-    members: testMembers([]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
+    members: testMembers([]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: prt.deployRepoUrl,
     report: composeTenantReport({ resolvedSha: SHA, probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     ...over,
   });
@@ -247,7 +247,7 @@ describe("create-tenant marks the identity provider in DNS where the product dec
     const prt = ports(dns);
     const p = createParams(prt, { issuerRecordLabel: "_digita-idp" });
     await makeCreateTenantDef(prt).steps(p).find((s) => s.name === "provision-dns")!.run(ctx(p, []));
-    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual([`https://auth.${SUB}.example.com`]);
+    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual([`https://${SUB}.example.com/auth`]);
     expect(listDnsWrites(db.db).find((w) => w.name === MARK_NAME)?.owner).toEqual({ kind: "tenant", name: GUID, stage: "prod" });
   });
 

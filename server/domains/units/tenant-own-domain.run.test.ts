@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { getRun, readEvents } from "../../executor/read.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { findDnsWrite, recordDnsWrite } from "../../db/dns-writes.ts";
-import { useOwnDomainHarness, BARE, CLUSTER, GUID, OK, OTHER, OWN, ZONE, idpAt } from "./tenant-own-domain.fixture.ts";
+import { useOwnDomainHarness, BARE, CLUSTER, GUID, OK, OTHER, OWN, ZONE, healthAt } from "./tenant-own-domain.fixture.ts";
 
 // tenant-set-own-domain driven through the real Executor: the order the run exists for (the new
 // domain's record, the recorded domain, a 2xx at the new host, only then the previous domain's record
@@ -20,7 +20,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(findDnsWrite(h.db.db, { name: OWN, type: "CNAME" })?.owner).toEqual({ kind: "tenant", name: GUID, stage: "prod" });
     expect(h.rowDomain()).toBe(OWN);
     expect(await h.regDomain()).toBe(OWN);
-    expect(h.probe.probed).toContain(idpAt(OWN));
+    expect(h.probe.probed).toContain(healthAt(OWN));
     // The zone keeps its record: the charts answer it with a redirect to the domain.
     expect(h.dns.record(ZONE, "CNAME")).toBe(CLUSTER);
   });
@@ -50,26 +50,23 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
     expect([h.rowDomain(), await h.regDomain(), h.rowRedirects(), await h.regRedirects()]).toEqual([BARE, BARE, [OWN], [OWN]]);
     expect([h.dns.upserts, h.dns.creates, h.dns.deletes]).toEqual([[], [], []]);
-    expect(h.probe.probed).toEqual([idpAt(BARE), `https://${OWN}/`]);
+    expect(h.probe.probed).toEqual([healthAt(BARE), `https://${OWN}/`]);
   });
 
-  it("keeps the domain it moves from as redirect hosts: no record of the previous hosts is removed", async () => {
+  it("PLANTED DEFECT: retires the domain it moves from once the new host answers, and keeps no alias of it", async () => {
     const NEXT = "www.next.test";
-    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [NEXT], redirecting: [OWN, BARE] });
+    const h = await make({ ownDomain: OWN, ownDomainRedirects: [BARE], answers: [NEXT] });
     for (const host of [OWN, BARE]) {
       h.dns.seed(host, "CNAME", ZONE);
       recordDnsWrite(h.db.db, { name: host, type: "CNAME", content: ZONE, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_old" });
     }
     const planned = await plan(h, { ownDomain: NEXT, previous: OWN, previousRedirects: [BARE] });
-    expect(planned.summary).not.toContain("remove the records of");
+    expect(planned.summary).toContain(`remove the records of ${OWN}, ${BARE}`);
     await h.executor.approve(planned.runId);
     await h.executor.settle(planned.runId);
     expect(getRun(h.db.db, planned.runId)?.status).toBe("succeeded");
-    // www.customer.test and customer.test are the one alias customer.test, with its www.
-    expect([h.rowRedirects(), await h.regRedirects()]).toEqual([[], []]);
-    expect([h.rowAliases(), await h.regAliases()]).toEqual([[BARE], [BARE]]);
-    expect(h.dns.deletes).toEqual([]);
-    expect([h.dns.record(OWN, "CNAME"), h.dns.record(BARE, "CNAME"), h.dns.record(NEXT, "CNAME")]).toEqual([ZONE, ZONE, ZONE]);
+    expect([h.rowAliases(), await h.regAliases()]).toEqual([[], []]);
+    expect([h.dns.record(OWN, "CNAME"), h.dns.record(BARE, "CNAME"), h.dns.record(NEXT, "CNAME")]).toEqual([undefined, undefined, ZONE]);
   });
 
   it("names the mail records beside its hosts in the plan, and refuses to write where one changed since", async () => {
@@ -149,7 +146,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(await refusal(OWN, ["www.example.com"])).toMatch(/platform's own name space/);
     h.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
     }).run();
     expect(await refusal(OWN, [BARE])).toMatch(/overlaps a host of tenant beta/);
     expect(await refusal("www.other.test", [BARE])).toMatch(/already a host of tenant beta/);
@@ -161,7 +158,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     const h = await make({ answers: [OWN] });
     h.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: BARE, suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", ownDomain: BARE, suspended: false, status: "active",
     }).run();
     expect((await plan(h, { ownDomain: OWN, previous: "" })).error).toMatch(/overlaps a host of tenant beta \(customer.test\) — where both tenants are one owner's/);
     expect((await plan(h, { ownDomain: OWN, previous: "", nestsUnder: "nobody" })).error).toMatch(/no other live tenant has the subdomain "nobody"/);
@@ -255,7 +252,7 @@ describe("tenant-set-own-domain through the Executor", () => {
 
   it("does not take a redirect for the IdP at the new host", async () => {
     const h = await make();
-    h.probe.set(idpAt(OWN), { reachable: true, status: 307, detail: "HTTP 307" });
+    h.probe.set(healthAt(OWN), { reachable: true, status: 307, detail: "HTTP 307" });
     const runId = await move(h, OWN, "");
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
   });
@@ -265,7 +262,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     const other = (id: string, guid: string, domain: string, status: "active" | "offboarded"): void => {
       h.db.db.insert(tenants).values({
         id, clusterId: "cls_1", guid, subdomain: id, stage: "prod",
-        members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: domain, suspended: false, status,
+        members: ["auth"], identityProvider: "auth", ownDomain: domain, suspended: false, status,
       }).run();
     };
     other("tnt_old", "oooooooooooo", OWN, "offboarded");
@@ -288,16 +285,14 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(h.rowDomain()).toBe(OWN);
   });
 
-  it("REFUSES at plan time: a host-routed tenant, a moved one, a name of the platform and a domain another tenant has", async () => {
-    const hostRouted = await make({ routing: "host" });
-    expect((await plan(hostRouted, { ownDomain: OWN, previous: "" })).error).toMatch(/path routing first/);
+  it("REFUSES at plan time: a moved tenant, a name of the platform and a domain another tenant has", async () => {
     const moved = await make({ ownDomain: OWN });
     expect((await plan(moved, { ownDomain: OTHER, previous: "" })).error).toMatch(/moved since/);
     const platform = await make();
     expect((await plan(platform, { ownDomain: "shop.example.com", previous: "" })).error).toMatch(/platform's own name space/);
     platform.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: OTHER, suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", ownDomain: OTHER, suspended: false, status: "active",
     }).run();
     expect((await plan(platform, { ownDomain: OTHER, previous: "" })).error).toMatch(/already a host of tenant beta/);
   });

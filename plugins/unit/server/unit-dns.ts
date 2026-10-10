@@ -4,11 +4,9 @@
 //
 //   consumer — CNAME `<label>.<stage apex>`. The chart renders exactly ONE host, and by DNS rule a
 //              wildcard does NOT cover a bare label, so the record is the host itself.
-//   tenant   — one CNAME PER STAGE, named by the tenant's recorded routing (tenantRecordName). `host`:
-//              the wildcard `*.<subdomain>.<stage apex>`, every member one level below it. `path`:
-//              the zone `<subdomain>.<stage apex>` itself, every member under a path of it. Either way
-//              one record covers a stage's members, members added later included, and a move
-//              changes ONE record per stage.
+//   tenant   — one CNAME PER STAGE, the zone `<subdomain>.<stage apex>` itself (tenantZone), every
+//              member under a path of it. One record covers a stage's members, members added later
+//              included, and a move changes ONE record per stage.
 //
 // THE STAGE IS THE ZONE (`<stage>.<unitApex>`, and the apex itself for prod), and the apex is the
 // target cluster's own (global.unitApex off its values chain). Two clusters may well share one apex — install.sh defaults
@@ -33,7 +31,7 @@
 // record. A move between clusters is a content update of this one record, and the relocation's
 // switch is the ONE caller that repoints a record from another cluster of this installation.
 // Certificates are unaffected: HTTP-01 only requires that every certificate host resolves, which the
-// record (or the wildcard) provides.
+// record provides.
 //
 // Every step here is fail-CLOSED — an unwired provider or an API failure breaks the run, in the
 // removal run kinds too: "no address is left pointing nowhere" holds without exception, and purge is the
@@ -52,11 +50,10 @@ import { findDnsWrite, forgetDnsWrite, listDnsWrites, recordDnsWrite } from "#co
 import type { DnsProvider } from "#core/server/adapters/dns/port.ts";
 import { errValidation } from "#core/server/kernel/errors.ts";
 import type { DnsWriteOwnerKind, Stage } from "#core/shared/enums.ts";
-import { issuerAddressHost } from "../shared/unit-host.ts";
 
 // A CONSUMER'S HOST LABEL AND A TENANT SUBDOMAIN ARE ONE NAME SPACE. Both stand as a single DNS
 // label directly under a stage zone: the consumer serves `<label>.<stage apex>`, and the tenant's
-// members sit one level below `<subdomain>.<stage apex>`. That parent is not merely the tenant's wildcard root —
+// members sit under paths of `<subdomain>.<stage apex>`. That host is not merely the tenant's address —
 // it is the Domain its IdP scopes every session cookie to (`example-auth.cookieDomain` in
 // the deploy repository's charts/example-auth/templates/_helpers.tpl, delivered as AUTH_COOKIE_DOMAIN and set
 // on the access and refresh cookies in example-auth/backend/src/auth/cookies.ts). A browser sends a
@@ -69,10 +66,9 @@ import { issuerAddressHost } from "../shared/unit-host.ts";
 /** The compositions themselves live in plugins/unit/shared/unit-host.ts — ONE place for the Manager and, by the
  *  same strings, for hostyour-cloud's ApplicationSets — and are re-exported here for the callers of
  *  this module: a consumer stands at `<label>.<stage apex>`, a tenant's members at
- *  `<member>.<subdomain>.<stage apex>` under ONE wildcard PER STAGE (host routing) or at
- *  `<subdomain>.<stage apex>/<member>` under ONE record for the zone (path routing). The label is
+ *  `<subdomain>.<stage apex>/<member>` under ONE record for the zone. The label is
  *  the registration's / the row's `host`, never the name (simetrixch/hostyour-cloud#208). */
-export { consumerUnitHost, issuerAddressHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, stageApex } from "../shared/unit-host.ts";
+export { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantZone, stageApex } from "../shared/unit-host.ts";
 
 export function requireDns(dns: DnsProvider | undefined, unit: string, runKind: string): DnsProvider {
   if (!dns) {
@@ -214,11 +210,10 @@ export function isBookedFor(db: Db, recordName: string, owner: BookedOwner): boo
   return booked !== null && bookedFor(booked.owner, owner);
 }
 
-/** Whether a record a tenant's purge may name is the tenant's own. A wildcard is: only a tenant ever
- *  writes one. A plain name is a host another unit may hold, so it is the tenant's only where the book
- *  of DNS writes names the tenant as its owner. */
+/** Whether a record a tenant's purge may name is the tenant's own. Its name is a host another unit
+ *  may hold, so it is the tenant's only where the book of DNS writes names the tenant as its owner. */
 export function isTenantRecord(db: Db, recordName: string, guid: string): boolean {
-  return recordName.startsWith("*.") || isBookedFor(db, recordName, { kind: "tenant", name: guid });
+  return isBookedFor(db, recordName, { kind: "tenant", name: guid });
 }
 
 /** Remove ONE CNAME the book of DNS writes names as `owner`'s, only while it still carries the
@@ -258,17 +253,6 @@ export async function publishIssuerRecord(
   const dns = requireDns(opts.dns, opts.guid, opts.runKind);
   const { name, content } = opts.record;
   const owner = { kind: "tenant" as const, name: opts.guid, stage: opts.stage };
-  // Before the mark, so the issuer host never stands without an address in between; on every path below,
-  // so a mark that already stands gets its record too. The record goes with the mark, so it is booked for
-  // the tenant the mark is booked for: provisionUnitDns books none where the record already points here.
-  const address = issuerAddressHost(content);
-  if (address !== null) {
-    await provisionUnitDns(ctx, { dns, unit: opts.guid, kind: "tenant", stage: opts.stage, recordName: address, clusterFqdn: opts.clusterFqdn, runKind: opts.runKind });
-    const booked = findDnsWrite(ctx.db, { name: address, type: "CNAME" });
-    if (booked === null || !bookedFor(booked.owner, owner)) {
-      recordDnsWrite(ctx.db, { name: address, type: "CNAME", content: opts.clusterFqdn, act: "adopted", owner, runId: ctx.runId });
-    }
-  }
   const standing = await dns.listRecordContents({ name, type: "TXT", signal: ctx.signal });
   const others = standing.filter((txt) => txt !== content);
   const beside = others.length === 0 ? "" : `; beside it stands ${others.join(" | ")}, which no run of this Manager wrote and which is left as it is`;
@@ -294,34 +278,16 @@ function bookedIssuerRecords(db: Db, guid: string, stage: Stage) {
   return listDnsWrites(db).filter((row) => row.type === "TXT" && row.name.startsWith("_") && bookedFor(row.owner, owner));
 }
 
-/** The label of the identity provider mark the book holds for the tenant at its stage, or null where it
- *  holds none: what a routing move publishes the mark under again, so the move carries the mark the
- *  tenant has and creates none it lacks. */
-export function bookedIssuerLabel(db: Db, guid: string, stage: Stage): string | null {
-  const [mark] = bookedIssuerRecords(db, guid, stage);
-  return mark === undefined ? null : mark.name.slice(0, mark.name.indexOf("."));
-}
-
-/** Remove every identity provider mark the book names as the tenant's at its stage but the names in
- *  `except`, each by the content the book holds: a record re-pointed since is somebody else's and stays.
- *  A host-routed mark takes the issuer host's record with it, unless a kept mark still needs it.
- *  Offboard and purge, with or without a registration, and a routing move for the routing it leaves — a
- *  mark that outlived its tenant would let whatever serves that host's key file next send mail as the
+/** Remove every identity provider mark the book names as the tenant's at its stage, each by the
+ *  content the book holds: a record re-pointed since is somebody else's and stays. Offboard and purge,
+ *  with or without a registration — a mark that outlived its tenant would let whatever serves that host's key file next send mail as the
  *  product's sender domain. Removing nothing is the idempotent no-op. */
-export async function removeIssuerRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; stage: Stage; except?: readonly string[] }): Promise<void> {
-  const marks = bookedIssuerRecords(ctx.db, opts.guid, opts.stage);
-  const kept = marks.filter((row) => (opts.except ?? []).includes(row.name));
-  const keptAddresses = kept.map((row) => issuerAddressHost(row.content));
-  for (const w of marks.filter((row) => !kept.includes(row))) {
+export async function removeIssuerRecords(ctx: StepCtx, opts: { dns: DnsProvider | undefined; guid: string; stage: Stage }): Promise<void> {
+  for (const w of bookedIssuerRecords(ctx.db, opts.guid, opts.stage)) {
     const dns = requireDns(opts.dns, opts.guid, "remove");
     const { deleted } = await dns.deleteRecord({ name: w.name, type: "TXT", content: w.content, signal: ctx.signal });
     forgetDnsWrite(ctx.db, { name: w.name, type: "TXT" });
     ctx.log("meta", deleted > 0 ? `TXT ${w.name} → ${w.content} removed` : `TXT ${w.name} no longer carries ${w.content} — left standing, it is not tenant ${opts.guid}'s any more`);
-    // After the mark, so the issuer host is never an empty non-terminal without its address.
-    const address = issuerAddressHost(w.content);
-    if (address !== null && !keptAddresses.includes(address)) {
-      await removeBookedRecord(ctx, { dns: opts.dns, owner: { kind: "tenant", name: opts.guid, stage: opts.stage }, recordName: address });
-    }
   }
 }
 

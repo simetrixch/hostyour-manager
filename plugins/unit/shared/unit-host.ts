@@ -1,10 +1,10 @@
-import { STAGE, type MemberRouting, type Stage } from "#core/shared/enums.ts";
+import { STAGE, type Stage } from "#core/shared/enums.ts";
 
 /** THE ONE PLACE A UNIT'S PUBLIC HOST IS COMPOSED (simetrixch/hostyour-cloud#208).
  *
  *  A stage is a ZONE and prod is the apex itself: `stageApex` is `<unitApex>` for prod and
  *  `<stage>.<unitApex>` for the other two. A consumer stands at `<label>.<stage apex>`, a tenant's
- *  members at `<member>.<subdomain>.<stage apex>`, and everything that has to agree with an ingress —
+ *  members under paths of `<subdomain>.<stage apex>`, and everything that has to agree with an ingress —
  *  the DNS record, the admission fence, the gates, the activation URL, the relocation probe — reads
  *  it from here. hostyour-cloud's ApplicationSets compose the same strings for the charts they
  *  deliver to (`unitHost`, `global.stageApex`, `tenant.zone`), so a chart composes no host at all.
@@ -63,53 +63,28 @@ export function consumerUnitHost(label: string, stage: Stage, unitApex: string):
   return `${label}.${stageApex(unitApex, stage)}`;
 }
 
-/** The zone a tenant's members stand one level below at one stage: `<subdomain>.<stage apex>`. */
+/** A tenant's zone at one stage: `<subdomain>.<stage apex>`. Every member stands under a path of it,
+ *  or of the tenant's own domain, so it is also the name of the tenant's one DNS record per stage. */
 export function tenantZone(subdomain: string, stage: Stage, unitApex: string): string {
   return `${subdomain}.${stageApex(unitApex, stage)}`;
 }
 
-/** The tenant's one wildcard at one stage, covering every member host below its zone. One record
- *  PER STAGE now: the zones differ, so one wildcard cannot cover them all. */
-export function tenantWildcardHost(subdomain: string, stage: Stage, unitApex: string): string {
-  return `*.${tenantZone(subdomain, stage, unitApex)}`;
-}
-
-/** The ONE DNS record a package's members need at one stage, by their routing: `host` routing puts
- *  every member on a host of its own below the zone, which the wildcard covers; `path` routing
- *  serves every member under a path of the zone itself, which is a name the wildcard does NOT cover
- *  (a wildcard matches one label more, never the zone). */
-export function tenantRecordName(routing: MemberRouting, subdomain: string, stage: Stage, unitApex: string): string {
-  return routing === "path" ? tenantZone(subdomain, stage, unitApex) : tenantWildcardHost(subdomain, stage, unitApex);
-}
-
-/** ONE member's public base URL at one stage, for the callers that must ADDRESS a member rather than
- *  resolve it (the first-admin invite over the identity provider, the administrator check, the
- *  relocation probe): `https://<member>.<zone>` under `host` routing, `https://<host>/<member>` under
- *  `path` routing, where the host is the tenant's own domain if it has one ("" = none) and its zone
- *  otherwise. A caller appends its API path to it. */
-export function tenantMemberUrl(routing: MemberRouting, member: string, stage: Stage, subdomain: string, unitApex: string, ownDomain: string): string {
-  const zone = tenantZone(subdomain, stage, unitApex);
-  return routing === "path" ? `https://${ownDomain || zone}/${member}` : `https://${member}.${zone}`;
+/** A standing member's public base URL at one stage, for the callers that must ADDRESS a member rather
+ *  than resolve it (the first-admin invite over the identity provider, the administrator check, the
+ *  relocation probe): `https://<host>/<member>`, where the host is the tenant's own domain if it has
+ *  one ("" = none) and its zone otherwise. A caller appends its API path to it. */
+export function tenantMemberUrl(member: string, stage: Stage, subdomain: string, unitApex: string, ownDomain: string): string {
+  return `https://${ownDomain || tenantZone(subdomain, stage, unitApex)}/${member}`;
 }
 
 /** The TXT record that marks a tenant's identity provider for the product's mail service: named
- *  `<label>.<issuer host>` and holding the issuer, which is the identity provider member's address on
- *  the tenant's ZONE and never on its own domain. The zone lies under a stage apex this platform alone
+ *  `<label>.<zone>` and holding the issuer, which is the identity provider member's address on the
+ *  tenant's ZONE and never on its own domain. The zone lies under a stage apex this platform alone
  *  writes, while a customer controls the DNS of its own domain, so only a mark under the zone can be
  *  trusted. The label is the product's (tenant spec `issuerRecordLabel`). */
-export function tenantIssuerRecord(label: string, routing: MemberRouting, identityProvider: string, stage: Stage, subdomain: string, unitApex: string): { name: string; content: string } {
-  const issuer = tenantMemberUrl(routing, identityProvider, stage, subdomain, unitApex, "");
+export function tenantIssuerRecord(label: string, identityProvider: string, stage: Stage, subdomain: string, unitApex: string): { name: string; content: string } {
+  const issuer = tenantMemberUrl(identityProvider, stage, subdomain, unitApex, "");
   return { name: `${label}.${new URL(issuer).host}`, content: issuer };
-}
-
-/** The host that needs an address record of its own beside a tenant's identity provider mark: the
- *  issuer host under `host` routing, where the mark makes it an empty non-terminal below the tenant's
- *  wildcard, and RFC 4592 lets no wildcard answer a name that exists; null under `path` routing, whose
- *  issuer host is the zone, which holds the tenant's own record. Read from the issuer the mark holds, so
- *  a mark in the book of DNS writes says it without the tenant's routing. */
-export function issuerAddressHost(issuer: string): string | null {
-  const url = new URL(issuer);
-  return url.pathname === "/" ? url.host : null;
 }
 
 /** Every host a tenant answers at beside its zone: its own domain, the hosts that redirect to it, and

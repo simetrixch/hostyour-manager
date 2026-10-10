@@ -1,5 +1,5 @@
-// The records and the wait of a customer's own hosts: the tenant's own domain (tenant-set-own-domain)
-// and a website's domain (website-domain.ts). Each host gets a CNAME onto the tenant's zone, entered
+// The records and the wait of a customer's own hosts: the tenant's own domain (tenant-set-own-domain).
+// Each host gets a CNAME onto the tenant's zone, entered
 // into the book of DNS writes; a host in a zone nobody here manages is named for the operator to set.
 // An address record, or a CNAME this installation did not write, standing at such a host is replaced:
 // the plan lists it, the run deletes it, and an abort writes it back.
@@ -41,11 +41,11 @@ export interface AnswerWaitPorts {
  *  and a host of a tenant nesting under this one may lie below this tenant's host. The operator accepts
  *  the cookie reach for two tenants of one owner; the exact same host stays refused. `nestsUnder`
  *  stands in for the recorded value while tenant-set-own-domain plans a new one. */
-export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, websites: readonly { host: string; subdomain: string; guid: string }[] = [], nestsUnder?: string | null): string | null {
+export function customerHostProblem(db: Db, tenantId: string, host: string, apex: string, nestsUnder?: string | null): string | null {
   if (host === apex || host.endsWith(`.${apex}`)) return `${host} lies in the platform's own name space (${apex}) — a customer's domain is one the customer brings`;
   // The one mail name a host can be spelled as (a DKIM selector carries an underscore, which no host
-  // does): its CNAME is the domain's mail record (mailNames), and a website's CNAME would replace it.
-  if (host.startsWith("autodiscover.")) return `${host} is the autodiscover name of ${host.slice("autodiscover.".length)}'s mail, a mail record — no website or own domain takes it`;
+  // does): its CNAME is the domain's mail record (mailNames), and an own domain's CNAME would replace it.
+  if (host.startsWith("autodiscover.")) return `${host} is the autodiscover name of ${host.slice("autodiscover.".length)}'s mail, a mail record — no own domain takes it`;
   const cluster = db.select({ domain: clusters.domain }).from(clusters).all().map((c) => c.domain).find((d) => host === d || host.endsWith(`.${d}`));
   if (cluster) return `${host} lies under the cluster name ${cluster} — a customer's domain is one the customer brings`;
   const self = db.select({ guid: tenants.guid, stage: tenants.stage, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, tenantId)).get();
@@ -74,11 +74,6 @@ export function customerHostProblem(db: Db, tenantId: string, host: string, apex
       return `${host} ${theirs === host ? "is already" : "overlaps"} a host of tenant ${o.subdomain} at ${o.stage} (${theirs})`;
     }
     return refusal("a host", o.subdomain, theirs);
-  }
-  for (const w of websites) {
-    if (!overlaps(w.host)) continue;
-    const owner = others.find((o) => o.guid === w.guid);
-    if (!owner || !confirmed(owner, w.host)) return refusal("a website host", w.subdomain, w.host);
   }
   return null;
 }
@@ -146,39 +141,6 @@ async function refuseInheritedMailAnswers(ports: RecordPorts, host: string, cnam
   }
   if (inherited.length === 0) return;
   throw errValidation(`${host} answers ${inherited.join(" and ")} only through its CNAME onto ${cname}, which this run replaces — add them as records of ${host} first, then plan again`);
-}
-
-/** What stands at a host a website answers at: nothing, its CNAME onto the tenant's zone, a record this
- *  installation did not write for it, or a zone nobody here manages. */
-export type HostRecordState = "missing" | "pointed" | "foreign" | "unmanaged";
-
-/** The state of each host of `hosts` against the tenant's `zone`, or null where no DNS provider is
- *  configured on this manager and nothing can be read. */
-export async function hostRecordStates(ports: RecordPorts, hosts: readonly string[], zone: string, signal?: AbortSignal): Promise<Map<string, HostRecordState> | null> {
-  if (!ports.dns) return null;
-  const states = new Map<string, HostRecordState>();
-  for (const host of hosts) {
-    let cname: string | null;
-    try {
-      cname = await ports.dns.readRecordContent({ name: host, type: "CNAME", ...(signal ? { signal } : {}) });
-    } catch (e) {
-      if (e instanceof DnsZoneUnknownError) {
-        states.set(host, "unmanaged");
-        continue;
-      }
-      throw e;
-    }
-    if (cname !== null) {
-      states.set(host, cname === zone ? "pointed" : "foreign");
-      continue;
-    }
-    let addressed = false;
-    for (const type of ADDRESS_TYPES) {
-      if ((await ports.dns.listRecordContents({ name: host, type, ...(signal ? { signal } : {}) })).length > 0) addressed = true;
-    }
-    states.set(host, addressed ? "foreign" : "missing");
-  }
-  return states;
 }
 
 /** The plan summary's sentence on the records the run replaces, or "" where it replaces none. The

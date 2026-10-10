@@ -4,9 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, appName, appDatabases, appFolder, siteId, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
-import { publicFqdn } from "../../../shared/consumer.ts";
-import { refuseOffStageHosts } from "./stage-hosts.ts";
+import { guid as guidSchema, appName, appDatabases, appFolder, siteId, TenantMemberRecordSchema, TenantValidationReportSchema, websitePath } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -30,11 +28,9 @@ import { addedMemberVersions, newMembersRefusal } from "./tenant-versions.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
-import { customerHostProblem, replacementSentence, ReplacedRecord } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace, type WebsiteDomainPorts } from "./website-domain.ts";
 import { builtBundleEngine, bundleFolderSites, bundleLacksSite, bundleReleaseTag, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import { seedTenantAppKeyStep } from "./tenant-app-keys.ts";
+import { seedTenantAppKeyStep, TENANT_WEB_MEMBER } from "./tenant-app-keys.ts";
 import { assertAddAppAbortable, revertAppendCleanup } from "./add-app-abort.ts";
 import { AddAppRequest } from "./add-app-request.ts";
 
@@ -107,28 +103,19 @@ export const AddAppParams = z.object({
   owner: z.string().default(""),
   seedUsers: z.boolean().default(false),
   demo: z.boolean().default(false), // the tenant is a demo: the new member renders with tenant.demo
-  // A website's folder, site and domain, written into its apps[] entry, and `main` where it becomes the
+  // A website's folder and site, written into its apps[] entry, and `main` where it becomes the
   // tenant's main website.
-  website: z.object({ folder: appName, site: siteId, domain: publicFqdn, main: z.literal(true).optional() }).optional(),
+  website: z.object({ folder: appName, site: siteId, main: z.literal(true).optional() }).optional(),
   // The website that held `main` when this run was planned: an abort of the add gives the mark back to it.
   previousMain: appName.nullable().default(null),
   // The website's site is one the tenant's own bundle lists under its folder: the bundle already carries
   // `webs/<site>`, so the bundle steps ask the template for no folder and copy no file of it.
   siteFromBundle: z.boolean().default(false),
-  // The website's hosts whose records this run writes: none where the tenant's own domain holds them.
-  websiteRecordHosts: z.array(publicFqdn).default([]),
-  // The records standing at those hosts that this run replaces; an abort writes them back.
-  websiteReplacing: z.array(ReplacedRecord).default([]),
 });
 export type AddAppParams = z.infer<typeof AddAppParams>;
 
-/** Why a tenant on another routing than `path` takes no website: a website's hosts point at the tenant's
- *  zone, and only path routing gives the zone itself a record (host routing records only its wildcard). */
-export const WEBSITE_NEEDS_PATH = (subdomain: string, routing: string): string =>
-  `tenant ${subdomain} is on ${routing} routing — a website's hosts point at the tenant's zone, which has a record of its own only under path routing; move the tenant to path routing first`;
-
-/** What add-app reads beyond the onboarding ports: the probe and its wait, for a website's hosts. */
-export type AddAppPorts = TenantOnboardPorts & Pick<WebsiteDomainPorts, "probe" | "routingWaitMs" | "routingPollMs">;
+/** What add-app reads: the onboarding ports. */
+export type AddAppPorts = TenantOnboardPorts;
 
 /** The sites the template supplies to the bundle steps for a website: its own site, or none where the
  *  tenant's bundle lists it. Naming the folder with an empty list keeps the steps from falling back to
@@ -226,8 +213,8 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     seedTenantAppKeyStep(ports.seeder, "service-key", p.stage, p.guid, p.app),
     ...(p.website
       ? [
-        seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, p.app),
-        seedTenantAppKeyStep(ports.seeder, "form-signing-key", p.stage, p.guid, p.app),
+        seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, TENANT_WEB_MEMBER),
+        seedTenantAppKeyStep(ports.seeder, "form-signing-key", p.stage, p.guid, TENANT_WEB_MEMBER),
       ]
       : []),
     {
@@ -271,8 +258,6 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         ctx.log("meta", `app "${p.app}" Application(s) are Synced + Healthy at ${p.chartsRef.slice(0, 7)}`);
       },
     },
-    // A website's hosts: their records, then the wait until it answers there.
-    ...websiteSteps(ports, p),
     {
       name: "smoke",
       title: "Smoke-check the new member's namespace",
@@ -313,21 +298,8 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
 /** What the plan says about a website, or nothing for an app that is none. */
 function websitePlanLine(p: AddAppParams): string {
   if (!p.website) return "";
-  const records = p.websiteRecordHosts.length
-    ? `this run points ${p.websiteRecordHosts.join(", ")} at the tenant's zone and waits until the site answers`
-    : "the tenant's own domain holds its records, and this run waits until the site answers";
-  const main = p.website.main ? ` It becomes the main website of the tenant, served at / of the tenant's domain${p.previousMain ? `, and website ${p.previousMain} stops being it` : ""}.` : "";
-  return ` It is a website of site ${p.website.site}, served at ${websiteHosts(p.website.domain)[0]}, and ${websiteHosts(p.website.domain).slice(1).join(", ")} redirects there; ${records}.${main}`;
-}
-
-/** A website's two steps after its member syncs: its hosts' records, then the wait until it answers. */
-function websiteSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
-  const website = p.website;
-  if (!website) return [];
-  return [
-    provisionWebsiteRecordsStep(ports, p.tenantId, p.app, p.websiteRecordHosts, p.websiteReplacing),
-    { name: "wait-website", title: `Wait until the website answers at ${websiteHosts(website.domain)[0]}`, run: (ctx) => waitForWebsite(ctx, ports, website.domain, "The website's member stands: retry this step once its records and certificate are in place, or remove the website.") },
-  ];
+  const main = p.website.main ? ` It becomes the main website of the tenant, served at / of the tenant's host${p.previousMain ? `, and website ${p.previousMain} stops being it` : ""}.` : ` It is served at ${websitePath(p.website)} of the tenant's host.`;
+  return ` It is a website of site ${p.website.site}.${main}`;
 }
 
 export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
@@ -353,20 +325,10 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       if ([...current.entry.apps, ...current.entry.members].some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
-      const website = req.folder !== undefined && req.site !== undefined && req.domain !== undefined ? { folder: req.folder, site: req.site, domain: req.domain, ...(req.main ? { main: true as const } : {}) } : undefined;
+      const website = req.folder !== undefined && req.site !== undefined ? { folder: req.folder, site: req.site, ...(req.main ? { main: true as const } : {}) } : undefined;
       let bundle: AppsManifest | null = null;
       if (website) {
         if (current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) throw errValidation(`site "${website.site}" already runs in tenant ${tc.guid}`);
-        if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
-        const serving = current.entry.apps.find((a) => a.domain === website.domain);
-        if (serving) throw errValidation(`${website.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
-        const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
-        for (const host of websiteHosts(website.domain)) {
-          const problem = customerHostProblem(ctx.db, tc.tenantId, host, apex, websites);
-          if (problem !== null) throw errValidation(problem);
-        }
-        await refuseOffStageHosts(ports.dns, [website.domain], tc.stage, ctx);
         // A tenant whose own bundle lists the website's folder serves the site from that bundle, at the
         // release it stands at, the way tenant-set-website-site judges it. A folder the bundle lacks
         // comes from the template, with the template's sites.
@@ -490,15 +452,13 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         ...(website ? { website } : {}),
         previousMain: current.entry.apps.find((a) => a.main)?.name ?? null,
         siteFromBundle,
-        websiteRecordHosts: website ? websiteRecordHosts(website.domain, [], current.entry) : [],
-        websiteReplacing: website ? await websiteRecordsToReplace(ctx.db, ports, tc, websiteRecordHosts(website.domain, [], current.entry), ctx.signal) : [],
       };
       const stepDefs = addAppSteps(ports, params);
       const plan: Plan = {
         kind: "tenant-add-app",
         targetKind: "tenant",
         targetId: tc.tenantId,
-        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${bundleSite ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} ${bundleSite}, takes no file from the template, and is built first` : hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.${replacementSentence(params.websiteReplacing)}`,
+        summary: `Add app "${req.app}" to tenant ${tc.guid} on ${tc.domain} (${tc.stage}), validated at deploy repository ${outcome.resolvedSha.slice(0, 7)}: ${stepDefs.length} steps.${websitePlanLine(params)}${bundleSite ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} ${bundleSite}, takes no file from the template, and is built first` : hasBundle ? ` The tenant's own apps repository ${appsUnit.org}/${appsImage} gains "${req.app}" from ${appsUnit.templateRepoURL} and is built first` : ` The tenant's own apps repository ${appsUnit.org}/${appsImage} is created from ${appsUnit.templateRepoURL} with "${req.app}", onboarded build-only and built first`}; the member is fanned out at the built tag.`,
         steps: stepDefs.map((s) => ({ name: s.name, title: s.title })),
         targets: [],
         locks: tenantLocks(ports.registrations),
@@ -508,7 +468,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       return { outcome: "planned", params, plan };
     },
     steps: (params) => addAppSteps(ports, params),
-    cleanups: (params) => [revertAppendCleanup(ports, params), removeWebsiteRecordsCleanup(ports, params.tenantId, params.app, params.websiteRecordHosts, params.websiteReplacing)],
+    cleanups: (params) => [revertAppendCleanup(ports, params)],
     // The rollback's precondition: the drop above is destructive by cascade (the member's databases go
     // with its ServiceClaim), so it must never fire for a run whose NEW member has meanwhile gone live.
     assertAbortable: (params, deps) => assertAddAppAbortable(ports, params, deps.db),

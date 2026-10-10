@@ -42,20 +42,20 @@ describe("repointUnitRecords", () => {
     dns.seed("post.example.net", "CNAME", FROM);
     dns.seed("auth.example.net", "CNAME", "s2.example");
     dns.seed("gone.example.net", "CNAME", FROM);
-    dns.seed("*.acme.example.net", "CNAME", FROM);
+    dns.seed("acme.example.net", "CNAME", FROM);
     const logs: string[] = [];
     const unitApex = async (domain: string) => { expect(domain).toBe(TO); return "example.net"; };
 
     const moved = await repointUnitRecords({ dns, unitApex }, ctx(logs), { clusterId: "cls_1", from: FROM, to: TO });
 
-    expect(moved.sort()).toEqual(["*.acme.example.net", "post.example.net"]);
+    expect(moved.sort()).toEqual(["acme.example.net", "post.example.net"]);
     expect(dns.record("post.example.net", "CNAME")).toBe(TO);
-    expect(dns.record("*.acme.example.net", "CNAME")).toBe(TO);
+    expect(dns.record("acme.example.net", "CNAME")).toBe(TO);
     expect(dns.record("auth.example.net", "CNAME")).toBe("s2.example");
     expect(dns.record("gone.example.net", "CNAME")).toBe(FROM);
     expect(logs.join("\n")).toContain("auth.example.net points at s2.example, not at s1.example — it is not this cluster's to move");
     expect(listDnsWrites(db.db).map((w) => [w.name, w.act, w.content, w.runId]).sort()).toEqual([
-      ["*.acme.example.net", "updated", TO, "run_rename"],
+      ["acme.example.net", "updated", TO, "run_rename"],
       ["post.example.net", "updated", TO, "run_rename"],
     ]);
 

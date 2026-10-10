@@ -57,7 +57,7 @@ describe("readDnsInventory", () => {
     db: db.db,
     dns,
     consumers: async (cluster, stage) => (stage === "prod" && cluster === M1.split(".")[0] ? [{ name: "post", host: "post", fqdn: "" }] : []),
-    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "m1" }, { subdomain: "beta", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "s1" }] : []),
+    tenants: async (stage) => (stage === "prod" ? [{ subdomain: "acme", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "m1" }, { subdomain: "beta", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "s1" }] : []),
     unitApex: async () => "example.net",
     mail: async () => mailView(),
     ...over,
@@ -65,29 +65,29 @@ describe("readDnsInventory", () => {
 
   it("derives one record per unit per stage and reads each at the provider, with the cluster's own name as what its CNAME must carry", async () => {
     dns.seed("post.example.net", "CNAME", M1); // the consumer's host, pointing at its cluster
-    dns.seed("*.beta.example.net", "CNAME", M1); // the slave's tenant, still pointing at the master
+    dns.seed("beta.example.net", "CNAME", M1); // the slave's tenant, still pointing at the master
     const view = await readDnsInventory(deps());
     expect(view.skipped).toEqual([]);
     expect(view.rows.filter((r) => r.owner.kind === "consumer" || r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual([
       "post.example.net standing",
-      "*.acme.example.net absent", // never provisioned, or already taken back
-      "*.beta.example.net other", // the slave's own name is what this one must carry
+      "acme.example.net absent", // never provisioned, or already taken back
+      "beta.example.net other", // the slave's own name is what this one must carry
     ]);
     const consumer = view.rows.find((r) => r.name === "post.example.net")!;
     expect(consumer).toMatchObject({ owner: { kind: "consumer", name: "post", stage: "prod" }, type: "CNAME", expected: M1, removable: true });
-    expect(view.rows.find((r) => r.name === "*.beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1, found: M1 });
+    expect(view.rows.find((r) => r.name === "beta.example.net")).toMatchObject({ owner: { kind: "tenant", name: "beta", stage: "prod" }, expected: S1, found: M1 });
   });
 
-  it("names a path-routed tenant's record by its zone, which the wildcard does not cover", async () => {
+  it("names a tenant's record by its zone", async () => {
     dns.seed("gamma.example.net", "CNAME", M1);
-    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "m1" }] : []) }));
+    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, cluster: "m1" }] : []) }));
     expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.verdict}`)).toEqual(["gamma.example.net standing"]);
   });
 
   it("lists an own domain's and its redirect hosts' records, each expected on the tenant's zone", async () => {
     dns.seed("gamma.example.net", "CNAME", M1);
     dns.seed("www.gamma.test", "CNAME", "gamma.example.net");
-    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", routing: "path", ownDomain: "www.gamma.test", ownDomainRedirects: ["gamma.test"], cluster: "m1" }] : []) }));
+    const view = await readDnsInventory(deps({ tenants: async (stage) => (stage === "prod" ? [{ subdomain: "gamma", ownDomain: "www.gamma.test", ownDomainRedirects: ["gamma.test"], cluster: "m1" }] : []) }));
     expect(view.rows.filter((r) => r.owner.kind === "tenant").map((r) => `${r.name} ${r.expected} ${r.verdict}`)).toEqual([
       `gamma.example.net ${M1} standing`,
       "www.gamma.test gamma.example.net standing",
@@ -96,9 +96,9 @@ describe("readDnsInventory", () => {
   });
 
   it("shows an address record standing where a unit's CNAME belongs as what it is — never as an absence", async () => {
-    dns.seed("*.acme.example.net", "A", "157.90.201.150"); // what a gone installation left under the tenant's wildcard
+    dns.seed("acme.example.net", "A", "157.90.201.150"); // what a gone installation left at the tenant's zone
     const view = await readDnsInventory(deps());
-    expect(view.rows.find((r) => r.name === "*.acme.example.net")).toMatchObject({
+    expect(view.rows.find((r) => r.name === "acme.example.net")).toMatchObject({
       owner: { kind: "tenant", name: "acme", stage: "prod" }, type: "A", expected: M1, found: "157.90.201.150", verdict: "other", removable: true,
     });
   });
@@ -132,29 +132,14 @@ describe("readDnsInventory", () => {
 
   it("lists the identity provider marks the book holds, removable, owned by the tenant's subdomain or, where no row names it, its guid", async () => {
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
-    recordDnsWrite(db.db, { name: "_digita-idp.auth.acme.example.net", type: "TXT", content: "https://auth.acme.example.net", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
-    recordDnsWrite(db.db, { name: "_digita-idp.auth.gone.example.net", type: "TXT", content: "https://auth.gone.example.net", act: "inserted", owner: { kind: "tenant", name: "ak64h58875qw", stage: "prod" }, runId: "run_b" });
-    dns.seed("_digita-idp.auth.acme.example.net", "TXT", "https://auth.acme.example.net");
+    recordDnsWrite(db.db, { name: "_digita-idp.acme.example.net", type: "TXT", content: "https://acme.example.net/auth", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
+    recordDnsWrite(db.db, { name: "_digita-idp.gone.example.net", type: "TXT", content: "https://gone.example.net/auth", act: "inserted", owner: { kind: "tenant", name: "ak64h58875qw", stage: "prod" }, runId: "run_b" });
+    dns.seed("_digita-idp.acme.example.net", "TXT", "https://acme.example.net/auth");
     const view = await readDnsInventory(deps());
     // The book lists its rows newest first, so the two are compared without their order.
     expect(view.rows.filter((r) => r.name.startsWith("_digita-idp.")).map((r) => `${r.owner.kind} ${r.owner.name} ${r.name} ${r.verdict} ${r.removable}`).sort()).toEqual([
-      "tenant acme _digita-idp.auth.acme.example.net standing true",
-      "tenant ak64h58875qw _digita-idp.auth.gone.example.net absent true", // a purge left it in the book, so dns-remove can take it back
-    ]);
-  });
-
-  it("lists the issuer host's CNAME beside a host-routed mark, removable, and none beside a path-routed one or one booked for another owner", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
-    const tenant = { kind: "tenant" as const, name: "zsjs023ctne0", stage: "prod" as const };
-    recordDnsWrite(db.db, { name: "_digita-idp.auth.acme.example.net", type: "TXT", content: "https://auth.acme.example.net", act: "inserted", owner: tenant, runId: "run_a" });
-    recordDnsWrite(db.db, { name: "auth.acme.example.net", type: "CNAME", content: "s1.example", act: "inserted", owner: tenant, runId: "run_a" });
-    recordDnsWrite(db.db, { name: "_digita-idp.show.example.net", type: "TXT", content: "https://show.example.net/auth", act: "inserted", owner: tenant, runId: "run_a" });
-    recordDnsWrite(db.db, { name: "_digita-idp.auth.other.example.net", type: "TXT", content: "https://auth.other.example.net", act: "inserted", owner: tenant, runId: "run_a" });
-    recordDnsWrite(db.db, { name: "auth.other.example.net", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "consumer", name: "auth", stage: "prod" }, runId: "run_c" });
-    dns.seed("auth.acme.example.net", "CNAME", "s1.example");
-    const view = await readDnsInventory(deps());
-    expect(view.rows.filter((r) => r.type === "CNAME" && r.name.startsWith("auth.")).map((r) => `${r.owner.kind} ${r.owner.name} ${r.name} ${r.expected} ${r.verdict} ${r.removable}`)).toEqual([
-      "tenant acme auth.acme.example.net s1.example standing true",
+      "tenant acme _digita-idp.acme.example.net standing true",
+      "tenant ak64h58875qw _digita-idp.gone.example.net absent true", // a purge left it in the book, so dns-remove can take it back
     ]);
   });
 

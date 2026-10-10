@@ -425,8 +425,8 @@ describe("tenant-refresh-members", () => {
 });
 
 describe("the Versions run's params", () => {
-  it("keep a website's folder, site and domain, so the render after the builds finds the website's folder", () => {
-    const website = { name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} };
+  it("keep a website's folder and site, so the render after the builds finds the website's folder", () => {
+    const website = { name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {} };
     const erp = { name: "erp", seedReference: true, seedDemo: false, selections: {} };
     expect(TenantRefreshMembersParams.shape.apps.parse([erp, website])).toEqual([erp, website]);
   });

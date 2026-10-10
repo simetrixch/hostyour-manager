@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, unknownDomainText, websiteDomainConfirm, websiteFolder, websiteSiteConfirm } from "./tenantAppRows.ts";
+import { listedWebsites, newWebsiteName, removedWebsites, tenantAppRows, typedAliases, undeployedApps, websiteFolder, websiteSiteConfirm } from "./tenantAppRows.ts";
 import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
@@ -60,26 +60,19 @@ describe("undeployedApps", () => {
     expect(removedWebsites([standing])).toEqual([]);
   });
 
-  it("lists the catalog's websites with their domains, and every live inventory website the catalog does not name", () => {
+  it("lists the catalog's websites, and every live inventory website the catalog does not name", () => {
     const live = { ...row("cycleshop"), site: "cycleshop" };
     const unnamed = { ...row("show"), site: "show" };
     const gone = { ...row("old", "offboarded"), site: "old" };
-    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [], main: false }]);
-    // A live website the catalog's list leaves out stays on the page, by name and site, without the
-    // domain only the registration knows, beside the ones the catalog names.
-    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch" }] }, [live, unnamed])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", aliases: [], main: false }, { name: "show", site: "show", domain: null, aliases: [], main: false }]);
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop" }] }, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", main: false }]);
+    // A live website the catalog's list leaves out stays on the page, by name and site, beside the
+    // ones the catalog names.
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop" }] }, [live, unnamed])).toEqual([{ name: "cycleshop", site: "cycleshop", main: false }, { name: "show", site: "show", main: false }]);
     // Loading, unreadable or degraded: the same, and a removed website is never listed as live.
-    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [], main: false }]);
-    expect(listedWebsites({}, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", domain: null, aliases: [], main: false }]);
+    expect(listedWebsites(null, [row("erp"), live, gone])).toEqual([{ name: "cycleshop", site: "cycleshop", main: false }]);
+    expect(listedWebsites({}, [live])).toEqual([{ name: "cycleshop", site: "cycleshop", main: false }]);
     // The catalog's mark carries through; an inventory-only row never holds it.
-    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", domain: "cycleshop.ch", main: true }] }, [live, unnamed]).map((w) => w.main)).toEqual([true, false]);
-  });
-
-  it("says why a website's domain is unknown only as far as the page knows it", () => {
-    expect(unknownDomainText(null)).toBe("domain unknown while the tenant's catalog loads");
-    expect(unknownDomainText({ error: "clone failed" })).toBe("domain unknown: the tenant's catalog cannot be read");
-    expect(unknownDomainText({ reason: "tenant onboarding is not configured on this manager" })).toBe("domain unknown: the catalog is not read for this tenant");
-    expect(unknownDomainText({ websites: [] })).toBe("domain unknown: the tenant's registration names no website of this name");
+    expect(listedWebsites({ websites: [{ name: "cycleshop", site: "cycleshop", main: true }] }, [live, unnamed]).map((w) => w.main)).toEqual([true, false]);
   });
 
   it("PLANTED INNOCENT: a removed app names no site and stays under Apps as offboarded", () => {
@@ -108,23 +101,6 @@ describe("typedAliases", () => {
   it("reads the alias domains of one field, split at commas or spaces, lower-cased, empties dropped", () => {
     expect(typedAliases(" Example.DE, example.at  example.com,,")).toEqual(["example.de", "example.at", "example.com"]);
     expect(typedAliases("  ")).toEqual([]);
-  });
-});
-
-// The confirm of a website's domain dialog: a move, an alias change, or, with both left as they stand,
-// the run that writes the host records the website misses (the server refuses it where none is missing).
-
-describe("websiteDomainConfirm", () => {
-  const standing = { domain: "example.ch", aliases: ["example.de"] };
-
-  it("names a move, an alias change, and with nothing changed the repair of missing host records", () => {
-    expect(websiteDomainConfirm(standing, "example.org", ["example.de"])).toBe("Serve at example.org");
-    expect(websiteDomainConfirm(standing, "example.ch", [])).toBe("Set the aliases");
-    expect(websiteDomainConfirm(standing, "example.ch", ["example.de"])).toBe("Write the missing host records");
-  });
-
-  it("offers nothing without a domain", () => {
-    expect(websiteDomainConfirm(standing, "", ["example.de"])).toBeNull();
   });
 });
 

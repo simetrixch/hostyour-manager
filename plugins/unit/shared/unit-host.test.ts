@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { consumerUnitHost, HOST_LABEL_RE, issuerAddressHost, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantWildcardHost, tenantZone, ownDomainEntryProblem, ownDomainHosts, stageHost, prodHostOf, stageHostProblem } from "./unit-host.ts";
+import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantZone, ownDomainEntryProblem, ownDomainHosts, stageHost, prodHostOf, stageHostProblem } from "./unit-host.ts";
 import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
@@ -24,36 +24,20 @@ describe("a consumer's host — <label>.<stage apex>", () => {
   });
 });
 
-describe("a tenant's zone and members — <member>.<subdomain>.<stage apex>", () => {
+describe("a tenant's zone and members — <subdomain>.<stage apex>/<member>", () => {
   it("puts the tenant one level below the stage zone, and every member one level below the tenant", () => {
     expect(tenantZone("simetrix", "prod", "digitacloud.app")).toBe("simetrix.digitacloud.app");
     expect(tenantZone("simetrix", "dev", "digitacloud.app")).toBe("simetrix.dev.digitacloud.app");
   });
 
-  it("addresses a member on a host of its own under host routing, and under a path of the zone under path routing", () => {
-    expect(tenantMemberUrl("host", "idp", "prod", "acme", "example.test", "")).toBe("https://idp.acme.example.test");
-    expect(tenantMemberUrl("host", "idp", "dev", "acme", "example.test", "")).toBe("https://idp.acme.dev.example.test");
-    expect(tenantMemberUrl("path", "idp", "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
-    expect(tenantMemberUrl("path", "idp", "dev", "acme", "example.test", "")).toBe("https://acme.dev.example.test/idp");
+  it("addresses a member under a path of the zone", () => {
+    expect(tenantMemberUrl("idp", "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
+    expect(tenantMemberUrl("idp", "dev", "acme", "example.test", "")).toBe("https://acme.dev.example.test/idp");
   });
 
   it("addresses a member under a path of the tenant's own domain where it has one, instead of its zone", () => {
-    expect(tenantMemberUrl("path", "idp", "prod", "acme", "example.test", "www.customer.example")).toBe("https://www.customer.example/idp");
-    expect(tenantMemberUrl("path", "idp", "dev", "acme", "example.test", "customer.example")).toBe("https://customer.example/idp");
-  });
-
-  it("names the one record the routing needs: the wildcard under host routing, the zone itself under path routing", () => {
-    expect(tenantRecordName("host", "acme", "prod", "example.test")).toBe("*.acme.example.test");
-    expect(tenantRecordName("path", "acme", "prod", "example.test")).toBe("acme.example.test");
-    expect(tenantRecordName("path", "acme", "dev", "example.test")).toBe("acme.dev.example.test");
-    // The wildcard matches one label more and never the zone, which is why path routing needs a record of its own.
-    expect(tenantRecordName("path", "acme", "prod", "example.test")).not.toBe(tenantRecordName("host", "acme", "prod", "example.test"));
-  });
-
-  it("gives every stage its own wildcard, because the zones differ", () => {
-    expect(tenantWildcardHost("simetrix", "prod", "digitacloud.app")).toBe("*.simetrix.digitacloud.app");
-    expect(tenantWildcardHost("simetrix", "dev", "digitacloud.app")).toBe("*.simetrix.dev.digitacloud.app");
-    expect(tenantWildcardHost("simetrix", "dev", "digitacloud.app")).not.toBe(tenantWildcardHost("simetrix", "prod", "digitacloud.app"));
+    expect(tenantMemberUrl("idp", "prod", "acme", "example.test", "www.customer.example")).toBe("https://www.customer.example/idp");
+    expect(tenantMemberUrl("idp", "dev", "acme", "example.test", "customer.example")).toBe("https://customer.example/idp");
   });
 });
 
@@ -104,21 +88,15 @@ describe("a tenant's own domain — typed without www, served at the apex", () =
 });
 
 describe("a tenant identity provider's DNS mark — the issuer under the zone", () => {
-  it("names the record under the identity provider's host on the zone and holds its address there, by the routing", () => {
-    expect(tenantIssuerRecord("_digita-idp", "path", "auth", "prod", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.digitacloud.app", content: "https://show.digitacloud.app/auth" });
-    expect(tenantIssuerRecord("_digita-idp", "host", "auth", "dev", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.auth.show.dev.digitacloud.app", content: "https://auth.show.dev.digitacloud.app" });
-  });
-
-  it("names the issuer host as the host that needs an address record beside the mark under host routing, and none under path routing", () => {
-    expect(issuerAddressHost(tenantIssuerRecord("_digita-idp", "host", "auth", "dev", "show", "digitacloud.app").content)).toBe("auth.show.dev.digitacloud.app");
-    // Under path routing the issuer host is the zone, which holds the tenant's own record.
-    expect(issuerAddressHost(tenantIssuerRecord("_digita-idp", "path", "auth", "prod", "show", "digitacloud.app").content)).toBeNull();
+  it("names the record under the zone and holds the identity provider's address on it", () => {
+    expect(tenantIssuerRecord("_digita-idp", "auth", "prod", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.digitacloud.app", content: "https://show.digitacloud.app/auth" });
+    expect(tenantIssuerRecord("_digita-idp", "auth", "dev", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.dev.digitacloud.app", content: "https://show.dev.digitacloud.app/auth" });
   });
 
   it("PLANTED DEFECT: never names the own domain, whose DNS the customer controls", () => {
-    const mark = tenantIssuerRecord("_idp", "path", "auth", "prod", "show", "digitacloud.app");
-    expect(mark.content).toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", ""));
-    expect(mark.content).not.toBe(tenantMemberUrl("path", "auth", "prod", "show", "digitacloud.app", "show.example.org"));
+    const mark = tenantIssuerRecord("_idp", "auth", "prod", "show", "digitacloud.app");
+    expect(mark.content).toBe(tenantMemberUrl("auth", "prod", "show", "digitacloud.app", ""));
+    expect(mark.content).not.toBe(tenantMemberUrl("auth", "prod", "show", "digitacloud.app", "show.example.org"));
   });
 });
 

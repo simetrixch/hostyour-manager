@@ -18,7 +18,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { RenderedDoc } from "../../adapters/helm/port.ts";
 import type { TenantValidationReport } from "../../../shared/tenant.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
-import { TEMPLATE_SPEC, addAppPorts, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
+import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { seedUnitSizes } from "#unit/server/unit-size.ts";
@@ -193,7 +193,7 @@ describe("ensure-images placement (both tenant runs)", () => {
   });
 
   it("add-app: strictly between attest-target and apply-appproject (before append-app)", () => {
-    const names = makeAddAppDef(addAppPorts(ports())).steps(addParams()).map((s) => s.name);
+    const names = makeAddAppDef(ports()).steps(addParams()).map((s) => s.name);
     expect(names.indexOf("ensure-images")).toBe(names.indexOf("attest-target") + 1);
     expect(names.indexOf("ensure-images")).toBeLessThan(names.indexOf("apply-appproject"));
     expect(names.indexOf("ensure-images")).toBeLessThan(names.indexOf("append-app"));
@@ -226,7 +226,7 @@ describe("ensure-images through the frozen run params", () => {
   it("add-app runs the SAME step off its own frozen requiredImages", async () => {
     const registryProbe = new FakeRegistryProbe({ missing: ["example-engine:0.4.0"] });
     const p = addParams({ requiredImages: [ENGINE] });
-    const step = makeAddAppDef(addAppPorts(ports({ registryProbe }))).steps(p).find((s) => s.name === "ensure-images")!;
+    const step = makeAddAppDef(ports({ registryProbe })).steps(p).find((s) => s.name === "ensure-images")!;
     await expect(step.run(ctx(p, []))).rejects.toThrow(/missing image\(s\).*example-engine:0\.4\.0/);
   });
 });

@@ -137,7 +137,7 @@ describe("one-stage tenant Move", () => {
     await ports.registrations.commitTenant({ stage, guid: GUID, registration: tenantEntry(), runId: "run_seed" });
     await ports.registrations.commitTenant({ stage: other, guid: GUID, registration: tenantEntry(), runId: "run_other" });
     const beforePointer = await ports.registrations.readTenant(other, GUID);
-    const otherRecord = `*.${SUBDOMAIN}.${other === "prod" ? "" : `${other}.`}example.com`;
+    const otherRecord = `${SUBDOMAIN}.${other === "prod" ? "" : `${other}.`}example.com`;
     f.dns.seed(otherRecord, "CNAME", SOURCE.domain);
     const otherNamespace = `${GUID}-auth-${other}`;
     f.source.reader.namespaceAnnotations.set(otherNamespace, { keep: "sibling" });

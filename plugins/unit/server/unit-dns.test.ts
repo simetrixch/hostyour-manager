@@ -98,11 +98,11 @@ describe("provisionUnitDns and the book", () => {
 
   it("the move (repoint) takes the record off the source cluster, and the switch is booked as updated by the tenant's run", async () => {
     const dns = new FakeDnsProvider();
-    dns.seed("*.acme.example.net", "CNAME", OTHER); // the source cluster
-    await provisionUnitDns(ctx([], "run_move"), { dns, unit: "zsjs023ctne0", kind: "tenant", stage: "prod", recordName: "*.acme.example.net", clusterFqdn: CLUSTER, runKind: "tenant-migrate", repoint: true });
-    expect(dns.record("*.acme.example.net", "CNAME")).toBe(CLUSTER);
+    dns.seed("acme.example.net", "CNAME", OTHER); // the source cluster
+    await provisionUnitDns(ctx([], "run_move"), { dns, unit: "zsjs023ctne0", kind: "tenant", stage: "prod", recordName: "acme.example.net", clusterFqdn: CLUSTER, runKind: "tenant-migrate", repoint: true });
+    expect(dns.record("acme.example.net", "CNAME")).toBe(CLUSTER);
     expect(listDnsWrites(db.db)).toMatchObject([
-      { name: "*.acme.example.net", type: "CNAME", act: "updated", content: CLUSTER, owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_move" },
+      { name: "acme.example.net", type: "CNAME", act: "updated", content: CLUSTER, owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_move" },
     ]);
   });
 
@@ -115,8 +115,8 @@ describe("provisionUnitDns and the book", () => {
 });
 
 describe("isTenantRecord — what a tenant's purge may remove", () => {
-  it("a wildcard is always the tenant's; a plain name only where the book names the tenant as its owner", () => {
-    expect(isTenantRecord(db.db, "*.acme.example.com", "zsjs023ctne0")).toBe(true);
+  it("PLANTED INNOCENT: a wildcard is no tenant's; a name is the tenant's only where the book names the tenant as its owner", () => {
+    expect(isTenantRecord(db.db, "*.acme.example.com", "zsjs023ctne0")).toBe(false);
     expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(false);
     recordDnsWrite(db.db, { name: "acme.example.com", type: "CNAME", content: CLUSTER, act: "inserted", owner: { kind: "consumer", name: "acme", stage: "prod" }, runId: "run_c" });
     expect(isTenantRecord(db.db, "acme.example.com", "zsjs023ctne0")).toBe(false);

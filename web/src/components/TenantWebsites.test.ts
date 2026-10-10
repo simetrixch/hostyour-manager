@@ -12,10 +12,10 @@ import { TenantWebsites } from "./TenantWebsites.tsx";
 
 const catalog: TenantAppCatalogView = {
   apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["simetrix-ch", "simplidigita-ai"] }],
-  websites: [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai" }],
+  websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }],
   members: ["web"],
 };
-const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", domain: "simplidigita.ai", aliases: [] as string[], main: false }];
+const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", main: false }];
 const removedSite = (name: string, status: TenantStatus) => ({ name, site: name, status, lastRunId: "run_removed" });
 
 function render(removed: ReturnType<typeof removedSite>[], websites: typeof live = live): string {
@@ -62,9 +62,12 @@ describe("the Websites section offers Deploy on a site of the bundle that is not
 
 describe("the Websites section marks the tenant's main website", () => {
   it("PLANTED DEFECT: shows the main chip on the website that holds the mark, and on no other row", () => {
-    const html = render([], [{ ...live[0]!, main: true }, { name: "blog", site: "blog", domain: "blog.example.ch", aliases: [], main: false }]);
+    const html = render([], [{ ...live[0]!, main: true }, { name: "blog", site: "blog", main: false }]);
     expect(rowOf(html, "simplidigita-ai")).toContain('<span class="chip">main</span>');
     expect(rowOf(html, "blog")).not.toContain(">main<");
+    // The main website answers at / of the tenant's host, every other at /web/<site>, and each one's engine at /app/<website>.
+    expect(rowOf(html, "simplidigita-ai")).toContain("site simplidigita-ai · at / · admin at /app/simplidigita-ai<");
+    expect(rowOf(html, "blog")).toContain("site blog · at /web/blog · admin at /app/blog<");
   });
 
   it("PLANTED INNOCENT: shows no main chip where no website holds the mark", () => {
