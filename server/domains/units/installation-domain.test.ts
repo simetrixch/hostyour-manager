@@ -229,7 +229,7 @@ describe("installation domain unit phase", () => {
     const move = makeInstallationDomainDef(actions);
     const movePlan = await move.planStream!(original, { db: db.db, log: () => undefined, signal: ctx().signal });
     if (movePlan.outcome !== "planned") throw new Error("expected plan");
-    db.sqlite.prepare("INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,started_by) VALUES(?,?,?,?,?,?,?,?)").run("run_source", "installation-domain-move", "installation", cloud.booksBranch, JSON.stringify(original), JSON.stringify(movePlan.plan), "failed", "op_system");
+    db.sqlite.prepare("INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,owner,modified_by) VALUES(?,?,?,?,?,?,?,?,?)").run("run_source", "installation-domain-move", "installation", cloud.booksBranch, JSON.stringify(original), JSON.stringify(movePlan.plan), "failed", "op_system", "op_system");
     const rollback = makeInstallationDomainRollbackDef(actions);
     const planned = await rollback.planStream!({ sourceRunId: "run_source", dryRun: true }, { db: db.db, log: () => undefined, signal: ctx().signal });
     if (planned.outcome !== "planned") throw new Error("expected rollback plan");

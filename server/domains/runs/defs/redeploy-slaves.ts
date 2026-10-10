@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { asc, eq } from "drizzle-orm";
+import { asc, eq, isNull } from "drizzle-orm";
 import type { Step, StepCtx, RunDefinition, LockClaim, RunTargetRef } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
@@ -63,6 +63,7 @@ export function activeSlaves(db: Db): FleetSlave[] {
     .select({ serverId: servers.id, name: servers.name, role: servers.role, domain: clusters.domain, status: clusters.status })
     .from(servers)
     .innerJoin(clusters, eq(clusters.serverId, servers.id))
+    .where(isNull(servers.deleted))
     .orderBy(asc(servers.name))
     .all()
     .filter((row) => !isMasterRole(row.role) && row.status === "active")

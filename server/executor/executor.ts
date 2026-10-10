@@ -1,7 +1,9 @@
 import { eq, and, inArray } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
-import { runs, steps, runLocks } from "../db/schema/runs.ts";
+import { runs, steps } from "../db/schema/runs.ts";
+import { deletion } from "../db/schema/stamps.ts";
 import { writeAudit } from "../db/audit-writer.ts";
+import { runAsActor, runActor } from "../kernel/actor.ts";
 import { runId as genRunId, stepId as genStepId } from "../kernel/ids.ts";
 import { errValidation, errNotFound, errIllegalTransition, errInternal, errResourceBusy } from "../kernel/errors.ts";
 import { redact } from "../security/redact.ts";
@@ -34,7 +36,6 @@ export interface ExecutorDeps {
   logger: Logger;
   runDefinitions: Map<string, AnyRunDefinition>;
   sshFactory: SshFactory;
-  actor: () => string; // current operator id (from request ctx) or "op_system"
 }
 
 export interface LoadedRun {
@@ -103,16 +104,15 @@ export class Executor {
     const plan: Plan = { ...planned, findings };
     const snapshot: PlanSnapshot = { ...plan, planHash: hashPlan(plan, params), plannedAt: Date.now() };
     const id = genRunId();
-    const actor = this.deps.actor();
     this.deps.db.transaction((tx) => {
       tx.insert(runs)
-        .values({ id, kind, targetKind: plan.targetKind, targetId: plan.targetId, paramsJson: params, planJson: snapshot, status: "planned", startedBy: actor })
+        .values({ id, kind, targetKind: plan.targetKind, targetId: plan.targetId, paramsJson: params, planJson: snapshot, status: "planned" })
         .run();
       impls.forEach((s, i) => {
         tx.insert(steps).values({ id: genStepId(), runId: id, ordinal: i, name: s.name, title: s.title, status: "pending" }).run();
       });
     });
-    writeAudit(this.deps.db, { actor, action: "run.planned", targetKind: plan.targetKind, targetId: plan.targetId, runId: id, detail: { kind, summary: plan.summary } });
+    writeAudit(this.deps.db, { action: "run.planned", targetKind: plan.targetKind, targetId: plan.targetId, runId: id, detail: { kind, summary: plan.summary } });
     return { runId: id, plan: snapshot };
   }
 
@@ -138,10 +138,9 @@ export class Executor {
       const held = conflictsAtEndOfQueue(this.deps.db, planClaims(run.plan), this.hasSecrets)[0];
       if (held) throw errResourceBusy("Resource busy", { resource: held.resource, key: held.key, holderRunId: held.runId });
     }
-    const actor = this.deps.actor();
     const moved = this.deps.db.transaction((tx) => tx.update(runs).set({ status: "queued", approvedAt: new Date() }).where(and(eq(runs.id, runId), eq(runs.status, "planned"))).run());
     if (moved.changes !== 1) throw errIllegalTransition(`run ${runId} was approved or discarded while this approve was checked`);
-    writeAudit(this.deps.db, { actor, action: "run.approved", runId, detail: { planHash: run.plan.planHash } });
+    writeAudit(this.deps.db, { action: "run.approved", runId, detail: { planHash: run.plan.planHash } });
     this.storeSecrets(runId, secrets);
     this.queue.dispatch();
     return this.queue.startedOrQueued(runId);
@@ -156,7 +155,7 @@ export class Executor {
     if (!this.queue.list().find((q) => q.runId === run.id)?.needsSecrets) throw errIllegalTransition(`run ${run.id} is already queued with everything it needs`);
     await assertApprovable(run, this.deps.runDefinitions.get(run.kind), this.deps.db, secrets);
     this.storeSecrets(run.id, secrets);
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.secrets_retyped", runId: run.id });
+    writeAudit(this.deps.db, { action: "run.secrets_retyped", runId: run.id });
     appendRunMeta(this.deps.db, this.deps.bus, run.id, "its secrets were typed again, and it keeps its place in the queue");
     this.queue.dispatch();
     return this.queue.startedOrQueued(run.id);
@@ -168,7 +167,7 @@ export class Executor {
     const run = this.loadRun(runId);
     assertRunTransition(run.status, "cancelled");
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
-    writeAudit(this.deps.db, { actor: this.deps.actor(), action: "run.cancelled", runId, detail: { discarded: true, queued: run.status === "queued" } });
+    writeAudit(this.deps.db, { action: "run.cancelled", runId, detail: { discarded: true, queued: run.status === "queued" } });
     callOnTerminal(this.deps, this.deps.runDefinitions.get(run.kind), runId, run.params, "cancelled");
     this.runSecrets.get(runId)?.wipe();
     this.runSecrets.delete(runId);
@@ -180,7 +179,7 @@ export class Executor {
    *  (planned, failed, cancelled, OR succeeded) may be deleted so the owner can tidy the
    *  list; only an in-flight run (planning/approved/running) is refused and must settle
    *  first. A run is NEVER hard-deleted. "Deleted" means removed from the operator's view:
-   *  `deleted_at` is set and listRuns hides the run, while the row and its
+   *  `deleted` is set and listRuns hides the run, while the row and its
    *  complete steps + events log REMAIN in the DB for retroactive inspection — events stays
    *  append-only, no trigger juggling. Any held run_locks are cleared so a soft-deleted run
    *  can never pin a resource. Idempotent: deleting an already-deleted run is a no-op.
@@ -192,7 +191,7 @@ export class Executor {
   async deleteRun(runId: string): Promise<void> {
     const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
     if (!r) throw errNotFound(`run ${runId}`);
-    if (r.deletedAt) return; // already soft-deleted — idempotent, no second hook/audit
+    if (r.deleted) return; // already soft-deleted — idempotent, no second hook/audit
     if (!isDeletableRun(r.status)) {
       throw errIllegalTransition(
         `run ${runId} is ${r.status} — an in-flight run must settle before it can be deleted`,
@@ -206,13 +205,12 @@ export class Executor {
       callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
     }
     this.deps.db.transaction((tx) => {
-      tx.delete(runLocks).where(eq(runLocks.runId, runId)).run(); // planned/failed normally hold none — defensive, a hidden run must never keep a lock
-      tx.update(runs).set({ deletedAt: new Date() }).where(eq(runs.id, runId)).run();
+      releaseLocks(tx, runId); // planned/failed normally hold none — defensive, a hidden run must never keep a lock
+      tx.update(runs).set(deletion()).where(eq(runs.id, runId)).run();
     });
     this.runSecrets.delete(runId); // hygiene — a deletable run holds no secrets, but never leak
     this.queue.dispatch();
     writeAudit(this.deps.db, {
-      actor: this.deps.actor(),
       action: "run.deleted",
       targetKind: r.targetKind,
       targetId: r.targetId,
@@ -237,7 +235,7 @@ export class Executor {
     const next = this.allStepRows(runId).find((row) => row.status !== "ok" && row.status !== "skipped");
     this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
     appendRunMeta(this.deps.db, this.deps.bus, runId, `✕ cancelled before: ${next?.title ?? "its end"}`);
-    writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: next?.name ?? null } });
+    writeAudit(this.deps.db, { action: "run.cancelled", runId, detail: { beforeStep: next?.name ?? null } });
     callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "cancelled");
   }
 
@@ -345,7 +343,7 @@ export class Executor {
       const params = def.paramsSchema.parse(run.params);
       const impls = def.steps(params);
       if (impls.map((s) => s.name).join(",") !== run.plan.steps.map((s) => s.name).join(",")) {
-        writeAudit(this.deps.db, { actor: "system", action: "run.plan_diverged", runId, detail: { expected: run.plan.steps.map((s) => s.name), actual: impls.map((s) => s.name) } });
+        writeAudit(this.deps.db, { action: "run.plan_diverged", runId, detail: { expected: run.plan.steps.map((s) => s.name), actual: impls.map((s) => s.name) } });
         this.failRun(runId, "step list diverged from the approved plan — re-plan required");
         return;
       }
@@ -379,7 +377,7 @@ export class Executor {
       // Log the run's sanitized inputs (run.params — never secret material) so the DB run log states WHAT it ran with, not just "Run started".
       const args = Object.entries(run.params).map(([k, v]) => `${k}=${v !== null && typeof v === "object" ? JSON.stringify(v) : String(v)}`).join("  ");
       ctx.emitMeta(opts.afterRestart ? "Run resumed after a Manager restart" : resuming ? "Run resumed" : `Run started${args ? `  ·  ${args}` : ""}`);
-      writeAudit(this.deps.db, { actor: "system", action: resuming ? "run.resumed" : "run.started", runId });
+      writeAudit(this.deps.db, { action: resuming ? "run.resumed" : "run.started", runId });
 
       const stepRows = this.allStepRows(runId);
       const isCleanupRun = stepRows.some((r) => r.name.startsWith("cleanup:"));
@@ -394,7 +392,7 @@ export class Executor {
         if (manager.signal.aborted) {
           this.deps.db.transaction((tx) => tx.update(runs).set({ status: "cancelled", finishedAt: new Date() }).where(eq(runs.id, runId)).run());
           ctx.emitMeta(`✕ cancelled before: ${row.title}`);
-          writeAudit(this.deps.db, { actor: "system", action: "run.cancelled", runId, detail: { beforeStep: row.name } });
+          writeAudit(this.deps.db, { action: "run.cancelled", runId, detail: { beforeStep: row.name } });
           callOnTerminal(this.deps, def, runId, params, "cancelled");
           this.finishRun(runId, ctx, secrets, "keep");
           return;
@@ -418,7 +416,7 @@ export class Executor {
             tx.update(runs).set({ status: "failed", error: missing, finishedAt: new Date() }).where(eq(runs.id, runId)).run();
           });
           ctx.emitMeta(`✗ failed: ${row.name} — ${missing}`);
-          writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { failedStep: row.name } });
+          writeAudit(this.deps.db, { action: "run.failed", runId, detail: { failedStep: row.name } });
           callOnTerminal(this.deps, def, runId, params, "failed");
           this.finishRun(runId, ctx, secrets, "keep");
           return;
@@ -449,7 +447,7 @@ export class Executor {
           // redacted above), so an error echoing command output can never leak a secret.
           stepCtx.log("stderr", `✗ ${message}`);
           ctx.emitMeta((aborted ? "✕ cancelled during: " : "✗ failed: ") + impl.title);
-          writeAudit(this.deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { failedStep: row.name } });
+          writeAudit(this.deps.db, { action: aborted ? "run.cancelled" : "run.failed", runId, detail: { failedStep: row.name } });
           // Every failed run is one error line in the process log, the line master's log alarm reads.
           if (!aborted) this.deps.logger.error({ runId, kind: def.kind, runError: message }, "run failed");
           callOnTerminal(this.deps, def, runId, params, aborted ? "cancelled" : "failed");
@@ -460,7 +458,7 @@ export class Executor {
       const finalStatus = isCleanupRun ? "cancelled" : "succeeded";
       this.deps.db.transaction((tx) => tx.update(runs).set({ status: finalStatus, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
       ctx.emitMeta(isCleanupRun ? "Run cancelled — cleanup complete" : "Run succeeded");
-      writeAudit(this.deps.db, { actor: "system", action: isCleanupRun ? "run.cancelled" : "run.succeeded", runId, ...(isCleanupRun ? { detail: { cleanedUp: true } } : {}) });
+      writeAudit(this.deps.db, { action: isCleanupRun ? "run.cancelled" : "run.succeeded", runId, ...(isCleanupRun ? { detail: { cleanedUp: true } } : {}) });
       callOnTerminal(this.deps, def, runId, params, finalStatus);
       this.finishRun(runId, ctx, secrets, "release");
     } catch (err) {
@@ -501,7 +499,7 @@ export class Executor {
       // Same observability law as the step catch: every failure reason lands in the visible
       // run log (appendMeta redacts), never only in runs.error.
       appendRunMeta(this.deps.db, this.deps.bus, runId, `✗ run failed: ${message}`);
-      writeAudit(this.deps.db, { actor: "system", action: "run.failed", runId, detail: { error: message } });
+      writeAudit(this.deps.db, { action: "run.failed", runId, detail: { error: message } });
       const r = this.deps.db.select().from(runs).where(eq(runs.id, runId)).get();
       this.deps.logger.error({ runId, kind: r?.kind, runError: message }, "run failed");
       if (r) callOnTerminal(this.deps, this.deps.runDefinitions.get(r.kind), runId, (r.paramsJson as Record<string, unknown> | null) ?? {}, "failed");
@@ -520,7 +518,7 @@ export class Executor {
     // A soft-deleted run is gone from the operator's view — no mutation (approve/discard/
     // retry/skip/abort) may resurrect it into an invisible live run. execute() only ever
     // loads runs it was handed by approve/resume, which never see a deleted run.
-    if (r.deletedAt) throw errValidation(`run ${runId} is deleted`);
+    if (r.deleted) throw errValidation(`run ${runId} is deleted`);
     return {
       id: r.id,
       kind: r.kind,
@@ -566,7 +564,10 @@ export class Executor {
    *  ever reach: on a rejection, awaiting settle() handled the first one while the discarded one went
    *  to the process as an unhandled rejection, with no way for anyone to catch it. */
   private fireExecute(runId: string, opts: { afterRestart?: boolean } = {}): Promise<void> {
-    const p = this.execute(runId, opts).finally(() => this.inflight.delete(runId));
+    // A run writes as its owner, whoever set it going: a queued run is dispatched by the request that
+    // freed its claims, and a resumed one by the boot.
+    const owner = this.deps.db.select({ owner: runs.owner }).from(runs).where(eq(runs.id, runId)).get()?.owner ?? runActor();
+    const p = runAsActor(owner, () => this.execute(runId, opts)).finally(() => this.inflight.delete(runId));
     this.inflight.set(runId, p);
     return p;
   }

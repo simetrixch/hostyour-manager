@@ -51,7 +51,7 @@ function checkAppendOnly(sqlite: DbHandle["sqlite"]): void {
   for (const t of wanted) if (!present.has(t)) throw new Error(`append-only trigger missing: ${t}`);
 
   const probe = sqlite.transaction(() => {
-    sqlite.prepare("INSERT INTO audit (id, actor, action) VALUES ('aud__selfcheck','system','__selfcheck__')").run();
+    sqlite.prepare("INSERT INTO audit (id, action, owner, modified_by) VALUES ('aud__selfcheck','__selfcheck__','op_system','op_system')").run();
     let raised = false;
     try {
       sqlite.prepare("UPDATE audit SET action='x' WHERE id='aud__selfcheck'").run();

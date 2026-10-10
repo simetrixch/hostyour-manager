@@ -5,10 +5,11 @@
 import { dropCredentialRows } from "../../security/store.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
-import { resolveBuildUnits, buildUnitStep, buildUnitStepName, refreshImagesStep, channelReaching, type TenantBuildRuntime } from "./tenant-builds.ts";
+import { buildUnitStep, buildUnitStepName, refreshImagesStep, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
 import { composeTenantReport, TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
@@ -30,7 +31,7 @@ import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { STANDING_MEMBER_NAMES as TEST_MEMBERS, testMembers, APP_OVERLAYS, TEST_CHANNEL_STAGES, TEST_RESOURCES } from "./tenant-members.fixture.ts";
 import { TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts"; import { seedUnitSizes } from "#unit/server/unit-size.ts";
+import { RELEASE_KIT_PATHS } from "#unit/server/release-kit/release-kit.ts";
 
 const SHA = "a".repeat(40);
 const GUID = "zsjs023ctne0";
@@ -90,7 +91,7 @@ const TRUNK_DOCS = withImages({ jobs: "0.2.0", engine: "0.4.0" });
 const BUILT_DOCS = withImages({ jobs: "0.1.0-stable-20260101000000-abc1234", engine: "0.4.0" });
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(): TenantValidationReport {
@@ -169,32 +170,6 @@ function seedClusters(): void {
   db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
 }
-const BUILD_REPOS = [{ repo: JOBS_REPO, builds: ["example-jobs"] }, { repo: PLATFORM_REPO, builds: ["example-engine"] }];
-
-describe("resolveBuildUnits — the missing images grouped by the repository that builds them", () => {
-  it("one unit per repository, named by the repository, registered or not; an image nobody builds is unmapped", async () => {
-    const r = await resolveBuildUnits({
-      missing: [{ repo: "example-jobs", tag: "0.2.0" }, { repo: "example-engine", tag: "0.4.0" }, { repo: "example-nobody", tag: "1" }],
-      buildRepos: BUILD_REPOS,
-      registration: async (unit) => (unit === "example-platform" ? { form: "build-only" } : null),
-    });
-    expect(r.units).toEqual([
-      { unit: "example-jobs", repoURL: JOBS_REPO, images: ["example-jobs"], registered: false },
-      { unit: "example-platform", repoURL: PLATFORM_REPO, images: ["example-engine"], registered: true, form: "build-only" },
-    ]);
-    expect(r.unmapped).toEqual([{ repo: "example-nobody", tag: "1" }]);
-  });
-});
-
-describe("channelReaching — the highest channel whose ceiling admits the stage", () => {
-  const table = { alpha: ["dev" as const], beta: ["dev" as const, "test" as const], stable: ["dev" as const, "test" as const, "prod" as const] };
-  it("stable for prod, stable for dev too (a tenant is never a pre-release), refused where nothing reaches", () => {
-    expect(channelReaching(table, "prod")).toBe("stable");
-    expect(channelReaching(table, "dev")).toBe("stable");
-    expect(() => channelReaching({ alpha: ["dev"] }, "prod")).toThrow(/no release channel reaches stage prod/);
-  });
-});
-
 describe("create-tenant planStream — the build units and their owner's identity (#220)", () => {
   it("lists a build unit per missing image's repository, asks nothing at approve, and places its steps before the tenant's writes", async () => {
     seedClusters();

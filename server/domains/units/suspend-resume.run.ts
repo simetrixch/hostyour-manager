@@ -84,7 +84,7 @@ function suspendSteps(ports: LifecyclePorts, params: SuspendResumeParams): Step[
       name: "record-suspended",
       title: "Record the consumer as suspended",
       run: async (ctx) => {
-        localTx(ctx, (tx) => tx.update(apps).set({ status: "suspended", lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
+        localTx(ctx, (tx) => tx.update(apps).set({ status: "suspended", lastRunId: ctx.runId }).where(eq(apps.id, appId)).run());
         ctx.log("meta", `consumer recorded as suspended (row kept) — the registration flip follows, so the two never disagree`);
       },
     },
@@ -113,7 +113,7 @@ function resumeSteps(ports: LifecyclePorts, params: SuspendResumeParams): Step[]
       name: "record-active",
       title: "Record the consumer as active",
       run: async (ctx) => {
-        localTx(ctx, (tx) => tx.update(apps).set({ status: "active", lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
+        localTx(ctx, (tx) => tx.update(apps).set({ status: "active", lastRunId: ctx.runId }).where(eq(apps.id, appId)).run());
         ctx.log("meta", `consumer recorded as active — the registration flip follows, so the two never disagree`);
       },
     },

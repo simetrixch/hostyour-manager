@@ -138,7 +138,7 @@ export async function seedConsumerSecrets(
   const dkimKey = input.dkimKey;
   const dkimPublicKey = dkimKey !== undefined ? publicKeys[dkimKey] : undefined;
   if (dkimPublicKey !== undefined) {
-    ctx.db.update(apps).set({ dkimPublicKey, updatedAt: new Date() }).where(and(eq(apps.name, input.consumerName), eq(apps.stage, input.stage))).run();
+    ctx.db.update(apps).set({ dkimPublicKey }).where(and(eq(apps.name, input.consumerName), eq(apps.stage, input.stage))).run();
     ctx.log("meta", `the public half of ${dkimKey} is kept on ${input.consumerName}'s row — the Mail page publishes it as the DKIM key of the platform domain`);
   }
 }

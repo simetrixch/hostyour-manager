@@ -65,7 +65,7 @@
 //
 // Boundary: domain layer — the db schema, shared/ and the git PlatformRepo port only. Deliberately
 // imports NO other domain (inventory is the base domain every other one may read, not the reverse).
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
@@ -389,12 +389,12 @@ export function buildPlaneFqdnFromMarkings(repo: PlatformRepo): BuildPlaneFqdnRe
 export function projectClusterMarking(
   db: Db,
   marking: ClusterMarking,
-  opts: { actor: string; runId?: string },
+  opts: { runId?: string } = {},
 ): { stage?: { from: Stage; to: Stage }; role?: { from: ServerRole; to: ServerRole } } {
   const row = db
     .select({ clusterId: clusters.id, stage: clusters.stage, serverId: servers.id, role: servers.role })
     .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .innerJoin(servers, and(eq(clusters.serverId, servers.id), isNull(servers.deleted)))
     .where(eq(clusters.domain, marking.fqdn))
     .get();
   if (!row) throw errValidation(`no cluster registered for ${marking.fqdn} — nothing to project the cluster map onto`);
@@ -410,7 +410,6 @@ export function projectClusterMarking(
   }
   if (changed.stage || changed.role) {
     writeAudit(db, {
-      actor: opts.actor,
       action: "cluster.marking_projected",
       targetKind: "cluster",
       targetId: row.clusterId,

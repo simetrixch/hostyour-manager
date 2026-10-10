@@ -1,4 +1,4 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters, servers } from "../../db/schema/inventory.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
@@ -242,7 +242,7 @@ export async function readMailEgress(deps: Pick<MailDnsDeps, "db" | "publicDns" 
  *  cluster row; the sender domains are its map's platformDomain (customer mail) and unitApex
  *  (alert mail) — one block when the two are the same name. */
 export async function readMailDns(deps: MailDnsDeps): Promise<MailDnsView> {
-  const master = deps.db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  const master = deps.db.select().from(servers).where(and(inArray(servers.role, [...MASTER_ROLES]), isNull(servers.deleted))).get();
   if (!master) throw errNotFound("no master server is registered — the mail leaves the master, and there is none to measure");
   const cluster = deps.db.select().from(clusters).where(eq(clusters.serverId, master.id)).get();
   if (!cluster) throw errNotFound(`the master ${master.name} carries no cluster row — boot seeds it from MASTER_FQDN (boot/seed-master.ts)`);

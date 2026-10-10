@@ -259,9 +259,9 @@ export interface ConsumerView {
   lastRunId: string | null;
   /** What the scheduled check last measured (#210), or null where none has reached this unit. */
   check: UnitCheck | null;
-  createdAt: number;
+  creation: number;
   /** When a writer last moved the row: a lifecycle run, a relocation, the scheduled check (#224). */
-  updatedAt: number;
+  modified: number;
 }
 /** The request of a unit that deploys or builds: it names the stage the release lands on. */
 export interface ReleaseOnboardInput {
@@ -478,7 +478,8 @@ export interface TenantView {
   suspended: boolean;
   /** Whether a release moves this tenant by itself (hostyour-manager#328). */
   followReleases: boolean;
-  owner: string | null;
+  /** The GitHub owner of the tenant's repositories. */
+  repoOwner: string | null;
   /** The same server enum ConsumerView carries, taken from shared/enums.ts rather than restated as a
    *  union here: a literal that leaves that list must break THIS build, not survive as a word the
    *  server never sends. A tenant is only ever "manager" — there is no adopt run kind for one. */
@@ -498,8 +499,8 @@ export interface TenantView {
   /** What the scheduled check last measured (#210), or null where none has reached this tenant. */
   check: UnitCheck | null;
   lastRunId: string | null;
-  createdAt: number;
-  updatedAt: number;
+  creation: number;
+  modified: number;
 }
 /** One app of the tenant's guid × apps[] matrix — a MEMBER of its own: namespace, AppProject and
  *  Application all named <guid>-<name>-<stage>, its host <name>.<subdomain>.<stage apex>. */
@@ -510,7 +511,7 @@ export interface TenantAppView {
   lastRunId: string | null;
   /** The site a website serves, null for an app — also once the website is removed. */
   site: string | null;
-  createdAt: number;
+  creation: number;
 }
 /** GET /api/tenants/:id — the tenant row plus its per-app rows. */
 export type TenantDetailView = TenantView & { apps: TenantAppView[] };

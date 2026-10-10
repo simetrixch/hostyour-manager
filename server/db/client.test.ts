@@ -55,7 +55,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit", "0028_stamp-inventory", "0029_stamp-operators-and-credentials", "0030_stamp-dns-secret-and-backup-books"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -94,7 +94,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     handles.push(h);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]); // 0004 dropped it again
     expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: journal.entries.length });
-    expect(h.sqlite.prepare("SELECT id, created_at, updated_at FROM apps").all()).toEqual([{ id: "app_1", created_at: 1700000000000, updated_at: 1700000000000 }]); // 0002: carried, updated_at = created_at
+    expect(h.sqlite.prepare("SELECT id, creation, modified FROM apps").all()).toEqual([{ id: "app_1", creation: 1700000000000, modified: 1700000000000 }]); // 0002: carried, updated_at = created_at; 0028 renames both
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'apps' AND name NOT LIKE 'sqlite_%'").all()).toEqual([{ name: "apps_name_stage_uq" }]);
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('credentials') WHERE name = 'server_id'").all()).toEqual([]); // 0004
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'repo_credential_id'").all()).toEqual([]); // 0006
@@ -196,10 +196,10 @@ describe("openDb — migration phase + append-only invariants", () => {
   it("enforces append-only on events and audit (UPDATE and DELETE both raise)", () => {
     const { sqlite } = fresh();
     sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_x", "noop", "server", "srv_x", "{}", "{}", "planned", "op_system");
-    sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text) VALUES (?,?,?,?,?)").run("evt_x", "run_x", "stdout", 0, "hello");
-    sqlite.prepare("INSERT INTO audit (id, actor, action) VALUES (?,?,?)").run("aud_x", "system", "run.started");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("run_x", "noop", "server", "srv_x", "{}", "{}", "planned", "op_system", "op_system");
+    sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, owner, modified_by) VALUES (?,?,?,?,?,?,?)").run("evt_x", "run_x", "stdout", 0, "hello", "op_system", "op_system");
+    sqlite.prepare("INSERT INTO audit (id, action, owner, modified_by) VALUES (?,?,?,?)").run("aud_x", "run.started", "op_system", "op_system");
 
     expect(() => sqlite.prepare("UPDATE events SET text='y' WHERE id='evt_x'").run()).toThrow(/append-only/);
     expect(() => sqlite.prepare("DELETE FROM events WHERE id='evt_x'").run()).toThrow(/append-only/);
@@ -211,8 +211,8 @@ describe("openDb — migration phase + append-only invariants", () => {
     const { sqlite } = fresh();
     const insert = (id: string, status: string) =>
       sqlite
-        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, started_by) VALUES (?,?,?,?,?,?,?)")
-        .run(id, "noop", "server", "srv_y", "{}", status, "op_system");
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?)")
+        .run(id, "noop", "server", "srv_y", "{}", status, "op_system", "op_system");
     expect(() => insert("run_bad", "planned")).toThrow(); // planned + NULL plan_json violates the CHECK
     expect(() => insert("run_ok", "failed")).not.toThrow(); // failed may carry no plan
   });

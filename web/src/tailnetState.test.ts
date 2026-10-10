@@ -11,7 +11,7 @@ function server(tailnetState: ServerTailnetState, tailnet: ServerTailnetRead): S
     role: "slave", status: "ready", cluster: null, tailnetState, tailnet,
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    hostKeyPinned: null, machineIdRecorded: false, createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true,
+    hostKeyPinned: null, machineIdRecorded: false, creation: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true,
   };
 }
 

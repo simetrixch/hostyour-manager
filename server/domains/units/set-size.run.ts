@@ -174,7 +174,7 @@ function tenantSetSizeSteps(ports: TenantOnboardPorts, p: TenantSetSizeParams): 
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const quota = resolveUnitQuota(ctx.db, p.size, TENANT_BRINGS);
         const { commit } = await ports.registrations.setSize(tc.stage, tc.guid, p.size, quota, ctx.runId);
-        ctx.db.update(tenants).set({ size: p.size, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ size: p.size }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, size: p.size, quota });
         ctx.log("meta", `tenant ${tc.guid} sized "${p.size}" (${commit}) — EVERY member namespace gets these figures, and the ArgoCD on ${tc.domain} applies them on its next sync`);
       },

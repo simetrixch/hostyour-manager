@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, isNull, notInArray } from "drizzle-orm";
 import type { RunDefinition, Step, LockClaim } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -81,7 +81,7 @@ export function tenantWatchSet(db: Db, tc: Pick<TenantCluster, "tenantId" | "gui
 export function tenantWatchMembers(db: Db, tenantId: string): string[] {
   const row = db.select().from(tenants).where(eq(tenants.id, tenantId)).get();
   if (!row) throw errNotFound(`tenant ${tenantId}`);
-  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).orderBy(tenantApps.name).all();
+  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).orderBy(tenantApps.name).all();
   return [...row.members, ...appRows.map((a) => a.name)];
 }
 
@@ -104,7 +104,7 @@ export function tenantWatchMembers(db: Db, tenantId: string): string[] {
 export function tenantTeardownMembers(db: Db, guid: string, stage: Stage): string[] {
   const row = db.select({ id: tenants.id, members: tenants.members }).from(tenants).where(and(eq(tenants.guid, guid), eq(tenants.stage, stage))).get();
   if (!row) return [];
-  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(eq(tenantApps.tenantId, row.id)).orderBy(tenantApps.name).all();
+  const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, row.id), isNull(tenantApps.deleted))).orderBy(tenantApps.name).all();
   return [...row.members, ...appRows.map((a) => a.name)];
 }
 
@@ -190,7 +190,7 @@ function suspendSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams
       name: "record-suspended",
       title: "Record the tenant as suspended",
       run: async (ctx) => {
-        localTx(ctx, (tx) => tx.update(tenants).set({ status: "suspended", suspended: true, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run());
+        localTx(ctx, (tx) => tx.update(tenants).set({ status: "suspended", suspended: true, lastRunId: ctx.runId }).where(eq(tenants.id, tenantId)).run());
         ctx.log("meta", `tenant recorded as suspended (row kept)`);
       },
     },
@@ -229,7 +229,7 @@ function resumeSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParams)
       name: "record-active",
       title: "Record the tenant as active",
       run: async (ctx) => {
-        localTx(ctx, (tx) => tx.update(tenants).set({ status: "active", suspended: false, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run());
+        localTx(ctx, (tx) => tx.update(tenants).set({ status: "active", suspended: false, lastRunId: ctx.runId }).where(eq(tenants.id, tenantId)).run());
         ctx.log("meta", `tenant recorded as active`);
       },
     },
@@ -253,7 +253,7 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
           ctx.log("meta", `app "${app}" already dropped from tenant ${tc.guid} — skipping (resume)`);
         } else {
           const { commit, approvedTags } = await ports.registrations.updateTenantApps(tc.stage, tc.guid, { op: "drop", app, runId: ctx.runId });
-          ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+          ctx.db.update(tenants).set({ approvedTags }).where(eq(tenants.id, tenantId)).run();
           ctx.checkpoint({ commit });
           await refreshTenantApplications(ports.resolver, tc.clusterId, [memberApplication(tc.guid, app, tc.stage)], ctx);
           ctx.log("meta", `app "${app}" dropped from tenant ${tc.guid} on ${ports.registrations.branch} (${commit}) — ArgoCD will now prune only this member's Application`);
@@ -295,8 +295,8 @@ function removeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): S
         // active — only one member of its matrix was dropped. Bump the tenant's updatedAt/lastRunId (its
         // apps[] matrix changed) so the row's audit trail follows the pointer.
         localTx(ctx, (tx) => {
-          tx.update(tenantApps).set({ status: "offboarded", lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, app))).run();
-          tx.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+          tx.update(tenantApps).set({ status: "offboarded", lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, app))).run();
+          tx.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, tenantId)).run();
         });
         ctx.log("meta", `tenant app "${app}" recorded as offboarded (row kept)`);
       },

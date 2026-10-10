@@ -10,8 +10,9 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { ApiError } from "../../../shared/api-types.ts";
 import { SessionCodec, sessionCookieName } from "./session.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 
-const EMERGENCY_OPERATOR = "op_emergency"; // seeded at schema creation; runs.started_by needs a row to point at
+const EMERGENCY_OPERATOR = "op_emergency"; // seeded at schema creation; runs.owner needs a row to point at
 
 /**
  * Break-glass — closes the chicken-and-egg: recover access even when
@@ -87,7 +88,7 @@ type ArrivedBy = "browser_redeem" | "admin_sock";
  *  session minted here is the highest privilege this process grants and says so on its way out. */
 async function mintEmergencySession(deps: EmergencyDeps, arrivedBy: ArrivedBy): Promise<string> {
   const session = await deps.session.mint({ sub: EMERGENCY_OPERATOR, groups: [deps.config.oidc.adminsGroup], via: "emergency" });
-  writeAudit(deps.db, { actor: EMERGENCY_OPERATOR, action: "operator.login", detail: { method: "emergency", arrivedBy } });
+  runAsActor(EMERGENCY_OPERATOR, () => writeAudit(deps.db, { action: "operator.login", detail: { method: "emergency", arrivedBy } }));
   deps.logger.warn({ action: "break_glass.session", arrivedBy }, `break-glass session minted via ${arrivedBy}`);
   return session;
 }

@@ -19,7 +19,7 @@ function server(over: Partial<ServerView> = {}): ServerView {
     role: "slave", status: "ready", cluster: null, tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    hostKeyPinned: PINNED, machineIdRecorded: true, createdAt: 0, adoptedAt: null, hasPassword: false, hasKey: true,
+    hostKeyPinned: PINNED, machineIdRecorded: true, creation: 0, adoptedAt: null, hasPassword: false, hasKey: true,
     ...over,
   };
 }

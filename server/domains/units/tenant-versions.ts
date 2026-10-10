@@ -243,7 +243,7 @@ export function restoreVersionsCleanup(ports: TenantOnboardPorts, p: TenantVersi
     title: "Record the tenant's previous versions again",
     run: async (ctx) => {
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, p.previousApproved, ctx.runId);
-      ctx.db.update(tenants).set({ approvedTags: p.previousApproved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ approvedTags: p.previousApproved, lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
       await refreshTenantApplications(ports.resolver, p.clusterId, p.members.map(m => memberApplication(p.guid, m.name, p.stage)), ctx);
       ctx.log("meta", `tenant ${p.guid}: versions back to what they were (${commit})`);
     },
@@ -265,7 +265,7 @@ export function writeVersionsStep(ports: TenantOnboardPorts, p: TenantVersionsPa
       const approved = withChosenVersions(read.entry.approvedTags, await stagePinsAndNamesOf((chart) => ports.registrations.listPinnedBuilds(p.stage, chart), p.members), p.chosenVersions);
       throwEngineLineRefusal(await bundleReleaseRefusal(ports, read.entry, read.entry.approvedTags, approved, stepLog(ctx)), `tenant ${p.guid} cannot run these versions`);
       const { commit } = await ports.registrations.setApprovedTags(p.stage, p.guid, approved, ctx.runId);
-      ctx.db.update(tenants).set({ approvedTags: approved, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ approvedTags: approved, lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
       ctx.checkpoint({ commit });
       await refreshTenantApplications(ports.resolver, p.clusterId, p.members.map(m => memberApplication(p.guid, m.name, p.stage)), ctx);
       ctx.log("meta", `tenant ${p.guid}: versions recorded (${commit})`);

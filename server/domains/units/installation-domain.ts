@@ -238,7 +238,7 @@ export async function applyInstallationDomain(ctx: StepCtx, optional: Installati
       const before = reverse ? tenant.ownDomainAfter : tenant.ownDomainBefore, after = reverse ? tenant.ownDomainBefore : tenant.ownDomainAfter;
       const redirectsBefore = reverse ? tenant.redirectsAfter : tenant.redirectsBefore, redirectsAfter = reverse ? tenant.redirectsBefore : tenant.redirectsAfter;
       if (!row || (row.ownDomain !== before && row.ownDomain !== after) || ![JSON.stringify(redirectsBefore), JSON.stringify(redirectsAfter)].includes(JSON.stringify(row.ownDomainRedirects))) throw errValidation(`tenant ${tenant.guid}/${tenant.stage} domain inventory changed since planning`);
-      if (!validateOnly && (row.ownDomain !== after || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(redirectsAfter))) ctx.db.update(tenants).set({ ownDomain: after, ownDomainRedirects: redirectsAfter, updatedAt: new Date() }).where(eq(tenants.id, tenant.id)).run();
+      if (!validateOnly && (row.ownDomain !== after || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(redirectsAfter))) ctx.db.update(tenants).set({ ownDomain: after, ownDomainRedirects: redirectsAfter }).where(eq(tenants.id, tenant.id)).run();
     }
   };
   const writeRecords = async (validateOnly = false): Promise<void> => {

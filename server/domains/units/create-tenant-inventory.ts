@@ -1,6 +1,6 @@
 // create-tenant's tenants and tenant_apps rows: the one writer both record steps share, split out of
 // create-tenant.run.ts like the registration composer (create-tenant-registration.ts).
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
@@ -53,14 +53,14 @@ export function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase
       seedUsers: p.seedUsers,
       displayName: p.displayName,
       size: p.size,
-      owner: p.owner, provenance: "manager" as const,
-      lastRunId: ctx.runId, updatedAt: new Date(),
+      repoOwner: p.owner, provenance: "manager" as const,
+      lastRunId: ctx.runId,
     };
     const rowId = existing?.id ?? mintTenantRowId();
     if (existing) tx.update(tenants).set({ ...values, ...(settle || recreate ? lifecycle : {}) }).where(eq(tenants.id, existing.id)).run();
     else tx.insert(tenants).values({ id: rowId, ...values, ...lifecycle }).run();
     for (const a of p.apps) {
-      const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, rowId), eq(tenantApps.name, a.name))).get();
+      const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, rowId), isNull(tenantApps.deleted), eq(tenantApps.name, a.name))).get();
       if (ex) tx.update(tenantApps).set({ lastRunId: ctx.runId, ...(settle || (recreate && ex.status === "purged") ? { status } : {}) }).where(eq(tenantApps.id, ex.id)).run();
       else tx.insert(tenantApps).values({ id: mintTenantAppId(), tenantId: rowId, name: a.name, status, lastRunId: ctx.runId }).run();
     }

@@ -1,6 +1,8 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { secretWrites } from "./schema/secret-writes.ts";
+import { deletion } from "./schema/stamps.ts";
+import { newId } from "../kernel/ids.ts";
 import type { SecretWriteAct, Stage } from "../../shared/enums.ts";
 
 // The one writer and the one reader of the book of secret writes (schema/secret-writes.ts). It stands
@@ -33,21 +35,28 @@ export function tenantGoogleTranslationEntry(stage: Stage, guid: string): string
  *  run and the time are the latest write's. */
 export function recordSecretWrites(db: Db, write: { entry: string; keys: readonly string[]; act: SecretWriteAct; runId: string }): void {
   for (const key of write.keys) {
-    const row = { act: write.act, runId: write.runId, writtenAt: new Date() };
+    const row = { act: write.act, runId: write.runId };
     db.insert(secretWrites)
-      .values({ entry: write.entry, key, ...row })
-      .onConflictDoUpdate({ target: [secretWrites.entry, secretWrites.key], set: row })
+      .values({ id: newId("secw"), entry: write.entry, key, ...row })
+      .onConflictDoUpdate({ target: [secretWrites.entry, secretWrites.key], targetWhere: sql`deleted IS NULL`, set: row })
       .run();
   }
 }
 
 /** Every key the book carries for `entry`. */
 export function listSecretWrites(db: Db, entry: string): SecretWrite[] {
-  return db.select().from(secretWrites).where(eq(secretWrites.entry, entry)).all();
+  return db
+    .select({ entry: secretWrites.entry, key: secretWrites.key, act: secretWrites.act, runId: secretWrites.runId, writtenAt: secretWrites.modified })
+    .from(secretWrites)
+    .where(liveEntry(entry))
+    .all();
 }
 
-/** Take the entry out of the book, beside its deletion in Vault. An entry the book never carried is
- *  the idempotent no-op, as the deletion of an absent entry is. */
+/** Take the entry out of the book, beside its deletion in Vault: its rows are marked deleted, and no
+ *  read returns them. An entry the book never carried is the idempotent no-op, as the deletion of an
+ *  absent entry is. */
 export function forgetSecretEntry(db: Db, entry: string): void {
-  db.delete(secretWrites).where(eq(secretWrites.entry, entry)).run();
+  db.update(secretWrites).set(deletion()).where(liveEntry(entry)).run();
 }
+
+const liveEntry = (entry: string) => and(eq(secretWrites.entry, entry), isNull(secretWrites.deleted));

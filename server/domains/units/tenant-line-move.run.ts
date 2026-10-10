@@ -113,7 +113,7 @@ function restorePairingCleanup(ports: TenantLineMovePorts, p: TenantLineMovePara
         throw errValidation(`a member of tenant ${p.guid} renders line ${p.line} by now, so the line-${p.fromLine} pairing is not written back; the way back is the Restore of the line-move generation this run took`);
       }
       const { commit } = await ports.registrations.setLinePairing(p.stage, p.guid, p.previous, ctx.runId);
-      ctx.db.update(tenants).set({ approvedTags: p.previous.approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ approvedTags: p.previous.approvedTags }).where(eq(tenants.id, p.tenantId)).run();
       await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
       ctx.log("meta", `tenant ${p.guid} back on its line-${p.fromLine} pairing (${commit})`);
     },
@@ -199,7 +199,7 @@ function tenantLineMoveSteps(ports: TenantLineMovePorts, p: TenantLineMoveParams
         }
         ctx.registerCleanup(restorePairingCleanup(ports, p));
         const { commit } = await ports.registrations.setLinePairing(p.stage, p.guid, p.target, ctx.runId);
-        ctx.db.update(tenants).set({ approvedTags: p.target.approvedTags, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ approvedTags: p.target.approvedTags, lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
         ctx.log("meta", `tenant ${p.guid}: bundle ${p.target.appsImageTag} and its platform part on line ${p.line} written in one commit (${commit})`);

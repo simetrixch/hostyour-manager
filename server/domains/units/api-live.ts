@@ -2,7 +2,7 @@
 // for standing units and compares them with GitOps pins.
 // Route payload types live in shared/api-types-live.ts.
 import type { Hono } from "hono";
-import { and, eq, inArray, notInArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
 import type { AppEnv } from "../../http/app-env.ts";
 import { apps, clusters, servers, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errNotFound } from "../../kernel/errors.ts";
@@ -139,7 +139,7 @@ export function registerTenantLiveRoutes(app: Hono<AppEnv>, deps: TenantLiveApiD
     // set TENANT_SETTLED_STATUS): a PROVISIONING app row belongs in the expected set, so a half-created
     // tenant's card honestly reports its missing members instead of rolling up a shrunken set and reading
     // Healthy, while an "offboarded" or "purged" row is genuinely gone.
-    const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, found.id), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).all();
+    const appRows = db.select({ name: tenantApps.name }).from(tenantApps).where(and(eq(tenantApps.tenantId, found.id), isNull(tenantApps.deleted), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS]))).all();
     const members = [...found.members, ...appRows.map((a) => a.name)];
     const expectedApps = tenantApplicationSet(members, found.guid, found.stage);
     const namespaces = tenantNamespaces(members, found.guid, found.stage);
@@ -153,7 +153,7 @@ export function registerTenantLiveRoutes(app: Hono<AppEnv>, deps: TenantLiveApiD
     const masterCluster = db
       .select({ domain: clusters.domain })
       .from(clusters)
-      .innerJoin(servers, eq(servers.id, clusters.serverId))
+      .innerJoin(servers, and(eq(servers.id, clusters.serverId), isNull(servers.deleted)))
       .where(inArray(servers.role, [...MASTER_ROLES]))
       .get();
     const argocdUrl = tenantArgocdUrl(masterCluster?.domain ?? null, argoNamespace, found.guid);

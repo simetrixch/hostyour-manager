@@ -27,7 +27,7 @@ export const TENANT_COLUMNS = {
   seedUsers: tenants.seedUsers,
   suspended: tenants.suspended,
   followReleases: tenants.followReleases,
-  owner: tenants.owner,
+  repoOwner: tenants.repoOwner,
   provenance: tenants.provenance,
   status: tenants.status,
   // What the last administrator check found. On the list projection and not only on the detail
@@ -38,6 +38,6 @@ export const TENANT_COLUMNS = {
   adminCheckedAt: tenants.adminCheckedAt,
   check: tenants.checkJson,
   lastRunId: tenants.lastRunId,
-  createdAt: tenants.createdAt,
-  updatedAt: tenants.updatedAt,
+  creation: tenants.creation,
+  modified: tenants.modified,
 };

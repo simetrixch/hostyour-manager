@@ -1,7 +1,7 @@
 import { beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makeAddAppDef, AddAppParams, type AddAppPorts } from "./add-app.run.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
@@ -71,7 +71,7 @@ export let db: DbHandle;
  *  The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
  *  starts without it — and write-pointer resolves the tenant's ceiling against it. */
 export function useMemoryDb(): void {
-  beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+  beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
   afterEach(() => { db.sqlite.close(); });
 }
 

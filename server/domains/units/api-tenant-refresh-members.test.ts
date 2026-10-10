@@ -11,6 +11,7 @@ import { toApiError } from "../../http/middleware/error-shape.ts";
 import { eq } from "drizzle-orm";
 import type { OperatorSession } from "../access/session.ts";
 import type { TenantFollower } from "./tenant-follow.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 
 // The Versions dialog's routes: the GET answers what the reader answers, and the POST plans the run with
 // the version chosen per part, refusing a body whose versions are no image tags before anything runs.
@@ -33,7 +34,7 @@ describe("the Versions routes of a tenant", () => {
     const follower = { checkTenant: async (id: string) => { checked.push(id); } } as unknown as TenantFollower;
     const app = new Hono<AppEnv>();
     app.onError((err, c) => { const { status, body } = toApiError(err); return c.json(body, status as 400); });
-    app.use(async (c, next) => { c.set("operator", { sub: "op_1" } as OperatorSession); await next(); });
+    app.use(async (c, next) => { c.set("operator", { sub: "op_1" } as OperatorSession); return runAsActor("op_1", () => next()); });
     registerTenantRefreshMembersRoutes(app, { db: h.db, executor, tenantEnabled: true, follower, ...(versions ? { versions } : {}), ...(lineMoves ? { lineMoves } : {}) });
     const post = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/refresh-members", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const follow = async (body: unknown): Promise<Response> => app.request("/api/tenants/tnt_1/follow-releases", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -92,9 +93,9 @@ describe("the Versions routes of a tenant", () => {
     expect((await r.follow({ followReleases: false })).status).toBe(200);
     expect(h.db.select({ f: tenants.followReleases }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.f).toBe(false);
     expect(r.checked).toEqual(["tnt_1"]); // turned off: nothing to catch up with
-    expect(h.sqlite.prepare("SELECT actor, action, detail_json AS detail FROM audit ORDER BY rowid").all()).toEqual([
-      { actor: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: true }) },
-      { actor: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: false }) },
+    expect(h.sqlite.prepare("SELECT owner, action, detail_json AS detail FROM audit ORDER BY rowid").all()).toEqual([
+      { owner: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: true }) },
+      { owner: "op_1", action: "tenant.follow-releases.set", detail: JSON.stringify({ followReleases: false }) },
     ]);
     expect((await r.follow({ followReleases: "yes" })).status).toBe(400);
   });

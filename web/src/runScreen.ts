@@ -161,11 +161,11 @@ export function abortOffer(run: Pick<RunView, "kind" | "cleanupsRegistered">, te
  *  interrupted (hostyour-manager#203). A plan discarded before its approve ran nothing; it offers
  *  Delete alone, and is planned again rather than resumed. */
 export function recoverable(run: RunView): boolean {
-  return run.deletedAt === null && (run.status === "failed" || (run.status === "cancelled" && run.startedAt !== null && !run.aborted));
+  return run.deleted === null && (run.status === "failed" || (run.status === "cancelled" && run.startedAt !== null && !run.aborted));
 }
 
 export function secretsToSupply(run: RunView): string[] {
-  return run.deletedAt === null && run.status === "planned" ? run.requiredSecrets : [];
+  return run.deleted === null && run.status === "planned" ? run.requiredSecrets : [];
 }
 
 /** Whether the approve may be sent yet: every field the plan asked for carries something.

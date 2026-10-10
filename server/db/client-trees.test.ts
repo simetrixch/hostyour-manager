@@ -49,7 +49,7 @@ describe("openDb over the migration trees of the compiled plugins", () => {
 
     const coreOnly = openDb(file);
     handles.push(coreOnly);
-    coreOnly.sqlite.prepare("INSERT INTO meta (key, value) VALUES ('probe', 'kept'), ('other', 'kept too')").run();
+    coreOnly.sqlite.prepare("INSERT INTO meta (key, value, owner, modified_by) VALUES ('probe', 'kept', 'op_system', 'op_system'), ('other', 'kept too', 'op_system', 'op_system')").run();
     const coreLedger = count(coreOnly, "__drizzle_migrations");
     coreOnly.sqlite.close();
 
@@ -75,13 +75,13 @@ describe("openDb over the migration trees of the compiled plugins", () => {
 // THE PRODUCT'S OWN TREES over the database the release before the unit plugin leaves behind: the
 // core's migrations up to 0012, and a row in EVERY table (the lesson of #229: an empty table hides what
 // SQLite refuses). Boot then applies the core's later migrations and the unit plugin's first one, which
-// adopts unit_sizes; twice. The file must end exactly as the core's migrations alone would leave it:
-// the plugin's adoption changes no row and no shape, and a pass after the first changes nothing,
-// while both ledgers stand.
+// adopts unit_sizes and then stamps it; twice. Every table but unit_sizes must end exactly as the
+// core's migrations alone would leave it, unit_sizes keeps its row with the stamps, and a pass after
+// the first changes nothing, while both ledgers stand.
 const PREVIOUS_HEAD = "0012_tenants-approved-tags";
 const ROW_IN_EVERY_TABLE = [
   "INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'm1')",
-  "INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com', 's1')",
+  "INSERT INTO clusters (id, server_id, stage, domain, name, provisioned_at) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com', 's1', 1700000000000)",
   "INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES ('cred_1', 'ssh_key', 'k', 'server', 'srv_1', 'ssh-key', 'plain:v0:AA==', 'fp')",
   "INSERT INTO apps (id, cluster_id, name, stage, host) VALUES ('app_1', 'cl_1', 'post', 'prod', 'post')",
   "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) VALUES ('tnt_1', 'cl_1', 'abcdefghjkmn', 'acme', 'prod', 'idp', '[\"idp\"]')",
@@ -111,7 +111,8 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     const file = join(dir, "manager.db");
     const tables = (s: Database.Database): string[] => (s.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '__drizzle_migrations%' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
     const rows = (s: Database.Database): Record<string, unknown[]> => Object.fromEntries(tables(s).map((tb) => [tb, s.prepare(`SELECT * FROM "${tb}" ORDER BY rowid`).all()]));
-    const shape = (s: Database.Database): unknown[] => s.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name NOT LIKE '__drizzle_migrations%' ORDER BY type, name").all();
+    const shape = (s: Database.Database): unknown[] => s.prepare("SELECT type, name, sql FROM sqlite_master WHERE tbl_name NOT LIKE '__drizzle_migrations%' AND tbl_name != 'unit_sizes' ORDER BY type, name").all();
+    const coreRows = (s: Database.Database): Record<string, unknown[]> => Object.fromEntries(Object.entries(rows(s)).filter(([tb]) => tb !== "unit_sizes"));
     const ledger = (s: Database.Database, name: string): number => (s.prepare(`SELECT count(*) AS c FROM "${name}"`).get() as { c: number }).c;
 
     // The core's folder up to the previous release's head, as a folder of its own.
@@ -129,13 +130,15 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     for (const insert of ROW_IN_EVERY_TABLE) standing.prepare(insert).run();
     const empty = Object.entries(rows(standing)).filter(([, r]) => r.length === 0).map(([tb]) => tb);
     expect(empty, `tables the proof seeds no row in: ${empty.join(", ")}`).toEqual([]);
+    const { updated_at: sizeTime } = standing.prepare("SELECT updated_at FROM unit_sizes").get() as { updated_at: number };
     standing.close();
-    // What the core's own migrations alone make of that file: the plugin's trees may add nothing to it.
+    // What the core's own migrations alone make of that file: the plugin's trees may change nothing else.
     const coreOnlyFile = join(dir, "core-only.db");
     copyFileSync(file, coreOnlyFile);
     const coreOnly = new Database(coreOnlyFile);
+    coreOnly.pragma("foreign_keys = OFF"); // as openDb applies migrations: a table rebuild drops a referenced table
     migrate(drizzle(coreOnly), { migrationsFolder: CORE_MIGRATIONS });
-    const before = { rows: rows(coreOnly), shape: shape(coreOnly) };
+    const before = { rows: coreRows(coreOnly), shape: shape(coreOnly) };
     coreOnly.close();
 
     const trees = inDependencyOrder(compiledPlugins);
@@ -143,8 +146,12 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     for (let pass = 1; pass <= 2; pass += 1) {
       const opened = openDb(file, trees);
       handles.push(opened);
-      expect(rows(opened.sqlite), `pass ${pass}`).toEqual(before.rows);
+      expect(coreRows(opened.sqlite), `pass ${pass}`).toEqual(before.rows);
       expect(shape(opened.sqlite), `pass ${pass}`).toEqual(before.shape);
+      expect(opened.sqlite.prepare("SELECT * FROM unit_sizes").all(), `pass ${pass}`).toEqual([{
+        component: "base", name: "small", requests_cpu: "900m", requests_memory: "1Gi", limits_cpu: "2", limits_memory: "2Gi", pods: 10, persistent_volume_claims: 5,
+        creation: sizeTime, modified: sizeTime, owner: "unrecorded", modified_by: "unrecorded",
+      }]);
       expect(ledger(opened.sqlite, "__drizzle_migrations"), `pass ${pass}`).toBe(journal.entries.length);
       for (const tr of trees) {
         const own = JSON.parse(readFileSync(join(tr.migrations, "meta/_journal.json"), "utf8")) as { entries: unknown[] };

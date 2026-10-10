@@ -132,7 +132,7 @@ function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
       const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.previous, p.previousRedirects, p.previousAliases, ctx.runId);
-      ctx.db.update(tenants).set({ ownDomain: p.previous, ownDomainRedirects: p.previousRedirects, ownDomainAliases: p.previousAliases, nestsUnder: p.previousNestsUnder, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ ownDomain: p.previous, ownDomainRedirects: p.previousRedirects, ownDomainAliases: p.previousAliases, nestsUnder: p.previousNestsUnder, lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `tenant ${tc.guid} own domain back to ${p.previous || "none"} (${commit})`);
     },
   };
@@ -188,7 +188,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         }
         ctx.registerCleanup(restoreOwnDomainCleanup(ports, p));
         const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.ownDomain, p.ownDomainRedirects, p.ownDomainAliases, ctx.runId);
-        ctx.db.update(tenants).set({ ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects, ownDomainAliases: p.ownDomainAliases, nestsUnder: p.nestsUnderTenantId, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects, ownDomainAliases: p.ownDomainAliases, nestsUnder: p.nestsUnderTenantId, lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         const via = p.ownDomainRedirects.length || p.ownDomainAliases.length ? `, redirected from ${[...p.ownDomainRedirects, ...aliasHosts(p.ownDomainAliases)].join(", ")}` : "";
         ctx.log("meta", `tenant ${tc.guid} own domain ${p.previous || "none"} → ${p.ownDomain || "none"}${via} (${commit}) — its charts serve it once the ArgoCD on ${tc.domain} syncs`);

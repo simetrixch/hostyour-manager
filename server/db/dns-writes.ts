@@ -1,6 +1,8 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import type { Db } from "./client.ts";
 import { dnsWrites } from "./schema/dns-writes.ts";
+import { deletion } from "./schema/stamps.ts";
+import { newId } from "../kernel/ids.ts";
 import type { DnsWriteAct, Stage } from "../../shared/enums.ts";
 import type { DnsRecordType } from "../../shared/dns.ts";
 
@@ -22,7 +24,7 @@ export interface DnsWrite {
 }
 
 /** Enter a write into the book. A record already in it is REWRITTEN — act, content, owner, run and
- *  time are the latest write's — because the book holds one row per record and answers what this
+ *  time are the latest write's — because the book holds one live row per record and answers what this
  *  Manager last did to it. */
 export function recordDnsWrite(db: Db, write: DnsWrite): void {
   const row = {
@@ -32,26 +34,29 @@ export function recordDnsWrite(db: Db, write: DnsWrite): void {
     ownerName: write.owner.name,
     ownerStage: write.owner.stage ?? null,
     runId: write.runId,
-    writtenAt: new Date(),
   };
   db.insert(dnsWrites)
-    .values({ name: write.name, type: write.type, ...row })
-    .onConflictDoUpdate({ target: [dnsWrites.name, dnsWrites.type], set: row })
+    .values({ id: newId("dnsw"), name: write.name, type: write.type, ...row })
+    .onConflictDoUpdate({ target: [dnsWrites.name, dnsWrites.type], targetWhere: sql`deleted IS NULL`, set: row })
     .run();
 }
 
 /** The book's row of ONE record, or null where this Manager never wrote it — a record published
  *  before the book existed, or by a hand at the provider. */
 export function findDnsWrite(db: Db, record: { name: string; type: DnsRecordType }): DnsWrite | null {
-  const row = db.select().from(dnsWrites).where(and(eq(dnsWrites.name, record.name), eq(dnsWrites.type, record.type))).get();
+  const row = db.select().from(dnsWrites).where(liveRecord(record)).get();
   return row === undefined ? null : rowToWrite(row);
 }
 
-/** Take a record out of the book, beside the deletion at the provider. A record the book never
- *  carried is the idempotent no-op, exactly as the deletion of an absent record is. */
+/** Take a record out of the book, beside the deletion at the provider: its row is marked deleted, and
+ *  no read returns it. A record the book never carried is the idempotent no-op, exactly as the
+ *  deletion of an absent record is. */
 export function forgetDnsWrite(db: Db, record: { name: string; type: DnsRecordType }): void {
-  db.delete(dnsWrites).where(and(eq(dnsWrites.name, record.name), eq(dnsWrites.type, record.type))).run();
+  db.update(dnsWrites).set(deletion()).where(liveRecord(record)).run();
 }
+
+const liveRecord = (record: { name: string; type: DnsRecordType }) =>
+  and(eq(dnsWrites.name, record.name), eq(dnsWrites.type, record.type), isNull(dnsWrites.deleted));
 
 function rowToWrite(r: typeof dnsWrites.$inferSelect): DnsWrite & { writtenAt: Date } {
   return {
@@ -61,11 +66,11 @@ function rowToWrite(r: typeof dnsWrites.$inferSelect): DnsWrite & { writtenAt: D
     act: r.act,
     owner: { kind: r.ownerKind, name: r.ownerName, ...(r.ownerStage === null ? {} : { stage: r.ownerStage }) },
     runId: r.runId,
-    writtenAt: r.writtenAt,
+    writtenAt: r.modified,
   };
 }
 
-/** Every row of the book, newest write first. */
+/** Every live row of the book, newest write first. */
 export function listDnsWrites(db: Db): (DnsWrite & { writtenAt: Date })[] {
-  return db.select().from(dnsWrites).orderBy(desc(dnsWrites.writtenAt), dnsWrites.name, dnsWrites.type).all().map(rowToWrite);
+  return db.select().from(dnsWrites).where(isNull(dnsWrites.deleted)).orderBy(desc(dnsWrites.modified), dnsWrites.name, dnsWrites.type).all().map(rowToWrite);
 }

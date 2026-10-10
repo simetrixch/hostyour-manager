@@ -1,6 +1,6 @@
 // add-app-abort.ts — what add-app does when it is aborted: the cleanup that drops the app it
 // appended, and the precondition that refuses the abort while the new member is live.
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Cleanup } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
@@ -39,7 +39,7 @@ export function revertAppendCleanup(ports: TenantOnboardPorts, p: AppendedApp): 
         return;
       }
       const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "drop", app: p.app, mainTo: p.previousMain, runId: ctx.runId });
-      ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+      ctx.db.update(tenants).set({ approvedTags }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `app "${p.app}" dropped from tenant ${p.guid} (${commit}) — ArgoCD will now prune only this member's Application`);
     },
   };
@@ -73,7 +73,7 @@ export async function assertAddAppAbortable(ports: TenantOnboardPorts, p: Append
   const row = db
     .select({ status: tenantApps.status })
     .from(tenantApps)
-    .where(and(eq(tenantApps.tenantId, p.tenantId), eq(tenantApps.name, p.app)))
+    .where(and(eq(tenantApps.tenantId, p.tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, p.app)))
     .get();
   const rowLive = row?.status === "active";
   let clusterLive = false;

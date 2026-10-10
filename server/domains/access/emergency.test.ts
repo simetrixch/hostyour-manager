@@ -179,13 +179,13 @@ describe("admin.sock app", () => {
     await sockApp.request("/auth/session", { method: "POST" });
     await emergencyApp.request(`/auth/emergency?token=${store.mint()}`);
 
-    const rows = db.sqlite.prepare("SELECT actor, action, detail_json FROM audit WHERE action = 'operator.login' ORDER BY id").all() as {
-      actor: string;
+    const rows = db.sqlite.prepare("SELECT owner, action, detail_json FROM audit WHERE action = 'operator.login' ORDER BY id").all() as {
+      owner: string;
       action: string;
       detail_json: string;
     }[];
     expect(rows).toHaveLength(2);
-    expect(rows.map((r) => r.actor)).toEqual(["op_emergency", "op_emergency"]);
+    expect(rows.map((r) => r.owner)).toEqual(["op_emergency", "op_emergency"]);
     const details = rows.map((r) => JSON.parse(r.detail_json ?? "null") as Record<string, unknown>);
     expect(details.map((d) => Object.keys(d).sort())).toEqual([
       ["arrivedBy", "method"],

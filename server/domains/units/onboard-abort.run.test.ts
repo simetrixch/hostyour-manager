@@ -1,9 +1,9 @@
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { eq } from "drizzle-orm";
 import { pino } from "pino";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
@@ -87,7 +87,7 @@ let db: DbHandle;
 // starts without it — and write-registration resolves the unit's ceiling against it. Seeding here is
 // what a running Manager has done long before an onboard reaches it; without it the run fails at
 // exactly that step, which is the correct behaviour and not what these tests are about.
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(manifest: ConsumerManifest): GateReport {
@@ -198,7 +198,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     ...(over.activator ? { activator: over.activator } : {}),
   };
   const def = makeOnboardDef(ports) as unknown as AnyRunDefinition;
-  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh });
   return { executor, registrations, argo, projects, cluster, seeder, dns };
 }
 

@@ -211,7 +211,7 @@ export async function make(opts: MakeOptions = {}, handles: DbHandle[] = [], dir
   const executor = new Executor({
     db: db.db, creds, bus: new RunEventBus(), logger,
     runDefinitions: new Map([["tenant-set-sender-domain", def as unknown as AnyRunDefinition]]),
-    sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+    sshFactory: () => Promise.reject(new Error("no ssh")),
   });
   const row = () => db.db.select({ d: tenants.senderDomain }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.d;
   const registered = async () => (await reg.readTenant("prod", GUID))?.entry.senderDomain;

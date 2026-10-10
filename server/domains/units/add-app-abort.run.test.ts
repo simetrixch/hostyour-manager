@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { eq, and } from "drizzle-orm";
 import { pino } from "pino";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { RunEventBus } from "../../executor/bus.ts";
 import { Executor } from "../../executor/executor.ts";
@@ -83,7 +83,7 @@ const CLEAN_DOCS = [doc("Namespace", { namespace: "", raw: { kind: "Namespace" }
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and write-pointer resolves the tenant's ceiling against it.
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 function seededPlatformRepo(): FakePlatformRepo {
@@ -141,7 +141,7 @@ function harness(): Harness {
   };
   // The template's catalog names the new app with no selection — the plan judges against it.
   const def = makeAddAppDef(withAppsTemplate(ports, { "apps.yaml": `apps:\n  - name: ${NEW_APP}\n    title: ${NEW_APP}\n`, [`apps/${NEW_APP}/package.json`]: "{}\n" })) as unknown as AnyRunDefinition;
-  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh });
   return { executor, registrations, argo };
 }
 

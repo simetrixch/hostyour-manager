@@ -76,7 +76,7 @@ export function registerUnitSizeRoutes(app: Hono<AppEnv>, deps: UnitSizeApiDeps)
     // UPDATE and not upsert: the nine rows are seeded at boot, so a missing one means the seed did
     // not run, and silently inserting here would hide that.
     const where = and(eq(unitSizes.component, component as SizeComponent), eq(unitSizes.name, name));
-    db.update(unitSizes).set({ ...parsed.data, updatedAt: new Date() }).where(where).run();
+    db.update(unitSizes).set(parsed.data).where(where).run();
     const row = db.select().from(unitSizes).where(where).get();
     if (!row) throw errNotFound(`unit size "${component}/${name}" — the size table holds no such row`);
     return c.json({ size: { component: component as SizeComponent, name: name as UnitSize, ...parsed.data } });

@@ -95,7 +95,7 @@ export function useOwnDomainHarness() {
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
       runDefinitions: new Map([["tenant-set-own-domain", def as unknown as AnyRunDefinition]]),
-      sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+      sshFactory: () => Promise.reject(new Error("no ssh")),
     });
     const rowDomain = (): string | undefined => db.db.select({ d: tenants.ownDomain }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.d;
     const regDomain = async (): Promise<string | undefined> => (await reg.readTenant(stage, GUID))?.entry.ownDomain;

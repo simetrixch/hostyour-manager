@@ -1,8 +1,7 @@
-import { sqliteTable, text, integer, index } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, check } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { CREDENTIAL_KIND, CREDENTIAL_PURPOSE, CREDENTIAL_SUBJECT } from "../../../shared/enums.ts";
-
-const now = sql`(unixepoch('subsec') * 1000)`;
+import { stampColumns, deletionColumns } from "./stamps.ts";
 
 // Written by server/security/store.ts ONLY. encrypted_blob is self-describing by prefix — a
 // plaintext pass-through, an AES-256-GCM envelope under the local data key, or a reference to the
@@ -24,14 +23,17 @@ export const credentials = sqliteTable("credentials", {
   subjectKind: text("subject_kind", { enum: CREDENTIAL_SUBJECT }).notNull(),
   subjectId: text("subject_id").notNull(),                         // the server's id, the owner's login, the unit's name
   purpose: text("purpose", { enum: CREDENTIAL_PURPOSE }).notNull(),
-  encryptedBlob: text("encrypted_blob").notNull(),
+  encryptedBlob: text("encrypted_blob"),                           // NULL once the credential is purged
   fingerprint: text("fingerprint").notNull(),                      // public, non-secret identifier
   publicKey: text("public_key"),                                   // OpenSSH public line for ssh_key; else NULL
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   lastUsedAt: integer("last_used_at", { mode: "timestamp_ms" }),
   rotatedAt: integer("rotated_at", { mode: "timestamp_ms" }),
   revokedAt: integer("revoked_at", { mode: "timestamp_ms" }),      // soft-revoke; blob kept for audit
+  ...stampColumns(),
+  ...deletionColumns(),
 }, (t) => [
+  // A purge keeps the row and erases its value, so only a deleted row may hold no blob.
+  check("credentials_blob_ck", sql`encrypted_blob IS NOT NULL OR deleted IS NOT NULL`),
   index("credentials_subject_ix").on(t.subjectKind, t.subjectId),
   // Plain (NON-unique) lookup index. The fingerprint is a public CORRELATOR, not a key:
   // the same secret bytes legitimately appear on more than one row — a slave's stable

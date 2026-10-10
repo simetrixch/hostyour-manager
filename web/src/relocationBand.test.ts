@@ -3,7 +3,7 @@ import { relocationRun, relocationLine } from "./relocationBand.ts";
 import type { RunView } from "../../shared/api-types.ts";
 
 const run = (over: Partial<RunView>): RunView =>
-  ({ id: "run_1", kind: "consumer-migrate", targetKind: "app", targetId: "app_1", status: "planned", summary: "", steps: [], requiredSecrets: [], requiredInputs: [], createdAt: 0, startedAt: null, endedAt: null, deletedAt: null, ...over }) as RunView;
+  ({ id: "run_1", kind: "consumer-migrate", targetKind: "app", targetId: "app_1", status: "planned", summary: "", steps: [], requiredSecrets: [], requiredInputs: [], creation: 0, startedAt: null, endedAt: null, deleted: null, ...over }) as RunView;
 
 describe("relocationRun", () => {
   it("surfaces an OPEN relocation run of THIS unit, and ignores other units and other kinds", () => {

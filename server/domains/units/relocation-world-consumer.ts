@@ -402,7 +402,7 @@ export function consumerWorld(ports: ConsumerRelocationPorts, appId: string): Wo
         // move — the service-provisioner logs the same fact with the bucket's exact name.
       },
       record: async (c, target) => {
-        localTx(c, (tx) => tx.update(apps).set({ clusterId: target.clusterId, status: "active", lastRunId: c.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
+        localTx(c, (tx) => tx.update(apps).set({ clusterId: target.clusterId, status: "active", lastRunId: c.runId }).where(eq(apps.id, appId)).run());
         c.log("meta", `consumer ${ac.name} recorded on cluster ${target.clusterId} (active)`);
       },
       workloadExempt: async () => consumerStoreWorkload(await readStageRegistration(ports, ac.stage, ac.name), appName),

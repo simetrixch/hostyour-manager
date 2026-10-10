@@ -11,6 +11,7 @@ import { registeredCleanupNames, settleAbortWithoutCleanup, scheduleCleanupSteps
 import { setStepStatus } from "./step-status.ts";
 import { appendRunMeta } from "./run-meta.ts";
 import type { ExecutorDeps, LoadedRun } from "./executor.ts";
+import { runActor } from "../kernel/actor.ts";
 
 export interface RecoveryHost {
   readonly deps: ExecutorDeps;
@@ -53,7 +54,7 @@ export async function retryFromStep(
     }
     tx.update(runs).set({ status: "running", error: null, finishedAt: null }).where(eq(runs.id, runId)).run();
   });
-  writeAudit(host.deps.db, { actor: host.deps.actor(), action: "run.step_retried", runId, detail: { step: target.name } });
+  writeAudit(host.deps.db, { action: "run.step_retried", runId, detail: { step: target.name } });
   host.storeSecrets(runId, secrets);
   host.fireExecute(runId);
 }
@@ -103,8 +104,8 @@ export async function skipStep(host: RecoveryHost, runId: string, stepName: stri
     setStepStatus(tx, step.id, step.status, "skipped", { skipReason: reason });
     tx.update(runs).set({ status: "running", error: null, finishedAt: null }).where(eq(runs.id, runId)).run();
   });
-  writeAudit(host.deps.db, { actor: host.deps.actor(), action: "run.step_skipped", runId, detail: { step: stepName, reason } });
-  appendRunMeta(host.deps.db, host.deps.bus, runId, `⏭ skipped by ${host.deps.actor()}: ${reason}`);
+  writeAudit(host.deps.db, { action: "run.step_skipped", runId, detail: { step: stepName, reason } });
+  appendRunMeta(host.deps.db, host.deps.bus, runId, `⏭ skipped by ${runActor()}: ${reason}`);
   host.fireExecute(runId);
 }
 
@@ -145,7 +146,7 @@ export async function abortWithCleanup(host: RecoveryHost, runId: string, secret
     // Said on the run itself: an abort that settles without a cleanup step to show would otherwise
     // leave the log exactly as it was, and the operator guessing whether anything happened.
     appendRunMeta(host.deps.db, host.deps.bus, runId, "\u2715 cancelled \u2014 nothing to clean up: no completed step registered a compensation");
-    writeAudit(host.deps.db, { actor: host.deps.actor(), action: "run.cancelled", runId, detail: { cleanedUp: false } });
+    writeAudit(host.deps.db, { action: "run.cancelled", runId, detail: { cleanedUp: false } });
     releaseLocks(host.deps.db, runId);
     host.dispatchQueue();
     return;
@@ -155,6 +156,6 @@ export async function abortWithCleanup(host: RecoveryHost, runId: string, secret
   acquireLocks(host.deps.db, runId, planClaims(run.plan));
   scheduleCleanupSteps(host.deps.db, runId, all, names, new Map((def?.cleanups?.(params) ?? []).map((c) => [c.name, c])));
   if (secrets) host.storeSecrets(runId, secrets);
-  writeAudit(host.deps.db, { actor: host.deps.actor(), action: "run.cleanup_started", runId });
+  writeAudit(host.deps.db, { action: "run.cleanup_started", runId });
   host.fireExecute(runId);
 }

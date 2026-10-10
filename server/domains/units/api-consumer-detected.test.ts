@@ -58,7 +58,7 @@ const brokenRegistrations = (): Registrations => ({ listConsumerRegistrations: (
 
 async function makeApp(opts: { resolver?: FakeClusterKubeResolver; registrations?: Registrations }): Promise<{ app: Hono<AppEnv>; cookie: string }> {
   const store = new CredentialStore({ db: db.db, logger });
-  const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,

@@ -73,7 +73,7 @@ function websiteSiteSteps(ports: AddAppPorts, p: TenantSetWebsiteSiteParams): St
           throw errValidation(`website ${p.app} or the tenant's bundle changed since this run was planned — plan it again`);
         }
         const { commit } = await ports.registrations.setWebsiteSite(tc.stage, tc.guid, p.app, p.site, p.member, p.appsImageTag, ctx.runId);
-        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         ctx.log("meta", `website ${p.app}: site ${p.previousSite} → ${p.site}, bundle ${p.previousAppsImageTag} → ${p.appsImageTag} (${commit}) — the tenant's members roll onto it once the ArgoCD on ${tc.domain} syncs`);
       },

@@ -11,6 +11,7 @@ import { CredentialStore } from "../security/store.ts";
 import { RunEventBus } from "./bus.ts";
 import { Executor } from "./executor.ts";
 import { getRun, listRuns } from "./read.ts";
+import { insertLock } from "./locks.ts";
 import type { RunDefinition, AnyRunDefinition, Step } from "./types.ts";
 import type { RunKind, RunStatus } from "../../shared/enums.ts";
 import type { SshFactory } from "../adapters/ssh/port.ts";
@@ -75,7 +76,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions: Map<RunKind, AnyRunDefinition> = new Map([["noop", testDef]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh });
     return { db, executor };
   }
   afterEach(() => {
@@ -85,8 +86,8 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
 
   const count = (db: DbHandle, table: "runs" | "steps" | "events" | "run_locks", runId: string): number =>
     (db.sqlite.prepare(`SELECT count(*) AS n FROM ${table} WHERE ${table === "runs" ? "id" : "run_id"}=?`).get(runId) as { n: number }).n;
-  const deletedAtOf = (db: DbHandle, runId: string): number | null =>
-    (db.sqlite.prepare("SELECT deleted_at AS d FROM runs WHERE id=?").get(runId) as { d: number | null }).d;
+  const deletedOf = (db: DbHandle, runId: string): number | null =>
+    (db.sqlite.prepare("SELECT deleted AS d FROM runs WHERE id=?").get(runId) as { d: number | null }).d;
 
   it("soft-deletes a planned run — gone from the list, row + steps retained; onTerminal('cancelled') fired; audited", async () => {
     const { db, executor } = make();
@@ -101,12 +102,12 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     // …but the row and its steps remain, marked deleted, and a direct link still resolves.
     expect(count(db, "runs", runId)).toBe(1);
     expect(count(db, "steps", runId)).toBe(2);
-    expect(deletedAtOf(db, runId)).toBeGreaterThan(0);
+    expect(deletedOf(db, runId)).toBeGreaterThan(0);
     const view = getRun(db.db, runId);
     expect(view?.status).toBe("planned");
-    expect(view?.deletedAt).toBe(deletedAtOf(db, runId));
+    expect(view?.deleted).toBe(deletedOf(db, runId));
     expect(terminalCalls).toEqual(["cancelled"]); // discard-parity choreography for a never-executed run
-    const audit = db.sqlite.prepare("SELECT action FROM audit WHERE run_id=? ORDER BY ts").all(runId) as { action: string }[];
+    const audit = db.sqlite.prepare("SELECT action FROM audit WHERE run_id=? ORDER BY creation").all(runId) as { action: string }[];
     expect(audit.map((a) => a.action)).toContain("run.deleted");
   });
 
@@ -121,7 +122,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     terminalCalls.length = 0; // onTerminal("failed") already fired at failure time
     // Simulate the rare crash window where a failed run still holds a lock — a soft-deleted
     // (hidden) run must never keep pinning a resource.
-    db.sqlite.prepare("INSERT INTO run_locks (resource, key, run_id) VALUES ('server', 'srv_stuck', ?)").run(runId);
+    insertLock(db.db, { resource: "server", key: "srv_stuck" }, runId);
 
     await executor.deleteRun(runId);
 
@@ -130,8 +131,10 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     expect(count(db, "runs", runId)).toBe(1);
     expect(count(db, "steps", runId)).toBe(2);
     expect(count(db, "events", runId)).toBe(eventsBefore);
-    expect(count(db, "run_locks", runId)).toBe(0); // the lock was released
-    expect(deletedAtOf(db, runId)).toBeGreaterThan(0);
+    // The lock was released: its row stays, marked deleted by whoever deleted the run.
+    expect(db.sqlite.prepare("SELECT deleted IS NOT NULL AS released, deleted_by FROM run_locks WHERE run_id=? AND key='srv_stuck'").get(runId)).toEqual({ released: 1, deleted_by: "op_system" });
+    expect(db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id=? AND deleted IS NULL").get(runId)).toEqual({ n: 0 });
+    expect(deletedOf(db, runId)).toBeGreaterThan(0);
     expect(terminalCalls).toEqual([]); // NOT re-fired for a failed run
 
     // events stays append-only throughout — no trigger was ever touched.
@@ -146,11 +149,11 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     const { db, executor } = make();
     const { runId } = await executor.plan("noop", {});
     await executor.deleteRun(runId);
-    const stamp = deletedAtOf(db, runId);
+    const stamp = deletedOf(db, runId);
 
     await executor.deleteRun(runId); // second delete: succeeds, changes nothing
 
-    expect(deletedAtOf(db, runId)).toBe(stamp);
+    expect(deletedOf(db, runId)).toBe(stamp);
     expect(terminalCalls).toEqual(["cancelled"]); // hook not re-fired
     const audit = db.sqlite.prepare("SELECT action FROM audit WHERE run_id=? AND action='run.deleted'").all(runId) as { action: string }[];
     expect(audit).toHaveLength(1);
@@ -167,7 +170,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     await executor.deleteRun(runId);
     // Soft-delete never changes status and never tears anything down; it only hides the run.
     expect(getRun(db.db, runId)?.status).toBe("succeeded");
-    expect(deletedAtOf(db, runId)).not.toBeNull();
+    expect(deletedOf(db, runId)).not.toBeNull();
     expect(listRuns(db.db).some((r) => r.id === runId)).toBe(false);
   });
 
@@ -184,12 +187,12 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     expect(listRuns(db.db).some((r) => r.id === runId)).toBe(false);
     expect(count(db, "runs", runId)).toBe(1);
     expect(count(db, "steps", runId)).toBe(2);
-    expect(deletedAtOf(db, runId)).toBeGreaterThan(0);
+    expect(deletedOf(db, runId)).toBeGreaterThan(0);
     const view = getRun(db.db, runId);
     expect(view?.status).toBe("cancelled");
-    expect(view?.deletedAt).toBe(deletedAtOf(db, runId));
+    expect(view?.deleted).toBe(deletedOf(db, runId));
     expect(terminalCalls).toEqual(["cancelled"]); // NOT re-fired — discard already ran the choreography
-    const audit = db.sqlite.prepare("SELECT action FROM audit WHERE run_id=? ORDER BY ts").all(runId) as { action: string }[];
+    const audit = db.sqlite.prepare("SELECT action FROM audit WHERE run_id=? ORDER BY creation").all(runId) as { action: string }[];
     expect(audit.map((a) => a.action)).toContain("run.deleted");
   });
 
@@ -210,7 +213,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     expect(count(db, "runs", runId)).toBe(1);
     expect(count(db, "steps", runId)).toBe(2);
     expect(count(db, "events", runId)).toBe(eventsBefore);
-    expect(deletedAtOf(db, runId)).toBeGreaterThan(0);
+    expect(deletedOf(db, runId)).toBeGreaterThan(0);
     expect(terminalCalls).toEqual([]); // a cancelled run's hook fired at cancel time — never re-fired here
   });
 
@@ -220,7 +223,7 @@ describe("Executor.deleteRun — the status gate + soft delete (row + logs retai
     for (const status of ["running", "approved", "planning"]) {
       db.sqlite.prepare("UPDATE runs SET status=? WHERE id=?").run(status, runId);
       await expect(executor.deleteRun(runId)).rejects.toMatchObject({ code: "ILLEGAL_TRANSITION", http: 409 });
-      expect(deletedAtOf(db, runId)).toBeNull();
+      expect(deletedOf(db, runId)).toBeNull();
     }
   });
 

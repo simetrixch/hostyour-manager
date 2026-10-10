@@ -160,7 +160,7 @@ describe("the operator-key run kinds — one line of one file, and never this ma
         publicKey: `ssh-ed25519 ${BLOB_MINE}`,
       });
     }
-    const key = createOperatorKey(db.db, "op_test", { label: "pat", publicKey: `${PAT_KEY} pat@example.com` });
+    const key = createOperatorKey(db.db, { label: "pat", publicKey: `${PAT_KEY} pat@example.com` });
     return { db, store, keyId: key.id };
   }
 

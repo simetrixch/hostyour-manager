@@ -127,8 +127,8 @@ describe("boot self-checks", () => {
     // The INNOCENT CASE, planted rather than assumed: an empty table would pass a check that had
     // stopped looking at the column altogether.
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_ok", "consumer-backup", "app", "app_1", "{}", "{}", "succeeded", "op_system");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("run_ok", "consumer-backup", "app", "app_1", "{}", "{}", "succeeded", "op_system", "op_system");
     const check = runSelfChecks({ db, config, store, bus, runDefinitions }).find((r) => r.name === "runs.kinds_known");
     expect(check?.kind).toBe("degrading");
     expect(check?.ok).toBe(true);
@@ -137,8 +137,8 @@ describe("boot self-checks", () => {
   it("runs.kinds_known passes on a row of a retired kind, which stands as history", () => {
     const { db, store, bus, runDefinitions } = fresh();
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_retired", "tenant-apps-repo-purge", "tenant", "tnt_1", "{}", "{}", "succeeded", "op_system");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("run_retired", "tenant-apps-repo-purge", "tenant", "tnt_1", "{}", "{}", "succeeded", "op_system", "op_system");
     const check = runSelfChecks({ db, config, store, bus, runDefinitions }).find((r) => r.name === "runs.kinds_known");
     expect(check?.ok).toBe(true);
   });
@@ -146,8 +146,8 @@ describe("boot self-checks", () => {
   it("runs.kinds_known is RED — and names the spelling — when a row stands under a kind this build dropped, without blocking boot", () => {
     const { db, store, bus, runDefinitions } = fresh();
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_old", "backup", "app", "app_1", "{}", "{}", "succeeded", "op_system");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("run_old", "backup", "app", "app_1", "{}", "{}", "succeeded", "op_system", "op_system");
     const results = runSelfChecks({ db, config, store, bus, runDefinitions });
     const check = results.find((r) => r.name === "runs.kinds_known");
     expect(check?.ok).toBe(false);

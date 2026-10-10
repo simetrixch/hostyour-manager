@@ -14,7 +14,6 @@ import { Executor } from "../../executor/executor.ts";
 import { buildRunDefinitions } from "./run-definitions.ts";
 import { registerRunRoutes, RUN_STREAM_IDLE_MS } from "./api.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
-import { runActor } from "../../kernel/actor.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import type { SshFactory } from "../../adapters/ssh/port.ts";
 import { servers, clusters, apps, tenants } from "../../db/schema/inventory.ts";
@@ -42,13 +41,13 @@ describe("runs API + SSE", () => {
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    // The chokepoint attributes every planned run to the session's sub, and runs.started_by is an
+    // The chokepoint attributes every planned run to the session's sub, and runs.owner is an
     // FK onto operators — in production upsertOperator wrote that row at login; the harness mints
     // the cookie directly, so it seeds the row itself.
-    db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
-    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: runActor });
+    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });
     const session = new SessionCodec(db.db, config);
     const app = createApp({
       config,
@@ -84,7 +83,7 @@ describe("runs API + SSE", () => {
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "test", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "suspended" }).run();
     db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "simetrix", stage: "test", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
-    const run = db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?, ?, ?, ?, '{}', '{}', 'succeeded', 'op_test')");
+    const run = db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?, ?, ?, ?, '{}', '{}', 'succeeded', 'op_test', 'op_test')");
     run.run("run_app", "consumer-suspend", "app", "app_1");
     run.run("run_tenant", "tenant-suspend", "tenant", "tnt_1");
     run.run("run_cluster", "consumer-onboard", "cluster", "cls_1");
@@ -139,7 +138,7 @@ describe("runs API + SSE", () => {
     const { app, cookie, db, bus } = await make();
     const { runId } = (await (await post(app, "/api/runs", cookie, { kind: "noop" })).json()) as { runId: string };
     const line = (seq: number) => {
-      db.sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, ts) VALUES (?, ?, 'stdout', ?, ?, ?)").run(`evt_${seq}`, runId, seq, `line ${seq}`, Date.now());
+      db.sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, owner, modified_by) VALUES (?, ?, 'stdout', ?, ?, 'op_system', 'op_system')").run(`evt_${seq}`, runId, seq, `line ${seq}`);
       return { seq, stream: "stdout" as const, text: `line ${seq}`, at: Date.now() };
     };
     for (let seq = 100; seq < 110; seq++) line(seq);
@@ -184,10 +183,10 @@ describe("runs API + SSE", () => {
     await post(app, `/api/runs/${runId}/approve`, cookie, {});
     await executor.settle(runId);
 
-    const run = db.sqlite.prepare("SELECT started_by FROM runs WHERE id = ?").get(runId) as { started_by: string };
-    expect(run.started_by).toBe("op_test");
+    const run = db.sqlite.prepare("SELECT owner FROM runs WHERE id = ?").get(runId) as { owner: string };
+    expect(run.owner).toBe("op_test");
     const actorOf = (action: string): string =>
-      (db.sqlite.prepare("SELECT actor FROM audit WHERE run_id = ? AND action = ?").get(runId, action) as { actor: string }).actor;
+      (db.sqlite.prepare("SELECT owner FROM audit WHERE run_id = ? AND action = ?").get(runId, action) as { owner: string }).owner;
     expect(actorOf("run.planned")).toBe("op_test");
     expect(actorOf("run.approved")).toBe("op_test");
   });
@@ -219,8 +218,8 @@ describe("runs API + SSE", () => {
     // …but a direct/bookmarked link still resolves, clearly marked deleted…
     const detail = await app.request(`/api/runs/${runId}`, authed(cookie));
     expect(detail.status).toBe(200);
-    const run = (await detail.json()) as { deletedAt: number | null };
-    expect(run.deletedAt).toBeGreaterThan(0);
+    const run = (await detail.json()) as { deleted: number | null };
+    expect(run.deleted).toBeGreaterThan(0);
     // …and the row + its steps survive in the DB for retroactive inspection.
     expect((db.sqlite.prepare("SELECT count(*) AS n FROM runs WHERE id=?").get(runId) as { n: number }).n).toBe(1);
     expect((db.sqlite.prepare("SELECT count(*) AS n FROM steps WHERE run_id=?").get(runId) as { n: number }).n).toBeGreaterThan(0);

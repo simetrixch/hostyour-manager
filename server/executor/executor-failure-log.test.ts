@@ -41,7 +41,7 @@ function executorOf(def: AnyRunDefinition): { db: DbHandle; executor: Executor; 
   const logger = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
   const executor = new Executor({
     db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
-    runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+    runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: () => Promise.reject(new Error("no ssh")),
   });
   return { db, executor, lines };
 }

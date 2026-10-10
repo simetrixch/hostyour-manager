@@ -38,7 +38,7 @@ const named = (name: string): string => (name ? `"${name}"` : "no name");
 
 async function writeDisplayName(ports: TenantSetDisplayNamePorts, tc: TenantCluster, db: Parameters<Step["run"]>[0]["db"], name: string, runId: string): Promise<string> {
   const { commit } = await ports.registrations.setDisplayName(tc.stage, tc.guid, name, runId);
-  db.update(tenants).set({ displayName: name, lastRunId: runId, updatedAt: new Date() }).where(eq(tenants.id, tc.tenantId)).run();
+  db.update(tenants).set({ displayName: name, lastRunId: runId }).where(eq(tenants.id, tc.tenantId)).run();
   return commit;
 }
 

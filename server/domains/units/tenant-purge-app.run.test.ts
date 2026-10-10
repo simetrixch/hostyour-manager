@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { makePurgeAppDef } from "./tenant-purge-app.run.ts";
@@ -111,7 +111,8 @@ function ctx(runId: string, stepName: string, logs: string[]): StepCtx {
   };
 }
 
-const appRow = (tenantId: string, name: string) => db.db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, name))).get();
+// The app's live record: a deleted one stays as a row, and every read skips it.
+const appRow = (tenantId: string, name: string) => db.db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, name), isNull(tenantApps.deleted))).get();
 const tenantRow = (id: string) => db.db.select().from(tenants).where(eq(tenants.id, id)).get();
 const runAll = async (def: ReturnType<typeof makePurgeAppDef>, logs: string[] = []) => {
   for (const step of def.steps(PARAMS)) await step.run(ctx("run_purge", step.name, logs));
@@ -137,6 +138,10 @@ describe("tenant-purge-app run", () => {
     expect(cluster.admissionPolicies.has(tenantMemberAdmissionPolicyName(GUID, "web", "prod"))).toBe(false);
     expect(vaultDeletes).toEqual([{ stage: "prod", guid: GUID, app: "web" }]);
     expect(appRow("tnt_1", "web")).toBeUndefined();
+    // The record stays, marked deleted by whoever ran the purge, and frees the app's name.
+    expect(db.sqlite.prepare("SELECT deleted IS NOT NULL AS gone, deleted_by FROM tenant_apps WHERE tenant_id = 'tnt_1' AND name = 'web'").all()).toEqual([{ gone: 1, deleted_by: "op_system" }]);
+    db.db.insert(tenantApps).values({ id: "tna_web_again", tenantId: "tnt_1", name: "web" }).run();
+    expect(appRow("tnt_1", "web")?.id).toBe("tna_web_again");
     expect(tenantRow("tnt_1")?.lastRunId).toBe("run_purge");
     // The sibling app and the other tenant's app of the same name keep everything.
     expect(appRow("tnt_1", "erp")?.status).toBe("active");

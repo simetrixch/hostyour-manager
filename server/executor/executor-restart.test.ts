@@ -61,7 +61,7 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
   function managerOver(db: DbHandle, def: AnyRunDefinition): Executor {
-    return new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop" as RunKind, def]]), sshFactory: noSsh, actor: () => "op_system" });
+    return new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop" as RunKind, def]]), sshFactory: noSsh });
   }
   function make(def: AnyRunDefinition): { db: DbHandle; executor: Executor } {
     const dir = mkdtempSync(join(tmpdir(), "mgr-restart-"));
@@ -142,7 +142,7 @@ describe("Executor — a restart pauses a run and the next Manager resumes it", 
     steps.release();
     await shutdown;
     expect(getRun(db.db, runId)?.status).toBe("running");
-    const locks = () => (db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id = ?").get(runId) as { n: number }).n;
+    const locks = () => (db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE run_id = ? AND deleted IS NULL").get(runId) as { n: number }).n;
     expect(locks()).toBe(1);
 
     await executor.cancel(runId);

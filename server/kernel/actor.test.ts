@@ -1,11 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { runAsActor, currentActor, runActor, SYSTEM_ACTOR } from "./actor.ts";
+import { runAsActor, runActor, SYSTEM_ACTOR } from "./actor.ts";
 
-// The actor carrier and the ONE resolver the composition root wires the Executor and the server
-// routes with. The resolver is tested here rather than at each wiring site because that is what
-// makes both sites a bare function reference: two inline `currentActor() ?? "op_system"` fallbacks
-// can drift apart, and the drift writes the system's id into audit rows a human caused with nothing
-// failing anywhere.
+// The actor carrier and the ONE resolver the stamp columns read (db/schema/stamps.ts).
 
 describe("runActor", () => {
   it("is the signed-in operator inside a request", () => {
@@ -13,7 +9,6 @@ describe("runActor", () => {
   });
 
   it("is the system row outside any request — a boot resume or a background job belongs to no human", () => {
-    expect(currentActor()).toBeUndefined();
     expect(runActor()).toBe(SYSTEM_ACTOR);
   });
 

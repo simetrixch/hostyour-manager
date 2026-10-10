@@ -91,7 +91,7 @@ function makeWith(def: AnyRunDefinition): { db: DbHandle; executor: Executor; li
   const executor = new Executor({
     db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
     logger: capturing, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
-    sshFactory: noSsh, actor: () => "op_system",
+    sshFactory: noSsh,
   });
   return { db, executor, lines };
 }

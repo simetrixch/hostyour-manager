@@ -20,7 +20,7 @@ export function RunRows({ runs, empty }: { runs: RunView[]; empty: ReactNode }):
             <span className="row__title">{r.kind}</span>
             <span className="row__meta">{r.id}</span>
             <span className="row__end">
-              <span className="row__time">{fmtWhen(r.createdAt)}</span>
+              <span className="row__time">{fmtWhen(r.creation)}</span>
               <span className="row__chevron" aria-hidden="true">
                 <IconChevronRight />
               </span>

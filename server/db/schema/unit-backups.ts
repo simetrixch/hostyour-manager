@@ -1,6 +1,7 @@
 import { sqliteTable, text, integer, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 import { BACKUP_STATE, BACKUP_TRIGGER, STAGE } from "../../../shared/enums.ts";
+import { stampColumns } from "./stamps.ts";
 
 const now = sql`(unixepoch('subsec') * 1000)`;
 
@@ -25,6 +26,7 @@ export const unitBackups = sqliteTable("unit_backups", {
   detail: text("detail"), // why a generation failed
   takenAt: integer("taken_at", { mode: "timestamp_ms" }).notNull().default(now),
   finishedAt: integer("finished_at", { mode: "timestamp_ms" }),
+  ...stampColumns(),
 }, (t) => [
   primaryKey({ columns: [t.kind, t.unit, t.stage, t.generation] }),
 ]);

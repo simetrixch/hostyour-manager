@@ -1,7 +1,8 @@
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { deletion } from "../../db/schema/stamps.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
@@ -31,7 +32,7 @@ function assertTenantStanding(db: Db, tc: TenantCluster): void {
 }
 
 function assertAppOffboarded(db: Db, tc: TenantCluster, app: string): void {
-  const row = db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tc.tenantId), eq(tenantApps.name, app))).get();
+  const row = db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, tc.tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, app))).get();
   if (!row) throw errNotFound(`app "${app}" of tenant ${tc.guid}`);
   if (row.status !== "offboarded") {
     throw errValidation(`app "${app}" of tenant ${tc.guid} is ${row.status}: only an offboarded app is purged — remove the app first`);
@@ -168,8 +169,8 @@ function purgeAppSteps(ports: TenantLifecyclePorts, params: RemoveAppParams): St
         assertTenantStanding(ctx.db, tc);
         assertAppOffboarded(ctx.db, tc, app);
         localTx(ctx, (tx) => {
-          tx.delete(tenantApps).where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, app))).run();
-          tx.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+          tx.update(tenantApps).set(deletion()).where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, app))).run();
+          tx.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, tenantId)).run();
         });
         ctx.log("meta", `record of app "${app}" of tenant ${tc.guid} deleted — nothing of the app remains`);
       },

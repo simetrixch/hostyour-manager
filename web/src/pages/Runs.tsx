@@ -109,8 +109,8 @@ export function Runs(): ReactNode {
                       <Link to={`/runs/${r.id}`}>{r.kind}</Link>
                     </td>
                     <td className="mono">{r.targetKind} {r.targetId}</td>
-                    <td>{r.startedBy}</td>
-                    <td>{since === null ? `not started, planned ${fmtWhen(r.createdAt)}` : fmtWhen(since)}</td>
+                    <td>{r.owner}</td>
+                    <td>{since === null ? `not started, planned ${fmtWhen(r.creation)}` : fmtWhen(since)}</td>
                     <td>{since === null ? "" : formatElapsed(now - since)}</td>
                     <td>{where}</td>
                     <td className="mono">{held.length > 0 ? held.join(", ") : "nothing"}</td>

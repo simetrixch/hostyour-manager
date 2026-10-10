@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { servers } from "../db/schema/inventory.ts";
 import type { SshSession } from "../adapters/ssh/port.ts";
@@ -64,7 +64,7 @@ export async function attestMachineId(deps: AttestMachineDeps): Promise<AttestOu
   const row = db
     .select({ machineId: servers.machineId, name: servers.name })
     .from(servers)
-    .where(eq(servers.id, serverId))
+    .where(and(eq(servers.id, serverId), isNull(servers.deleted)))
     .get();
   if (!row) throw errNotFound(`server ${serverId} not found`);
 

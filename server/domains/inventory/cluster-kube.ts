@@ -20,7 +20,7 @@
 // This module imports NO concrete kube adapter: the per-slave ClusterReader constructor and the
 // credential opener ride in as injected deps (the composition root supplies the real ones), keeping
 // the boundary clean and the resolve logic unit-testable without a cluster.
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -137,7 +137,7 @@ export function makeClusterKubeResolver(deps: ClusterKubeDeps): ClusterKubeResol
     async resolve(clusterId: string): Promise<ResolvedClusterKube> {
       const cluster = deps.db.select().from(clusters).where(eq(clusters.id, clusterId)).get();
       if (!cluster) throw errNotFound(`cluster ${clusterId}`);
-      const server = deps.db.select().from(servers).where(eq(servers.id, cluster.serverId)).get();
+      const server = deps.db.select().from(servers).where(and(eq(servers.id, cluster.serverId), isNull(servers.deleted))).get();
       if (!server) throw errNotFound(`server ${cluster.serverId} for cluster ${clusterId}`);
 
       // The MASTER part (the master's own cluster): the master-local trio verbatim

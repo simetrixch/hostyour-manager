@@ -128,7 +128,7 @@ async function makeConsumerLive(resolver?: FakeClusterKubeResolver, registration
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
   // The live route is a pure READ — no run defs are needed; the bare registrations satisfies the executor dep.
-  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,

@@ -15,7 +15,7 @@ function server(passwordLoginState: ServerPasswordLoginState, passwordLogin: Ser
     role: "slave", status: "ready", cluster: null, tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState, passwordLogin,
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    hostKeyPinned: null, machineIdRecorded: false, createdAt: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
+    hostKeyPinned: null, machineIdRecorded: false, creation: NOW, adoptedAt: NOW, hasPassword: false, hasKey: true, ...over,
   };
 }
 

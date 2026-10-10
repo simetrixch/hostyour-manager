@@ -62,7 +62,9 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); });
+// The session's sub owns the runs it plans, under a foreign key onto operators; in production the
+// login writes that row.
+beforeEach(() => { db = openDb(":memory:"); db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run(); });
 afterEach(() => { db.sqlite.close(); });
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
@@ -124,7 +126,7 @@ async function makeTenant(): Promise<{ app: Hono<AppEnv>; executor: Executor; co
   const store = new CredentialStore({ db: db.db, logger });
   const reg = new TenantRegistrations(new FakePlatformRepo());
   const cluster = new FakeClusterReader({ deployState: { domain: "s1.example", stage: "prod", writtenAt: "x", generation: 1 } });
-  const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [makeTenantPurgeDef(lifecyclePorts(reg, cluster))]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [makeTenantPurgeDef(lifecyclePorts(reg, cluster))]), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,

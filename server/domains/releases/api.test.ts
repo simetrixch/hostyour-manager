@@ -69,8 +69,8 @@ describe("GET /api/releases — which release an installation stands on, and whi
       ["srv_s", "s1", "slave", "cls_s", SLAVE, "dev"],
       ["srv_l", "s2", "slave", "cls_l", LONELY, "dev"],
     ] as const) {
-      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES (?,?,?,'root',?,'healthy')").run(id, name, domain, role);
-      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES (?,?,?,?,?)").run(cls, id, stage, domain, domain.split(".")[0]);
+      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES (?,?,?,'root',?,'healthy', 'op_system', 'op_system')").run(id, name, domain, role);
+      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, owner, modified_by) VALUES (?,?,?,?,?, 'op_system', 'op_system')").run(cls, id, stage, domain, domain.split(".")[0]);
     }
     const session = new SessionCodec(db.db, config);
     const cloud = deps.cloud;

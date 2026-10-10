@@ -158,7 +158,7 @@ export interface OperatorKeyView {
    *  load of the page for nothing to read. */
   type: string;
   fingerprint: string;
-  createdAt: number;
+  creation: number;
   /** The servers whose LAST reading found this key's fingerprint. Derived from those readings, not
    *  from a placement ledger: what a host actually carries is the only thing worth reporting, and a
    *  ledger of what was placed would go on claiming a key a reinstall took away. */
@@ -228,7 +228,7 @@ export interface ServerView {
    *  key stood is refused by every run that attests it, and the card can only offer the one act that
    *  clears the id where there is an id to clear (server/domains/inventory/machine-identity.ts). */
   machineIdRecorded: boolean;
-  createdAt: number;
+  creation: number;
   /** When this manager last proved it can log in to the machine with its own key — the stamp
    *  `verify-key-login` writes (server/domains/runs/defs/manager-key.kit.ts). Null where no run has
    *  taken that reading on the machine. */
@@ -261,14 +261,14 @@ export interface RunView extends RunApproveView {
   status: RunStatus;
   summary: string;
   /** The display name of the operator who planned the run; the Manager's own runs name its system operator. */
-  startedBy: string;
+  owner: string;
   steps: StepView[];
-  createdAt: number;
+  creation: number;
   startedAt: number | null;
   endedAt: number | null;
   /** Soft-delete marker: set = the run is gone from the runs list (its row + full log
    *  remain in the DB). Non-null only on a by-id read — listRuns never returns such runs. */
-  deletedAt: number | null;
+  deleted: number | null;
   /** Whether a completed step registered a compensation: what "Abort (cleanup)" would run. Where
    *  none did, the abort is not offered — there is nothing to clean up (#236). */
   cleanupsRegistered: boolean;
@@ -312,7 +312,7 @@ export interface LockView {
   resource: LockResource;
   key: string;
   runId: string;
-  acquiredAt: number;
+  creation: number;
 }
 
 export type ClustersVerdict = "ok" | "warn" | "down";

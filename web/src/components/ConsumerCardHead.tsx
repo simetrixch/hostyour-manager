@@ -28,7 +28,7 @@ export function ConsumerCardHead({ group, selected, onSelect }: {
       {/* No recorded revision: the unit's pin lives on its delivery branch and is the release cycle's
           to write — the live Drift row below shows what actually runs. */}
       <div className="servercard__target">
-        Actions for {selected.stage.toUpperCase()} · {selected.domain} · updated {new Date(selected.updatedAt).toLocaleString()} <StatusBadge row={selected} />
+        Actions for {selected.stage.toUpperCase()} · {selected.domain} · updated {new Date(selected.modified).toLocaleString()} <StatusBadge row={selected} />
       </div>
     </>
   );

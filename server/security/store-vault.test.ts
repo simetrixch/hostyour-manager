@@ -7,7 +7,8 @@ import { openDb, type DbHandle } from "../db/client.ts";
 import { createLogger } from "../kernel/logger.ts";
 import { parseConfig } from "../kernel/config.ts";
 import { REQUIRED_ENV } from "../kernel/config.fixture.ts";
-import { CredentialStore } from "./store.ts";
+import { CredentialStore, ownerIdentity } from "./store.ts";
+import { runAsActor } from "../kernel/actor.ts";
 import { credentials } from "../db/schema/credentials.ts";
 import { servers } from "../db/schema/inventory.ts";
 import type { VaultKv } from "../adapters/vault/port.ts";
@@ -73,14 +74,21 @@ describe("CredentialStore — vault mode (values in Vault KV)", () => {
     expect(list.map((c) => c.kind)).toEqual(["other"]);
   });
 
-  it("purge removes the value from Vault AND the metadata row", async () => {
+  it("purge erases the value from Vault and the row, keeps the row marked deleted, and no read returns it", async () => {
     const d = db();
     const vault = new FakeVault();
     const store = new CredentialStore({ db: d, logger, vault });
-    const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
-    await store.purge(ref.id);
+    const ref = await store.seal({ kind: "pat", subject: { kind: "owner", id: "acme" }, purpose: "repository-pat", label: "x", plaintext: Buffer.from("secret", "utf8"), fingerprint: "f" });
+    await runAsActor("op_a", () => store.purge(ref.id));
     expect(vault.kv.size).toBe(0);
-    expect(d.select().from(credentials).where(eq(credentials.id, ref.id)).get()).toBeUndefined();
+    const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
+    expect({ blob: row?.encryptedBlob, deletedBy: row?.deletedBy, isDeleted: row?.deleted instanceof Date }).toEqual({ blob: null, deletedBy: "op_a", isDeleted: true });
+    await expect(store.open(ref.id, { purpose: "test" })).rejects.toThrow(/not found/);
+    expect(await store.list()).toEqual([]);
+    expect(ownerIdentity(d, "acme")).toBeNull();
+    // A second purge finds no live row and changes nothing.
+    await runAsActor("op_b", () => store.purge(ref.id));
+    expect(d.select().from(credentials).where(eq(credentials.id, ref.id)).get()?.deletedBy).toBe("op_a");
   });
 
   it("open throws when the value vanished from Vault", async () => {

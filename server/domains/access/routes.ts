@@ -11,6 +11,7 @@ import { SessionCodec, sessionCookieName } from "./session.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { LoginTxCodec, loginTxCookieName } from "./login-tx.ts";
 import { upsertOperator } from "./identity.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 
 const b64url = (b: Buffer): string => b.toString("base64url");
 
@@ -77,15 +78,19 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRoutesDeps): voi
     const token = await session.mint({ sub: operatorId, groups: identity.groups, via: "oidc", ...(identity.email ? { email: identity.email } : {}) });
     deleteCookie(c, txCookie, deleteOpts);
     setCookie(c, sessionCookie, token, cookieOpts);
-    writeAudit(db, { actor: operatorId, action: "session.started", detail: { member: identity.groups.includes(config.oidc.adminsGroup) } });
+    // The callback runs before any session exists, so no chokepoint names the operator.
+    runAsActor(operatorId, () => writeAudit(db, { action: "session.started", detail: { member: identity.groups.includes(config.oidc.adminsGroup) } }));
     return c.redirect(tx.rt, 302);
   });
 
   app.on(["GET", "POST"], "/auth/logout", async (c) => {
     const verdict = await session.verify(getCookie(c, sessionCookie) ?? "");
     if (verdict.kind === "ok") {
-      session.revoke(verdict.session);
-      writeAudit(db, { actor: verdict.session.sub, action: "session.ended" });
+      // /auth/* sits before the chokepoint, so no request binds the operator who signs out.
+      runAsActor(verdict.session.sub, () => {
+        session.revoke(verdict.session);
+        writeAudit(db, { action: "session.ended" });
+      });
     }
     deleteCookie(c, sessionCookie, deleteOpts);
     let end: string | undefined;

@@ -170,7 +170,7 @@ export function TenantDetail() {
               holds none, and neither does the tenant's registration. The live targeted-vs-deployed answer
               lives one click back on the Tenants card, where the live route reads both off the base
               Application and gives them a verdict (server/domains/units/api.ts driftOf). */}
-          <p className="page__desc">Actions for {t.stage.toUpperCase()} · {t.domain}{t.owner ? ` · ${t.owner}` : ""}</p>
+          <p className="page__desc">Actions for {t.stage.toUpperCase()} · {t.domain}{t.repoOwner ? ` · ${t.repoOwner}` : ""}</p>
         </div>
         <div className="page__actions">
           <TenantStatusBadge status={t.status} suspended={t.suspended} />

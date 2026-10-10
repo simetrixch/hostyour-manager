@@ -261,7 +261,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         // Admit the namespace labels before the registration asks ArgoCD to write them.
         await refreshMemberPolicies(ports, p, p.members);
         const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
-        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
         ctx.log("meta", `tenant ${p.guid} member entries written (${commit}) — the master ArgoCD renders them once its ApplicationSet regenerates the member Applications`);

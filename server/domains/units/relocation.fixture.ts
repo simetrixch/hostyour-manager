@@ -261,7 +261,7 @@ export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<strin
     closePasswordSession: () => undefined, attest: () => Promise.reject(new Error("no attest")),
     log: (_s, t) => logs.push(t),
     checkpoint: (data) => {
-      db.sqlite.prepare("INSERT OR IGNORE INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?, 'noop', 'server', 'srv_seed', '{}', '{}', 'running', 'op_system')").run(runId);
+      db.sqlite.prepare("INSERT OR IGNORE INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?, 'noop', 'server', 'srv_seed', '{}', '{}', 'running', 'op_system', 'op_system')").run(runId);
       const row = db.sqlite.prepare("SELECT checkpoint_json FROM steps WHERE run_id = ? AND name = ?").get(runId, stepName) as { checkpoint_json: string | null } | undefined;
       const current = row?.checkpoint_json ? JSON.parse(row.checkpoint_json) : {};
       const updated = JSON.stringify({ ...current, data });
@@ -270,7 +270,7 @@ export function stepCtx(db: DbHandle, stepName: string, p: Readonly<Record<strin
       } else {
         const stepId = `step_${stepName}_${Math.random().toString(36).slice(2, 8)}`;
         const count = (db.sqlite.prepare("SELECT COUNT(*) as c FROM steps WHERE run_id = ?").get(runId) as { c: number }).c;
-        db.sqlite.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, checkpoint_json) VALUES (?, ?, ?, ?, ?, ?)").run(stepId, runId, count, stepName, stepName, updated);
+        db.sqlite.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, checkpoint_json, owner, modified_by) VALUES (?, ?, ?, ?, ?, ?, 'op_system', 'op_system')").run(stepId, runId, count, stepName, stepName, updated);
       }
     },
     readCheckpoint: () => {

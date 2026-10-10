@@ -157,26 +157,26 @@ describe("projectClusterMarking", () => {
 
   it("moves servers.role + clusters.stage onto what the map says, and audits the move", async () => {
     const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: prod\nrole: master\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n  buildPlane: ${MASTER}\n` }), SLAVE);
-    expect(projectClusterMarking(db.db, marking, { actor: "op_test", runId: "run_1" })).toEqual({
+    expect(projectClusterMarking(db.db, marking, { runId: "run_1" })).toEqual({
       stage: { from: "dev", to: "prod" },
       role: { from: "slave", to: "master" },
     });
     expect(db.db.select().from(clusters).where(eq(clusters.id, "cls_1")).get()?.stage).toBe("prod");
     expect(db.db.select().from(servers).where(eq(servers.id, "srv_1")).get()?.role).toBe("master");
     // The audit table has ONE writer (db/audit-writer.ts), so a test reads it as raw SQL.
-    const entry = db.sqlite.prepare("SELECT action, target_id FROM audit ORDER BY ts DESC LIMIT 1").get() as { action: string; target_id: string } | undefined;
+    const entry = db.sqlite.prepare("SELECT action, target_id FROM audit ORDER BY creation DESC LIMIT 1").get() as { action: string; target_id: string } | undefined;
     expect(entry).toEqual({ action: "cluster.marking_projected", target_id: "cls_1" });
   });
 
   it("is a silent no-op — and writes NO audit row — when the two already agree", async () => {
     const marking = await resolveClusterMarking(repoWith({ [SLAVE]: `stage: dev\nrole: slave\n\nglobal:\n  domain: ${SLAVE}\n  clusterName: ${(SLAVE).split(".")[0]}\n  buildPlane: ${MASTER}\n` }), SLAVE);
-    expect(projectClusterMarking(db.db, marking, { actor: "op_test" })).toEqual({});
+    expect(projectClusterMarking(db.db, marking)).toEqual({});
     expect(db.sqlite.prepare("SELECT count(*) AS n FROM audit").get()).toEqual({ n: 0 });
   });
 
   it("refuses a cluster inventory does not know — reading a file never registers one", async () => {
     const marking = await resolveClusterMarking(repoWith({ [MASTER]: masterMap }), MASTER);
-    expect(() => projectClusterMarking(db.db, marking, { actor: "op_test" })).toThrow(/no cluster registered for m1/);
+    expect(() => projectClusterMarking(db.db, marking)).toThrow(/no cluster registered for m1/);
   });
 });
 

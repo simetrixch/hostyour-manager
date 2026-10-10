@@ -43,7 +43,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     const secret = "sesame-open-1234";
     const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "pw", plaintext: Buffer.from(secret, "utf8"), fingerprint: "bootstrap-password" });
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
-    expect(row?.encryptedBlob.startsWith("v1:")).toBe(true);
+    expect(row?.encryptedBlob).toMatch(/^v1:/);
     expect(row?.encryptedBlob).not.toContain(secret);
     expect(row?.encryptedBlob).not.toContain(Buffer.from(secret, "utf8").toString("base64"));
 
@@ -56,7 +56,7 @@ describe("CredentialStore — keyfile mode (AES-256-GCM at rest)", () => {
     expect(store.mode()).toBe("plaintext");
     const ref = await store.seal({ kind: "other", subject: { kind: "server", id: "srv_1" }, purpose: "reviewer-jwt", label: "x", plaintext: Buffer.from("hi", "utf8"), fingerprint: "f" });
     const row = d.select().from(credentials).where(eq(credentials.id, ref.id)).get();
-    expect(row?.encryptedBlob.startsWith("plain:v0:")).toBe(true);
+    expect(row?.encryptedBlob).toMatch(/^plain:v0:/);
     expect((await store.open(ref.id, { purpose: "t" })).toString("utf8")).toBe("hi");
   });
 

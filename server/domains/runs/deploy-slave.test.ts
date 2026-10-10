@@ -329,7 +329,7 @@ describe("deploy-slave run — plan, guards, failure modes", () => {
     const { db, executor } = await makeHarness();
     db.db.insert(servers).values({ id: "srv_other", name: "s2", host: "s2.example.com", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_other", serverId: "srv_other", stage: "prod", domain: "s2.example.com", name: "s2", status: "active", slaveId: 7 }).run();
-    db.sqlite.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES (?,?,?,?,?,?,?,?)")
+    db.sqlite.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint, owner, modified_by) VALUES (?,?,?,?,?,?,?,?, 'op_system', 'op_system')")
       .run("cred_other", "kubeconfig", "s2 cluster bearer (argocd-manager)", "server", "srv_other", "cluster-bearer", "plain:v0:t", "sha256:t");
 
     const { plan } = await executor.plan("cluster-deploy-slave", PARAMS);

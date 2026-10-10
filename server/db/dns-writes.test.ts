@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "./client.ts";
-import { forgetDnsWrite, listDnsWrites, recordDnsWrite } from "./dns-writes.ts";
+import { findDnsWrite, forgetDnsWrite, listDnsWrites, recordDnsWrite } from "./dns-writes.ts";
+import { runAsActor } from "../kernel/actor.ts";
 
 // The book holds ONE row per record (name and type). What these tests hold: an insert and an update
 // are two acts on two records, a second write of the same record rewrites its row rather than adding
@@ -51,5 +52,21 @@ describe("the book of DNS writes", () => {
     forgetDnsWrite(db.db, { name: HOST.name, type: "A" });
     expect(listDnsWrites(db.db)).toEqual([]);
     expect(() => forgetDnsWrite(db.db, { name: HOST.name, type: "A" })).not.toThrow();
+  });
+
+  it("names who wrote a record first and last, keeps a forgotten record as a deleted row no read returns, and adds a new live row when it is written again", () => {
+    const record = { name: HOST.name, type: "A" as const };
+    runAsActor("op_a", () => recordDnsWrite(db.db, { ...HOST, content: "203.0.113.9", act: "inserted", runId: "run_1" }));
+    runAsActor("op_b", () => recordDnsWrite(db.db, { ...HOST, content: "203.0.113.20", act: "updated", runId: "run_2" }));
+    runAsActor("op_c", () => forgetDnsWrite(db.db, record));
+    runAsActor("op_c", () => forgetDnsWrite(db.db, record)); // a second take-back finds no live row
+    expect(findDnsWrite(db.db, record)).toBeNull();
+    expect(listDnsWrites(db.db)).toEqual([]);
+    runAsActor("op_d", () => recordDnsWrite(db.db, { ...HOST, content: "203.0.113.30", act: "inserted", runId: "run_3" }));
+    expect(findDnsWrite(db.db, record)).toMatchObject({ content: "203.0.113.30", runId: "run_3" });
+    expect(db.sqlite.prepare("SELECT content, owner, modified_by, deleted_by, deleted IS NOT NULL AS gone FROM dns_writes ORDER BY id").all()).toEqual([
+      { content: "203.0.113.20", owner: "op_a", modified_by: "op_c", deleted_by: "op_c", gone: 1 },
+      { content: "203.0.113.30", owner: "op_d", modified_by: "op_d", deleted_by: null, gone: 0 },
+    ]);
   });
 });

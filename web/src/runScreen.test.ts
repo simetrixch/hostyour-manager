@@ -12,17 +12,17 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   targetKind: "cluster",
   targetId: "cls_1",
   status,
-  startedBy: "System",
+  owner: "System",
   summary: `${kind} ${id}`,
   steps: [],
   requiredSecrets: [],
   optionalSecrets: [],
   findings: [],
   requiredInputs: [],
-  createdAt: 0,
+  creation: 0,
   startedAt: null,
   endedAt: null,
-  deletedAt: null,
+  deleted: null,
   cleanupsRegistered: false,
   aborted: false,
   secretHints: {},
@@ -205,7 +205,7 @@ describe("recoverable — which runs get the retry / skip / abort bar", () => {
     expect(recoverable(run("run_1", "noop", "failed"))).toBe(true);
     expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: 1 })).toBe(true);
     expect(recoverable({ ...run("run_1", "noop", "cancelled"), startedAt: null })).toBe(false);
-    expect(recoverable({ ...run("run_1", "noop", "failed"), deletedAt: 1 })).toBe(false);
+    expect(recoverable({ ...run("run_1", "noop", "failed"), deleted: 1 })).toBe(false);
     expect(recoverable(run("run_1", "noop", "succeeded"))).toBe(false);
   });
 });
@@ -248,7 +248,7 @@ describe("secretsToSupply / readyToApprove", () => {
     // The fields belong to the approve, not to the run: a run already going, and a deleted one, are
     // read on this same screen and neither is waiting for a password.
     expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), status: "running" })).toEqual([]);
-    expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), deletedAt: 1 })).toEqual([]);
+    expect(secretsToSupply({ ...slave(["ansiwise-elevation"]), deleted: 1 })).toEqual([]);
   });
 });
 

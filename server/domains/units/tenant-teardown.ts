@@ -20,7 +20,7 @@
 // Boundary: domain layer (onboarding) — the TenantRegistrations + the per-cluster kube resolver + the pure
 // fan-out algebra + the inventory rows; no adapters, no IO of its own.
 import { z } from "zod";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, isNull, notInArray } from "drizzle-orm";
 import type { Step } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -446,8 +446,8 @@ export function tenantTeardownSteps(ports: TenantLifecyclePorts, t: TenantTeardo
         const status = opts.settledStatus;
         const keep = atLeastAsSettledAs(status);
         localTx(ctx, (tx) => {
-          tx.update(tenantApps).set({ status, lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, row.id), notInArray(tenantApps.status, keep))).run();
-          tx.update(tenants).set({ status, lastRunId: ctx.runId, updatedAt: new Date() }).where(and(eq(tenants.id, row.id), notInArray(tenants.status, keep))).run();
+          tx.update(tenantApps).set({ status, lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, row.id), isNull(tenantApps.deleted), notInArray(tenantApps.status, keep))).run();
+          tx.update(tenants).set({ status, lastRunId: ctx.runId }).where(and(eq(tenants.id, row.id), notInArray(tenants.status, keep))).run();
         });
         // WHICH sentence the run log gets is decided from the status read above, while the WHERE clause
         // is what actually holds — better-sqlite3 is synchronous and there is no await between the read

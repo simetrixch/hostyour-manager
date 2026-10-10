@@ -6,7 +6,7 @@
 // admins to cluster-admin (hostyour-deploy ansiwise/programs/deploy-cluster.yaml). So no credential of
 // a slave lands in Headlamp; what a person may do there is what their own sign-in may do.
 import { createHash } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { stringify } from "yaml";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
@@ -29,7 +29,7 @@ export function activeSlaves(db: Db): { slaves: SlaveContext[]; unreachable: str
   const rows = db
     .select({ name: clusters.name, status: clusters.status, planeJson: clusters.planeJson, role: servers.role })
     .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .innerJoin(servers, and(eq(clusters.serverId, servers.id), isNull(servers.deleted)))
     .all()
     .filter((r) => r.status === "active" && !isMasterRole(r.role));
   const slaves: SlaveContext[] = [];

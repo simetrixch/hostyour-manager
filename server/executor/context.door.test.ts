@@ -152,7 +152,7 @@ describe("the password door and the pinned host key", () => {
     await ctx.openPasswordSession(SECRET).then(() => undefined, () => undefined);
     expect(srv.authMethodsSeen).toEqual([]);
 
-    restateMachineIdentity(db.db, "op_test", SERVER_ID, { hostKeyFingerprint: srv.hostKeyFingerprint });
+    restateMachineIdentity(db.db, SERVER_ID, { hostKeyFingerprint: srv.hostKeyFingerprint });
 
     const session = await ctx.openPasswordSession(SECRET);
     expect(session.hostKeyFingerprint()).toBe(srv.hostKeyFingerprint);
@@ -168,7 +168,7 @@ describe("the password door and the pinned host key", () => {
     // act, made about the wrong machine — which is the case this manager cannot tell from the right
     // one and therefore leaves to the wire to settle.
     const OTHER_MACHINE = `SHA256:${"B".repeat(43)}`;
-    restateMachineIdentity(db.db, "op_test", SERVER_ID, { hostKeyFingerprint: OTHER_MACHINE });
+    restateMachineIdentity(db.db, SERVER_ID, { hostKeyFingerprint: OTHER_MACHINE });
 
     const refusal = await ctx.openPasswordSession(SECRET).then(() => undefined, (e: unknown) => e);
 

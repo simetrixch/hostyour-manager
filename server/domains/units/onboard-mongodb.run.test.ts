@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
@@ -41,7 +41,7 @@ const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration — and the quota this word
 // feeds into is resolved against it.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 

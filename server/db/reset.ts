@@ -39,7 +39,7 @@ const WIPE_ORDER = [
 ] as const;
 
 // The tables a wipe deliberately leaves standing:
-//   operators — op_system/op_emergency are seeded by the BASELINE MIGRATION only and runs.started_by
+//   operators — op_system/op_emergency are seeded by the BASELINE MIGRATION only and runs.owner
 //     references them, so a wipe would leave every later run without a startable actor.
 //   meta — meta.session.key IS the resetting operator's live session, and keystore.mode is what the
 //     Clusters page reports the keystore as; wiping either signs the operator out mid-reset and

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardParams } from "./onboard.run.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
@@ -17,7 +17,7 @@ import { SHA, MANIFEST, CHART_PINS, passReport, ports } from "./onboard.fixture.
 // registration path — carrying test, and the registration's cluster field naming that cluster.
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 /** ONE cluster, marked prod. Every test here onboards onto it. */

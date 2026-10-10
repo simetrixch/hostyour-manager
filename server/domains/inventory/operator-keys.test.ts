@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers } from "../../db/schema/inventory.ts";
-import { createOperatorKey, deleteOperatorKey, listOperatorKeys, loadOperatorKey } from "./operator-keys.ts";
+import { createOperatorKey, deleteOperatorKey, listOperatorKeys, listOperatorKeyIdentities, loadOperatorKey } from "./operator-keys.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 import { operatorKeyMarker } from "../../../shared/operator-keys.ts";
 
@@ -54,7 +55,7 @@ describe("operator keys — the rows", () => {
 
   it("stores the key line without the operator's own comment, and fingerprints it", () => {
     const db = setup();
-    const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A} pat@example.com` });
+    const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A} pat@example.com` });
     // The stored line's comment slot is empty because the comment on the PLACED line is the marker,
     // and a line has only one. The ROW carries the line; the view does not — nothing in the browser
     // reads a key body, and the run that places one loads the row.
@@ -67,14 +68,14 @@ describe("operator keys — the rows", () => {
   it("refuses a label that could not be interpolated into the removal pattern", () => {
     const db = setup();
     for (const label of ["Pat", "pat laptop", "pat.*", "a:b"]) {
-      expect(() => createOperatorKey(db.db, "op_me", { label, publicKey: `ssh-ed25519 ${BLOB_A}` }), label)
+      expect(() => createOperatorKey(db.db, { label, publicKey: `ssh-ed25519 ${BLOB_A}` }), label)
         .toThrowError(/not a usable label/);
     }
   });
 
   it("refuses anything that is not one usable public key", () => {
     const db = setup();
-    const bad = (publicKey: string): unknown => () => createOperatorKey(db.db, "op_me", { label: "pat", publicKey });
+    const bad = (publicKey: string): unknown => () => createOperatorKey(db.db, { label: "pat", publicKey });
     expect(bad("hello")).toThrowError(/single OpenSSH public key line/);
     expect(bad(`ssh-ed25519 ${BLOB_A}\nssh-ed25519 ${BLOB_B}`)).toThrowError(/single OpenSSH public key line/);
     // OpenSSH has disabled ssh-dss by default since 7.0: the host would take the line into the file
@@ -84,19 +85,32 @@ describe("operator keys — the rows", () => {
 
   it("keeps one row per label and one per key", () => {
     const db = setup();
-    createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     // A second row under the same label would make the label name two lines on a host.
-    expect(() => createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_B}` }))
+    expect(() => createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_B}` }))
       .toThrowError(/already stored/);
     // The same key under a second label would put two lines carrying it on every host, and removing
     // one would leave the other granting access.
-    expect(() => createOperatorKey(db.db, "op_me", { label: "sam", publicKey: `ssh-ed25519 ${BLOB_A}` }))
+    expect(() => createOperatorKey(db.db, { label: "sam", publicKey: `ssh-ed25519 ${BLOB_A}` }))
       .toThrowError(/already stored/);
+  });
+
+  it("keeps a forgotten key as a deleted row that no read returns, and frees its label and key", () => {
+    const db = setup();
+    const view = runAsActor("op_a", () => createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` }));
+    runAsActor("op_b", () => deleteOperatorKey(db.db, view.id));
+    expect(db.sqlite.prepare("SELECT owner, deleted_by, deleted IS NOT NULL AS gone FROM operator_keys WHERE id = ?").get(view.id))
+      .toEqual({ owner: "op_a", deleted_by: "op_b", gone: 1 });
+    expect(listOperatorKeys(db.db)).toEqual([]);
+    expect(listOperatorKeyIdentities(db.db)).toEqual([]);
+    expect(() => loadOperatorKey(db.db, view.id)).toThrowError(/not found/);
+    const again = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    expect(listOperatorKeys(db.db).map((k) => k.id)).toEqual([again.id]);
   });
 
   it("says which servers hold a key from their READINGS, never from a ledger of placements", () => {
     const db = setup();
-    const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     // Nothing has read the host yet: not "absent", simply not known.
     expect(listOperatorKeys(db.db).find((k) => k.id === view.id)?.onServerIds).toEqual([]);
     recordKeys(db, [PAT_FP]);
@@ -108,26 +122,26 @@ describe("operator keys — the rows", () => {
 
   it("refuses to forget a key the last reading still finds on a host", () => {
     const db = setup();
-    const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     recordKeys(db, [PAT_FP]);
     // Deleting the row touches no machine, and the removal run kind needs the row to name the line —
     // so a row deleted now leaves a working key nothing here can take off.
-    expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/s1/);
-    expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/with an operator-key-remove run first/);
+    expect(() => deleteOperatorKey(db.db, view.id)).toThrowError(/s1/);
+    expect(() => deleteOperatorKey(db.db, view.id)).toThrowError(/with an operator-key-remove run first/);
     recordKeys(db, []);
-    deleteOperatorKey(db.db, "op_me", view.id);
+    deleteOperatorKey(db.db, view.id);
     expect(listOperatorKeys(db.db)).toEqual([]);
   });
 
   it("names a HAND edit when the line carrying the key is one no act here can reach", () => {
     const db = setup();
-    const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     // The colleague's own ssh-copy-id line: same key, a comment this platform did not write. The
     // removal deletes by marker, so it does not reach this line — and telling the operator to
     // "remove it from those servers" would name an act that cannot do it.
     recordKeys(db, [PAT_FP], "foreign");
-    expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/deleted on the host itself/);
-    expect(() => deleteOperatorKey(db.db, "op_me", view.id)).not.toThrowError(/operator-key-remove run/);
+    expect(() => deleteOperatorKey(db.db, view.id)).toThrowError(/deleted on the host itself/);
+    expect(() => deleteOperatorKey(db.db, view.id)).not.toThrowError(/operator-key-remove run/);
   });
 
   // The two documents that EXIST on the row and say nothing this build can use. They are not the same
@@ -140,25 +154,25 @@ describe("operator keys — the rows", () => {
   ] as const) {
     it(`refuses to forget a key while a host's reading is ${what}`, () => {
       const db = setup();
-      const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+      const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
       db.db.update(servers).set({ authorizedKeysState: "accounted", authorizedKeysJson: doc }).where(eq(servers.id, "srv_1")).run();
 
-      expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/cannot be established from here/);
-      expect(() => deleteOperatorKey(db.db, "op_me", view.id)).toThrowError(/read that server again first/);
+      expect(() => deleteOperatorKey(db.db, view.id)).toThrowError(/cannot be established from here/);
+      expect(() => deleteOperatorKey(db.db, view.id)).toThrowError(/read that server again first/);
       expect(loadOperatorKey(db.db, view.id).id).toBe(view.id); // still there
       // And the list does not claim the key IS on it either — an undecided host is neither.
       expect(listOperatorKeys(db.db).find((k) => k.id === view.id)?.onServerIds).toEqual([]);
 
       // A fresh, readable reading decides it, and the delete goes through.
       recordKeys(db, []);
-      deleteOperatorKey(db.db, "op_me", view.id);
+      deleteOperatorKey(db.db, view.id);
       expect(listOperatorKeys(db.db)).toEqual([]);
     });
   }
 
   it("places under the marker the removal matches, and never under the manager's", () => {
     const db = setup();
-    const view = createOperatorKey(db.db, "op_me", { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    const view = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
     expect(operatorKeyMarker(view.label)).toBe("hostyour-operator:pat");
     expect(operatorKeyMarker(view.label).includes("hostyour:")).toBe(false);
   });

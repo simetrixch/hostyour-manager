@@ -1,4 +1,4 @@
-import { sql, eq, and } from "drizzle-orm";
+import { isNull, sql, eq, and } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { events, steps } from "../db/schema/runs.ts";
 import { servers } from "../db/schema/inventory.ts";
@@ -128,7 +128,7 @@ export class RunContext {
     if (this.passwordSession) return this.passwordSession;
     const id = this.d.targetServerId;
     if (!id) throw errUndeclaredTarget("(no target server)");
-    const server = this.d.db.select().from(servers).where(eq(servers.id, id)).get();
+    const server = this.d.db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
     if (!server) throw errUndeclaredTarget(id);
     const password = this.d.secrets.get(secretName);
     if (!password) throw errMissingRunSecret(secretName);
@@ -261,7 +261,7 @@ export class RunContext {
     // Plan-gate: the primary/default target is always reachable; any OTHER serverId a step
     // asks for must be one the plan declared it touches, else it is refused.
     if (id !== this.d.targetServerId && !this.declared.has(id)) throw errUndeclaredTarget(id);
-    const server = this.d.db.select().from(servers).where(eq(servers.id, id)).get();
+    const server = this.d.db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
     if (!server) throw errUndeclaredTarget(id);
     // The row is read BEFORE the cache is consulted, because the address it resolves to is half
     // the cache key — a session is only the right one if it went out on the address this call asks

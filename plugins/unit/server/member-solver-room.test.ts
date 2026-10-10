@@ -1,24 +1,27 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { openDb } from "#core/server/db/client.ts";
-import { unitSizes } from "./schema.ts";
 import { UNIT_SIZE_SEED } from "../shared/unit-size.ts";
 
 // The forward step of the member rows' solver room (migration 0001 of the unit ledger), run on the
-// rows an installation held before it.
+// rows an installation held before it. A database opened without the unit's tree holds unit_sizes as
+// the core's baseline created it, the table 0001 ran on; so the rows are written and read in SQL.
 const SQL = readFileSync(new URL("./migrations/0001_member-cert-solver-room.sql", import.meta.url), "utf8");
+const INSERT = "INSERT INTO unit_sizes (component, name, requests_cpu, requests_memory, limits_cpu, limits_memory, pods, persistent_volume_claims) VALUES (?, ?, ?, ?, ?, ?, ?, 1)";
+const FIGURES = "SELECT component, name, requests_cpu AS requestsCpu, requests_memory AS requestsMemory, limits_cpu AS limitsCpu, limits_memory AS limitsMemory, pods, persistent_volume_claims AS persistentVolumeClaims FROM unit_sizes";
 
 describe("migration 0001: a standing member row gains one cert-manager solver", () => {
   type Row = [name: string, requestsCpu: string, requestsMemory: string, limitsCpu: string, limitsMemory: string, pods?: number];
   /** The member rows (and one base row) after the migration ran over `rows`, keyed component/name. */
   const migrated = (rows: Row[]) => {
-    const { db, sqlite } = openDb(":memory:");
+    const { sqlite } = openDb(":memory:");
     for (const [name, requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods = 8] of rows) {
-      db.insert(unitSizes).values({ component: "member", name: name as "small", requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods, persistentVolumeClaims: 1 }).run();
+      sqlite.prepare(INSERT).run("member", name, requestsCpu, requestsMemory, limitsCpu, limitsMemory, pods);
     }
-    db.insert(unitSizes).values({ component: "base", name: "small", requestsCpu: "400m", requestsMemory: "1Gi", limitsCpu: "1500m", limitsMemory: "2Gi", pods: 8, persistentVolumeClaims: 1 }).run();
+    sqlite.prepare(INSERT).run("base", "small", "400m", "1Gi", "1500m", "2Gi", 8);
     sqlite.exec(SQL);
-    return Object.fromEntries(db.select().from(unitSizes).all().map(({ updatedAt: _u, component, name, ...q }) => [`${component}/${name}`, q]));
+    const figures = sqlite.prepare(FIGURES).all() as { component: string; name: string }[];
+    return Object.fromEntries(figures.map(({ component, name, ...q }) => [`${component}/${name}`, q]));
   };
 
   it("brings the shipped rows to the grown seed, grows an edited row by at least one solver, and leaves other components alone", () => {

@@ -89,7 +89,7 @@ describe("tenant-set-google-translation through the Executor", () => {
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
       runDefinitions: new Map([["tenant-set-google-translation", def as unknown as AnyRunDefinition]]),
-      sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+      sshFactory: () => Promise.reject(new Error("no ssh")),
     });
     /** Every text the run left in the database: its plan, its params, its log, its checkpoints and its error. */
     const traces = (runId: string): string => JSON.stringify([

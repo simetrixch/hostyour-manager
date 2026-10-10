@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import type { Db } from "../db/client.ts";
 import type { Config } from "../kernel/config.ts";
@@ -96,7 +96,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
   if (!m) return; // no MASTER_FQDN → nothing to seed
 
   // ---- 1. Upsert the one role=master row (servers_one_master_uq keeps it singular/race-safe).
-  let master = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  let master = db.select().from(servers).where(and(inArray(servers.role, [...MASTER_ROLES]), isNull(servers.deleted))).get();
   if (!master) {
     const id = srvId();
     const name = clusterShortName(m.fqdn);
@@ -126,9 +126,9 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
       }
       throw err;
     }
-    writeAudit(db, { actor: "system", action: "server.master_seeded", targetKind: "server", targetId: id, detail: { name, host: m.fqdn } });
+    writeAudit(db, { action: "server.master_seeded", targetKind: "server", targetId: id, detail: { name, host: m.fqdn } });
     logger.info({ id, name, host: m.fqdn, sshUser: m.sshUser }, "seeded the role=master server row (this control host)");
-    master = db.select().from(servers).where(eq(servers.id, id)).get();
+    master = db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
     if (!master) return; // unreachable in practice; keeps the type narrow
   } else {
     // Reconcile config drift onto the existing row (host/user/lan can change across installs).
@@ -139,9 +139,9 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         .set({ host: m.fqdn, sshUser: m.sshUser, lanHost: nextLan, sshPort: m.sshPort })
         .where(eq(servers.id, master.id))
         .run();
-      writeAudit(db, { actor: "system", action: "server.master_reconciled", targetKind: "server", targetId: master.id, detail: { host: m.fqdn, sshUser: m.sshUser } });
+      writeAudit(db, { action: "server.master_reconciled", targetKind: "server", targetId: master.id, detail: { host: m.fqdn, sshUser: m.sshUser } });
       logger.warn({ id: master.id, host: m.fqdn, sshUser: m.sshUser }, "reconciled the role=master row to the configured MASTER_* values");
-      master = db.select().from(servers).where(eq(servers.id, master.id)).get() ?? master;
+      master = db.select().from(servers).where(and(eq(servers.id, master.id), isNull(servers.deleted))).get() ?? master;
     }
   }
 
@@ -160,7 +160,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         .run();
       // Audit + log ONLY on a real insert (inside the try) so a clash below never writes a false
       // "seeded" record.
-      writeAudit(db, { actor: "system", action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage } });
+      writeAudit(db, { action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage } });
       logger.info({ id: cid, serverId: master.id, domain: m.fqdn, stage: m.stage }, "seeded the master self-cluster row (this control host)");
     } catch (err) {
       // A stray clusters row already owns this domain (clusters_domain_uq). Degrade loudly — never
@@ -181,7 +181,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
     // installs), mirroring the role=master server-row reconcile above. A master's name follows its
     // FQDN, as the branch program writes it into the master's own map on every regeneration.
     db.update(clusters).set({ stage: m.stage, domain: m.fqdn, name: clusterShortName(m.fqdn) }).where(eq(clusters.id, cluster.id)).run();
-    writeAudit(db, { actor: "system", action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
+    writeAudit(db, { action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
     logger.warn({ id: cluster.id, domain: m.fqdn, stage: m.stage }, "reconciled the master self-cluster row to the configured MASTER_* values");
   }
 
@@ -217,7 +217,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
  *  it. */
 async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, logger: Logger): Promise<void> {
   const sealed = (await creds.list({ subject: { kind: "server", id: masterId }, purpose: "ssh-key", excludeRotated: true })).length > 0;
-  const row = db.select().from(servers).where(eq(servers.id, masterId)).get();
+  const row = db.select().from(servers).where(and(eq(servers.id, masterId), isNull(servers.deleted))).get();
   if (!row) return;
   const want = sealed ? "healthy" : "degraded";
   if (row.status === want || (row.status !== "healthy" && row.status !== "degraded")) return;
@@ -230,7 +230,7 @@ async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, 
 }
 
 async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: MasterConfig, logger: Logger): Promise<boolean> {
-  let master = db.select().from(servers).where(eq(servers.id, masterId)).get();
+  let master = db.select().from(servers).where(and(eq(servers.id, masterId), isNull(servers.deleted))).get();
   if (!master) {
     logger.warn({ id: masterId }, "role=master row vanished while converging — stopping (the next boot re-seeds it)");
     return true; // retrying cannot help
@@ -250,7 +250,7 @@ async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: M
     if (pf.hostKey !== fpRead.fp && mayWrite) {
       db.update(servers).set({ preflightJson: { ...pf, hostKey: fpRead.fp } }).where(eq(servers.id, master.id)).run();
       logger.info({ id: master.id, hostKey: fpRead.fp }, "pinned the master sshd host-key fingerprint on the master row");
-      master = db.select().from(servers).where(eq(servers.id, master.id)).get() ?? master;
+      master = db.select().from(servers).where(and(eq(servers.id, master.id), isNull(servers.deleted))).get() ?? master;
     }
   }
 

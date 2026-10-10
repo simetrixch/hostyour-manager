@@ -12,7 +12,7 @@ import { unitSizes } from "#unit/server/schema.ts";
 import { RUN_KIND } from "../../shared/enums.ts";
 import type { Executor } from "../executor/executor.ts";
 import { compiledPlugins } from "../plugins.ts";
-import { activatePlugins } from "./plugin-set.ts";
+import { activatePlugins, inDependencyOrder } from "./plugin-set.ts";
 import { Hono } from "hono";
 import type { AppEnv } from "../http/app-env.ts";
 import { registerPluginRoutes } from "../http/plugins-route.ts";
@@ -29,7 +29,7 @@ afterEach(() => {
 
 /** A core carrying what the unit plugin reads: the database it seeds, the logger, and no Vault. */
 function core(): Omit<Core, "plugins"> {
-  const h = openDb(":memory:");
+  const h = openDb(":memory:", inDependencyOrder(compiledPlugins));
   handles.push(h);
   return { config: {}, db: h.db, logger: pino({ level: "silent" }) } as unknown as Omit<Core, "plugins">;
 }

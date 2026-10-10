@@ -28,11 +28,16 @@ import { inDependencyOrder } from "../boot/plugin-set.ts";
 //
 // The schema is read as SOURCE, not imported: the boundary law gives runs/credentials/operators/audit
 // exactly one importer each, and a census that imported them would break it.
+//
+// The stamp columns are declared once, in functions of db/schema/stamps.ts that a table spreads in
+// (`...stampColumns()`) and a writer passes as its payload (`.set(deletion())`); the census reads
+// those functions and resolves both shapes through them.
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const SCHEMA_DIR = "server/db/schema";
 const MIGRATIONS_DIR = "server/db/migrations";
 const COLUMN_BUILDERS = "text|integer|real|blob|numeric";
+const STAMPS_FILE = "server/db/schema/stamps.ts";
 
 interface Journal {
   entries: { idx: number; tag: string }[];
@@ -128,22 +133,44 @@ function balanced(text: string, open: number): string {
   throw new Error(`unbalanced { at index ${open}`);
 }
 
+/** The column a declaration line at `indent` spaces declares. A value drizzle supplies on an insert,
+ *  a default or an `$onUpdateFn` (drizzle's insert falls back to it), needs no writer. */
+function declaredColumn(line: string, indent: number): Omit<Column, "table" | "sqlTable"> | null {
+  const col = new RegExp(`^ {${indent}}(\\w+): (?:${COLUMN_BUILDERS})\\(\\s*"([^"]+)"(.*)$`).exec(line);
+  if (!col) return null;
+  return { prop: col[1] as string, sqlName: col[2] as string, hasDefault: /\.\$?default(Fn)?\(|\.\$onUpdateFn\(/.test(col[3] as string) };
+}
+
+/** The functions of stamps.ts: the keys of the object each returns, and the columns it declares. */
+function stampFunctions(): Map<string, { keys: string[]; columns: Omit<Column, "table" | "sqlTable">[] }> {
+  const text = readFileSync(join(ROOT, STAMPS_FILE), "utf8");
+  const out = new Map<string, { keys: string[]; columns: Omit<Column, "table" | "sqlTable">[] }>();
+  for (const fn of text.matchAll(/export function (\w+)\(\)[^\n]*\{\n\s*return \{/g)) {
+    const block = balanced(text, fn.index + fn[0].length - 1);
+    const columns = block.split(/\r?\n/).map((line) => declaredColumn(line, 4)).filter((c) => c !== null);
+    out.set(fn[1] as string, { keys: payloadParts(block).keys, columns });
+  }
+  return out;
+}
+
 function schemaColumns(files: readonly string[] = trees().flatMap((tr) => tr.schemaFiles)): Column[] {
+  const stamps = stampFunctions();
   const columns: Column[] = [];
   for (const file of files) {
     const text = readFileSync(join(ROOT, file), "utf8");
     for (const table of text.matchAll(/export const (\w+) = sqliteTable\(\s*"([^"]+)",\s*\{/g)) {
       const block = balanced(text, text.indexOf("{", table.index + table[0].length - 1));
+      const at = { table: table[1] as string, sqlTable: table[2] as string };
       for (const line of block.split(/\r?\n/)) {
-        const col = new RegExp(`^ {2}(\\w+): (?:${COLUMN_BUILDERS})\\(\\s*"([^"]+)"(.*)$`).exec(line);
-        if (!col) continue;
-        columns.push({
-          table: table[1] as string,
-          sqlTable: table[2] as string,
-          prop: col[1] as string,
-          sqlName: col[2] as string,
-          hasDefault: /\.\$?default(Fn)?\(/.test(col[3] as string),
-        });
+        const spread = /^ {2}\.\.\.(\w+)\(\),?$/.exec(line);
+        if (spread) {
+          const fn = stamps.get(spread[1] as string);
+          if (!fn) throw new Error(`${file}: ${at.sqlTable} spreads ${spread[1]}(), which ${STAMPS_FILE} does not export`);
+          for (const c of fn.columns) columns.push({ ...at, ...c });
+          continue;
+        }
+        const col = declaredColumn(line, 2);
+        if (col) columns.push({ ...at, ...col });
       }
     }
   }
@@ -224,7 +251,7 @@ function everyObjectKey(file: string): string[] {
 }
 
 /** The props each file writes, per table. */
-function writtenProps(file: string, tables: Set<string>): Map<string, Set<string>> {
+function writtenProps(file: string, tables: Set<string>, stamps = stampFunctions()): Map<string, Set<string>> {
   const written = new Map<string, Set<string>>();
   const record = (table: string, props: string[]): void => {
     const set = written.get(table) ?? new Set<string>();
@@ -235,6 +262,8 @@ function writtenProps(file: string, tables: Set<string>): Map<string, Set<string
   const resolve = (name: string, seen: Set<string>): string[] | null => {
     if (seen.has(name)) return [];
     seen.add(name);
+    const stamp = stamps.get(name);
+    if (stamp) return stamp.keys;
     const decl = new RegExp(`\\b(?:const|let)\\s+${name}\\s*(?::[^=]+)?=\\s*\\{`).exec(file);
     if (!decl) return null;
     const parts = payloadParts(balanced(file, decl.index + decl[0].length - 1));
@@ -293,7 +322,16 @@ describe("schema census: every column has a writer", () => {
   it("parses the schema (the census has something to check)", () => {
     expect(tables.size).toBeGreaterThanOrEqual(10);
     expect(columns.some((c) => c.table === "runs" && c.prop === "planJson")).toBe(true);
-    expect(columns.find((c) => c.table === "tenantApps" && c.prop === "createdAt")?.hasDefault).toBe(true);
+    expect(columns.find((c) => c.table === "tenantApps" && c.prop === "status")?.hasDefault).toBe(true);
+    // The stamp columns a table spreads in: drizzle fills the four, a writer the deletion pair.
+    expect(columns.filter((c) => c.table === "runs" && ["creation", "modified", "owner", "modifiedBy"].includes(c.prop)).map((c) => c.hasDefault)).toEqual([true, true, true, true]);
+    expect(columns.filter((c) => c.table === "runs" && ["deleted", "deletedBy"].includes(c.prop)).map((c) => c.hasDefault)).toEqual([false, false]);
+  });
+
+  it("resolves a payload that a stamps.ts function returns, and no other call", () => {
+    const tableSet = new Set(["runs"]);
+    expect([...(writtenProps("db.update(runs).set(deletion()).run();", tableSet).get("runs") ?? [])]).toEqual(["deleted", "deletedBy"]);
+    expect(writtenProps("const x = { deleted: 1 };\ndb.update(runs).set(somewhere()).run();", tableSet).get("runs")?.has("deletedBy")).toBe(false);
   });
 
   it("names every column no shipped writer ever sets", () => {

@@ -113,7 +113,7 @@ describe("attestMachineId ", () => {
 
     // What the refusal tells the operator to do: go to the machine, read the fingerprint it presents
     // now — here the one already pinned, because its sshd did not change — and state it.
-    restateMachineIdentity(db.db, "op_test", serverId, { hostKeyFingerprint: PIN });
+    restateMachineIdentity(db.db, serverId, { hostKeyFingerprint: PIN });
     expect(storedMachineId(db, serverId)).toBeNull();
 
     const out = await attestMachineId({ db: db.db, session: fakeSession(OTHER), serverId, signal });

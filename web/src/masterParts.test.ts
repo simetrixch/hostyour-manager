@@ -14,7 +14,7 @@ function server(over: Partial<ServerView> = {}): ServerView {
     tailnetState: "unknown", tailnet: { kind: "none" },
     passwordLoginState: "unknown", passwordLogin: { kind: "none" },
     authorizedKeysState: "unknown", authorizedKeys: { kind: "none" },
-    hostKeyPinned: null, machineIdRecorded: false, createdAt: 0, adoptedAt: null, hasPassword: false, hasKey: true,
+    hostKeyPinned: null, machineIdRecorded: false, creation: 0, adoptedAt: null, hasPassword: false, hasKey: true,
     ...over,
   };
 }

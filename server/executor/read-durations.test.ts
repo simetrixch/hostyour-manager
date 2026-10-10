@@ -1,6 +1,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { runs, runLocks } from "../db/schema/runs.ts";
+import { runs } from "../db/schema/runs.ts";
+import { insertLock } from "./locks.ts";
 import type { RunStatus } from "../../shared/enums.ts";
 import { listRunDurations, listRuns } from "./read.ts";
 
@@ -8,22 +9,22 @@ let db: DbHandle;
 afterEach(() => db?.sqlite.close());
 
 let seq = 0;
-function seedRun(o: { kind: string; status: RunStatus; minutes?: number; endedAt?: number; deleted?: boolean; startedBy?: string }): string {
+function seedRun(o: { kind: string; status: RunStatus; minutes?: number; endedAt?: number; deleted?: boolean; owner?: string }): string {
   const endedAt = o.endedAt ?? 1_700_000_000_000 + seq * 1000;
   const id = `run_${++seq}`;
   db.db.insert(runs).values({
     id,
-    createdAt: new Date(endedAt),
+    creation: new Date(endedAt),
     kind: o.kind,
     targetKind: "server",
     targetId: "srv_1",
     paramsJson: {},
     planJson: {},
     status: o.status,
-    startedBy: o.startedBy ?? "op_system",
+    owner: o.owner ?? "op_system",
     startedAt: o.minutes === undefined ? null : new Date(endedAt - o.minutes * 60_000),
     finishedAt: o.minutes === undefined ? null : new Date(endedAt),
-    deletedAt: o.deleted ? new Date(endedAt) : null,
+    deleted: o.deleted ? new Date(endedAt) : null,
   }).run();
   return id;
 }
@@ -63,16 +64,16 @@ describe("listRunDurations", () => {
 describe("listRuns", () => {
   it("names the operator who started each run by display name", () => {
     db = openDb(":memory:");
-    db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_sample', 'sample', 'Sample Operator')").run();
-    seedRun({ kind: "noop", status: "planned", startedBy: "op_sample" });
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_sample', 'sample', 'Sample Operator', 'op_system', 'op_system')").run();
+    seedRun({ kind: "noop", status: "planned", owner: "op_sample" });
     seedRun({ kind: "noop", status: "planned" });
-    expect(listRuns(db.db).map((r) => r.startedBy).sort()).toEqual(["Sample Operator", "System"]);
+    expect(listRuns(db.db).map((r) => r.owner).sort()).toEqual(["Sample Operator", "System"]);
   });
 
   it("keeps a run that holds a lock or has not ended in the list, however many runs came after it", () => {
     db = openDb(":memory:");
     const holder = seedRun({ kind: "tenant-line-move", status: "failed", minutes: 3, endedAt: 1_000_000 });
-    db.db.insert(runLocks).values({ resource: "master-kube", key: "m", runId: holder }).run();
+    insertLock(db.db, { resource: "master-kube", key: "m" }, holder);
     const waiting = seedRun({ kind: "noop", status: "planned", endedAt: 2_000_000 });
     seedRun({ kind: "noop", status: "failed", minutes: 1, endedAt: 3_000_000 });
     for (let i = 0; i < 3; i++) seedRun({ kind: "noop", status: "succeeded", minutes: 1, endedAt: 9_000_000 + i });
