@@ -133,27 +133,38 @@ describe.skipIf(!JQ)("the publish job's shell, run", () => {
       "held/package.json": pkg({ name: "@x/held", version: "0.3.1" }),
     });
     writeFileSync(join(f.temp, "publishable.tsv"), ["stable\t@x/stable", "beta\t@x/beta", "held\t@x/held"].map((l) => `${l}\t${REGISTRY}\n`).join(""));
-    // npm answers `view` as the registry would: it holds @x/held@0.3.1 and nothing else.
+    // npm answers `view` as the registry would: it holds @x/held@0.3.1 and nothing else, and records a
+    // publish. pnpm packs the folder it runs in and answers with the tarball's path, as `pack --json` does.
     const bin = join(f.temp, "bin");
     mkdirSync(bin);
     const log = join(f.temp, "calls.log");
-    writeFileSync(join(bin, "npm"), `#!/bin/sh\n[ "$2" = "@x/held@0.3.1" ] && exit 0\nexit 1\n`);
-    writeFileSync(join(bin, "pnpm"), `#!/bin/sh\necho "$(basename "$PWD"): pnpm $*" >> "${log}"\n`);
+    const npm = (held: string): string =>
+      `#!/bin/sh\nif [ "$1" = view ]; then [ "$2" = "${held}" ] && exit 0; exit 1; fi\necho "npm $*" >> "${log}"\n`;
+    writeFileSync(join(bin, "npm"), npm("@x/held@0.3.1"));
+    writeFileSync(
+      join(bin, "pnpm"),
+      `#!/bin/sh\necho "$(basename "$PWD"): pnpm $*" >> "${log}"\nprintf '{"filename": "%s/%s.tgz"}\\n' "$4" "$(basename "$PWD")"\n`,
+    );
     for (const name of ["npm", "pnpm"]) chmodSync(join(bin, name), 0o755);
     const r = perform(f, script("Publish what is not yet published"), bin);
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("publish: @x/held@0.3.1 is published already");
+    const packed = join(f.temp, "packed");
     expect(readFileSync(log, "utf8")).toBe([
-      "stable: pnpm publish --no-git-checks --tag latest",
-      "beta: pnpm publish --no-git-checks --tag beta",
+      `stable: pnpm pack --json --pack-destination ${packed}`,
+      `npm publish ${packed}/stable.tgz --tag latest`,
+      `beta: pnpm pack --json --pack-destination ${packed}`,
+      `npm publish ${packed}/beta.tgz --tag beta`,
       "",
     ].join("\n"));
+    // pnpm publish asks GitHub for an OIDC id token and warns on every package without id-token: write.
+    expect(readFileSync(log, "utf8")).not.toContain("pnpm publish");
     // COUNTER-PROBE: with a registry that holds nothing, the same step does publish @x/held, so the
     // skip above is the registry's answer and not a package the loop never reached.
-    writeFileSync(join(bin, "npm"), "#!/bin/sh\nexit 1\n");
+    writeFileSync(join(bin, "npm"), npm("nothing"));
     writeFileSync(log, "");
     expect(perform(f, script("Publish what is not yet published"), bin).status).toBe(0);
-    expect(readFileSync(log, "utf8")).toContain("held: pnpm publish --no-git-checks --tag latest");
+    expect(readFileSync(log, "utf8")).toContain(`npm publish ${packed}/held.tgz --tag latest`);
   });
 
   it("checks out the newest release tag of the version and channel a dispatched run names, and the pushed tag on a push", () => {
