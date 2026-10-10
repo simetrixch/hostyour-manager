@@ -177,33 +177,18 @@ describe("tenant stages share identity while provisioning independently", () => 
     expect(db.db.select().from(tenants).all()).toHaveLength(1);
   });
 
-  it("PLANTED INNOCENT: a website without aliases keeps every value, its domain stage-scoped", async () => {
-    const p = stagePorts();
-    const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", databases: ["core"] }];
-    const values = { site: { domain: "company.example" }, hosts: ["other.example"], none: [], blank: {}, nested: { inner: {} } };
-    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, ...values } })) } : m);
-    const books = new FakePlatformRepo();
-    const write = tenantRegistrationWrite("prod", GUID, TenantRegistrationSchema.parse({ ...current, apps, members, quota: seedQuota("small") })); books.seed(books.booksBranch, write.path, write.content);
-    p.registrations = new TenantRegistrations(books);
-    const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
-    if (result.outcome !== "planned") throw new Error(result.summary);
-    const source = members.find((m) => m.name === "company")!.sources[0]!.values;
-    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toEqual({ ...source, site: { domain: "test.company.example" } });
-  });
-
   it("PLANTED DEFECT: puts the stage directly before the zone that holds each host, not in front of the whole name", async () => {
     const p = stagePorts();
     (p.dns as FakeDnsProvider).zones = ["example.org"];
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", domain: "cycleshop.show.example.org", databases: ["core"] }];
+    const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", databases: ["core"] }];
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), ownDomain: "show.example.org", ownDomainRedirects: ["www.show.example.org"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
     const result = await makeCreateTenantDef(p).planStream!({ ...addRequest, stage: "test" }, planCtx());
     if (result.outcome !== "planned") throw new Error(result.summary);
-    expect([result.params.ownDomain, result.params.ownDomainRedirects, result.params.apps[0]!.domain]).toEqual(["show.test.example.org", ["www.show.test.example.org"], "cycleshop.show.test.example.org"]);
+    expect([result.params.ownDomain, result.params.ownDomainRedirects]).toEqual(["show.test.example.org", ["www.show.test.example.org"]]);
   });
 
   it("PLANTED DEFECT: refuses a stage for a domain whose zone cannot be read, and never takes its last two labels for one", async () => {
@@ -222,14 +207,11 @@ describe("tenant stages share identity while provisioning independently", () => 
     await expect(plan()).rejects.toThrow(/no DNS provider is configured on this manager, so the zone of show\.example\.org, and with it its host at test, cannot be read/);
   });
 
-  it("preserves custom website composition while stage-scoping every public host, and takes no alias domain", async () => {
+  it("stage-scopes the own domain, carries the websites and their members unchanged, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "company", folder: "web", site: "main", domain: "company.example", aliases: ["company.example.it"], databases: ["core"] }, { name: "erp", databases: ["core"] }];
-    // Beside the alias lists, values no alias drop may touch: a list holding an alias among others,
-    // a list without one, an empty list, an empty map and a map holding one.
-    const INNOCENT = { mixed: ["company.example.it", "other.example"], plain: ["other.example"], none: [], blank: {}, nested: { inner: {} } };
-    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, ...INNOCENT, site: { domain: "company.example", aliases: ["company.example.it"] }, redirect: { hosts: ["company.example.it"] } } })) } : m);
+    const apps = [{ name: "company", folder: "web", site: "main", databases: ["core"] }, { name: "erp", databases: ["core"] }];
+    const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, site: { id: "main" } } })) } : m);
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members, ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
@@ -238,26 +220,21 @@ describe("tenant stages share identity while provisioning independently", () => 
     if (result.outcome !== "planned") throw new Error(result.summary);
     expect(result.params.ownDomain).toBe("test.show.example");
     expect(result.params.ownDomainRedirects).toEqual(["www.test.show.example"]);
-    expect(result.params.apps[0]!.domain).toBe("test.company.example");
-    // An alias is another domain of the same site, held by the stage it was given on: the new stage
-    // answers at none, of the websites or the own domain, until it is given its own.
-    expect(result.params.apps[0]).not.toHaveProperty("aliases");
+    // An alias is another domain of the tenant, held by the stage it was given on: the new stage
+    // answers at none until it is given its own.
     expect(result.params).not.toHaveProperty("ownDomainAliases");
-    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).not.toHaveProperty("redirect");
-    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ domain: "test.company.example" });
-    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values).toMatchObject(INNOCENT);
-    expect(result.params.members.map((m) => m.name)).toEqual(members.map((m) => m.name));
-    // Every host a website answers at gets its record, www. included, as the Deploy button of a website writes them; the
-    // abort takes them all back.
+    expect(result.params.apps.map((a) => a.name)).toEqual(["company", "erp"]);
+    expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ id: "main" });
+    // The own domain and its www. get their records; the abort takes them back.
     const cleanups: Cleanup[] = [];
     const steps = makeCreateTenantDef(p).steps(result.params);
     await steps.find((step) => step.name.endsWith("record-provisional"))!.run(context(result.params, cleanups));
     await steps.find((step) => step.name.endsWith("provision-stage-hosts"))!.run(context(result.params, cleanups));
-    const hosts = ["test.show.example", "www.test.show.example", "test.company.example", "www.test.company.example"];
+    const hosts = ["test.show.example", "www.test.show.example"];
     const dns = p.dns as FakeDnsProvider;
-    expect(hosts.map((h) => dns.record(h, "CNAME") !== undefined)).toEqual([true, true, true, true]);
+    expect(hosts.map((h) => dns.record(h, "CNAME") !== undefined)).toEqual([true, true]);
     for (const cleanup of [...createTenantCleanups(p, result.params)].reverse()) await cleanup.run(context(result.params));
-    expect(hosts.map((h) => dns.record(h, "CNAME"))).toEqual([undefined, undefined, undefined, undefined]);
+    expect(hosts.map((h) => dns.record(h, "CNAME"))).toEqual([undefined, undefined]);
   });
 });
 

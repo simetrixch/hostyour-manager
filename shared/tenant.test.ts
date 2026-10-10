@@ -177,14 +177,13 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     ]);
   });
 
-  it("carries a website's folder, site and domain, and refuses a domain outside the grammar", () => {
+  it("carries a website's folder and site", () => {
     // A website added before names followed the site keeps its name, so any app name stands.
-    expect(TenantAppSchema.parse({ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }))
-      .toEqual({ name: "example-ch", folder: "web", site: "main", domain: "example.ch", seedReference: false, seedDemo: false, selections: {} });
+    expect(TenantAppSchema.parse({ name: "example-ch", folder: "web", site: "main" }))
+      .toEqual({ name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {} });
     expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {} });
     // Two websites run one folder, so their bundle carries it once.
     expect(appFolders([{ name: "erp" }, { name: "example-ch", folder: "web" }, { name: "example-com", folder: "web" }])).toEqual(["erp", "web"]);
-    expect(TenantAppSchema.safeParse({ name: "example-ch", folder: "web", site: "main", domain: "Example.ch" }).success).toBe(false);
   });
 
   it("names a new website after its site, numbered where a member or a catalog app holds that name", () => {

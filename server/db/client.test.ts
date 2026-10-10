@@ -181,7 +181,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     run.run("run_web", JSON.stringify({ tenantId: "tnt_1", app: "cycleshop-show-digitapla-a9665c", website: { folder: "web", site: "cycleshop", domain: "cycleshop.show.example" } }), 3);
     run.run("run_app", JSON.stringify({ tenantId: "tnt_1", app: "workshop" }), 2);
     // Neither a run of another kind nor another tenant's website of the same name marks the app's row.
-    standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-domain', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
+    standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at) VALUES ('run_kind', 'tenant-set-website-site', 'tenant', 'tnt_1', ?, '{}', 'succeeded', 'op_system', 4)").run(JSON.stringify({ tenantId: "tnt_1", app: "workshop", website: { site: "wrong-kind" } }));
     run.run("run_other", JSON.stringify({ tenantId: "tnt_2", app: "workshop", website: { folder: "web", site: "other-tenant", domain: "w.other.example" } }), 5);
     standing.close();
     const h = openDb(file);

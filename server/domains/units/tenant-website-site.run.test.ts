@@ -32,7 +32,7 @@ describe("tenant-set-website-site", () => {
     repo.scriptFor(`${TEST_BUNDLE.appsRepo}@${release}`, { resolvedSha: SHA, files: { "apps.yaml": apps } });
     return repo;
   };
-  const website = [{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
+  const website = [{ name: "example-ch", folder: "web", site: "main" }];
 
   it("plans the site and the bundle release in one move, with the member resolved again at the new site", async () => {
     seedClusters();
@@ -49,7 +49,7 @@ describe("tenant-set-website-site", () => {
 
   it("refuses an app that is no website, the site it serves, a site another website serves, and a site the release does not list", async () => {
     seedClusters();
-    const registrations = tenantWith([...website, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);
+    const registrations = tenantWith([...website, { name: "shop", folder: "web", site: "shop" }]);
     const def = makeTenantSetWebsiteSiteDef(ports({ registrations, repo: repoWith("apps:\n  - name: web\n    title: Website\n    sites: [main, renamed, shop]\n") }, WEBSITE_APPS));
     await expect(def.planStream!({ ...RENAME, app: "erp" }, planCtx())).rejects.toThrow(/is no website/);
     await expect(def.planStream!({ ...RENAME, site: "main" }, planCtx())).rejects.toThrow(/already serves site main/);
@@ -105,9 +105,9 @@ describe("tenant-set-website-site", () => {
     const prt = ports({ registrations, repo: repoWith() }, WEBSITE_APPS);
     const planned = await makeTenantSetWebsiteSiteDef(prt).planStream!(RENAME, planCtx());
     if (planned.outcome !== "planned") throw new Error(planned.summary);
-    await registrations.setWebsiteDomain("prod", GUID, "example-ch", "example.org", [], planned.params.previousMember, "run_other");
+    await registrations.setWebsiteMain("prod", GUID, "example-ch", "run_other");
     const write = makeTenantSetWebsiteSiteDef(prt).steps(planned.params).find((s) => s.name === "write-website-site")!;
-    // The member the plan resolved carries the previous domain; written now, it would move the website back.
+    // The entry the plan read is not the main website; written now, it would take the mark back.
     await expect(write.run(ctx(params(), write.name, []))).rejects.toThrow(/plan it again/);
     const other = tenantWith(website);
     const prt2 = ports({ registrations: other, repo: repoWith() }, WEBSITE_APPS);

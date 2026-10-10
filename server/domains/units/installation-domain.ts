@@ -9,7 +9,6 @@ import { readOnlyPlatformRepo, type PlatformRepo } from "../../adapters/git/port
 import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { consumerUnitHost, tenantOwnHosts, tenantZone, tenantMemberUrl } from "#unit/shared/unit-host.ts";
-import { websiteHosts } from "./website-domain.ts";
 import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
@@ -169,7 +168,7 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
       const marks = book.filter(w => w.type === "TXT" && w.name.startsWith("_") && w.owner.kind === "tenant" && w.owner.name === pointer.guid && w.owner.stage === stage);
       if (!marks.length) snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: no booked identity-provider mark`);
       for (const mark of marks) await addRecord(mark.name, "TXT", mark.content, movePublicAddress(mark.content, fromDomain, toDomain), owner);
-      for (const host of new Set([...tenantOwnHosts(entry.ownDomain, entry.ownDomainRedirects, entry.ownDomainAliases), ...entry.apps.flatMap(a => a.domain ? websiteHosts(a.domain, a.aliases) : [])])) {
+      for (const host of new Set(tenantOwnHosts(entry.ownDomain, entry.ownDomainRedirects, entry.ownDomainAliases))) {
         // External web hosts retain their record names; only an installation-zone target is repointed.
         const target = tenantZone(entry.subdomain, stage, cluster.apexBefore);
         await addRecord(host, "CNAME", target, moveDomain(target, fromDomain, toDomain), owner);

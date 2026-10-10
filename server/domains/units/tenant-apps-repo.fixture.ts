@@ -9,8 +9,6 @@ import { seedAppIdentityRow, seedCredentialRow } from "../../security/store.fixt
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { tenantAppsRepoURL, tenantAppsUnit } from "./tenant-apps-tree.ts";
-import type { AddAppPorts } from "./add-app.run.ts";
-import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 
 export const SHA = "a".repeat(40);
 export const GUID = "zsjs023ctne0";
@@ -105,12 +103,6 @@ export function withAppsTemplate<P extends TenantOnboardPorts>(ports: P, files: 
     githubApp,
     resolveClusterValueFiles: async (domain, stage) => [{ path: PLATFORM_VALUES_COMMON, content: `global:\n  placeholderTag: "${PLACEHOLDER_TAG}"\n` }, ...(await chain(domain, stage))],
   };
-}
-
-/** Onboarding ports as add-app reads them, for a test that adds no website: a probe that answers
- *  nothing, and no wait. */
-export function addAppPorts<P extends TenantOnboardPorts>(ports: P): P & Pick<AddAppPorts, "probe" | "routingWaitMs" | "routingPollMs"> {
-  return { ...ports, probe: new FakePublicProbe({}), routingWaitMs: 0, routingPollMs: 0 };
 }
 
 /** The owner identities a tenant test stands on (#220, #225): the App's owner ORG

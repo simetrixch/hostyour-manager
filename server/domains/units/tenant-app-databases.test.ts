@@ -29,7 +29,7 @@ const CATALOG: AppsManifest = {
 
 const erp = { name: "erp", seedReference: true, seedDemo: false, selections: { extra: true } };
 const crm = { name: "crm", seedReference: false, seedDemo: false, selections: {} };
-const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", domain: "example.org", seedReference: false, seedDemo: false, selections: {} };
+const site = { name: "simetrix-ch", folder: "web", site: "simetrix-ch", seedReference: false, seedDemo: false, selections: {} };
 
 function registration(apps: TenantRegistration["apps"], appsRepo = "https://github.com/acme/catalog-acme.git"): TenantRegistration {
   return {

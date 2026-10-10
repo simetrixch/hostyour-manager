@@ -90,13 +90,12 @@ describe("installation domain unit phase", () => {
     const map = parseDocument(cloud.read(cloud.booksBranch, oldMap)!);
     expect([map.getIn(["global", "domain"]), map.getIn(["global", "unitApex"])]).toEqual([OLD_HOST, TO]);
   });
-  it("repoints the tenant's alias domains and its websites' aliases onto the new zone", async () => {
+  it("repoints the tenant's alias domains onto the new zone", async () => {
     seed("prod");
     const tenant = (await tenantRegistrations.readTenant("prod", GUID))!.entry, zone = tenantZone("shop", "prod", FROM);
-    const write = tenantRegistrationWrite("prod", GUID, { ...tenant, ownDomain: "company.example", ownDomainRedirects: ["www.company.example"], ownDomainAliases: ["company-alias.example"],
-      apps: [{ ...tenant.apps[0]!, domain: "site.example", aliases: ["site-alias.example"] }] });
+    const write = tenantRegistrationWrite("prod", GUID, { ...tenant, ownDomain: "company.example", ownDomainRedirects: ["www.company.example"], ownDomainAliases: ["company-alias.example"] });
     deploy.seed(deploy.booksBranch, write.path, write.content);
-    const hosts = ["company.example", "www.company.example", "company-alias.example", "www.company-alias.example", "site.example", "www.site.example", "site-alias.example", "www.site-alias.example"];
+    const hosts = ["company.example", "www.company.example", "company-alias.example", "www.company-alias.example"];
     for (const host of hosts) {
       dns.seed(host, "CNAME", zone);
       recordDnsWrite(db.db, { name: host, type: "CNAME", content: zone, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });

@@ -13,13 +13,10 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { aliasHosts, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
-import { appName, TenantMemberRecordSchema } from "../../../shared/tenant.ts";
 import {
   checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord,
   replacementSentence, restoreReplacedRecords, waitForAnswer, MailRecordHash, ReplacedRecord,
 } from "./own-domain-records.ts";
-import { otherTenantsWebsiteHosts, tenantWebsiteHosts, waitForWebsiteRoot, websiteHosts } from "./website-domain.ts";
-import { resolveWebsiteMember, type WebsiteMemberPorts } from "./website-member.ts";
 
 /** What a failed wait tells the operator to do next. */
 const OWN_DOMAIN_NEXT = "The previous hosts still stand: retry this step once they are, or abort the run to record the previous own domain again.";
@@ -47,14 +44,6 @@ const OWN_DOMAIN_NEXT = "The previous hosts still stand: retry this step once th
 // and bookmarks to the old name keep working. Only a later run that drops an alias removes its records.
 // A domain that is an alias now cannot become the own domain in the same run: a browser that cached
 // its permanent redirect would loop; drop the alias first.
-//
-// A WEBSITE ON THE OWN HOST MOVES WITH IT. The website chart serves a website whose domain is the
-// tenant's host at the root of that host, beside the members under their paths, and any other domain
-// as a domain of its own. Left behind, such a website would serve the old host alone, without the
-// members its pages link to. So the run writes its domain and its member entry, resolved again with
-// the new own domain, in the same commit as the own domain, and its old name becomes an alias like
-// every previous host. Clearing the own domain carries it to the tenant's zone, the host the tenant
-// returns to. A website with a domain of its own stays where it is.
 //
 // THE MAIL RECORDS BESIDE THE HOSTS: the run writes only CNAME records, and the plan hashes the MX, SPF,
 // DMARC and autodiscover records at each host's domain; the run refuses to start where one changed.
@@ -92,10 +81,6 @@ export const TenantSetOwnDomainParams = z
      *  first, and an abort the second. */
     nestsUnderTenantId: z.string().nullable().default(null),
     previousNestsUnder: z.string().nullable().default(null),
-    /** The websites standing on the previous own host, which the run carries to the new one, or to the
-     *  zone where it clears the own domain: each
-     *  one's member resolved with the new domain, and the one it replaces, which an abort writes back. */
-    carriedWebsites: z.array(z.object({ app: appName, member: TenantMemberRecordSchema, previousMember: TenantMemberRecordSchema })).default([]),
   })
   .superRefine((p, ctx) => {
     if (p.ownDomain === "" && p.ownDomainRedirects.length > 0) ctx.addIssue({ code: "custom", path: ["ownDomainRedirects"], message: "redirect hosts need an own domain to redirect to" });
@@ -137,7 +122,7 @@ function sameHosts(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && [...a].sort().join(" ") === [...b].sort().join(" ");
 }
 
-export type TenantSetOwnDomainPorts = TenantLifecyclePorts & WebsiteMemberPorts & {
+export type TenantSetOwnDomainPorts = TenantLifecyclePorts & {
   /** Reads the tenant's IdP from the outside — the probe verify-quiesced reads a quiesced unit with. */
   probe: PublicProbe;
   /** How long the wait asks before it fails the run, and how long it pauses between two asks. */
@@ -157,8 +142,7 @@ function restoreOwnDomainCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
     title: `Record the previous own domain (${p.previous || "none"}) again`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
-      const websites = p.carriedWebsites.map((w) => ({ app: w.app, domain: p.previous, member: w.previousMember }));
-      const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.previous, p.previousRedirects, p.previousAliases, ctx.runId, websites);
+      const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.previous, p.previousRedirects, p.previousAliases, ctx.runId);
       ctx.db.update(tenants).set({ ownDomain: p.previous, ownDomainRedirects: p.previousRedirects, ownDomainAliases: p.previousAliases, nestsUnder: p.previousNestsUnder, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
       ctx.log("meta", `tenant ${tc.guid} own domain back to ${p.previous || "none"} (${commit})`);
     },
@@ -174,7 +158,7 @@ function removeNewRecordCleanup(ports: TenantSetOwnDomainPorts, p: TenantSetOwnD
     title: `Remove the DNS records of ${hostsOf(p).join(", ") || "no domain"}, where the tenant does not use them`,
     run: async (ctx) => {
       const tc = loadTenantCluster(ctx.db, p.tenantId);
-      const used = new Set([...standingHosts(tc), ...(await tenantWebsiteHosts(ports.registrations, tc))]);
+      const used = new Set(standingHosts(tc));
       for (const host of hostsOf(p)) {
         if (!used.has(host)) await removeOwnDomainRecord(ctx, ports, tc, host);
       }
@@ -214,9 +198,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
           throw errValidation(`tenant ${tc.subdomain} has the own hosts ${standingHosts(tc).join(", ") || "none"} now, not those of when this run was planned — plan it again`);
         }
         ctx.registerCleanup(restoreOwnDomainCleanup(ports, p));
-        const host = tenantHost(tc, await ports.resolveUnitApex(tc.domain, tc.stage), p.ownDomain);
-        const websites = p.carriedWebsites.map((w) => ({ app: w.app, domain: host, member: w.member }));
-        const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.ownDomain, p.ownDomainRedirects, p.ownDomainAliases, ctx.runId, websites);
+        const { commit } = await ports.registrations.setOwnDomain(tc.stage, tc.guid, p.ownDomain, p.ownDomainRedirects, p.ownDomainAliases, ctx.runId);
         ctx.db.update(tenants).set({ ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects, ownDomainAliases: p.ownDomainAliases, nestsUnder: p.nestsUnderTenantId, lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         const via = p.ownDomainRedirects.length || p.ownDomainAliases.length ? `, redirected from ${[...p.ownDomainRedirects, ...aliasHosts(p.ownDomainAliases)].join(", ")}` : "";
@@ -232,18 +214,12 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         const url = `${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
         const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
-        if (p.carriedWebsites.length) await waitForWebsiteRoot(ctx, ports, tenantHost(tc, apex, p.ownDomain), OWN_DOMAIN_NEXT);
         // The probe does not follow a redirect, so a redirect host answers with the 3xx itself.
         for (const host of [...p.ownDomainRedirects, ...aliasHosts(p.ownDomainAliases)]) {
           const redirect = await waitForAnswer(ctx, ports, `https://${host}/`, "a redirect", (s) => s >= 300 && s < 400, OWN_DOMAIN_NEXT);
           ctx.log("meta", `https://${host}/ redirects (${redirect})`);
         }
-        // A host a website of the tenant still answers at stays: its records are the website's now.
-        const websites = await tenantWebsiteHosts(ports.registrations, tc);
-        for (const host of retiredHosts(p)) {
-          if (websites.has(host)) ctx.log("meta", `${host} stays: a website of tenant ${tc.guid} answers there`);
-          else await removeOwnDomainRecord(ctx, ports, tc, host);
-        }
+        for (const host of retiredHosts(p)) await removeOwnDomainRecord(ctx, ports, tc, host);
       },
     },
   ];
@@ -252,7 +228,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
 /** The tenant the operator confirms the new own domain lies under, with the host of it the domain lies
  *  below; null where the request names none. Refused where the tenant is not a live other tenant, or
  *  where the domain lies under none of its hosts, so a confirmation never stands for nothing. */
-function resolveNesting(db: Db, p: TenantSetOwnDomainParams, websites: readonly { host: string; guid: string }[]): { tenantId: string; host: string } | null {
+function resolveNesting(db: Db, p: TenantSetOwnDomainParams): { tenantId: string; host: string } | null {
   if (p.nestsUnder === "") return null;
   if (p.ownDomain === "") throw errValidation(`no own domain is set, so it can lie under no tenant — leave "lies under tenant" empty`);
   const other = db
@@ -261,7 +237,7 @@ function resolveNesting(db: Db, p: TenantSetOwnDomainParams, websites: readonly 
     .where(and(eq(tenants.subdomain, p.nestsUnder), ne(tenants.id, p.tenantId), notInArray(tenants.status, [...TENANT_SETTLED_STATUS])))
     .get();
   if (!other) throw errValidation(`no other live tenant has the subdomain "${p.nestsUnder}" — name the tenant whose domain this one lies under`);
-  const hosts = [...standingHosts(other), ...websites.filter((w) => w.guid === other.guid).map((w) => w.host)];
+  const hosts = standingHosts(other);
   const host = hosts.find((h) => p.ownDomain.endsWith(`.${h}`));
   if (!host) throw errValidation(`${p.ownDomain} lies under no host of tenant ${p.nestsUnder} (${hosts.join(", ") || "it has none"}), so there is nothing to confirm`);
   return { tenantId: other.id, host };
@@ -280,28 +256,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const asked = TenantSetOwnDomainParams.parse(rawParams);
       const db = ctx.db;
       const tc = loadTenantCluster(db, asked.tenantId);
-      // A host a website of the tenant serves is no alias: one asked for is refused, and a previous host
-      // a website answers at stays the website's rather than becoming an alias.
-      const ownWebsites = await tenantWebsiteHosts(ports.registrations, tc);
-      // A website on the previous own host moves with the own domain, so its hosts are the previous own
-      // host's and become aliases like the others.
-      const leaving = asked.previous !== "" && asked.previous !== asked.ownDomain;
-      const registration = leaving ? (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry : undefined;
-      const onOwnHost = (registration?.apps ?? []).filter((a) => a.domain === asked.previous);
-      for (const website of onOwnHost) for (const host of websiteHosts(asked.previous, website.aliases)) ownWebsites.delete(host);
-      for (const host of aliasHosts(asked.ownDomainAliases)) if (ownWebsites.has(host)) throw errValidation(`${host} is a host a website of tenant ${tc.guid} serves — an alias names another domain`);
-      const kept = keepingPrevious(asked);
-      // An alias a carried website still holds goes with it to the own domain, the one place a website on
-      // the own host keeps its old names; the website itself holds none there. A clear leaves no own
-      // domain for such an alias to redirect to, and the auth chart refuses aliases without one.
-      if (asked.ownDomain === "") {
-        for (const website of onOwnHost.filter((w) => w.aliases?.length)) {
-          throw errValidation(`${website.aliases!.join(", ")}: website ${website.name} still holds these aliases, and clearing the own domain leaves them no own domain to redirect to — drop them first with Websites, ${website.name}, Domain and aliases…`);
-        }
-      }
-      const carriedAliases = onOwnHost.flatMap((w) => w.aliases ?? []);
-      const ownAliases = kept.ownDomainAliases.filter((a) => !ownWebsites.has(a));
-      const params = { ...kept, ownDomainAliases: [...ownAliases, ...carriedAliases.filter((a) => !ownAliases.includes(a) && a !== kept.ownDomain)] };
+      const params = keepingPrevious(asked);
       const row = db.select({ suspended: tenants.suspended, status: tenants.status, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no domain to set`);
@@ -311,14 +266,13 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       }
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
-      const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
-      const nesting = resolveNesting(db, params, websites);
+      const nesting = resolveNesting(db, params);
       // Only a host the move claims: one the tenant does not hold already. The previous domain a move
       // keeps as an alias stood as this tenant's; judged again, an old-shape name under the tenant's
       // own host at another stage would refuse the very move that retires it.
       const held = new Set(previousHostsOf(params));
       for (const host of hostsOf(params).filter((h) => !held.has(h))) {
-        const problem = customerHostProblem(db, params.tenantId, host, apex, websites, nesting?.tenantId ?? null);
+        const problem = customerHostProblem(db, params.tenantId, host, apex, nesting?.tenantId ?? null);
         if (problem !== null) throw errValidation(problem);
       }
       // Only what is typed now: the domain where it changes, and an alias added. The previous domain
@@ -326,20 +280,11 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const typed = [...(params.ownDomain && params.ownDomain !== params.previous ? [params.ownDomain] : []), ...asked.ownDomainAliases.filter((a) => a !== params.previous && !params.previousAliases.includes(a))];
       await refuseOffStageHosts(ports.dns, typed, tc.stage, ctx);
       const newHost = params.ownDomain || zone;
-      const carriedWebsites: TenantSetOwnDomainParams["carriedWebsites"] = [];
-      for (const website of onOwnHost) {
-        const resolved = await resolveWebsiteMember(ports, ctx, tc, registration!, website.name, newHost, []);
-        if ("failedGates" in resolved) {
-          return { outcome: "rejected", summary: `Moving tenant ${tc.guid} to ${newHost} was rejected — website ${website.name} at ${newHost}: ${resolved.failedGates.length} gate(s) did not pass: ${resolved.failedGates.join(", ")}`, planJson: resolved.report };
-        }
-        carriedWebsites.push({ app: website.name, ...resolved });
-      }
       const oldRecords = retiredHosts(params);
       const redirects = [...params.ownDomainRedirects, ...aliasHosts(params.ownDomainAliases)];
       const replacing = await recordsToReplace(db, ports, tc.guid, zone, hostsOf(params), ctx.signal);
       const mailRecords = await mailRecordHashes(ports, [...hostsOf(params), ...oldRecords], ctx.signal);
-      const frozen: TenantSetOwnDomainParams = { ...params, replacing, mailRecords, nestsUnderTenantId: nesting?.tenantId ?? null, previousNestsUnder: row?.nestsUnder ?? null, carriedWebsites };
-      const carried = carriedWebsites.length ? `, carry website ${carriedWebsites.map((w) => w.app).join(", ")} from ${params.previous} to ${newHost} in the same commit` : "";
+      const frozen: TenantSetOwnDomainParams = { ...params, replacing, mailRecords, nestsUnderTenantId: nesting?.tenantId ?? null, previousNestsUnder: row?.nestsUnder ?? null };
       const steps = tenantSetOwnDomainSteps(ports, frozen);
       return { outcome: "planned", params: frozen, plan: {
         kind: "tenant-set-own-domain",
@@ -347,7 +292,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         targetId: params.tenantId,
         summary:
           `${params.previous === params.ownDomain ? "Re-apply" : `Move tenant ${tc.guid} from ${params.previous || zone} to`} ${newHost} (${tc.domain}, ${tc.stage}): ` +
-          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row${carried}, wait until ${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/${carriedWebsites.length ? ` and https://${newHost}/` : ""} answers with a 2xx` +
+          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until ${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/ answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +

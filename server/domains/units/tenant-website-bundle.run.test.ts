@@ -19,13 +19,13 @@ import { WEBSITE_APPS, websitePorts } from "./tenant-website.fixture.ts";
 
 useMemoryDb();
 
-const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch" };
+const WEBSITE = { tenantId: "tnt_1", app: "main", folder: "web", site: "main" };
 
 // A tenant that runs its own bundle serves a website's site from it, at the release it stands at: the
 // bundle may list sites the template never offered, and the template carries no folder of them.
 describe("add-app for a website of the tenant's own bundle", () => {
   const RELEASE = bundleReleaseTag(TEST_BUNDLE.appsImageTag);
-  const OWN_SITE = { tenantId: "tnt_1", app: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai" };
+  const OWN_SITE = { tenantId: "tnt_1", app: "simplidigita-ai", folder: "web", site: "simplidigita-ai" };
   const webEntry = (sites: string[]): string => `  - name: web\n    title: Website\n    sites: [${sites.join(", ")}]\n`;
   const manifestOf = (...entries: string[]): string => `apps:\n  - name: erp\n    title: ERP\n${entries.join("")}`;
   const BUNDLE_URL = tenantAppsRepoURL("acme-org", "example-apps", "acme");
@@ -49,7 +49,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
     scriptBundle(prt, { "apps.yaml": manifestOf(webEntry(["main", "simplidigita-ai"])) });
     const result = await makeAddAppDef(prt).planStream!(OWN_SITE, planCtx());
     if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
-    expect(result.params).toMatchObject({ app: "simplidigita-ai", website: { folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai" }, siteFromBundle: true });
+    expect(result.params).toMatchObject({ app: "simplidigita-ai", website: { folder: "web", site: "simplidigita-ai" }, siteFromBundle: true });
     // The template has no folder webs/simplidigita-ai/: were it asked for one, the plan would refuse.
     // Its folders webs/main/ and webs/shop/ stay out of the tenant's repository, which the bundle serves from.
     const standing = { "apps.yaml": manifestOf(webEntry(["main", "simplidigita-ai"])), "webs/simplidigita-ai/website.json": "the tenant's own\n" };
@@ -223,7 +223,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
       seedClusters();
       const template = { ...WEBSITE_APPS, "apps.yaml": manifestOf(webEntry(["main", "shop", "simplidigita-ai"])) };
       const prt = websitePorts({ registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) }, template);
-      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
+      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", seedReference: false, seedDemo: false, selections: {} };
       const step = refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: [app], seedUsers: false, registryHost: REGISTRY_HOST, requiredImages: [], appsImage: UNIT, siteFromBundle: true }, { appsImageTag: BUILT_TAG });
       await expect(step.run(ctx(params(), "refresh-images", []))).rejects.toThrow(`the website's site is listed by the tenant's own bundle, but the registration of tenant ${GUID} at prod names no apps repository`);
     });
@@ -231,7 +231,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
     it("PLANTED DEFECT: refuses by name a new stage's size beside a site from the bundle, whose registration this step does not read", async () => {
       seedClusters();
       const prt = websitePorts({}, WEBSITE_APPS);
-      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
+      const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", seedReference: false, seedDemo: false, selections: {} };
       const step = refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: [app], seedUsers: false, registryHost: REGISTRY_HOST, requiredImages: [], appsImage: UNIT, siteFromBundle: true, size: "small" }, { appsImageTag: BUILT_TAG });
       await expect(step.run(ctx(params(), "refresh-images", []))).rejects.toThrow(`which only a standing tenant's registration names, and this run creates a stage of tenant ${GUID} at size small`);
     });

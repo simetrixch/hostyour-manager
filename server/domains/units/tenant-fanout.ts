@@ -69,10 +69,8 @@ export interface AppRef {
   name: string;
   /** The app folder the app runs, where it is not the folder of its own name: a website's. */
   folder?: string;
-  /** A website's site, domain and alias domains (TenantAppSchema). */
+  /** A website's site (TenantAppSchema). */
   site?: string;
-  domain?: string;
-  aliases?: readonly string[];
   databases?: readonly string[];
 }
 
@@ -99,18 +97,15 @@ export function catalogDatabases(apps: readonly { name: string; folder?: string 
 }
 
 /** The tokens the manifest defines. `{app}` (the member name) and `{folder}` (the app folder, the
- *  member name for every app that is no website) are replaced inside any string. `{site}` and
- *  `{domain}` are a website's: replaced inside any string, and a whole value of one of them is
+ *  member name for every app that is no website) are replaced inside any string. `{site}` is a
+ *  website's: replaced inside any string, and a whole value of it is
  *  DROPPED with its key for an app that has none, as `{databases}` is: a whole string value replaced
  *  by the app's database list, or dropped when the app declares none, so a chart's own value files
  *  decide then. */
 export const APP_TOKEN = "{app}";
 export const FOLDER_TOKEN = "{folder}";
 export const SITE_TOKEN = "{site}";
-export const DOMAIN_TOKEN = "{domain}";
 export const DATABASES_TOKEN = "{databases}";
-/** A website's alias domains, as `{databases}` is a list: dropped with its key where it has none. */
-export const ALIASES_TOKEN = "{aliases}";
 
 /** The tenant's own identity provider — the member the whole tenant authenticates against, so a
  *  caller that needs THAT member rather than the set can name it: the bootstrap-token Secret lives in
@@ -182,18 +177,17 @@ function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSou
   // member's source is the product's own mistake and reaches the chart as written, where it fails
   // loudly, rather than silently becoming the empty string.
   const tokens: readonly (readonly [string, string | undefined])[] = app === undefined ? [] : [
-    [APP_TOKEN, app.name], [FOLDER_TOKEN, appFolder(app)], [SITE_TOKEN, app.site], [DOMAIN_TOKEN, app.domain],
+    [APP_TOKEN, app.name], [FOLDER_TOKEN, appFolder(app)], [SITE_TOKEN, app.site],
   ];
   const text = (s: string): string => tokens.reduce((out, [token, value]) => (value === undefined ? out : out.split(token).join(value)), s);
-  // DROPPED marks the list token of an app that declares no list, and a site or domain token of an app
+  // DROPPED marks the list token of an app that declares no list, and a site token of an app
   // that has none: the key goes, and so does every object the drop leaves empty, so the chart's own
   // value files (an overlay that still carries the list) decide, rather than an empty list or an
   // empty map from here standing over them.
   const DROPPED = Symbol("dropped");
   const walk = (v: unknown): unknown => {
     if (app !== undefined && v === DATABASES_TOKEN) return app.databases === undefined ? DROPPED : [...app.databases];
-    if (app !== undefined && v === ALIASES_TOKEN) return app.aliases?.length ? [...app.aliases] : DROPPED;
-    if (app !== undefined && ((v === SITE_TOKEN && app.site === undefined) || (v === DOMAIN_TOKEN && app.domain === undefined))) return DROPPED;
+    if (app !== undefined && v === SITE_TOKEN && app.site === undefined) return DROPPED;
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return v.map(walk);
     if (v && typeof v === "object") {

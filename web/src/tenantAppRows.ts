@@ -54,29 +54,19 @@ export function removedWebsites<R extends TenantAppRowInput>(rows: readonly R[])
   return websiteRows(rows).filter((r) => SETTLED.includes(r.status));
 }
 
-/** The websites the Websites section lists as live: the catalog's, each with its domain, and every
+/** The websites the Websites section lists as live: the catalog's, and every
  *  inventory row that names a site, is not settled and is not among them, by name and site. That is
  *  every row while the catalog has not answered (still loading, unreadable or degraded). The Apps list
  *  leaves every row with a site out, so a live website missing here would vanish from the page. */
-export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; domain: string | null; aliases: string[]; main: boolean }[] {
-  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, domain: w.domain as string | null, aliases: w.aliases ?? [], main: w.main === true }));
+export function listedWebsites(catalog: Pick<TenantAppCatalogView, "websites"> | null, rows: readonly TenantAppRowInput[]): { name: string; site: string; main: boolean }[] {
+  const named = (catalog?.websites ?? []).map((w) => ({ name: w.name, site: w.site, main: w.main === true }));
   const unnamed = websiteRows(rows).filter((r) => !SETTLED.includes(r.status) && !named.some((w) => w.name === r.name));
-  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, domain: null, aliases: [], main: false }))];
+  return [...named, ...unnamed.map((r) => ({ name: r.name, site: r.site, main: false }))];
 }
 
 /** The alias domains as an operator types them into one field: separated by commas or spaces. */
 export function typedAliases(text: string): string[] {
   return text.split(/[\s,]+/).map((a) => a.trim().toLowerCase()).filter((a) => a !== "");
-}
-
-/** Why the Websites section shows no domain for a website only the inventory names, as far as the page
- *  knows it: the catalog still loads, the route reads none for the tenant by design (its `reason`), it
- *  could not be read, or it answered and the registration names no website of that name. */
-export function unknownDomainText(catalog: Pick<TenantAppCatalogView, "websites" | "reason" | "error"> | null): string {
-  if (catalog === null) return "domain unknown while the tenant's catalog loads";
-  if (catalog.error !== undefined) return "domain unknown: the tenant's catalog cannot be read";
-  if (catalog.reason !== undefined) return "domain unknown: the catalog is not read for this tenant";
-  return "domain unknown: the tenant's registration names no website of this name";
 }
 
 /** The apps whose row offers Deploy: the bundle's undeployed ones, in catalog order, no website
@@ -115,12 +105,3 @@ export function websiteSiteDialogConfirm(standing: { site: string; main: boolean
   return { label: "Make it the main website", why: null };
 }
 
-/** What the confirm of a website's domain dialog does, as its label: move the website, change its
- *  aliases, or, with the domain and aliases as they stand, write the host records it misses. The
- *  server refuses the last where no record is missing. Null where no domain is typed. */
-export function websiteDomainConfirm(standing: { domain: string; aliases: readonly string[] }, next: string, aliases: readonly string[]): string | null {
-  if (!next) return null;
-  if (next !== standing.domain) return `Serve at ${next}`;
-  if (aliases.join() !== standing.aliases.join()) return "Set the aliases";
-  return "Write the missing host records";
-}

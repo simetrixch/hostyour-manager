@@ -42,7 +42,7 @@ export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
  *  where that is taken or no app name (a one-letter id), the id with `-2`, `-3` and on, whichever is
  *  free first. `taken` holds the tenant's member names and its catalog's app names, because an app is
  *  named by its folder and cannot move aside. The name is chosen once: a website keeps it when its
- *  domain moves. */
+ *  site moves. */
 export function websiteAppName(site: string, taken: ReadonlySet<string>): string {
   for (let n = 1; ; n++) {
     const name = numberedSiteName(site, n);
@@ -64,12 +64,11 @@ function numberedSiteName(site: string, n: number): string {
   return `${site.slice(0, 30 - suffix.length).replace(/-+$/, "")}${suffix}`;
 }
 
-/** What makes an apps[] entry a website: the folder it runs, the site it serves, the domain it is
- *  served at. `main` marks the tenant's main website; absent means it is not. */
+/** What makes an apps[] entry a website: the folder it runs and the site it serves. `main` marks the
+ *  tenant's main website; absent means it is not. */
 export interface TenantWebsite {
   folder: string;
   site: string;
-  domain: string;
   main?: true | undefined;
 }
 
@@ -151,29 +150,28 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  operator app is USABLE) and `seedDemo` → SEED_DEMO_DATA_ON_BOOT (demo tier `seeds-demo/`: showcase
  *  records). `seed` is the LEGACY demo alias — READ-ONLY: a pre-existing pointer
  *  carrying {name, seed} folds seed → seedDemo here and is NEVER re-emitted (the writer always
- *  serializes the canonical {name, seedReference, seedDemo, selections}, with folder, site and domain
- *  on a website). Both default false, so a bare
+ *  serializes the canonical {name, seedReference, seedDemo, selections}, with folder and site on a
+ *  website). Both default false, so a bare
  *  {name} from before the tiers parses unchanged and seeds nothing. `selections` carries every
  *  further selection the app's manifest declares; the two above are refused there, so one selection
  *  has one place. Imported everywhere the apps element is validated.
  *
- *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs, the
- *  site it serves and the domain it is served at (`<domain>`, which `www.<domain>` and its aliases redirect to). It is
- *  named after its site when it is added, and numbered where that name is taken (websiteAppName), so
- *  one folder serves as many websites as there are domains. An entry without a folder runs the folder
- *  of its own name. One website of a tenant may carry `main: true`: the tenant's main website. */
+ *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs and
+ *  the site it serves, and has no domain of its own: the tenant's main website answers at `/` of the
+ *  tenant's host, every other at `/web/<site>`. It is named after its site when it is added, and
+ *  numbered where that name is taken (websiteAppName). An entry without a folder runs the folder of
+ *  its own name. One website of a tenant may carry `main: true`: the tenant's main website. */
+/** The path a website answers at on the tenant's host: `/` for the main website, `/web/<site>` for every other. */
+export const websitePath = (website: { site: string; main?: boolean | undefined }): string => (website.main ? "/" : `/web/${website.site}`);
+
 export const TenantAppSchema = z
   .object({
     name: appName,
     folder: appName.optional(),
     site: siteId.optional(),
-    domain: publicFqdn.optional(),
-    // The tenant's main website, served at `/` of the tenant's domain: on a website only, on one website
+    // The tenant's main website, served at `/` of the tenant's host: on a website only, on one website
     // at most (the registration holds both). Absent means false, and false is never written.
     main: z.boolean().optional(),
-    // A website's alias domains, each typed without `www.`: `<alias>` and `www.<alias>` answer with a
-    // redirect to `<domain>`. A move of the website keeps the domain it leaves here.
-    aliases: z.array(publicFqdn).optional(),
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
@@ -185,13 +183,11 @@ export const TenantAppSchema = z
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, folder, site, domain, main, aliases, seedReference, seedDemo, seed, databases, selections }) => ({
+  .transform(({ name, folder, site, main, seedReference, seedDemo, seed, databases, selections }) => ({
     name,
     ...(folder === undefined ? {} : { folder }),
     ...(site === undefined ? {} : { site }),
-    ...(domain === undefined ? {} : { domain }),
     ...(main ? { main: true as const } : {}),
-    ...(aliases?.length ? { aliases } : {}),
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
     selections,
@@ -403,8 +399,8 @@ export const TenantRegistrationSchema = z
     // would leave them without an answer to "which website is the main one", and an app that is no
     // website has no site to serve at the root.
     e.apps.forEach((a, i) => {
-      if (a.main && !(a.folder && a.site && a.domain)) {
-        ctx.addIssue({ code: "custom", path: ["apps", i, "main"], message: `app "${a.name}" is marked main but is no website — a website names its folder, its site and its domain` });
+      if (a.main && !(a.folder && a.site)) {
+        ctx.addIssue({ code: "custom", path: ["apps", i, "main"], message: `app "${a.name}" is marked main but is no website — a website names its folder and its site` });
       }
     });
     const holders = e.apps.filter((a) => a.main).map((a) => a.name);

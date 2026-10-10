@@ -40,11 +40,10 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
     );
   });
 
-  it("lets a host lie under the host of the tenant it nests under: confirmed in the plan, then recorded on the row, a website host of it included", () => {
-    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, [], "tnt_sim")).toBeNull();
+  it("lets a host lie under the host of the tenant it nests under: confirmed in the plan, then recorded on the row", () => {
+    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, "tnt_sim")).toBeNull();
     nest("tnt_show", "tnt_sim");
     expect(customerHostProblem(db.db, "tnt_show", "cycleshop.show.digitaplatform.com", APEX)).toBeNull();
-    expect(customerHostProblem(db.db, "tnt_show", "www.show.digitaplatform.com", APEX, [{ host: "digitaplatform.com", subdomain: "simetrix", guid: "a1a1a1a1a1a1" }])).toBeNull();
   });
 
   it("lets the tenant nested under keep its own hosts above the nested tenant's", () => {
@@ -55,17 +54,17 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
 
   it("refuses the autodiscover name of a mail domain as a host: it is a mail record, never a web host", () => {
     expect(customerHostProblem(db.db, "tnt_other", "autodiscover.customer.example", APEX)).toBe(
-      "autodiscover.customer.example is the autodiscover name of customer.example's mail, a mail record — no website or own domain takes it",
+      "autodiscover.customer.example is the autodiscover name of customer.example's mail, a mail record — no own domain takes it",
     );
     expect(customerHostProblem(db.db, "tnt_other", "discover.customer.example", APEX)).toBeNull();
   });
 
   it("PLANTED DEFECT: refuses the exact same host even when confirmed, a host under a third tenant, and a host above a tenant that nests under nobody", () => {
-    expect(customerHostProblem(db.db, "tnt_show", "digitaplatform.com", APEX, [], "tnt_sim")).toBe("digitaplatform.com is already a host of tenant simetrix (digitaplatform.com)");
-    expect(customerHostProblem(db.db, "tnt_show", "shop.other.example", APEX, [], "tnt_sim")).toMatch(/overlaps a host of tenant other \(other.example\)/);
+    expect(customerHostProblem(db.db, "tnt_show", "digitaplatform.com", APEX, "tnt_sim")).toBe("digitaplatform.com is already a host of tenant simetrix (digitaplatform.com)");
+    expect(customerHostProblem(db.db, "tnt_show", "shop.other.example", APEX, "tnt_sim")).toMatch(/overlaps a host of tenant other \(other.example\)/);
     nest("tnt_show", null, "x.other.example");
     expect(customerHostProblem(db.db, "tnt_other", "other.example", APEX)).toBe("other.example overlaps a host of tenant show (x.other.example)");
-    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, [{ host: "digitaplatform.com", subdomain: "simetrix", guid: "a1a1a1a1a1a1" }], null)).toMatch(/overlaps a host of tenant simetrix/);
+    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, null)).toMatch(/overlaps a host of tenant simetrix/);
   });
 });
 

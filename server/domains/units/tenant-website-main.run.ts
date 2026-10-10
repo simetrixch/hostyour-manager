@@ -104,7 +104,7 @@ export function makeTenantSetWebsiteMainDef(ports: TenantOnboardPorts): RunDefin
       const params = { ...request, previous: mainOf(current.entry), guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentTenant(ports, params, ctx);
       const website = current.entry.apps.find((a) => a.name === request.app);
-      if (!website?.folder || !website.site || !website.domain) throw errValidation(`app "${request.app}" of tenant ${tc.subdomain} is no website — only a website can be the main website`);
+      if (!website?.folder || !website.site) throw errValidation(`app "${request.app}" of tenant ${tc.subdomain} is no website — only a website can be the main website`);
       if (params.previous === request.app) throw errValidation(`website "${request.app}" is already the main website of tenant ${tc.subdomain}`);
       const steps = mainWebsiteSteps(ports, params);
       return { outcome: "planned", params, plan: {

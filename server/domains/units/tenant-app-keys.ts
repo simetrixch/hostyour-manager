@@ -87,8 +87,8 @@ export async function seedTenantEngineKeys(seeder: VaultSeeder, stage: Stage, gu
 }
 
 /** Creation seeds the website keys before the registration starts their engines and renderers. */
-export async function seedTenantWebsiteKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly { name: string; domain?: string }[], ctx: Pick<StepCtx, "log">): Promise<(TenantAppKeysOutcome & { kind: TenantAppKeyKind })[]> {
-  const websites = apps.filter((a) => a.domain).map((a) => a.name);
+export async function seedTenantWebsiteKeys(seeder: VaultSeeder, stage: Stage, guid: string, apps: readonly { name: string; site?: string }[], ctx: Pick<StepCtx, "log">): Promise<(TenantAppKeysOutcome & { kind: TenantAppKeyKind })[]> {
+  const websites = apps.filter((a) => a.site).map((a) => a.name);
   const outcomes = [];
   for (const kind of ["revalidate-secret", "form-signing-key"] as const) {
     const keys = await seedTenantAppKeys(seeder, kind, stage, guid, websites);
@@ -165,7 +165,7 @@ export async function ensureTenantAppKeys(deps: { db: Db; seeder: VaultSeeder; r
       deps.logger.error({ stage, guid, err: err instanceof Error ? err.message : String(err) }, `the Google translation settings of tenant ${stage}/${guid} could not be written, and every app's ExternalSecret for them fails, and with it every sync of the app's engine; the next boot tries again`);
     }
     const websites = async (): Promise<string[]> =>
-      ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.domain && apps.includes(a.name)).map((a) => a.name);
+      ((await deps.registrations.readTenant(stage, guid))?.entry.apps ?? []).filter((a) => a.site && apps.includes(a.name)).map((a) => a.name);
     await ensure("revalidate-secret", stage, guid, websites);
     await ensure("form-signing-key", stage, guid, websites);
   }

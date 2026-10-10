@@ -18,7 +18,7 @@ import { WEBSITE_APPS, tenantWith, websitePorts } from "./tenant-website.fixture
 
 useMemoryDb();
 
-const site = (name: string, siteId: string, over: Record<string, string | boolean> = {}) => ({ name, folder: "web", site: siteId, domain: `${name}.example.ch`, ...over });
+const site = (name: string, siteId: string, over: Record<string, string | boolean> = {}) => ({ name, folder: "web", site: siteId, ...over });
 const SHOP = site("shop-site", "shop", { main: true });
 const BLOG = site("blog-site", "blog");
 const DOCS = site("docs-site", "docs");
@@ -26,7 +26,7 @@ const DOCS = site("docs-site", "docs");
 const holders = async (registrations: ReturnType<typeof tenantWith>): Promise<string[]> =>
   (await registrations.readTenant("prod", GUID))!.entry.apps.filter((a) => a.main).map((a) => a.name);
 const appended = (registrations: ReturnType<typeof tenantWith>, app: string, main: boolean) =>
-  registrations.updateTenantApps("prod", GUID, { op: "append", app, website: { folder: "web", site: "extra", domain: "extra.example.ch", ...(main ? { main: true as const } : {}) }, member: testMembers([app])[3]!, runId: "run_add" });
+  registrations.updateTenantApps("prod", GUID, { op: "append", app, website: { folder: "web", site: "extra", ...(main ? { main: true as const } : {}) }, member: testMembers([app])[3]!, runId: "run_add" });
 
 describe("the main website in the registration", () => {
   it("an append marked main takes the mark from the other holder, in the same commit", async () => {
@@ -75,7 +75,7 @@ describe("the main website in the registration", () => {
 });
 
 describe("add-app for a website marked main", () => {
-  const MAIN = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", domain: "example.ch", main: true };
+  const MAIN = { tenantId: "tnt_1", app: "main", folder: "web", site: "main", main: true };
   const planAdd = async (registrations: ReturnType<typeof tenantWith>, request: Record<string, unknown>) => {
     const result = await makeAddAppDef(websitePorts({ registrations, dns: new FakeDnsProvider() })).planStream!(request, planCtx());
     if (result.outcome !== "planned") throw new Error("the website was not planned");
@@ -85,15 +85,15 @@ describe("add-app for a website marked main", () => {
   it("plans the mark, the website that holds it today and the summary that names the one that loses it", async () => {
     seedClusters();
     const result = await planAdd(tenantWith([SHOP, BLOG]), MAIN);
-    expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch", main: true });
+    expect(result.params.website).toEqual({ folder: "web", site: "main", main: true });
     expect(result.params.previousMain).toBe("shop-site");
-    expect(result.plan.summary).toContain("It becomes the main website of the tenant, served at / of the tenant's domain, and website shop-site stops being it.");
+    expect(result.plan.summary).toContain("It becomes the main website of the tenant, served at / of the tenant's host, and website shop-site stops being it.");
   });
 
   it("plans no mark, and no previous holder to give back, for a website not marked", async () => {
     seedClusters();
     const result = await planAdd(tenantWith([SHOP]), { ...MAIN, main: false });
-    expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch" });
+    expect(result.params.website).toEqual({ folder: "web", site: "main" });
     expect(result.plan.summary).not.toContain("main website");
   });
 

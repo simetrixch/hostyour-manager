@@ -133,24 +133,22 @@ describe("gateT4Apps", () => {
     expect(gateT4Apps({ apps: [], members: [], renderedMembers: [], standingMembers: STANDING, catalog: { apps: [] } }).status).toBe("pass");
   });
 
-  it("holds a website to a site its folder lists and to a domain", () => {
+  it("holds a website to a site its folder lists", () => {
     const withWeb: AppsManifest = { apps: [...CATALOG.apps, { name: "web", title: "Website", description: "", selections: {}, sites: ["main", "shop"] }] };
     const judge = (apps: AppRef[], catalog: AppsManifest = withWeb) =>
       gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog });
-    const site = (over: Partial<AppRef> = {}): AppRef => ({ name: "example-ch", folder: "web", site: "main", domain: "example.ch", ...over });
+    const site = (over: Partial<AppRef> = {}): AppRef => ({ name: "example-ch", folder: "web", site: "main", ...over });
     // Two websites on the one folder, beside an app that is none, and the folder-named app without a site.
-    expect(judge([app("erp"), site(), site({ name: "example-com", site: "shop", domain: "example.com" }), app("web")]).status).toBe("pass");
+    expect(judge([app("erp"), site(), site({ name: "example-com", site: "shop" }), app("web")]).status).toBe("pass");
     expect(judge([site({ site: "blog" })]).found).toBe(`app "example-ch" serves the site "blog", which its folder "web" does not list (main, shop).`);
-    // Its name stays when its domain moves, so the gate does not hold the name to the domain.
-    expect(judge([site({ domain: "example.org" })]).status).toBe("pass");
-    expect(judge([site({ folder: "erp" })]).found).toBe(`app "example-ch" carries a site or a domain, but its folder "erp" lists no sites in the app catalog.`);
+    expect(judge([site({ folder: "erp" })]).found).toBe(`app "example-ch" carries a site, but its folder "erp" lists no sites in the app catalog.`);
     expect(judge([site({ folder: "shop" })]).found).toBe(`the folder "shop" of app "example-ch" is not in the app catalog (erp, crm, web).`);
   });
 
   // A standing tenant's Versions run. The catalog of today names only the folder web, with no sites:
   // erp, crm and the website the tenant runs stand in its own repository alone.
   const TODAY: AppsManifest = { apps: [{ name: "web", title: "Website", description: "", selections: {} }] };
-  const runs: (AppRef & { selections?: Record<string, boolean> })[] = [app("erp"), { name: "crm", selections: { seedPrices: true } }, { name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
+  const runs: (AppRef & { selections?: Record<string, boolean> })[] = [app("erp"), { name: "crm", selections: { seedPrices: true } }, { name: "example-ch", folder: "web", site: "main" }];
   const judgeToday = (apps: (AppRef & { selections?: Record<string, boolean> })[], over: { isStandingTenant?: boolean; renderedMembers?: string[] } = {}) =>
     gateT4Apps({ apps, members: membersFor(apps), renderedMembers: over.renderedMembers ?? renderedNames(apps), standingMembers: STANDING, catalog: TODAY, ...(over.isStandingTenant ? { isStandingTenant: true } : {}) });
 

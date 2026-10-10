@@ -48,7 +48,6 @@ import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/unit
 import { tenantBundleManifest } from "../domains/units/engine-line.ts";
 import { ensureTenantAppDatabases, type TenantManifestReader } from "../domains/units/tenant-app-databases.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
-import { makeTenantSetWebsiteDomainDef } from "../domains/units/tenant-website-domain.run.ts";
 import { makeTenantSetWebsiteSiteDef } from "../domains/units/tenant-website-site.run.ts";
 import { makeTenantSetWebsiteMainDef } from "../domains/units/tenant-website-main.run.ts";
 import { makeTenantRefreshMembersDef } from "../domains/units/tenant-refresh-members.run.ts";
@@ -366,9 +365,8 @@ export function buildTenantOnboarding(
       // registered into the slot by the time the run starts.
       units: () => unitProbes,
     }),
-    makeAddAppDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
-    makeTenantSetWebsiteDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
-    makeTenantSetWebsiteSiteDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    makeAddAppDef(onboardPorts),
+    makeTenantSetWebsiteSiteDef(onboardPorts),
     // The members of a standing tenant resolved again off the product's manifest: the same port set
     // add-app judges with, because it renders and gates the same fan-out.
     makeTenantRefreshMembersDef(onboardPorts),

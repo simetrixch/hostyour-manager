@@ -54,11 +54,11 @@ describe("TenantRegistrations", () => {
   it("PLANTED DEFECT: cannot append a second website for the same site under another name or domain", async () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
-    const website = { folder: "web", site: "show", domain: "show.example.ch" };
+    const website = { folder: "web", site: "show" };
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: registration({ apps: [{ name: "show", ...website, seedReference: false, seedDemo: false, selections: {} }], members: testMembers(["show"]) }), runId: "run_first" });
-    await expect(reg.updateTenantApps("prod", GUID, { op: "append", app: "show-2", website: { ...website, domain: "another.example.ch" }, member: testMembers(["show-2"])[3]!, runId: "run_stale" })).rejects.toThrow(/site "show" already runs/);
+    await expect(reg.updateTenantApps("prod", GUID, { op: "append", app: "show-2", website, member: testMembers(["show-2"])[3]!, runId: "run_stale" })).rejects.toThrow(/site "show" already runs/);
     expect(repo.commits).toHaveLength(1);
-    await reg.updateTenantApps("prod", GUID, { op: "append", app: "cycleshop", website: { ...website, site: "cycleshop", domain: "cycleshop.example.ch" }, member: testMembers(["cycleshop"])[3]!, runId: "run_other" });
+    await reg.updateTenantApps("prod", GUID, { op: "append", app: "cycleshop", website: { ...website, site: "cycleshop" }, member: testMembers(["cycleshop"])[3]!, runId: "run_other" });
     expect((await reg.readTenant("prod", GUID))?.entry.apps.map((a) => a.site)).toEqual(["show", "cycleshop"]);
   });
 
@@ -186,7 +186,7 @@ describe("TenantRegistrations", () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
     const erp = { name: "erp", seedReference: false, seedDemo: false, selections: {} };
-    const web = { name: "web", folder: "web", site: "web", domain: "new.example", seedReference: false, seedDemo: false, selections: {}, databases: ["content"] };
+    const web = { name: "web", folder: "web", site: "web", seedReference: false, seedDemo: false, selections: {}, databases: ["content"] };
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration({ apps: [{ ...erp, databases: ["stale"] }, web], members: testMembers(["erp", "web"]) }), runId: "run_1" });
     const members = testMembers(["erp", "web"]);
     // The plan read web before its domain moved: the write keeps the new domain, and web's own list.

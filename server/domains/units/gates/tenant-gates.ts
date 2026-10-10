@@ -395,17 +395,14 @@ function t4Reject(found: string, reason: string, isStandingTenant = false): Gate
   };
 }
 
-/** Why an apps[] entry breaks the website rules, or null. An entry that carries a folder, a site or a
- *  domain is a website: its folder's catalog entry lists sites, it serves one of them, and it names its
- *  domain. An entry with none of the three is judged as every other app is. The name a website gets
- *  from its domain, and how a domain is typed, are checked where a website is added: its name stays
- *  when its domain moves. */
+/** Why an apps[] entry breaks the website rules, or null. An entry that carries a folder or a site is
+ *  a website: its folder's catalog entry lists sites, and it serves one of them. An entry with neither
+ *  is judged as every other app is. */
 function websiteProblem(app: AppChoice, entry: AppEntry): string | null {
-  if (app.folder === undefined && app.site === undefined && app.domain === undefined) return null;
+  if (app.folder === undefined && app.site === undefined) return null;
   const name = `app "${cap(app.name)}"`;
-  if (entry.sites === undefined) return `${name} carries a site or a domain, but its folder "${cap(entry.name)}" lists no sites in the app catalog.`;
+  if (entry.sites === undefined) return `${name} carries a site, but its folder "${cap(entry.name)}" lists no sites in the app catalog.`;
   if (app.site === undefined || !entry.sites.includes(app.site)) return `${name} serves the site "${cap(app.site ?? "")}", which its folder "${cap(entry.name)}" does not list (${entry.sites.join(", ")}).`;
-  if (app.domain === undefined) return `${name} names no domain; a website is served at <domain>, and www.<domain> redirects there.`;
   return null;
 }
 
