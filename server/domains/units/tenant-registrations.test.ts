@@ -13,7 +13,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
     cluster: "s1",
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
     identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
-    subdomain: "simetrix",
+    subdomain: "example",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
@@ -30,7 +30,7 @@ describe("tenantRegistrationWrite (the ONE-file write the tenant appsets read)",
     const w = tenantRegistrationWrite("dev", GUID, registration());
     expect(w.path).toBe(`${DIR}/dev.yaml`);
     expect(w.content).toContain('cluster: "s1"'); // the appset destination + AppProject pin
-    expect(w.content).toContain('subdomain: "simetrix"');
+    expect(w.content).toContain('subdomain: "example"');
     expect(w.content).toContain('apps: [{"name":"erp","seedReference":false,"seedDemo":false,"selections":{}}]'); // both tiers default false, no further selection, round-trip in-file
     expect(w.content).toContain("seedUsers: false");
     expect(w.content).toContain('resetNonce: "1"');
@@ -87,7 +87,7 @@ describe("TenantRegistrations", () => {
     await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" });
     const t = await reg.readTenant("dev", GUID);
     expect(t?.entry.cluster).toBe("s1");
-    expect(t?.entry.subdomain).toBe("simetrix");
+    expect(t?.entry.subdomain).toBe("example");
     expect(t?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]);
     expect(t?.entry.seedUsers).toBe(false);
     expect(t?.entry.resetNonce).toBe("1");
@@ -99,7 +99,7 @@ describe("TenantRegistrations", () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
     const full = registration({
-      cluster: "s1", subdomain: "simetrix",
+      cluster: "s1", subdomain: "example",
       members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       apps: [{ name: "erp", seedReference: true, seedDemo: false, selections: {} }],
       seedUsers: true, quota: seedQuota("small"), resetNonce: "7", suspended: true, quiesced: true,
@@ -253,20 +253,20 @@ describe("TenantRegistrations", () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
     const OTHER = "e2e8ymj86dk8";
-    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // simetrix
-    await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "simetrix" }), runId: "run_2" });
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // example
+    await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "example" }), runId: "run_2" });
     await reg.commitTenant({ stage: "dev", guid: "zzzzzzzzzzzz", registration: registration({ subdomain: "other" }), runId: "run_3" });
-    expect((await reg.subdomainGuids("dev", "simetrix")).sort()).toEqual([OTHER, GUID].sort());
+    expect((await reg.subdomainGuids("dev", "example")).sort()).toEqual([OTHER, GUID].sort());
     expect(await reg.subdomainGuids("dev", "other")).toEqual(["zzzzzzzzzzzz"]);
     expect(await reg.subdomainGuids("dev", "absent")).toEqual([]);
-    expect(await reg.subdomainGuids("prod", "simetrix")).toEqual([]); // stage-scoped
+    expect(await reg.subdomainGuids("prod", "example")).toEqual([]); // stage-scoped
   });
 
   it("listTenantGuids is the SAME scan without the subdomain filter — every deployed guid at the stage", async () => {
     const repo = new FakePlatformRepo();
     const reg = new TenantRegistrations(repo);
     const OTHER = "e2e8ymj86dk8";
-    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // simetrix
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // example
     await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "other" }), runId: "run_2" });
     // The discovery source for an ORPHAN: a guid with a live registration and no
     // tenants row is invisible to inventory but named here, which is what makes a tenant-purge possible.
@@ -276,20 +276,20 @@ describe("TenantRegistrations", () => {
     // discovery of every other one.
     repo.seed(repo.booksBranch, "registrations/zzzzzzzzzzzz/dev.yaml", "subdomain: \"ghost\"\n"); // no cluster ⇒ fails schema
     expect((await reg.listTenantGuids("dev")).sort()).toEqual([OTHER, GUID].sort());
-    expect((await reg.subdomainGuids("dev", "simetrix"))).toEqual([GUID]);
+    expect((await reg.subdomainGuids("dev", "example"))).toEqual([GUID]);
   });
 
   it("listTenantPointers is the same scan projecting subdomain + cluster — what NAMES an orphan and aims its purge", async () => {
     const reg = new TenantRegistrations(new FakePlatformRepo());
     const OTHER = "e2e8ymj86dk8";
-    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // GUID / simetrix on s1
+    await reg.commitTenant({ stage: "dev", guid: GUID, registration: registration(), runId: "run_1" }); // GUID / example on s1
     await reg.commitTenant({ stage: "dev", guid: OTHER, registration: registration({ subdomain: "other", cluster: "s2" }), runId: "run_2" });
     // The orphan scan needs all three: the guid the purge is keyed on, the subdomain a human recognises,
     // and the ArgoCD-registered slave name the target cluster row is resolved from.
     const dev = await reg.listTenantPointers("dev");
     expect(dev.pointers.map((p) => ({ guid: p.guid, subdomain: p.subdomain, cluster: p.cluster })).sort((a, b) => a.guid.localeCompare(b.guid))).toEqual(
       [
-        { guid: GUID, subdomain: "simetrix", cluster: "s1" },
+        { guid: GUID, subdomain: "example", cluster: "s1" },
         { guid: OTHER, subdomain: "other", cluster: "s2" },
       ].sort((a, b) => a.guid.localeCompare(b.guid)),
     );
@@ -383,7 +383,7 @@ describe("the pointer scan reports what it could NOT read", () => {
     expect(await reg.scanTenant("dev", GUID)).toEqual({
       status: "read",
       entry: {
-        guid: GUID, subdomain: "simetrix", stage: "dev", cluster: "s1",
+        guid: GUID, subdomain: "example", stage: "dev", cluster: "s1",
         members: ["auth", "jobs", "report", "erp"],
         ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [],
         senderDomain: "", identityProvider: "auth", appsImage: "",

@@ -30,7 +30,7 @@ export function entry(over: Partial<TenantRegistration> = {}): TenantRegistratio
     cluster: "s1",
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
     identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
-    subdomain: "simetrix",
+    subdomain: "example",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
@@ -119,7 +119,7 @@ export function lifecycleHarness(getDb: () => DbHandle) {
     getDb().db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     getDb().db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
     getDb().db.insert(tenants).values({
-      id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+      id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       suspended: opts.suspended ?? false, status: opts.status ?? "active",
     }).run();
     for (const name of opts.apps ?? ["erp"]) getDb().db.insert(tenantApps).values({ id: `tna_${name}`, tenantId: "tnt_1", name, status: opts.appStatus ?? "active" }).run();

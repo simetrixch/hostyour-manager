@@ -42,8 +42,8 @@ describe("POST /api/tenants/:id/own-domain", () => {
       nestsUnder: "", nestsUnderTenantId: null, previousNestsUnder: null,
     }]);
     // The operator's confirmation that the domain lies under another tenant's, as that tenant's subdomain.
-    expect((await r.post({ domain: "shop.test", aliases: [], nestsUnder: " Simetrix " })).status).toBe(201);
-    expect(r.planned[1]).toMatchObject({ nestsUnder: "simetrix" });
+    expect((await r.post({ domain: "shop.test", aliases: [], nestsUnder: " Example " })).status).toBe(201);
+    expect(r.planned[1]).toMatchObject({ nestsUnder: "example" });
   });
 
   it("returns the tenant to its zone for an empty domain", async () => {
@@ -54,8 +54,8 @@ describe("POST /api/tenants/:id/own-domain", () => {
 
   it("takes the alias domains the body names, and refuses a body that names no list", async () => {
     const r = route();
-    expect((await r.post({ domain: "shop.test", aliases: [" Old.Test ", "simetrix.de"] })).status).toBe(201);
-    expect(r.planned[0]).toMatchObject({ ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], ownDomainAliases: ["old.test", "simetrix.de"] });
+    expect((await r.post({ domain: "shop.test", aliases: [" Old.Test ", "example.de"] })).status).toBe(201);
+    expect(r.planned[0]).toMatchObject({ ownDomain: "shop.test", ownDomainRedirects: ["www.shop.test"], ownDomainAliases: ["old.test", "example.de"] });
     expect((await r.post({ domain: "", aliases: ["old.test"] })).status).toBe(201);
     expect(r.planned[1]).toMatchObject({ ownDomainAliases: [] });
     expect((await r.post({ domain: "shop.test" })).status).toBe(400);
@@ -67,9 +67,9 @@ describe("POST /api/tenants/:id/own-domain", () => {
 
   it("PLANTED DEFECT: an empty alias list drops every alias the tenant has", async () => {
     const r = route();
-    r.db.update(tenants).set({ ownDomainAliases: ["simetrix.eu"] }).where(eq(tenants.id, "tnt_1")).run();
+    r.db.update(tenants).set({ ownDomainAliases: ["example.eu"] }).where(eq(tenants.id, "tnt_1")).run();
     expect((await r.post({ domain: "shop.test", aliases: [] })).status).toBe(201);
-    expect(r.planned[0]).toMatchObject({ ownDomainAliases: [], previousAliases: ["simetrix.eu"] });
+    expect(r.planned[0]).toMatchObject({ ownDomainAliases: [], previousAliases: ["example.eu"] });
   });
 
   it("refuses a domain typed with www, and a body without a domain", async () => {

@@ -10,9 +10,9 @@ import type { UnitCall } from "#unit/server/adapters/unit-call/port.ts";
 // its sign-ins instead.
 describe("stageServiceIssuer", () => {
   it("is the identity provider on the zone, whatever own domain the tenant has", () => {
-    const tc = { identityProvider: "auth", stage: "test", subdomain: "simetrix", ownDomain: "show.test.example.org" } as TenantCluster;
-    expect(stageServiceIssuer(tc, "digitacloud.app")).toBe("https://simetrix.test.digitacloud.app/auth");
-    expect(stageServiceIssuer({ ...tc, stage: "prod", ownDomain: "example.org" } as TenantCluster, "digitacloud.app")).toBe("https://simetrix.digitacloud.app/auth");
+    const tc = { identityProvider: "auth", stage: "test", subdomain: "example", ownDomain: "show.test.example.org" } as TenantCluster;
+    expect(stageServiceIssuer(tc, "digitacloud.app")).toBe("https://example.test.digitacloud.app/auth");
+    expect(stageServiceIssuer({ ...tc, stage: "prod", ownDomain: "example.org" } as TenantCluster, "digitacloud.app")).toBe("https://example.digitacloud.app/auth");
   });
 });
 

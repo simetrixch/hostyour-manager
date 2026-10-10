@@ -95,13 +95,13 @@ async function seedConsumer(reg: Registrations, over: { services?: ("postgresql"
 async function seedTenant(reg: TenantRegistrations): Promise<void> {
   seedCluster();
   db.db.insert(tenants).values({
-    id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "simetrix", stage: "prod",
+    id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod",
     members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", suspended: false, status: "active",
   }).run();
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",
     registration: {
-      cluster: "s1", subdomain: "simetrix", apps: [], members: testMembers(), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+      cluster: "s1", subdomain: "example", apps: [], members: testMembers(), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });

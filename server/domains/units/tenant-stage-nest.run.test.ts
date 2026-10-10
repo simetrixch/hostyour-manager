@@ -17,10 +17,10 @@ const ZONE = "example.net";
 function world(stage: Stage, own: string, other: { guid: string; stage: Stage; own: string }): void {
   seedClusters();
   db.db.update(clusters).set({ stage }).where(eq(clusters.id, "cls_1")).run();
-  db.db.update(tenants).set({ stage, subdomain: "simetrix", ownDomain: own, ownDomainRedirects: [`www.${own}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
+  db.db.update(tenants).set({ stage, subdomain: "example", ownDomain: own, ownDomainRedirects: [`www.${own}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: other.stage, domain: "s2.example", name: "s2", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_2", guid: other.guid, subdomain: other.guid === GUID ? "simetrix" : "other", stage: other.stage,
+  db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_2", guid: other.guid, subdomain: other.guid === GUID ? "example" : "other", stage: other.stage,
     members: ["auth"], identityProvider: "auth", ownDomain: other.own, ownDomainRedirects: [`www.${other.own}`], status: "active" }).run();
 }
 
@@ -45,16 +45,16 @@ describe("one tenant at two stages under one zone", () => {
 
   it("PLANTED INNOCENT: still refuses the same tenant's nest that is not shaped by the stage rule", async () => {
     world("prod", "hub.example.net", { guid: GUID, stage: "test", own: "legacy.example.net" });
-    expect(judged(ZONE)).toMatch(/overlaps a host of tenant simetrix at test \(legacy\.example\.net\)/);
+    expect(judged(ZONE)).toMatch(/overlaps a host of tenant example at test \(legacy\.example\.net\)/);
   });
 
   it("PLANTED INNOCENT: still refuses a host the same tenant holds at its other stage", async () => {
     world("prod", "hub.example.net", { guid: GUID, stage: "test", own: "site.example.net" });
-    expect(judged("site.example.net")).toMatch(/site\.example\.net is already a host of tenant simetrix at test/);
+    expect(judged("site.example.net")).toMatch(/site\.example\.net is already a host of tenant example at test/);
   });
 
   it("PLANTED INNOCENT: still refuses a test host above the same tenant's prod host, which no stage rule nests", async () => {
     world("test", "hub.test.example.net", { guid: GUID, stage: "prod", own: "hub.example.net" });
-    expect(judged(ZONE)).toMatch(/overlaps a host of tenant simetrix at prod \(hub\.example\.net\)/);
+    expect(judged(ZONE)).toMatch(/overlaps a host of tenant example at prod \(hub\.example\.net\)/);
   });
 });

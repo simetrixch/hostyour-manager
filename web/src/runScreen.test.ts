@@ -28,7 +28,7 @@ const run = (id: string, kind: RunView["kind"], status: RunView["status"]): RunV
   secretHints: {},
 });
 
-const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "simetrix", stage: "prod", clusterId: "cls_1", machine: "apps2.example" };
+const target: PurgeTenantTarget = { guid: "zsfk0m57xp87", subdomain: "example", stage: "prod", clusterId: "cls_1", machine: "apps2.example" };
 const row = { tenantId: "tnt_1", suspended: false };
 
 describe("runOnScreen", () => {
@@ -296,7 +296,7 @@ describe("approvePayload", () => {
 describe("unitCardHref", () => {
   it("PLANTED: opens the run's card on the run's stage, through the page's env parameter", () => {
     expect(unitCardHref({ page: "consumers", key: "digita-post", label: "digita-post", stage: "test" })).toBe("/consumers?env.digita-post=test");
-    expect(unitCardHref({ page: "tenants", key: "ak64h58875qw", label: "simetrix", stage: "test" })).toBe("/tenants?env.ak64h58875qw=test");
+    expect(unitCardHref({ page: "tenants", key: "ak64h58875qw", label: "example", stage: "test" })).toBe("/tenants?env.ak64h58875qw=test");
   });
 });
 

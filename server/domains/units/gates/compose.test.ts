@@ -107,18 +107,18 @@ describe("G23 unit name (hard)", () => {
   });
 
   it("refuses a LABEL a tenant already stands on — its IdP scopes every session cookie to that exact host", () => {
-    // A tenant with subdomain "simetrix" serves auth./web./jobs. under simetrix.<stage apex> and
-    // sets its session cookies with Domain=simetrix.<stage apex>. A consumer on that label serves
-    // simetrix.<stage apex> itself, so every browser holding a tenant session would send it there —
+    // A tenant with subdomain "example" serves auth./web./jobs. under example.<stage apex> and
+    // sets its session cookies with Domain=example.<stage apex>. A consumer on that label serves
+    // example.<stage apex> itself, so every browser holding a tenant session would send it there —
     // a full takeover with nothing of the tenant touched. The mirror lives in the create-tenant
     // subdomain belt. It is the LABEL that is held, so a unit named after the tenant but standing
     // on another label passes, and a unit whose label is the tenant's subdomain fails whatever its name.
-    const g = gateUnitName({ stage: "prod", unitName: "simetrix", hostLabel: "simetrix", tenantSubdomains: ["simetrix", "other"], foreignHostLabels: [] });
+    const g = gateUnitName({ stage: "prod", unitName: "example", hostLabel: "example", tenantSubdomains: ["example", "other"], foreignHostLabels: [] });
     expect(g.status).toBe("fail");
     expect(g.found).toContain("session cookie");
-    expect(gateUnitName({ stage: "prod", unitName: "acme", hostLabel: "acme", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("pass");
-    expect(gateUnitName({ stage: "prod", unitName: "digita-simetrix", hostLabel: "simetrix", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("fail");
-    expect(gateUnitName({ stage: "prod", unitName: "simetrix", hostLabel: "portal", tenantSubdomains: ["simetrix"], foreignHostLabels: [] }).status).toBe("pass");
+    expect(gateUnitName({ stage: "prod", unitName: "acme", hostLabel: "acme", tenantSubdomains: ["example"], foreignHostLabels: [] }).status).toBe("pass");
+    expect(gateUnitName({ stage: "prod", unitName: "digita-example", hostLabel: "example", tenantSubdomains: ["example"], foreignHostLabels: [] }).status).toBe("fail");
+    expect(gateUnitName({ stage: "prod", unitName: "example", hostLabel: "portal", tenantSubdomains: ["example"], foreignHostLabels: [] }).status).toBe("pass");
   });
 
   it("refuses a label another unit stands on at this stage — one zone is one name space", () => {

@@ -32,14 +32,14 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
     db = openDb(":memory:");
     db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "apps1.digitacloud.app", name: "apps1", status: "active" }).run();
-    tenant("tnt_sim", "a1a1a1a1a1a1", "simetrix", "digitaplatform.com");
+    tenant("tnt_sim", "a1a1a1a1a1a1", "example", "digitaplatform.com");
     tenant("tnt_show", "b2b2b2b2b2b2", "show", "");
     tenant("tnt_other", "c3c3c3c3c3c3", "other", "other.example");
   });
 
   it("refuses a host under another tenant's host without a confirmation, and says how to confirm it", () => {
     expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX)).toBe(
-      "show.digitaplatform.com overlaps a host of tenant simetrix (digitaplatform.com) — where both tenants are one owner's, confirm in Set own domain that this tenant's domain lies under tenant simetrix",
+      "show.digitaplatform.com overlaps a host of tenant example (digitaplatform.com) — where both tenants are one owner's, confirm in Set own domain that this tenant's domain lies under tenant example",
     );
   });
 
@@ -63,11 +63,11 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
   });
 
   it("PLANTED DEFECT: refuses the exact same host even when confirmed, a host under a third tenant, and a host above a tenant that nests under nobody", () => {
-    expect(customerHostProblem(db.db, "tnt_show", "digitaplatform.com", APEX, "tnt_sim")).toBe("digitaplatform.com is already a host of tenant simetrix (digitaplatform.com)");
+    expect(customerHostProblem(db.db, "tnt_show", "digitaplatform.com", APEX, "tnt_sim")).toBe("digitaplatform.com is already a host of tenant example (digitaplatform.com)");
     expect(customerHostProblem(db.db, "tnt_show", "shop.other.example", APEX, "tnt_sim")).toMatch(/overlaps a host of tenant other \(other.example\)/);
     nest("tnt_show", null, "x.other.example");
     expect(customerHostProblem(db.db, "tnt_other", "other.example", APEX)).toBe("other.example overlaps a host of tenant show (x.other.example)");
-    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, null)).toMatch(/overlaps a host of tenant simetrix/);
+    expect(customerHostProblem(db.db, "tnt_show", "show.digitaplatform.com", APEX, null)).toMatch(/overlaps a host of tenant example/);
   });
 });
 
@@ -76,7 +76,7 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
 // target. Replacing that CNAME withdraws those answers, so mail to the name finds no MX.
 describe("recordsToReplace — the mail answers a replaced CNAME carries", () => {
   const GUID = "a1a1a1a1a1a1";
-  const ZONE = "simetrix.digitacloud.app";
+  const ZONE = "example.digitacloud.app";
   let db: DbHandle;
   let dns: FakeDnsProvider;
   let publicDns: FakePublicDns;
@@ -148,7 +148,7 @@ describe("recordsToReplace — the mail answers a replaced CNAME carries", () =>
 
 describe("a replaced record is written back as it stood", () => {
   const GUID = "a1a1a1a1a1a1";
-  const ZONE = "simetrix.digitacloud.app";
+  const ZONE = "example.digitacloud.app";
   let db: DbHandle;
   let dns: FakeDnsProvider;
   const logs: string[] = [];

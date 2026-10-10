@@ -27,7 +27,7 @@ const { ConfirmDialog } = await import("../components/ConfirmDialog.tsx");
 const { tenantConfirmTitle } = await import("../tenantRows.ts");
 
 const tenant = (status: TenantDetailView["status"]): TenantDetailView => ({
-  id: "tnt_1", guid: "tenant1guid", subdomain: "simetrix", stage: "prod", status, clusterId: "cls_1", domain: "apps2.example", suspended: false, approvedTags: {},
+  id: "tnt_1", guid: "tenant1guid", subdomain: "example", stage: "prod", status, clusterId: "cls_1", domain: "apps2.example", suspended: false, approvedTags: {},
   apps: [
     { id: "tna_erp", name: "erp", status: "offboarded", lastRunId: "run_erp", site: null, creation: 1 },
     { id: "tna_site", name: "example-com", status: "offboarded", lastRunId: "run_site", site: "example-com", creation: 1 },

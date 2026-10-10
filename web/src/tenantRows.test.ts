@@ -100,7 +100,7 @@ describe("splitTenantRows", () => {
 
 describe("groupTenantEnvironments", () => {
   const row = (id: string, stage: Stage, status: TenantStatus) => ({ id, guid: "ak64h58875qw", stage, status });
-  it("shows simetrix once, with its PROD and TEST rows as its environments", () => {
+  it("shows example once, with its PROD and TEST rows as its environments", () => {
     const groups = groupTenantEnvironments([row("tnt_p", "prod", "active"), row("tnt_t", "test", "active"), { ...row("tnt_o", "prod", "active"), guid: "other0000000" }]);
     expect(groups.map((g) => g.key)).toEqual(["ak64h58875qw", "other0000000"]);
     expect(groups[0]!.byStage).toEqual({ prod: row("tnt_p", "prod", "active"), test: row("tnt_t", "test", "active") });
@@ -127,13 +127,13 @@ describe("typedConfirmation", () => {
 });
 
 describe("tenantConfirmTitle", () => {
-  const t = { subdomain: "simetrix", stage: "test" as const, domain: "apps1.digitacloud.app" };
+  const t = { subdomain: "example", stage: "test" as const, domain: "apps1.digitacloud.app" };
   it("names the environment and its machine in every changing or destructive confirmation", () => {
-    expect(tenantConfirmTitle.removeApp(t, "erp")).toBe('Remove app "erp" from "simetrix" · test on apps1.digitacloud.app?');
-    expect(tenantConfirmTitle.purgeApp(t, "erp")).toBe('Purge app "erp" of "simetrix" · test on apps1.digitacloud.app?');
-    expect(tenantConfirmTitle.backup(t)).toBe('Back up tenant "simetrix" · test on apps1.digitacloud.app?');
-    expect(tenantConfirmTitle.restore(t)).toBe('Restore tenant "simetrix" · test, now on apps1.digitacloud.app, from its backup?');
-    expect(tenantConfirmTitle.offboard(t)).toBe('Offboard tenant "simetrix" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.removeApp(t, "erp")).toBe('Remove app "erp" from "example" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.purgeApp(t, "erp")).toBe('Purge app "erp" of "example" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.backup(t)).toBe('Back up tenant "example" · test on apps1.digitacloud.app?');
+    expect(tenantConfirmTitle.restore(t)).toBe('Restore tenant "example" · test, now on apps1.digitacloud.app, from its backup?');
+    expect(tenantConfirmTitle.offboard(t)).toBe('Offboard tenant "example" · test on apps1.digitacloud.app?');
   });
 });
 

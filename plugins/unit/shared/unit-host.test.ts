@@ -26,8 +26,8 @@ describe("a consumer's host — <label>.<stage apex>", () => {
 
 describe("a tenant's zone and members — <subdomain>.<stage apex>/<member>", () => {
   it("puts the tenant one level below the stage zone, and every member one level below the tenant", () => {
-    expect(tenantZone("simetrix", "prod", "digitacloud.app")).toBe("simetrix.digitacloud.app");
-    expect(tenantZone("simetrix", "dev", "digitacloud.app")).toBe("simetrix.dev.digitacloud.app");
+    expect(tenantZone("example", "prod", "digitacloud.app")).toBe("example.digitacloud.app");
+    expect(tenantZone("example", "dev", "digitacloud.app")).toBe("example.dev.digitacloud.app");
   });
 
   it("addresses a member under a path of the zone", () => {
@@ -62,7 +62,7 @@ describe("the host label", () => {
       expect(r.success, word).toBe(false);
       expect(r.error?.issues[0]?.message, word).toContain("platform host");
     }
-    for (const ok of ["post", "swissbookai", "simetrix", "shop", "mailer-x", "my-apps", "wwwx"]) expect(hostLabel.safeParse(ok).success, ok).toBe(true);
+    for (const ok of ["post", "swissbookai", "example", "shop", "mailer-x", "my-apps", "wwwx"]) expect(hostLabel.safeParse(ok).success, ok).toBe(true);
   });
 
   it("is the manifest's `host`, or the unit's name where it declares none", () => {

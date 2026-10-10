@@ -47,7 +47,7 @@ describe("inventory tenants + tenant_apps", () => {
       id: tId,
       clusterId: "cls_1",
       guid: "zsjs023ctne0",
-      subdomain: "simetrix.example",
+      subdomain: "example.example",
       stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth",
       seedUsers: true,
       lastRunId: "run_1",
