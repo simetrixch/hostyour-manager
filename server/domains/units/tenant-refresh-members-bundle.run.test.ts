@@ -88,6 +88,34 @@ describe("the apps bundle as a part of the tenant", () => {
     expect(engineDatabases(after.members)).toEqual(["core", "sales"]);
   });
 
+  it("PLANTED DEFECT: a run planned at one bundle refuses to write once another writer moved the tenant's bundle", async () => {
+    const prt = await bundlePorts();
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    const planned = (await prt.registrations.readTenant("prod", GUID))!.entry;
+    await prt.registrations.setMembers("prod", GUID, planned.members, "run_other", planned.apps, BUNDLE_NEW);
+    await expect(makeTenantRefreshMembersDef(prt).steps(out.params).find((s) => s.name === "write-members")!.run(stepCtx(out.params, [], [])))
+      .rejects.toThrow(`tenant ${GUID}'s apps bundle moved to ${BUNDLE_NEW} since this run was planned at ${BUNDLE_OLD} — plan it again`);
+    expect((await prt.registrations.readTenant("prod", GUID))!.entry.appsImageTag).toBe(BUNDLE_NEW);
+  });
+
+  it("an abort leaves the bundle another writer moved after write-members, with everything that writer wrote", async () => {
+    const prt = await bundlePorts();
+    const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { [BUNDLE]: BUNDLE_NEW } }, planCtx());
+    if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
+    const p = out.params;
+    const cleanups: Cleanup[] = [];
+    await makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, cleanups, []));
+    const written = (await prt.registrations.readTenant("prod", GUID))!.entry;
+    const LATER = "0.1.2-stable-20261001120000-cde3456";
+    await prt.registrations.setMembers("prod", GUID, written.members, "run_other", written.apps, LATER);
+    await cleanups.find((c) => c.name === "restore-members")!.run(stepCtx(p, [], []));
+    const after = (await prt.registrations.readTenant("prod", GUID))!.entry;
+    expect(after.appsImageTag).toBe(LATER);
+    expect(after.apps).toEqual(written.apps);
+    expect(after.members).toEqual(written.members);
+  });
+
   it("PLANTED DEFECT: refuses a bundle written for another line than the engines the tenant runs", async () => {
     const prt = await bundlePorts({ newEngineLine: "0.2" });
     await expect(makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { [BUNDLE]: BUNDLE_NEW } }, planCtx()))

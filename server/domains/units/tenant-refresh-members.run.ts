@@ -165,17 +165,22 @@ function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMembe
   return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, stage));
 }
 
+/** Whether the registration's bundle tag is one this run planned from or writes: anything else was
+ *  written by another run or a release since, together with the database lists of that bundle. */
+const ownBundleTag = (p: TenantRefreshMembersParams, tag: string | undefined): boolean =>
+  (tag ?? "") === p.previousAppsImageTag || (tag ?? "") === p.appsImageTag;
+
 /** On abort: write back the member entries, the apps' database lists and the bundle tag the
- *  registration carried before this run — only while it still carries this run's own entries. Entries
- *  another run wrote since are that run's, and stay. */
+ *  registration carried before this run — only while it still carries this run's own entries and
+ *  bundle. Entries another run wrote since are that run's, and stay. */
 function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Cleanup {
   return {
     name: "restore-members",
     title: "Write the previous member entries back into the registration",
     run: async (ctx) => {
       const current = await ports.registrations.readTenant(p.stage, p.guid);
-      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous))) {
-        ctx.log("meta", `tenant ${p.guid}'s member entries are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
+      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous)) || !ownBundleTag(p, current.entry.appsImageTag)) {
+        ctx.log("meta", `tenant ${p.guid}'s member entries or bundle are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
         return;
       }
       await refreshMemberPolicies(ports, p, p.previous);
@@ -260,6 +265,10 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         // finds its own write already standing.
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
           throw errValidation(`tenant ${p.guid}'s ${MEMBERS_CHANGED} — plan it again`);
+        }
+        // The database lists were resolved at the bundle the plan saw; beside another they are wrong.
+        if (!ownBundleTag(p, current.entry.appsImageTag)) {
+          throw errValidation(`tenant ${p.guid}'s apps bundle moved to ${current.entry.appsImageTag ?? "none"} since this run was planned at ${p.previousAppsImageTag || "none"} — plan it again`);
         }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         // Admit the namespace labels before the registration asks ArgoCD to write them.
