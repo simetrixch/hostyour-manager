@@ -5,7 +5,7 @@ import { useOwnDomainHarness } from "./tenant-own-domain.fixture.ts";
 
 // An own domain at a dev or test stage puts the stage directly before the zone that holds it, and a
 // prod one carries no stage: the plan refuses a host typed now that breaks the rule, naming the host
-// it would be. The previous domain a move keeps as an alias, and an alias dropped, are not judged.
+// it would be. The previous domain a move retires, and an alias dropped, are not judged.
 
 describe("tenant-set-own-domain and the stage rule", () => {
   const { make, plan } = useOwnDomainHarness();
@@ -18,11 +18,11 @@ describe("tenant-set-own-domain and the stage rule", () => {
     expect((await plan(h, { ownDomain: "show.test.example.org", previous: "" })).status).toBe("planned");
   });
 
-  it("PLANTED INNOCENT: moves a test tenant off a domain of the old shape, which the move keeps as an alias, and drops that alias", async () => {
+  it("PLANTED INNOCENT: moves a test tenant off a domain of the old shape, and drops an alias of the old shape", async () => {
     const h = await make({ stage: "test", ownDomain: "test.show.example.org" });
     h.dns.zones = ["example.org"];
     expect((await plan(h, { ownDomain: "show.test.example.org", previous: "test.show.example.org" })).status).toBe("planned");
-    // Where the move stands, the previous domain is an alias; a run that only drops it judges nothing.
+    // A run that only drops an alias judges nothing.
     h.db.db.update(tenants).set({ ownDomain: "show.test.example.org", ownDomainAliases: ["test.show.example.org"] }).where(eq(tenants.id, "tnt_1")).run();
     expect((await plan(h, { ownDomain: "show.test.example.org", previous: "show.test.example.org", previousAliases: ["test.show.example.org"] })).status).toBe("planned");
   });

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView, TenantCatalogAppView } from "../../../shared/apps-manifest.ts";
 import type { TenantDetailView } from "../api.ts";
+import { appPath } from "../../../shared/tenant.ts";
 import { tenantAppRows, undeployedApps } from "../tenantAppRows.ts";
 import { appPurgeable, tenantRowOffer } from "../tenantRows.ts";
 import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
@@ -59,7 +60,7 @@ export function TenantAppList(props: {
               <div className="row">
                 {r.row ? <TenantStatusBadge status={r.row.status} /> : <span className="chip">{r.deployed ? "deployed" : "in the bundle"}</span>}
                 <span className="row__title">{r.entry ? `${r.entry.title} (${r.name})` : r.name}</span>
-                <span className="row__meta">{r.deployed ? `${t.guid}-${r.name}-${t.stage}` : "not deployed"}</span>
+                <span className="row__meta">{r.deployed ? `${t.guid}-${r.name}-${t.stage} · at ${appPath(r.name)}` : "not deployed"}</span>
                 <span className="row__end">
                   {deployable.some((a) => a.name === r.name) && r.entry && (
                     <button type="button" className="btn btn--primary" disabled={busy || readerMissing} onClick={() => setDeploying(r.entry)}>

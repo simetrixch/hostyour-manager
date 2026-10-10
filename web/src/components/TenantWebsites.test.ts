@@ -65,9 +65,9 @@ describe("the Websites section marks the tenant's main website", () => {
     const html = render([], [{ ...live[0]!, main: true }, { name: "blog", site: "blog", main: false }]);
     expect(rowOf(html, "simplidigita-ai")).toContain('<span class="chip">main</span>');
     expect(rowOf(html, "blog")).not.toContain(">main<");
-    // The main website answers at / of the tenant's host, every other at /web/<site>.
-    expect(rowOf(html, "simplidigita-ai")).toContain("site simplidigita-ai · at /<");
-    expect(rowOf(html, "blog")).toContain("site blog · at /web/blog<");
+    // The main website answers at / of the tenant's host, every other at /web/<site>, and each one's engine at /app/<website>.
+    expect(rowOf(html, "simplidigita-ai")).toContain("site simplidigita-ai · at / · admin at /app/simplidigita-ai<");
+    expect(rowOf(html, "blog")).toContain("site blog · at /web/blog · admin at /app/blog<");
   });
 
   it("PLANTED INNOCENT: shows no main chip where no website holds the mark", () => {

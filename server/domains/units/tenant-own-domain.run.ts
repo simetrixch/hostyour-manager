@@ -10,7 +10,7 @@ import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
 import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { refuseOffStageHosts } from "./stage-hosts.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
-import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
+import { tenantZone } from "#unit/server/unit-dns.ts";
 import { aliasHosts, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
 import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import {
@@ -107,17 +107,6 @@ function retiredHosts(p: TenantSetOwnDomainParams): string[] {
   return previousHostsOf(p).filter((h) => !kept.has(h));
 }
 
-/** The request as a move asks for it: from one own domain to another, every previous host stays, as an
- *  alias without its `www.`. Setting, re-applying and clearing the domain take the hosts as asked. */
-function keepingPrevious(p: TenantSetOwnDomainParams): TenantSetOwnDomainParams {
-  if (p.previous === "" || p.ownDomain === "" || p.previous === p.ownDomain) return p;
-  if (p.previousAliases.includes(p.ownDomain)) throw errValidation(`${p.ownDomain} is an alias of this tenant, whose permanent redirect a browser may have cached — drop the alias in one run, then make it the own domain in another`);
-  const held = new Set([p.ownDomain, ...p.ownDomainRedirects]);
-  const aliases = new Set([...p.ownDomainAliases, ...previousHostsOf(p).map((h) => h.replace(/^www\./, ""))]);
-  for (const a of aliases) if (held.has(a)) aliases.delete(a);
-  return { ...p, ownDomainAliases: [...aliases] };
-}
-
 function sameHosts(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && [...a].sort().join(" ") === [...b].sort().join(" ");
 }
@@ -211,7 +200,8 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        const url = `${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
+        // The tenant web server, a standing member of every tenant, answers /health at the host's root.
+        const url = `https://${tenantHost(tc, apex, p.ownDomain)}/health`;
         const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
         // The probe does not follow a redirect, so a redirect host answers with the 3xx itself.
@@ -253,10 +243,14 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
     },
     // Streamed so the plan can freeze the records it replaces into the params, where the abort reads them.
     planStream: async (rawParams, ctx) => {
-      const asked = TenantSetOwnDomainParams.parse(rawParams);
+      const params = TenantSetOwnDomainParams.parse(rawParams);
       const db = ctx.db;
-      const tc = loadTenantCluster(db, asked.tenantId);
-      const params = keepingPrevious(asked);
+      const tc = loadTenantCluster(db, params.tenantId);
+      // A browser may have cached an alias's permanent redirect onto the previous domain, which this
+      // run retires: that alias would lead nowhere as the own domain.
+      if (params.ownDomain !== params.previous && params.previousAliases.includes(params.ownDomain)) {
+        throw errValidation(`${params.ownDomain} is an alias of this tenant, whose permanent redirect a browser may have cached — drop the alias in one run, then make it the own domain in another`);
+      }
       const row = db.select({ suspended: tenants.suspended, status: tenants.status, nestsUnder: tenants.nestsUnder }).from(tenants).where(eq(tenants.id, params.tenantId)).get();
       if (row?.status === "provisioning") throw errValidation(`tenant ${tc.subdomain} is still provisioning — finish or remove its create-tenant run before setting its own domain`);
       if (row?.status === "offboarded" || row?.status === "purged") throw errValidation(`tenant ${tc.subdomain} is ${row.status} — nothing serves it, so there is no domain to set`);
@@ -267,17 +261,17 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
       const nesting = resolveNesting(db, params);
-      // Only a host the move claims: one the tenant does not hold already. The previous domain a move
-      // keeps as an alias stood as this tenant's; judged again, an old-shape name under the tenant's
-      // own host at another stage would refuse the very move that retires it.
+      // Only a host the move claims: one the tenant does not hold already. A host it holds stood as this
+      // tenant's; judged again, an old-shape name under the tenant's own host at another stage would
+      // refuse the very run that keeps it.
       const held = new Set(previousHostsOf(params));
       for (const host of hostsOf(params).filter((h) => !held.has(h))) {
         const problem = customerHostProblem(db, params.tenantId, host, apex, nesting?.tenantId ?? null);
         if (problem !== null) throw errValidation(problem);
       }
-      // Only what is typed now: the domain where it changes, and an alias added. The previous domain
-      // a move keeps as an alias, and an alias dropped, are not judged.
-      const typed = [...(params.ownDomain && params.ownDomain !== params.previous ? [params.ownDomain] : []), ...asked.ownDomainAliases.filter((a) => a !== params.previous && !params.previousAliases.includes(a))];
+      // Only what is typed now: the domain where it changes, and an alias added. An alias the tenant
+      // has already, and one dropped, are not judged.
+      const typed = [...(params.ownDomain && params.ownDomain !== params.previous ? [params.ownDomain] : []), ...params.ownDomainAliases.filter((a) => a !== params.previous && !params.previousAliases.includes(a))];
       await refuseOffStageHosts(ports.dns, typed, tc.stage, ctx);
       const newHost = params.ownDomain || zone;
       const oldRecords = retiredHosts(params);
@@ -292,7 +286,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         targetId: params.tenantId,
         summary:
           `${params.previous === params.ownDomain ? "Re-apply" : `Move tenant ${tc.guid} from ${params.previous || zone} to`} ${newHost} (${tc.domain}, ${tc.stage}): ` +
-          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until ${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/ answers with a 2xx` +
+          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row, wait until https://${newHost}/health answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +

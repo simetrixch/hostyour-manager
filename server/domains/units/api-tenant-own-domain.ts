@@ -30,10 +30,10 @@ export function registerTenantOwnDomainRoutes(app: Hono<AppEnv>, deps: TenantOwn
     if (body.nestsUnder !== undefined && typeof body.nestsUnder !== "string") throw errValidation("invalid own-domain request: nestsUnder: the subdomain of a tenant, or absent");
     if (typeof body.domain !== "string") throw errValidation("invalid own-domain request: domain: a string is required (\"\" returns the tenant to its zone)");
     const domain = body.domain.trim().toLowerCase();
-    if (body.aliases !== undefined && !(Array.isArray(body.aliases) && body.aliases.every((a) => typeof a === "string"))) throw errValidation("invalid own-domain request: aliases: a list of domains, or absent to keep the tenant's");
+    if (!(Array.isArray(body.aliases) && body.aliases.every((a) => typeof a === "string"))) throw errValidation("invalid own-domain request: aliases: a list of domains is required ([] names none)");
     // The own hosts the tenant has now: what an abort of the move records again.
     const now = db.select({ ownDomain: tenants.ownDomain, ownDomainRedirects: tenants.ownDomainRedirects, ownDomainAliases: tenants.ownDomainAliases }).from(tenants).where(eq(tenants.id, id)).get();
-    const aliases = domain === "" ? [] : body.aliases === undefined ? (now?.ownDomainAliases ?? []) : (body.aliases as string[]).map((a) => a.trim().toLowerCase());
+    const aliases = domain === "" ? [] : (body.aliases as string[]).map((a) => a.trim().toLowerCase());
     for (const entry of [domain, ...aliases]) {
       const problem = ownDomainEntryProblem(entry);
       if (problem) throw errValidation(`invalid own-domain request: ${problem}`);

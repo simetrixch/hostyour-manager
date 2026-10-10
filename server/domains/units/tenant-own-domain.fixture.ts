@@ -33,7 +33,8 @@ export const ZONE = "acme.example.com";
 export const OWN = "www.customer.test";
 export const OTHER = "shop.customer.test";
 export const BARE = "customer.test";
-export const idpAt = (host: string): string => `https://${host}/auth/`;
+/** The address the own-domain run waits on: the tenant web server's health at the host's root. */
+export const healthAt = (host: string): string => `https://${host}/health`;
 export const OK = { reachable: true, status: 200, detail: "HTTP 200" };
 const REDIRECTS = { reachable: true, status: 307, detail: "HTTP 307" };
 
@@ -66,7 +67,7 @@ export function useOwnDomainHarness() {
     dns.unmanaged = opts.unmanaged ?? [];
     dns.seed(ZONE, "CNAME", CLUSTER);
     const probe = new FakePublicProbe(Object.fromEntries([
-      ...(opts.answers ?? []).map((host) => [idpAt(host), OK]),
+      ...(opts.answers ?? []).map((host) => [healthAt(host), OK]),
       ...(opts.redirecting ?? []).map((host) => [`https://${host}/`, REDIRECTS]),
     ]));
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();

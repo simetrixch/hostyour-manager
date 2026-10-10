@@ -163,6 +163,8 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  its own name. One website of a tenant may carry `main: true`: the tenant's main website. */
 /** The path a website answers at on the tenant's host: `/` for the main website, `/web/<site>` for every other. */
 export const websitePath = (website: { site: string; main?: boolean | undefined }): string => (website.main ? "/" : `/web/${website.site}`);
+/** The path an app's engine answers at on the tenant's host, a website's engine too: `/app/<app>`. */
+export const appPath = (app: string): string => `/app/${app}`;
 
 export const TenantAppSchema = z
   .object({
