@@ -50,11 +50,6 @@ export const unitPlugin: Plugin<typeof UnitEnv> = {
   name: "unit",
   env: UnitEnv,
   schema: { unitSizes },
-  // The size table is EDITED data, not derived data: the boot seed would refill it with the SHIPPED
-  // figures, silently replacing the ones this installation sells, and the registrations in git carry
-  // resolved numbers, not the table they came from. A reset ends what the manager KNOWS; what it
-  // SELLS outlives that.
-  keep: ["unit_sizes"],
   migrations: fileURLToPath(new URL("./migrations", import.meta.url)),
   activate(core, env) {
     const config = unitConfig(env);

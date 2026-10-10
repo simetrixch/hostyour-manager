@@ -8,19 +8,17 @@ const msg = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
 const KIND_ORDER: Record<BranchView["kind"], number> = { master: 0, manager: 1, slave: 2, other: 3 };
 
-/** The full platform reset: strip the selected install branches' pointer files, delete those
- *  branches on GitHub, and (optionally) wipe the cluster state out of the Manager DB. Safeguards,
- *  in order: master is LOCKED (never deletable, also refused server-side); the manager's own
- *  branch needs an explicit OFF-by-default opt-in; nothing fires until the operator types RESET.
- *  The VMs themselves are restored separately via Hyper-V — this wizard touches ONLY GitHub and
- *  the Manager DB. */
+/** The full platform reset: strip the selected install branches' pointer files and delete those
+ *  branches on GitHub. Safeguards, in order: master is LOCKED (never deletable, also refused
+ *  server-side); the manager's own branch needs an explicit OFF-by-default opt-in; nothing fires
+ *  until the operator types RESET. The VMs themselves are restored separately via Hyper-V — this
+ *  wizard touches ONLY GitHub, and the Manager DB stays as it is. */
 export function ResetWizard() {
   const [branches, setBranches] = useState<BranchView[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [githubUnavailable, setGithubUnavailable] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [includeMaster, setIncludeMaster] = useState(false);
-  const [wipeDb, setWipeDb] = useState(true);
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ResetResult | null>(null);
@@ -36,7 +34,7 @@ export function ResetWizard() {
       })
       .catch((e: unknown) => {
         if (!alive) return;
-        // GitHub not configured on this Manager: a DB-only reset must still be possible.
+        // GitHub not configured on this Manager: there is nothing to reset, which the form says.
         if (e instanceof ApiRequestError && e.code === "NOT_CONFIGURED") {
           setGithubUnavailable(true);
           setBranches([]);
@@ -50,7 +48,7 @@ export function ResetWizard() {
   }, []);
 
   const manager = branches?.find((b) => b.kind === "manager");
-  const armed = confirm === "RESET" && (selected.size > 0 || wipeDb) && !busy;
+  const armed = confirm === "RESET" && selected.size > 0 && !busy;
 
   function toggle(name: string): void {
     setSelected((prev) => {
@@ -75,7 +73,7 @@ export function ResetWizard() {
     setBusy(true);
     setError(null);
     try {
-      setResult(await resetManager({ confirm, wipeDb, deleteBranches: [...selected].sort(), includeMaster }));
+      setResult(await resetManager({ confirm, deleteBranches: [...selected].sort(), includeMaster }));
     } catch (err) {
       setError(msg(err));
     }
@@ -98,9 +96,6 @@ export function ResetWizard() {
 
   // ---- Result view: exactly what happened, per item — replaces the form entirely. ----
   if (result) {
-    // A wipe that was asked for and failed. Read once: it decides both the card below and whether the
-    // post-wipe recovery steps apply at all — they open with "your session survived the wipe".
-    const dbError = result.db.wiped ? null : result.db.error ?? null;
     return (
       <section className="page">
         <header className="page__head">
@@ -130,65 +125,23 @@ export function ResetWizard() {
           </ul>
         )}
 
-        {result.pointers && (
-          <ul className="rows">
-            <li className="resultrow">
-              <span className="resultrow__mark resultrow__mark--ok" aria-hidden="true">✓</span>
-              <span className="resultrow__target">pointer files</span>
-              <span className="resultrow__msg">
-                {result.pointers.removed.length === 0
-                  ? "none to remove"
-                  : <>removed {result.pointers.removed.length} on <span className="mono">{result.pointers.branch}</span>{result.pointers.commit ? <> · <span className="mono">{result.pointers.commit.slice(0, 8)}</span></> : null}</>}
-              </span>
-            </li>
-          </ul>
-        )}
+        <ul className="rows">
+          <li className="resultrow">
+            <span className="resultrow__mark resultrow__mark--ok" aria-hidden="true">✓</span>
+            <span className="resultrow__target">pointer files</span>
+            <span className="resultrow__msg">
+              {result.pointers.removed.length === 0
+                ? "none to remove"
+                : <>removed {result.pointers.removed.length} on <span className="mono">{result.pointers.branch}</span>{result.pointers.commit ? <> · <span className="mono">{result.pointers.commit.slice(0, 8)}</span></> : null}</>}
+            </span>
+          </li>
+        </ul>
 
-        {result.db.wiped && (
-          <div className="card">
-            <h3 className="dangercard__title">Manager database wiped</h3>
-            <ul className="resetsummary">
-              {Object.entries(result.db.rows).map(([table, n]) => (
-                <li key={table}>
-                  <span className="mono">{table}</span>: {n} {n === 1 ? "row" : "rows"}
-                </li>
-              ))}
-            </ul>
-            <p className="field__hint">
-              Your pre-reset backup: <span className="mono">{result.db.backupFile}</span> — restore by copying it back
-              over <span className="mono">manager.db</span> while the pod is stopped.
-            </p>
-            {result.reseeded && <p className="field__hint">The master server row was re-registered in-process.</p>}
-            {result.db.vaultOrphans.map((ref) => (
-              <p key={ref} role="alert" className="alert alert--danger">
-                A Vault value could not be deleted (<span className="mono">{ref}</span>) — delete this KV ref by hand, it
-                may hold a private key.
-              </p>
-            ))}
-          </div>
-        )}
-
-        {dbError !== null && (
-          <div className="card">
-            <h3 className="dangercard__title">Manager database NOT wiped</h3>
-            <p role="alert" className="alert alert--danger">{dbError}</p>
-            <p className="field__hint">
-              The wipe is one transaction, so the database is exactly the one it was before this reset — but whatever is
-              listed above is already gone from GitHub. A reset with only the database box checked retries the wipe. If
-              the cause is still there it refuses at the rehearsal with the message above and touches nothing, which
-              means the wipe cannot succeed on this database as it stands.
-            </p>
-          </div>
-        )}
-
-        {dbError === null && (
-          <p className="callout">
-            Your session survived the wipe. Now: 1 · restore the VMs from <strong>bare</strong> snapshots via Hyper-V
-            (restoring the master from a live snapshot resurrects the old database), 2 · deploy the slaves again — the run
-            installs this Manager&apos;s key on the way through.
-            Rotate the GitHub tokens after any reset/restore — VM snapshots contain the old copies.
-          </p>
-        )}
+        <p className="callout">
+          The Manager database is unchanged: the servers and clusters of the deleted branches still stand in it, and a{" "}
+          <span className="mono">cluster-remove-slave</span> run takes each one out. Rotate the GitHub tokens after any
+          reset/restore — VM snapshots contain the old copies.
+        </p>
         <div className="actions">
           <button type="button" className="btn" onClick={() => window.location.assign("/")}>
             Reload the Manager
@@ -207,13 +160,13 @@ export function ResetWizard() {
         <div>
           <span className="page__eyebrow">Danger zone</span>
           <h2 className="page__title">Reset</h2>
-          <p className="page__desc">Wind the platform back to zero: delete install branches on GitHub and wipe this Manager&apos;s database.</p>
+          <p className="page__desc">Wind the platform back to zero: delete install branches on GitHub. The Manager&apos;s database stays.</p>
         </div>
       </header>
 
       <p role="alert" className="alert alert--danger">
         This is destructive and immediate. Run it while the Manager is still alive — GitHub cleanup must happen
-        BEFORE any VM restore. It touches ONLY GitHub and the Manager database; the per-slave Vault mounts, ArgoCD
+        BEFORE any VM restore. It touches ONLY GitHub; the per-slave Vault mounts, ArgoCD
         instances and Headlamp contexts on the master disappear only when you restore the master VM — if you do NOT
         restore the master, run the <span className="mono">remove-slave</span> program on the master per slave afterwards.
       </p>
@@ -228,7 +181,7 @@ export function ResetWizard() {
         <h3 className="dangercard__title">1 · Branches to delete</h3>
         {githubUnavailable ? (
           <p className="field__hint">
-            GitHub is not configured on this Manager (GITHUB_REPO + GITHUB_WRITE_PAT) — only the database can be reset
+            GitHub is not configured on this Manager (GITHUB_REPO + GITHUB_WRITE_PAT), so a reset has nothing to do
             here.
           </p>
         ) : (
@@ -281,26 +234,7 @@ export function ResetWizard() {
           </div>
         )}
 
-        <h3 className="dangercard__title">2 · Manager database</h3>
-        <label className="checkrow">
-          <input type="checkbox" checked={wipeDb} onChange={() => setWipeDb((v) => !v)} />
-          <span>
-            Wipe the platform state from the Manager database — servers, clusters, apps, credentials, the operator SSH
-            keys held for placing, runs and audit. Your operator account and this session survive; the keys do not, and
-            every one of them has to be pasted in again.
-          </span>
-        </label>
-        <p className="field__hint">
-          A fresh Manager re-registers the master&apos;s own server row on boot — nothing here is needed to start over.
-        </p>
-        {wipeDb && (
-          <p className="field__hint">
-            The wipe is rehearsed and rolled back before any branch is deleted — if it cannot run, the reset stops with
-            nothing removed.
-          </p>
-        )}
-
-        <h3 className="dangercard__title">3 · Confirm</h3>
+        <h3 className="dangercard__title">2 · Confirm</h3>
         <p className="dangercard__summary">This will, in order:</p>
         <ul className="resetsummary">
           {chosen.length > 0 ? (
@@ -311,11 +245,7 @@ export function ResetWizard() {
           ) : (
             <li>Delete no branches</li>
           )}
-          <li>
-            {wipeDb
-              ? "Wipe the Manager database (cluster state and the stored operator SSH keys; operators/session kept)"
-              : "Leave the Manager database untouched"}
-          </li>
+          <li>Keep the Manager database: its servers, clusters, runs and audit stay</li>
           <li>
             Never touch <span className="mono">master</span> — it stays, always
           </li>

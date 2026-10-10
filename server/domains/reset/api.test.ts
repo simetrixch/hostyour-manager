@@ -1,6 +1,4 @@
-import { compiledPlugins } from "../../plugins.ts";
 import { describe, it, expect, afterEach } from "vitest";
-import Database from "better-sqlite3";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,7 +8,6 @@ import { parseConfig } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
-import { CredentialStore } from "../../security/store.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { EmergencyStore, createAdminSocketApp } from "../access/emergency.ts";
 import { registerResetRoutes } from "./api.ts";
@@ -18,9 +15,8 @@ import { GitHubPlatformError, type GitHubPlatform, type BranchRef } from "../../
 import type { AppEnv } from "../../http/app-env.ts";
 import type { ResetResult } from "../../../shared/api-types.ts";
 
-// DATA_DIR is set PER-TEST to the temp dir below — wipeDb calls backupManagerDb (VACUUM INTO
-// $DATA_DIR/backups), so it must be a real writable path on every OS (a fake "/d" happens to work
-// on Windows but not on Linux CI). This module-level parse is only for the logger.
+// DATA_DIR is set per test to the temp dir that holds that test's database. This module-level parse
+// is only for the logger.
 const baseEnv = {
   ...REQUIRED_ENV,
   PUBLIC_URL: "https://m1.example", OIDC_ISSUER: "https://i.example/",
@@ -37,9 +33,9 @@ interface FakeOpts {
   failDelete?: string[];
   failList?: boolean;
   failPaths?: boolean;
-  /** Runs on every GitHub call with that call's log label. Two uses: read the LOCAL state at that
-   *  moment (which is how "the wipe runs last" becomes a fact in the log), or change it — the only
-   *  way to make the wipe fail after its rehearsal has already passed. */
+  /** Runs on every GitHub call with that call's log label: reads the LOCAL state at that moment
+   *  (which is how "the audit entry lands last" becomes a fact in the log), or changes it between
+   *  two calls. */
   onCall?: (label: string) => void;
 }
 function fakeGitHub(opts: FakeOpts = {}) {
@@ -73,37 +69,25 @@ function fakeGitHub(opts: FakeOpts = {}) {
   return { client, log };
 }
 
-// A table WIPE_ORDER does not name, holding a row that RESTRICTs a server — the shape that made the
-// wipe throw after the install branches were already deleted.
-function addUnwipedChildRow(db: DbHandle): void {
-  db.sqlite.exec("CREATE TABLE stragglers (id TEXT PRIMARY KEY, server_id TEXT NOT NULL REFERENCES servers(id))");
-  db.sqlite.prepare("INSERT INTO stragglers (id, server_id) VALUES ('str_1','srv_s')").run();
-}
-
 describe("reset API (POST /api/reset)", () => {
   const handles: DbHandle[] = [];
   const dirs: string[] = [];
-  function make(github: GitHubPlatform | undefined, over: { reseed?: () => Promise<void> } = {}) {
+  function make(github: GitHubPlatform | undefined) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-reset-api-"));
     dirs.push(dir);
     const config = parseConfig({ ...baseEnv, DATA_DIR: dir } as NodeJS.ProcessEnv);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    // a master row (so masterFqdn derives m1.example.com) + a slave row (to prove the wipe)
+    // a master row (so masterFqdn derives m1.example.com) + a slave row (whose rows a reset keeps)
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_m','m1','m1.example.com','m1','master','ready', 'op_system', 'op_system')").run();
     db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready', 'op_system', 'op_system')").run();
-    const store = new CredentialStore({ db: db.db, logger });
     const session = new SessionCodec(db.db, config);
-    let reseedCalledWithAuditCount = -1;
-    const reseedMaster = over.reseed ?? (async () => {
-      reseedCalledWithAuditCount = (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='manager.reset'").get() as { c: number }).c;
-    });
     const app = createApp({
       config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,
       registerAuth: () => undefined,
-      registerProtected: (a) => registerResetRoutes(a, { config, db: db.db, sqlite: db.sqlite, store, logger, github, reseedMaster, plugins: compiledPlugins }),
+      registerProtected: (a) => registerResetRoutes(a, { config, db: db.db, sqlite: db.sqlite, logger, github }),
     });
-    return { app, db, session, reseededAt: () => reseedCalledWithAuditCount };
+    return { app, db, session };
   }
   afterEach(() => {
     for (const h of handles.splice(0)) h.sqlite.close();
@@ -121,12 +105,50 @@ describe("reset API (POST /api/reset)", () => {
     (db.sqlite.prepare(`SELECT count(*) AS c FROM ${table}`).get() as { c: number }).c;
   const resetAuditDetail = (db: DbHandle): string =>
     JSON.stringify((db.sqlite.prepare("SELECT detail_json AS d FROM audit WHERE action='manager.reset'").get() as { d: unknown } | undefined)?.d ?? null);
-  /** The wipe's failure, which lives on the `wiped: false` arm only. */
-  const dbError = (r: ResetResult): string | undefined => (r.db.wiped ? undefined : r.db.error);
-  /** The pre-wipe snapshot's path, which lives on the `wiped: true` arm only. */
-  const backupFile = (r: ResetResult): string => (r.db.wiped ? r.db.backupFile : "");
 
-  const req = { confirm: "RESET", wipeDb: false, deleteBranches: [] as string[], includeMaster: false };
+  const req = { confirm: "RESET", deleteBranches: [] as string[], includeMaster: false };
+
+  // The Manager's database is infrastructure and is never reset: no request may empty a table of it.
+  const rowsPerTable = (db: DbHandle): Record<string, number> => {
+    const tables = db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[];
+    return Object.fromEntries(tables.map(({ name }) => [name, rowCount(db, name)]));
+  };
+
+  it("PLANTED DEFECT: refuses a request that still asks for the database wipe, with nothing removed", async () => {
+    const { client, log } = fakeGitHub({ blobs: ["clusters/active/s1.example.com.yaml"] });
+    const { app, db, session } = make(client);
+    const before = rowsPerTable(db);
+
+    const res = await post(app, await cookie(session), { ...req, wipeDb: true, deleteBranches: ["s1.example.com"] });
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/wipeDb/);
+    expect(log).toEqual([]);
+    expect(rowsPerTable(db)).toEqual({ ...before, audit: before.audit! + 1 });
+    expect(auditRefusals(db)).toBe(1);
+  });
+
+  it("leaves every row of the database where it was after deleting an install branch", async () => {
+    const { client, log } = fakeGitHub({ blobs: ["clusters/active/s1.example.com.yaml"] });
+    const { app, db, session } = make(client);
+    const before = rowsPerTable(db);
+
+    const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as ResetResult).ok).toBe(true);
+    expect(log).toContain("del:s1.example.com");
+    // The one row a reset adds is its own audit entry.
+    expect(rowsPerTable(db)).toEqual({ ...before, audit: before.audit! + 1 });
+  });
+
+  it("refuses a reset that selects no branch, because the database is never part of one", async () => {
+    const { client, log } = fakeGitHub();
+    const { app, db, session } = make(client);
+    const res = await post(app, await cookie(session), req);
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { message: string }).message).toMatch(/no branches are selected/);
+    expect(log).toEqual([]);
+    expect(auditRefusals(db)).toBe(1);
+  });
 
   it("refuses (and audits) a wrong confirm token", async () => {
     const { client } = fakeGitHub();
@@ -151,7 +173,7 @@ describe("reset API (POST /api/reset)", () => {
     expect((await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] })).status).toBe(501);
   });
 
-  it("409 when a run is in flight (even without wipeDb)", async () => {
+  it("409 when a run is in flight", async () => {
     const { client } = fakeGitHub();
     const { app, db, session } = make(client);
     db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('r','noop','self','c','{}','{}','running','op_system','op_system')").run();
@@ -163,7 +185,7 @@ describe("reset API (POST /api/reset)", () => {
   it("refuses a break-glass (emergency) session", async () => {
     const { client } = fakeGitHub();
     const { app, db, session } = make(client);
-    const res = await post(app, await cookie(session, "emergency"), { ...req, wipeDb: true });
+    const res = await post(app, await cookie(session, "emergency"), { ...req, deleteBranches: ["s1.example.com"] });
     expect(res.status).toBe(403);
     expect(auditRefusals(db)).toBe(1);
   });
@@ -185,7 +207,7 @@ describe("reset API (POST /api/reset)", () => {
     const res = await app.request("/api/reset", {
       method: "POST",
       headers: { authorization: `Bearer ${bearer}`, "content-type": "application/json" },
-      body: JSON.stringify({ ...req, wipeDb: true }),
+      body: JSON.stringify({ ...req, deleteBranches: ["s1.example.com"] }),
     });
     expect(res.status).toBe(403);
     expect(auditRefusals(db)).toBe(1);
@@ -210,79 +232,58 @@ describe("reset API (POST /api/reset)", () => {
     expect(acted[1]).toBe("del:s1.example.com");
     // orphan (ghost, whose branch is absent from the repo) reconciled alongside the selected one
     // The maps live on the books branch — the master cluster's own install branch — never on the trunk.
-    expect(body.pointers?.branch).toBe("m1.example.com");
-    expect(body.pointers?.removed).toContain("clusters/active/ghost.example.com.yaml");
-    expect(body.pointers?.removed).toContain("clusters/active/s1.example.com.yaml");
+    expect(body.pointers.branch).toBe("m1.example.com");
+    expect(body.pointers.removed).toContain("clusters/active/ghost.example.com.yaml");
+    expect(body.pointers.removed).toContain("clusters/active/s1.example.com.yaml");
     // the master's own map stands: its branch exists and it was not selected for deletion.
-    expect(body.pointers?.removed).not.toContain("clusters/active/m1.example.com.yaml");
+    expect(body.pointers.removed).not.toContain("clusters/active/m1.example.com.yaml");
     // sha captured as the undo anchor
     expect(body.branches[0]).toMatchObject({ branch: "s1.example.com", ok: true, sha: "f1" });
     expect(body.ok).toBe(true);
   });
 
-  it("a GitHub delete failure ⇒ ok:false, but the DB wipe still runs; audit precedes the reseed", async () => {
+  it("a GitHub delete failure answers ok:false with the failure per branch, and the audit entry still lands", async () => {
     const { client } = fakeGitHub({ failDelete: ["s1.example.com"] });
-    const { app, db, session, reseededAt } = make(client);
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
+    const { app, db, session } = make(client);
+    const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     const body = (await res.json()) as ResetResult;
     expect(body.ok).toBe(false); // the branch delete failed
     expect(body.branches[0]?.error).toMatch(/delete boom/);
-    // wipe still ran: servers gone, master re-seed invoked, and it saw the audit row already written
-    expect(body.db.wiped).toBe(true);
-    expect((db.sqlite.prepare("SELECT count(*) AS c FROM servers").get() as { c: number }).c).toBe(0);
-    expect(body.reseeded).toBe(true);
-    expect(reseededAt()).toBe(1); // audit 'manager.reset' existed BEFORE reseedMaster ran
+    expect(resetAuditDetail(db)).toMatch(/delete boom/);
+    expect(rowCount(db, "servers")).toBe(2);
   });
 
   // The order IS the safety property: the branch deletes are the one act that cannot be taken back,
-  // so every step that can still refuse has to be in front of them. The tests below pin both sides:
-  // where each refusal lands, and what survives the one failure that can still arrive too late.
-  it("pins the order: list, maps, branches, and the wipe LAST — every GitHub call sees the DB whole", async () => {
-    let liveServers = (): number => -1;
+  // so every step that can still refuse has to be in front of them, and the audit entry, which
+  // records their outcome, behind them.
+  it("pins the order: list, maps, branches, and the audit entry LAST", async () => {
+    let resetAudits = (): number => -1;
     const seen: string[] = [];
     const { client } = fakeGitHub({
       blobs: ["clusters/active/s1.example.com.yaml"],
-      onCall: (label) => seen.push(`${label} servers=${liveServers()}`),
+      onCall: (label) => seen.push(`${label} audit=${resetAudits()}`),
     });
     const { app, db, session } = make(client);
-    liveServers = () => rowCount(db, "servers");
+    resetAudits = () => (db.sqlite.prepare("SELECT count(*) AS c FROM audit WHERE action='manager.reset'").get() as { c: number }).c;
 
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
+    const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     expect(res.status).toBe(200);
-    // Both server rows were still standing at every GitHub call, so the wipe is behind all of them —
-    // and the map removal is ahead of the branch it describes.
+    // No GitHub call saw the audit entry, and the map removal is ahead of the branch it describes.
     expect(seen).toEqual([
-      "list servers=2",
-      "blobs servers=2",
-      "paths:clusters/active/s1.example.com.yaml servers=2",
-      "del:s1.example.com servers=2",
+      "list audit=0",
+      "blobs audit=0",
+      "paths:clusters/active/s1.example.com.yaml audit=0",
+      "del:s1.example.com audit=0",
     ]);
-    const body = (await res.json()) as ResetResult;
-    expect(body.ok).toBe(true);
-    expect(body.db.wiped).toBe(true);
-    expect(rowCount(db, "servers")).toBe(0);
-  });
-
-  it("a wipe that cannot run refuses after the listing and before anything is removed", async () => {
-    const { client, log } = fakeGitHub({ blobs: ["clusters/active/s1.example.com.yaml"] });
-    const { app, db, session } = make(client);
-    addUnwipedChildRow(db);
-
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
-    expect(res.status).toBe(500);
-    expect(((await res.json()) as { message: string }).message).toMatch(/the database wipe would fail.*FOREIGN KEY/is);
-    // The rehearsal sits between the sha capture and the map removal: the listing happened, nothing
-    // after it did.
-    expect(log).toEqual(["list"]);
-    expect(rowCount(db, "servers")).toBe(2);
-    expect(auditRefusals(db)).toBe(1);
+    expect(((await res.json()) as ResetResult).ok).toBe(true);
+    expect(resetAudits()).toBe(1);
   });
 
   it("a failed cluster-map cleanup refuses before any branch is deleted", async () => {
     const { client, log } = fakeGitHub({ blobs: ["clusters/active/s1.example.com.yaml"], failPaths: true });
     const { app, db, session } = make(client);
 
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
+    const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     expect(res.status).toBe(502);
     expect(((await res.json()) as { message: string }).message).toMatch(/cluster-map cleanup on m1\.example\.com failed \(paths boom\)/);
     expect(log).toEqual(["list", "blobs", "paths:clusters/active/s1.example.com.yaml"]); // no del:
@@ -290,96 +291,20 @@ describe("reset API (POST /api/reset)", () => {
     expect(auditRefusals(db)).toBe(1);
   });
 
-  it("refuses a branch delete when the listing failed — no sha, no way back — but still wipes on its own", async () => {
+  it("refuses a branch delete when the listing failed — no sha, no way back", async () => {
     const { client, log } = fakeGitHub({ failList: true });
     const { app, db, session } = make(client);
-    const ck = await cookie(session);
 
-    const refused = await post(app, ck, { ...req, wipeDb: true, deleteBranches: ["s1.example.com"] });
+    const refused = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     expect(refused.status).toBe(502);
     expect(((await refused.json()) as { message: string }).message).toMatch(/sha was not captured first/);
     expect(log).toEqual(["list"]);
-    expect(rowCount(db, "servers")).toBe(2);
-
-    // The same failure does not block a database-only reset. It costs only orphan reconciliation, so
-    // the map step has nothing it may act on and reports nothing.
-    const res = await post(app, ck, { confirm: "RESET", wipeDb: true, deleteBranches: [], includeMaster: false });
-    const body = (await res.json()) as ResetResult;
-    expect(body.db.wiped).toBe(true);
-    expect(body.pointers).toBe(null);
-    expect(rowCount(db, "servers")).toBe(0);
-  });
-
-  it("a wipe that fails AFTER its rehearsal answers 200, keeps the whole DB, and names what went", async () => {
-    // The one failure a rehearsal cannot predict: the offending row lands while the run is between
-    // the two, so the wipe throws where nothing above it can be taken back any more.
-    let breakTheWipe = (): void => undefined;
-    const { client, log } = fakeGitHub({
-      blobs: ["clusters/active/s1.example.com.yaml"],
-      onCall: (label) => {
-        if (label.startsWith("del:")) breakTheWipe();
-      },
-    });
-    const { app, db, session, reseededAt } = make(client);
-    breakTheWipe = () => addUnwipedChildRow(db);
-
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
-    // NOT a 500: the branch is already gone, and a bare error carries neither that fact nor the sha.
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as ResetResult;
-    expect(body.ok).toBe(false);
-    expect(dbError(body)).toMatch(/FOREIGN KEY/i);
-
-    // What survived: the database entire, because the wipe is one transaction that rolled back whole.
-    expect(rowCount(db, "servers")).toBe(2);
-    expect(rowCount(db, "operators")).toBe(2);
-    expect(db.sqlite.prepare("SELECT count(*) AS c FROM sqlite_master WHERE type='trigger' AND name='audit_no_delete'").get()).toEqual({ c: 1 });
-    // What did not, with the anchor to push it back and the audit entry saying so.
-    expect(log).toContain("del:s1.example.com");
-    expect(body.branches[0]).toMatchObject({ branch: "s1.example.com", ok: true, sha: "f1" });
-    expect(body.pointers?.removed).toEqual(["clusters/active/s1.example.com.yaml"]);
-    expect(resetAuditDetail(db)).toMatch(/FOREIGN KEY/i);
-    // The reseed re-materializes what the wipe removed and stops the master-reconcile timer on its
-    // way in — a database that lost nothing keeps both.
-    expect(reseededAt()).toBe(-1);
-    expect(body.reseeded).toBe(false);
-  });
-
-  it("the backup holds what the wipe destroys — a row that lands during the GitHub calls is in it", async () => {
-    // A snapshot is a way back only if it was taken after the last chance to write. Every GitHub call
-    // awaits, and nothing across those awaits stops another writer: the master-reconcile timer
-    // (boot/seed-master.ts) seals keys into the credential store while the master has not converged,
-    // which on a fresh install is exactly when a reset gets run. Taken early, the snapshot would miss
-    // such a row while the wipe still destroys it — and for a credential, collectVaultRefs is a fresh
-    // read, so its Vault value would go with a row the snapshot cannot restore.
-    let landRow = (): void => undefined;
-    const { client } = fakeGitHub({
-      blobs: ["clusters/active/s1.example.com.yaml"],
-      onCall: (label) => {
-        if (label.startsWith("del:")) landRow();
-      },
-    });
-    const { app, db, session } = make(client);
-    landRow = () => {
-      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_late','late','9.9.9.9','root','slave','ready', 'op_system', 'op_system')").run();
-    };
-
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
-    const body = (await res.json()) as ResetResult;
-    expect(body.db.wiped).toBe(true);
-    expect(rowCount(db, "servers")).toBe(0); // the wipe took the late row along with the other two
-
-    const backup = new Database(backupFile(body), { readonly: true });
-    try {
-      expect((backup.prepare("SELECT count(*) AS c FROM servers").get() as { c: number }).c).toBe(3);
-    } finally {
-      backup.close();
-    }
+    expect(auditRefusals(db)).toBe(1);
   });
 
   it("an audit entry that cannot be written is logged, not thrown — the branch outcomes must still reach the operator", async () => {
-    // The audit INSERT goes into the table the wipe just emptied, so it can fail on storage the wipe
-    // did not need. Behind the branch deletes, a throw would answer 500 and drop the shas with it.
+    // The audit INSERT runs behind the branch deletes, so a throw there would answer 500 and drop the
+    // shas with it.
     let blockAudit = (): void => undefined;
     const { client } = fakeGitHub({
       onCall: (label) => {
@@ -387,43 +312,14 @@ describe("reset API (POST /api/reset)", () => {
       },
     });
     const { app, db, session } = make(client);
-    // Armed only after the rehearsal has passed: an INSERT guard the wipe neither drops nor recreates.
+    // Armed at the branch delete, behind every refusal, which would write an audit entry of its own.
     blockAudit = () => db.sqlite.exec("CREATE TRIGGER audit_no_insert BEFORE INSERT ON audit BEGIN SELECT RAISE(ABORT, 'audit is unwritable'); END");
+    const auditsBefore = rowCount(db, "audit");
 
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
+    const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     expect(res.status).toBe(200);
     const body = (await res.json()) as ResetResult;
-    expect(body.db.wiped).toBe(true);
     expect(body.branches[0]).toMatchObject({ branch: "s1.example.com", ok: true, sha: "f1" });
-    expect(rowCount(db, "audit")).toBe(0); // the entry really did not land
-    expect(body.reseeded).toBe(true); // and the step behind it still ran
-  });
-
-  it("a re-seed that fails is reported, not thrown — the branch outcomes must reach the operator", async () => {
-    const { client } = fakeGitHub();
-    const { app, db, session } = make(client, {
-      reseed: async () => {
-        throw new Error("reseed boom");
-      },
-    });
-
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as ResetResult;
-    expect(body.db.wiped).toBe(true);
-    expect(body.branches[0]).toMatchObject({ branch: "s1.example.com", ok: true, sha: "f1" });
-    expect(body.reseeded).toBe(false);
-    expect(rowCount(db, "servers")).toBe(0);
-  });
-
-  it("wipeDb-only (no branches) wipes the cluster state without touching GitHub", async () => {
-    const { client, log } = fakeGitHub();
-    const { app, db, session } = make(client);
-    const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: [], includeMaster: false });
-    const body = (await res.json()) as ResetResult;
-    expect(body.ok).toBe(true);
-    expect(body.db.wiped).toBe(true);
-    expect((db.sqlite.prepare("SELECT count(*) AS c FROM servers").get() as { c: number }).c).toBe(0);
-    expect(log.filter((l) => l.startsWith("del:"))).toEqual([]); // no branch deletes
+    expect(rowCount(db, "audit")).toBe(auditsBefore); // the entry really did not land
   });
 });

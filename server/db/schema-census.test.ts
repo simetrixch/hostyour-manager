@@ -451,8 +451,8 @@ describe("schema census: the database the migrations build declares the same sch
   // CREATE TABLE loses without a trace, and each loss is silent in a different way: without
   // `clusters_slave_id_uq` two clusters rows carry one slave_id and the never-reused ordinal
   // (schema/inventory.ts) is gone; with credentials.server_id on ON DELETE cascade instead of
-  // restrict, deleting a server takes its sealed keys with it where the wipe order (db/reset.ts)
-  // assumes it is refused; without operator_keys_label_uq two rows share one label and the removal
+  // restrict, deleting a server takes its sealed keys with it where the schema says it is
+  // refused; without operator_keys_label_uq two rows share one label and the removal
   // that keys on that label matches two lines. The snapshot is the ONE declaration in the tree that
   // carries all of it, and drizzle-kit writes it — so it is what the executed SQL is measured against.
   it("carries the indexes, keys, defaults and NOT NULLs the head snapshot declares", () => {
