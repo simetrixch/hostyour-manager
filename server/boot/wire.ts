@@ -55,7 +55,6 @@ import { registerTenantAppCatalogRoute } from "../domains/units/api-tenant-app-c
 import { ensureAppIdentityRow } from "../security/app-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
 import { refreshAppTokens } from "#unit/server/app-token-refresh.ts";
-import { ensureTenantAppKeys } from "../domains/units/tenant-app-keys.ts";
 import { syncReleaseKits } from "#unit/server/inject-release-kit.ts";
 import { KubeHeadlampKubeconfig } from "../adapters/kube/kube-headlamp.ts";
 import { syncHeadlampContexts } from "../domains/inventory/headlamp-contexts.ts";
@@ -96,12 +95,6 @@ export interface Wired {
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
-  /** The Password field key of every tenant app, and the revalidate secret of every tenant website,
-   *  that has none, written create-only (server/domains/units/tenant-app-keys.ts ensureTenantAppKeys):
-   *  the forward step for the apps that joined before these keys were minted. boot.ts runs it once
-   *  behind the listening server. Never rejects. A no-op where the unit family and its seeder, or the
-   *  tenant registrations, are not wired. */
-  mintTenantAppKeys: () => Promise<void>;
   /** The database list of every app of every standing tenant, as its catalog entry declares it, written
    *  into the registration's apps[] entries where it differs (server/domains/units/tenant-app-databases.ts
    *  ensureTenantAppDatabases): the forward step for the tenants registered before the lists were
@@ -447,11 +440,6 @@ export async function wire(): Promise<Wired> {
     checks,
     carryDeployTrunk,
     refreshAppTokens: refreshAppTokensLater,
-    mintTenantAppKeys: unit && tenantRegistrations
-      ? async () => {
-        await ensureTenantAppKeys({ db: db.db, seeder: unit.seeder, registrations: tenantRegistrations, logger });
-      }
-      : async () => undefined,
     writeTenantAppDatabases: units.writeTenantAppDatabases ? () => units.writeTenantAppDatabases!(db.db) : async () => undefined,
     syncReleaseKits: registrations && consumerRepo
       ? () => syncReleaseKits({
