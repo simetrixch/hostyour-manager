@@ -227,6 +227,6 @@ jobs:
             tag=latest
             case "$version" in *-*) tag="${version#*-}"; tag="${tag%%.*}" ;; esac
             echo "publish: ${name}@${version} with dist-tag ${tag}"
-            tarball="$(cd "$dir" && pnpm pack --json --pack-destination "$RUNNER_TEMP/packed" | jq -r .filename)"
+            tarball="$(cd "$dir" && pnpm pack --json --pack-destination "$RUNNER_TEMP/packed" | jq -er .filename)"
             npm publish "$tarball" --tag "$tag"
           done < "$RUNNER_TEMP/publishable.tsv"
