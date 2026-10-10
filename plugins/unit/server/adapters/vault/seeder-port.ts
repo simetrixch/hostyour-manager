@@ -373,8 +373,9 @@ export interface VaultSeeder {
    *  ok; every other non-2xx fails the run. */
   deleteTenantGoogleTranslation(input: TenantCryptoDeleteInput): Promise<void>;
   /** REPLACE a demo tenant's end-to-end password, <stage>/tenants/<guid>/e2e with the one property
-   *  `password`: created where absent, replaced where it stands, no check-and-set, because writing
-   *  again is the rotation and the tenant's auth applies the value at its next start. A leaf of its
+   *  `password`: created where absent, replaced where it stands (the leaf a failed switch on left),
+   *  no check-and-set. A switch on only runs for a tenant that is no demo, so its auth starts with
+   *  the value once it renders demo. A leaf of its
    *  own and not a property of the tenant's entry, because a Vault policy grants a path: the
    *  end-to-end task on the master may read this leaf, and never the tenant's signing key beside it.
    *  Write-only: nothing is read. */

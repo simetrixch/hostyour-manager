@@ -73,7 +73,7 @@ function mintE2ePasswordStep(ports: TenantOnboardPorts, p: TenantSetDemoParams):
       const { tc } = await currentDemo(ports, p, ctx);
       ctx.registerCleanup(undoE2ePassword(ports, p));
       await seederOf(ports).replaceTenantE2ePassword({ stage: tc.stage, guid: tc.guid, password: mintSecretValue("hex32") });
-      ctx.log("meta", `end-to-end password of tenant ${tc.guid} written to ${tenantE2ePasswordPath(tc.stage, tc.guid)}; its auth takes it at its next start`);
+      ctx.log("meta", `end-to-end password of tenant ${tc.guid} written to ${tenantE2ePasswordPath(tc.stage, tc.guid)}; its auth starts with it once it renders demo`);
     },
   };
 }
@@ -135,7 +135,11 @@ export function makeTenantSetDemoDef(ports: TenantOnboardPorts): RunDefinition<T
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-      const params = { ...request, previous: current.entry.demo ?? false, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
+      const previous = current.entry.demo ?? false;
+      // A switch on for a demo would mint a value its auth never takes, since nothing in its rendering
+      // changes and the auth reads the value only when it starts.
+      if (request.demo === previous) throw errValidation(`tenant ${tc.subdomain} is ${previous ? "already a demo" : "no demo"} — there is nothing to switch`);
+      const params = { ...request, previous, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentDemo(ports, params, ctx);
       const steps = demoSteps(ports, params);
       return { outcome: "planned", params, plan: {

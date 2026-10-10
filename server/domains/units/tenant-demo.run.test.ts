@@ -70,12 +70,12 @@ describe("standing tenant demo switch", () => {
   it("PLANTED DEFECT: every switch on writes a fresh value, and it reaches no log, checkpoint or table", async () => {
     seedClusters();
     const vault = recordingSeeder();
-    const prt = ports({ argo: new FakeMasterArgoReader({ statuses: rendering(true) }), seeder: vault.seeder });
     const logs: string[] = [];
     const checkpoints: unknown[] = [];
     const recording = (step: string): StepCtx => ({ ...ctx(params(), step, logs), checkpoint: (c: unknown) => void checkpoints.push(c) });
-    for (let i = 0; i < 2; i++) {
-      const { def, p } = await planned(prt, true);
+    const prt = ports({ seeder: vault.seeder });
+    for (const demo of [true, false, true]) {
+      const { def, p } = await planned(ports({ registrations: prt.registrations, argo: new FakeMasterArgoReader({ statuses: rendering(demo || undefined) }), seeder: vault.seeder }), demo);
       for (const step of def.steps(p)) await step.run(recording(step.name));
     }
     const [first, second] = vault.writes.map((w) => w.password);
@@ -87,6 +87,16 @@ describe("standing tenant demo switch", () => {
       expect(JSON.stringify(checkpoints)).not.toContain(value);
       expect(stored).not.toContain(value);
     }
+  });
+
+  it("PLANTED DEFECT: a switch to the mode the tenant already has is refused, so no value is minted that its auth never takes", async () => {
+    seedClusters();
+    const vault = recordingSeeder();
+    const prt = ports({ seeder: vault.seeder });
+    await expect(planned(prt, false)).rejects.toThrow(/is no demo — there is nothing to switch/);
+    await prt.registrations.setDemo("prod", GUID, true, "run_before");
+    await expect(planned(prt, true)).rejects.toThrow(/is already a demo — there is nothing to switch/);
+    expect(vault.writes).toEqual([]);
   });
 
   it("PLANTED DEFECT: an undone switch on takes the value back, and leaves it while the tenant stays a demo", async () => {
