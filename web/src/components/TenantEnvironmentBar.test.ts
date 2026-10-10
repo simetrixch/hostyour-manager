@@ -8,10 +8,10 @@ import { ChosenTenantEnvironment, TenantEnvironmentBar } from "./TenantEnvironme
 vi.mock("react-router", () => ({ Link: ({ to, children, className }: { to: string; children: import("react").ReactNode; className?: string }) => createElement("a", { href: to, className }, children) }));
 
 const row = (id: string, stage: TenantView["stage"], status: TenantView["status"], domain: string): TenantView =>
-  ({ id, guid: "ak64h58875qw", subdomain: "simetrix", stage, status, domain, suspended: false } as TenantView);
-const simetrix = [row("tnt_p", "prod", "active", "apps2.digitacloud.app"), row("tnt_t", "test", "active", "apps1.digitacloud.app"), row("tnt_d", "dev", "purged", "apps1.digitacloud.app")];
+  ({ id, guid: "ak64h58875qw", subdomain: "example", stage, status, domain, suspended: false } as TenantView);
+const example = [row("tnt_p", "prod", "active", "apps2.digitacloud.app"), row("tnt_t", "test", "active", "apps1.digitacloud.app"), row("tnt_d", "dev", "purged", "apps1.digitacloud.app")];
 const render = (selectedId: string, onSelect?: (r: TenantView) => void): string =>
-  renderToStaticMarkup(createElement(TenantEnvironmentBar, { group: groupTenantEnvironments(simetrix)[0]!, selectedId, onSelect }));
+  renderToStaticMarkup(createElement(TenantEnvironmentBar, { group: groupTenantEnvironments(example)[0]!, selectedId, onSelect }));
 
 describe("TenantEnvironmentBar", () => {
   it("names each standing environment with its machine, and offers + add where none stands", () => {
@@ -23,7 +23,7 @@ describe("TenantEnvironmentBar", () => {
     expect(html).toContain("no size recorded");
   });
   it("names each environment's size by its letter where the row records one", () => {
-    const sized = simetrix.map((r) => (r.id === "tnt_p" ? { ...r, size: "medium" as const } : r));
+    const sized = example.map((r) => (r.id === "tnt_p" ? { ...r, size: "medium" as const } : r));
     const html = renderToStaticMarkup(createElement(TenantEnvironmentBar, { group: groupTenantEnvironments(sized)[0]!, selectedId: "tnt_p" }));
     expect(html).toMatch(/PROD.*apps2\.digitacloud\.app<\/span> <span>M<\/span>/);
     expect(html).toMatch(/TEST.*apps1\.digitacloud\.app<\/span> <span class="muted">no size recorded/);
@@ -42,7 +42,7 @@ describe("TenantEnvironmentBar", () => {
 
 describe("ChosenTenantEnvironment", () => {
   // The Tenants card: what it opens and acts on is the environment the page URL names.
-  const card = (search: string, rows = simetrix): string =>
+  const card = (search: string, rows = example): string =>
     renderToStaticMarkup(createElement(ChosenTenantEnvironment, {
       group: groupTenantEnvironments(rows)[0]!, search: new URLSearchParams(search), setSearch: () => undefined,
       children: (t: TenantView, bar: import("react").ReactNode) => createElement("div", null, bar, createElement("a", { href: `/tenants/${t.id}` }, `Open ${t.stage}`)),
@@ -55,6 +55,6 @@ describe("ChosenTenantEnvironment", () => {
     const html = card("env.ak64h58875qw=test");
     expect(html).toContain('href="/tenants/tnt_t">Open test');
     expect(html).toMatch(/aria-selected="true"[^>]*>TEST/);
-    expect(card("env.ak64h58875qw=test", simetrix.map((r) => ({ ...r })))).toContain('href="/tenants/tnt_t">Open test');
+    expect(card("env.ak64h58875qw=test", example.map((r) => ({ ...r })))).toContain('href="/tenants/tnt_t">Open test');
   });
 });

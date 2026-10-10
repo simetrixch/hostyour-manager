@@ -8,7 +8,7 @@ import { appPath, TenantRegistrationSchema, websitePath } from "./tenant.ts";
 const site = (name: string, over: Record<string, unknown> = {}) => ({ name, folder: "web", site: name, ...over });
 function parse(apps: { name: string }[]) {
   const members = ["auth", "jobs", "report", ...apps.map((a) => a.name)].map((name) => ({ name, sources: [{ chart: `charts/example-${name}` }] }));
-  return TenantRegistrationSchema.safeParse({ members, identityProvider: "auth", cluster: "s1", subdomain: "simetrix", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false });
+  return TenantRegistrationSchema.safeParse({ members, identityProvider: "auth", cluster: "s1", subdomain: "example", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false });
 }
 const messages = (r: ReturnType<typeof parse>): string[] => (r.success ? [] : r.error.issues.map((i) => i.message));
 

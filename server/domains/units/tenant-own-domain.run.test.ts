@@ -92,7 +92,7 @@ describe("tenant-set-own-domain through the Executor", () => {
   });
 
   it("sets alias domains: a record at each and its www., a redirect awaited at each, and dropping one removes only its records", async () => {
-    const ALIAS = "simetrix.de";
+    const ALIAS = "example.de";
     const h = await make({ ownDomain: OWN, answers: [OWN], redirecting: [ALIAS, `www.${ALIAS}`] });
     h.dns.seed(OWN, "CNAME", ZONE);
     expect(getRun(h.db.db, await move(h, OWN, OWN, { ownDomainAliases: [ALIAS] }))?.status).toBe("succeeded");
@@ -109,8 +109,8 @@ describe("tenant-set-own-domain through the Executor", () => {
     const refusal = async (request: Record<string, unknown>) => (await plan(h, { previous: OWN, ...request })).error;
     expect(await refusal({ ownDomain: OWN, ownDomainAliases: ["customer.test"] })).toMatch(/already the own domain or a redirect host/);
     expect(await refusal({ ownDomain: OWN, ownDomainAliases: ["a.test", "a.test"] })).toMatch(/named twice/);
-    h.db.db.update(tenants).set({ ownDomainAliases: ["simetrix.de"] }).where(eq(tenants.id, "tnt_1")).run();
-    expect(await refusal({ ownDomain: "simetrix.de", previousAliases: ["simetrix.de"] })).toMatch(/drop the alias in one run/);
+    h.db.db.update(tenants).set({ ownDomainAliases: ["example.de"] }).where(eq(tenants.id, "tnt_1")).run();
+    expect(await refusal({ ownDomain: "example.de", previousAliases: ["example.de"] })).toMatch(/drop the alias in one run/);
   });
 
   it("does not take a 2xx for a redirect host: it must answer the redirect itself", async () => {
@@ -135,14 +135,14 @@ describe("tenant-set-own-domain through the Executor", () => {
 
   it("an abort after a failed redirect wait removes the new redirect host's record and records the previous hosts again", async () => {
     const h = await make({ answers: [OWN] });
-    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE], ownDomainAliases: ["simetrix.de"] });
+    const runId = await move(h, OWN, "", { ownDomainRedirects: [BARE], ownDomainAliases: ["example.de"] });
     expect(getRun(h.db.db, runId)?.status).toBe("failed");
-    expect([h.dns.record(BARE, "CNAME"), h.rowAliases()]).toEqual([ZONE, ["simetrix.de"]]);
+    expect([h.dns.record(BARE, "CNAME"), h.rowAliases()]).toEqual([ZONE, ["example.de"]]);
     await h.executor.abortWithCleanup(runId);
     await h.executor.settle(runId);
     expect(h.dns.record(BARE, "CNAME")).toBeUndefined();
     expect(h.dns.record(OWN, "CNAME")).toBeUndefined();
-    expect([h.rowRedirects(), await h.regRedirects(), h.rowAliases(), await h.regAliases(), h.dns.record("simetrix.de", "CNAME")]).toEqual([[], [], [], [], undefined]);
+    expect([h.rowRedirects(), await h.regRedirects(), h.rowAliases(), await h.regAliases(), h.dns.record("example.de", "CNAME")]).toEqual([[], [], [], [], undefined]);
   });
 
   it("REFUSES redirect hosts without a domain, twice named, equal to the domain, in the platform's name space, or another tenant's", async () => {

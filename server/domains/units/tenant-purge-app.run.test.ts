@@ -87,7 +87,7 @@ async function world(left: { namespace?: boolean; workloads?: string[]; serviceC
     stage: "prod", guid: GUID, runId: "run_onb",
     registration: {
       cluster: "s1", members: testMembers(apps), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
-      subdomain: "simetrix", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
+      subdomain: "example", apps, seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });
   const ports: TenantLifecyclePorts = {

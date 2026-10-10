@@ -42,11 +42,11 @@ describe("remove-app run", () => {
   it("the last app removed takes the tenant's apps build registration and the bundle fields with it, and leaves the repository standing; a sibling standing keeps them", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const reg = new TenantRegistrations(new FakePlatformRepo());
-    const bundle = { appsRepo: "https://github.com/acme-org/example-apps-simetrix.git", appsImage: "example-apps-simetrix", appsImageTag: "0.1.0-stable-20260101000000-abc1234" };
+    const bundle = { appsRepo: "https://github.com/acme-org/example-apps-example.git", appsImage: "example-apps-example", appsImageTag: "0.1.0-stable-20260101000000-abc1234" };
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry({ ...bundle, apps: TWO_APPS, members: testMembers(TWO_APPS) }), runId: "run_onb" });
     const githubApp = new FakeGitHubApp();
     githubApp.org = "acme-org";
-    githubApp.seedRepository("acme-org", "example-apps-simetrix");
+    githubApp.seedRepository("acme-org", "example-apps-example");
     const removedUnits: string[] = [];
     const prt = ports(reg, { githubApp, buildRegistrations: { removeBuildRegistration: async (name: string) => { removedUnits.push(name); return { removed: true }; } } as unknown as NonNullable<TenantLifecyclePorts["buildRegistrations"]> });
     const logs: string[] = [];
@@ -55,16 +55,16 @@ describe("remove-app run", () => {
     expect((await reg.readTenant("prod", GUID))?.entry.appsRepo).toBe(bundle.appsRepo);
     expect(logs.some((l) => l.includes("still deploys erp — its apps bundle stays registered"))).toBe(true);
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma2", { tenantId: "tnt_1", app: "erp" }, logs);
-    expect(githubApp.repos.has("acme-org/example-apps-simetrix")).toBe(true); // the repository stands (#241)
+    expect(githubApp.repos.has("acme-org/example-apps-example")).toBe(true); // the Manager deletes no repository
     expect(logs.some((l) => l === `repository ${bundle.appsRepo} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`)).toBe(true);
-    expect(removedUnits).toEqual(["example-apps-simetrix"]);
+    expect(removedUnits).toEqual(["example-apps-example"]);
     const after = (await reg.readTenant("prod", GUID))?.entry;
     expect(after?.apps).toEqual([]);
     expect(after?.appsRepo).toBeUndefined();
     expect(after?.appsImage).toBe("");
     // A resume finds nothing to delete and nothing to clear.
     await runAll(makeRemoveAppDef(prt).steps({ tenantId: "tnt_1", app: "erp" }), "run_rma3", { tenantId: "tnt_1", app: "erp" }, logs);
-    expect(removedUnits).toEqual(["example-apps-simetrix"]);
+    expect(removedUnits).toEqual(["example-apps-example"]);
     expect(logs.some((l) => l.includes("records no apps repository — nothing to take back"))).toBe(true);
   });
 

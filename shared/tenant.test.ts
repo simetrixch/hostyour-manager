@@ -38,7 +38,7 @@ function registration(over: Record<string, unknown> = {}): unknown {
     members: testMembers([{ name: "erp" }]),
     identityProvider: "auth",
     cluster: "s1",
-    subdomain: "simetrix",
+    subdomain: "example",
     apps: [{ name: "erp" }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
@@ -135,7 +135,7 @@ describe("subdomain — one DNS label, never a stage word", () => {
       expect(refused.success, word).toBe(false);
       expect(refused.error?.issues[0]?.message).toMatch(/platform host/);
     }
-    expect(subdomain.safeParse("simetrix").success).toBe(true);
+    expect(subdomain.safeParse("example").success).toBe(true);
   });
 });
 
@@ -151,7 +151,7 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
   });
 
   it("applies defaults for apps/seedUsers/resetNonce/suspended/quiesced when omitted", () => {
-    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.apps).toEqual([]);
     expect(parsed.seedUsers).toBe(false);
     expect(parsed.resetNonce).toBe("1");
@@ -446,13 +446,13 @@ describe("isOlderRelease — the order of two approved image tags (#297)", () =>
 
 describe("tenantDisplayName", () => {
   it("admits a name digita-post parses in `Name <address>`, any script, and the empty name", () => {
-    for (const name of ["", "Simetrix", "Simetrix GmbH & Co.", "Müller & O'Brien", "Ελληνικά 2", "Show-Case"]) {
+    for (const name of ["", "Example", "Example GmbH & Co.", "Müller & O'Brien", "Ελληνικά 2", "Show-Case"]) {
       expect(tenantDisplayName.safeParse(name).success, name).toBe(true);
     }
   });
 
   it("PLANTED: refuses each character post's sender parsing refuses, a name past 64 characters, and padding", () => {
-    for (const name of ["A, B", "A <b>", 'A "B"', "A (B)", "a@b", "A\\B", "A;B", "x".repeat(65), " Simetrix", "Simetrix "]) {
+    for (const name of ["A, B", "A <b>", 'A "B"', "A (B)", "a@b", "A\\B", "A;B", "x".repeat(65), " Example", "Example "]) {
       expect(tenantDisplayName.safeParse(name).success, name).toBe(false);
     }
   });
@@ -462,7 +462,7 @@ describe("tenantDisplayName", () => {
   });
 
   it("defaults a registration written before the field existed to the empty name", () => {
-    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "simetrix", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.displayName).toBe("");
   });
 });
