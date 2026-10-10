@@ -3,7 +3,10 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pino, type Logger } from "pino";
+import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../db/client.ts";
+import { runLocks } from "../db/schema/runs.ts";
+import { runAsActor } from "../kernel/actor.ts";
 import type { Executor } from "./executor.ts";
 import { getRun, readEvents } from "./read.ts";
 import { listLocks, releaseLocks } from "./locks.ts";
@@ -94,6 +97,21 @@ describe("the run queue", () => {
     expect([first, again]).toEqual([[b], []]);
     expect(listLocks(db.db).map((l) => l.runId)).toEqual([b]);
     w.open("a");
+  });
+
+  it("starts a queued run as its owner, not as the operator whose run freed its claims", async () => {
+    const w = world();
+    w.blocking.set("a", () => undefined);
+    const { db, executor } = managerOver(file(), w.def);
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_alice', 'alice', 'Alice', 'op_system', 'op_system'), ('op_bob', 'bob', 'Bob', 'op_system', 'op_system')").run();
+    const a = await runAsActor("op_alice", () => plan(executor, "a", ["deploy@main"]));
+    const b = await runAsActor("op_bob", () => plan(executor, "b", ["deploy@main"]));
+    await runAsActor("op_alice", () => executor.approve(a));
+    await until(() => w.started.includes("a"));
+    expect(await runAsActor("op_bob", () => executor.approve(b))).toEqual({ status: "queued" });
+    w.open("a");
+    await executor.settle(b);
+    expect(db.db.select({ owner: runLocks.owner }).from(runLocks).where(eq(runLocks.runId, b)).all()).toEqual([{ owner: "op_bob" }]);
   });
 
   it("keeps the queue across a Manager restart, and starts the run once its failed holder is deleted", async () => {
