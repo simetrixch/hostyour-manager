@@ -59,8 +59,9 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     const log = deps.logger.child({ route: "reset" });
     const operator = c.get("operator");
 
-    // Every refusal leaves an audit trace (log-everything) BEFORE it throws.
-    const refuse = (err: AppError): never => {
+    // Every refusal leaves an audit trace (log-everything) BEFORE it throws. The declared type lets
+    // a call narrow what follows it, which an arrow's own return annotation does not.
+    const refuse: (err: AppError) => never = (err) => {
       writeAudit(deps.db, {
         action: "manager.reset.refused",
         detail: { reason: err.message, via: operator.via },
@@ -81,25 +82,25 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     }
     const parsed = ResetInput.safeParse(await c.req.json().catch(() => ({})));
     if (!parsed.success) refuse(errValidation(parsed.error.issues.map((i) => `${i.path.join(".") || "(body)"}: ${i.message}`).join("; ")));
-    const input = parsed.data!; // narrowed: refuse() returns never
+    const input = parsed.data;
     if (input.confirm !== "RESET") refuse(errValidation('confirmation failed — type "RESET" (exactly) to confirm'));
     const branches = [...new Set(input.deleteBranches)];
     if (branches.length === 0) refuse(errValidation("nothing to reset: no branches are selected"));
 
     // A reset NEVER runs beside live runs — its branch deletes race a deploy-slave's pushes.
     const live = countLiveRuns(deps.sqlite);
-    if (live > 0) refuse(errIllegalTransition(`cannot reset: ${live} run(s) in flight (planning/approved/running) — cancel or let them finish`));
+    if (live > 0) refuse(errIllegalTransition(`cannot reset: ${live} run(s) in flight (planning/queued/approved/running) — cancel or let them finish`));
 
     if (!deps.github) refuse(errNotConfigured("GitHub is not configured (set GITHUB_REPO + GITHUB_WRITE_PAT) — branch deletion is unavailable"));
-    const gh = deps.github!;
+    const gh = deps.github;
     // The master's install branch is TWO things at once here, which is why one derivation serves
     // both: it is the shape every deletable install branch is measured against, and it is the
     // branch this installation keeps its books on — so it is also where the cluster maps stand
     // that step 2 reconciles.
     const masterBranch = booksBranch(deps.db, deps.config.master?.fqdn);
     if (!masterBranch) refuse(errValidation("no master FQDN derivable (no role=master row, MASTER_FQDN unset) — refusing branch deletion"));
-    if (!masterBranch!.includes(".")) refuse(errValidation(`master FQDN "${masterBranch}" has no base domain — refusing branch deletion (no derivable install-branch shape)`));
-    const base = masterBranch!.slice(masterBranch!.indexOf(".") + 1);
+    if (!masterBranch.includes(".")) refuse(errValidation(`master FQDN "${masterBranch}" has no base domain — refusing branch deletion (no derivable install-branch shape)`));
+    const base = masterBranch.slice(masterBranch.indexOf(".") + 1);
     const installShape = new RegExp(`^[a-z0-9-]+\\.${base.replaceAll(".", "\\.")}$`);
     for (const b of branches) {
       if (b === "master") refuse(errValidation('refusing: "master" is never deletable'));
@@ -111,8 +112,8 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     resetInFlight = true;
     try {
       const outcomes: ResetBranchOutcome[] = [];
-      let pointers: ResetPointerOutcome | undefined;
-      const deletingMaster = branches.includes(masterBranch!);
+      let pointers: ResetPointerOutcome;
+      const deletingMaster = branches.includes(masterBranch);
       const slaveBranches = branches.filter((b) => b !== masterBranch);
 
       // ---- 1. one listBranches: sha capture (the undo anchor) + orphan-map detection ------------
@@ -130,7 +131,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // reconciliation runs only with the master's own install branch present in the listing: that
       // branch is the proof that these branches belong to the repo this manager was installed
       // from. Maps SELECTED for deletion need no such proof — the operator named them.
-      const reconcileOrphans = shaByName.has(masterBranch!);
+      const reconcileOrphans = shaByName.has(masterBranch);
 
       // ---- 2. cluster maps, ahead of the branches they describe: a branch removed while its map
       // stands leaves a phantom <name>-apps syncing a dead branch. Reconciles ORPHANS too, so a
@@ -139,7 +140,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // deletes THAT branch (the explicit includeMaster opt-in) takes the maps with it wholesale,
       // which is the same outcome by a shorter road.
       try {
-        const blobs = await gh.listBlobs(masterBranch!);
+        const blobs = await gh.listBlobs(masterBranch);
         const selected = new Set(branches);
         const candidates = blobs.filter((p) => {
           const m = MARKING_RE.exec(p);
@@ -148,12 +149,12 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
           return selected.has(fqdn) || (reconcileOrphans && !shaByName.has(fqdn));
         });
         if (candidates.length > 0) {
-          const res = await gh.deletePaths(masterBranch!, candidates,
+          const res = await gh.deletePaths(masterBranch, candidates,
             `reset: remove cluster maps (${candidates.map((p) => MARKING_RE.exec(p)?.[1]).join(", ")})`);
-          pointers = { branch: masterBranch!, removed: res.removed, commit: res.commitSha };
+          pointers = { branch: masterBranch, removed: res.removed, commit: res.commitSha };
           log.info({ branch: masterBranch, removed: res.removed, commit: res.commitSha }, "reset: removed cluster maps");
         } else {
-          pointers = { branch: masterBranch!, removed: [], commit: null };
+          pointers = { branch: masterBranch, removed: [], commit: null };
         }
       } catch (err) {
         // The last refusal. deletePaths builds the tree and the commit before it moves the ref, and
@@ -178,13 +179,13 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
 
       // ---- 4. master install branch LAST among remote ops (opt-in gated above) ---------------------------
       if (deletingMaster) {
-        const sha = shaByName.get(masterBranch!);
+        const sha = shaByName.get(masterBranch);
         try {
-          await gh.deleteBranch(masterBranch!);
-          outcomes.push({ branch: masterBranch!, ok: true, ...(sha ? { sha } : {}) });
+          await gh.deleteBranch(masterBranch);
+          outcomes.push({ branch: masterBranch, ok: true, ...(sha ? { sha } : {}) });
           log.warn({ branch: masterBranch, sha, actor: operator.sub }, "reset: deleted the MASTER's own install branch (explicit opt-in)");
         } catch (err) {
-          outcomes.push({ branch: masterBranch!, ok: false, ...(sha ? { sha } : {}), error: msg(err) });
+          outcomes.push({ branch: masterBranch, ok: false, ...(sha ? { sha } : {}), error: msg(err) });
           log.error({ branch: masterBranch, err: msg(err) }, "reset: master install branch NOT deleted");
         }
       }
@@ -193,14 +194,14 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // It may not throw here: the branch shas in `outcomes` reach durable storage nowhere else, and
       // a 500 would drop them. Logged at error level instead, with the whole detail, so the record
       // survives even when the row does not.
-      const detail = { via: operator.via, includeMaster: input.includeMaster, branches: outcomes, pointers: pointers! };
+      const detail = { via: operator.via, includeMaster: input.includeMaster, branches: outcomes, pointers };
       try {
         writeAudit(deps.db, { action: "manager.reset", detail });
       } catch (err) {
         log.error({ err: msg(err), actor: operator.sub, detail }, "reset: the audit entry could NOT be written — this log line is the only record of what the reset did");
       }
 
-      return c.json({ ok: outcomes.every((o) => o.ok), branches: outcomes, pointers: pointers! } satisfies ResetResult);
+      return c.json({ ok: outcomes.every((o) => o.ok), branches: outcomes, pointers } satisfies ResetResult);
     } finally {
       resetInFlight = false;
     }

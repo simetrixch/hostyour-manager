@@ -20,15 +20,17 @@ describe("the reset's database read (db/reset.ts)", () => {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  it("countLiveRuns counts only planning/approved/running", () => {
+  it("countLiveRuns counts only planning/queued/approved/running", () => {
     const db = make();
     const ins = (id: string, status: string) =>
       db.sqlite.prepare(`INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('${id}','noop','self','c','{}','{}','${status}','op_system','op_system')`).run();
     ins("r_plan", "planned"); // parked — not live
     ins("r_done", "succeeded");
     expect(countLiveRuns(db.sqlite)).toBe(0);
-    ins("r_run", "running");
+    ins("r_pln", "planning");
+    ins("r_que", "queued");
     ins("r_appr", "approved");
-    expect(countLiveRuns(db.sqlite)).toBe(2);
+    ins("r_run", "running");
+    expect(countLiveRuns(db.sqlite)).toBe(4);
   });
 });
