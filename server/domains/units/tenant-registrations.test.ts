@@ -12,7 +12,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   return {
     cluster: "s1",
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
-    identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+    identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain: "simetrix",
     apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"),
@@ -100,7 +100,7 @@ describe("TenantRegistrations", () => {
     const reg = new TenantRegistrations(repo);
     const full = registration({
       cluster: "s1", subdomain: "simetrix",
-      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+      members: testMembers([{ name: "erp", seedReference: true, seedDemo: false, selections: {} }]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       apps: [{ name: "erp", seedReference: true, seedDemo: false, selections: {} }],
       seedUsers: true, quota: seedQuota("small"), resetNonce: "7", suspended: true, quiesced: true,
     });
@@ -385,7 +385,7 @@ describe("the pointer scan reports what it could NOT read", () => {
       entry: {
         guid: GUID, subdomain: "simetrix", stage: "dev", cluster: "s1",
         members: ["auth", "jobs", "report", "erp"],
-        routing: "host", ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [],
+        ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [],
         senderDomain: "", identityProvider: "auth",
         apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
       },

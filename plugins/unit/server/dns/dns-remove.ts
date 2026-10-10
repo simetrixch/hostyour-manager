@@ -21,7 +21,7 @@ import { deleteRecord, ownedRecords, ownerSentence, providerRemoval, removableRe
 // run carries no elevation password, no session and no program.
 
 const DnsRemoveRecord = z.object({
-  /** The record NAME exactly as the inventory carries it — a host, a wildcard, or a mail record's
+  /** The record NAME exactly as the inventory carries it — a host, a zone, or a mail record's
    *  own name (`<stage>._domainkey.<domain>`, `_dmarc.<domain>`). */
   name: z.string().min(1),
   type: z.enum(DNS_RECORD_TYPE),

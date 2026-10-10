@@ -20,7 +20,7 @@ import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, seededPlatformRepo, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
+import { WEBSITE_APPS, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
 
 // A website of a live tenant, added, moved and removed: named after its site, running the bundle's
 // folder `web`, served at <domain> with www.<domain> redirecting there, its hosts pointed at the
@@ -45,7 +45,7 @@ function seedOtherTenantWebsite(repo: FakePlatformRepo, domain: string): void {
 
 describe("add-app for a website", () => {
   it("plans a website named after its site, running the web folder, with the records of both its hosts", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const def = makeAddAppDef(websitePorts({ dns: new FakeDnsProvider() }));
     const result = await def.planStream!(WEBSITE, planCtx());
     expect(result.outcome).toBe("planned");
@@ -64,7 +64,7 @@ describe("add-app for a website", () => {
 
   // A tenant without a bundle of its own gets the site's folder from the template.
   it("carries only the site it serves from the template into the bundle of a tenant without one, and lists only that site", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const sites = { "webs/main/website.json": "{}\n", "webs/shop/website.json": "{}\n" };
     const prt = ports({ dns: new FakeDnsProvider(), registrations: withoutBundle() }, { ...WEBSITE_APPS, ...sites });
     const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
@@ -81,7 +81,7 @@ describe("add-app for a website", () => {
   });
 
   it("refuses a website not named after its site, a domain typed with www, and a domain another website serves", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const def = makeAddAppDef(ports({}, WEBSITE_APPS));
     // The name a website got from its domain before is no name for a new one.
     await expect(def.planStream!({ ...WEBSITE, app: "example-ch" }, planCtx())).rejects.toThrow(/a website of site main is named main, or that name with -2, -3 and on where it is taken, never example-ch/);
@@ -92,7 +92,7 @@ describe("add-app for a website", () => {
   });
 
   it("takes the numbered name of a site whose id the tenant already carries, and refuses the id itself", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "main" }]);
     const def = makeAddAppDef(websitePorts({ registrations, dns: new FakeDnsProvider() }));
     await expect(def.planStream!(WEBSITE, planCtx())).rejects.toThrow(/app "main" already exists/);
@@ -101,13 +101,13 @@ describe("add-app for a website", () => {
   });
 
   it("refuses a website whose site the catalog carries no folder for under webs/, naming the folder, for a tenant without a bundle", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const withoutSite = { "apps.yaml": WEBSITE_APPS["apps.yaml"], "webs/shop/website.json": "{}\n" };
     await expect(makeAddAppDef(ports({ registrations: withoutBundle() }, withoutSite)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/carries no webs\/main\/ although its apps\.yaml names it/);
   });
 
   it("lists an address record at a website host in the plan, replaces it with the CNAME, and writes it back on abort", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const dns = new FakeDnsProvider();
     dns.seed("www.example.ch", "A", "192.0.2.10");
     const result = await makeAddAppDef(websitePorts({ dns })).planStream!(WEBSITE, planCtx());
@@ -124,14 +124,14 @@ describe("add-app for a website", () => {
   });
 
   it("writes no record for a website on the tenant's own domain, whose records tenant-set-own-domain holds", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const own = tenantWith([], { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] });
     const result = await makeAddAppDef(websitePorts({ registrations: own })).planStream!(WEBSITE, planCtx());
     expect(result.outcome === "planned" && result.params.websiteRecordHosts).toEqual([]);
   });
 
   it("records the site of a website in the inventory, which keeps it out of the Apps list once it is removed", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" } });
     await makeAddAppDef(ports({})).steps(p).find((s) => s.name === "record-inventory")!.run(ctx(p, "record-inventory", []));
     const site = (name: string) => db.db.select({ site: tenantApps.site }).from(tenantApps).where(and(eq(tenantApps.tenantId, "tnt_1"), eq(tenantApps.name, name))).get()?.site;
@@ -144,7 +144,7 @@ describe("add-app for a website", () => {
   });
 
   it("points both hosts at the tenant's zone, then waits until the site answers at its domain and its www host redirects", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const dns = new FakeDnsProvider();
     const probe = new FakePublicProbe({ "https://example.ch/": OK, "https://www.example.ch/": REDIRECTS });
     const p = params({ app: "main", website: { folder: "web", site: "main", domain: "example.ch" }, websiteRecordHosts: ["example.ch", "www.example.ch"] });
@@ -158,7 +158,7 @@ describe("add-app for a website", () => {
   });
 
   it("removes a website's records with its drop, and again off the checkpoint on a resume after the drop", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const dns = new FakeDnsProvider();
     for (const name of ["www.example.ch", "example.ch"]) {
       dns.seed(name, "CNAME", "acme.example.com");
@@ -182,10 +182,8 @@ describe("add-app for a website", () => {
     expect(def.cleanups!(p).map((c) => c.name)).toEqual(expect.arrayContaining(["revert-app-append", "remove-website-records"]));
   });
 
-  it("refuses a website on a host-routed tenant and at a domain another tenant's website serves", async () => {
+  it("refuses a website at a domain another tenant's website serves", async () => {
     seedClusters();
-    await expect(makeAddAppDef(ports({}, WEBSITE_APPS)).planStream!(WEBSITE, planCtx())).rejects.toThrow(/is on host routing/);
-    db.db.update(tenants).set({ routing: "path" }).where(eq(tenants.id, "tnt_1")).run();
     const repo = new FakePlatformRepo();
     seedOtherTenantWebsite(repo, "example.ch");
     const registrations = tenantWith([], undefined, repo);
@@ -193,7 +191,7 @@ describe("add-app for a website", () => {
   });
 
   it("leaves a website's hosts standing when the tenant's own domain moves away from them", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     db.db.update(tenants).set({ ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] }).where(eq(tenants.id, "tnt_1")).run();
     const dns = new FakeDnsProvider();
     for (const name of ["www.example.ch", "example.ch"]) {
@@ -209,7 +207,7 @@ describe("add-app for a website", () => {
   });
 
   it("refuses an own-domain alias a website of the tenant serves, and keeps a previous host a website answers at off the aliases", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const own = { ownDomain: "www.example.ch", ownDomainRedirects: ["example.ch"] };
     db.db.update(tenants).set(own).where(eq(tenants.id, "tnt_1")).run();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }], own);
@@ -231,7 +229,7 @@ describe("tenant-set-website-domain", () => {
   const MOVE = { tenantId: "tnt_1", app: "example-ch", domain: "example.org" };
 
   it("plans the move with the member resolved again at the new domain, keeping the previous domain as an alias", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const result = await makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, WEBSITE_APPS)).planStream!(MOVE, planCtx());
     expect(result.outcome).toBe("planned");
@@ -242,7 +240,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("moves a website whose site the template catalog no longer lists: the catalog does not judge a standing website", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const noSites = { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n  - name: web\n    title: Website\n" };
     const logs: string[] = [];
@@ -253,7 +251,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("refuses an app that is no website, the domain it already has, a domain another website serves, and a domain typed with www", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations }, WEBSITE_APPS));
     await expect(def.planStream!({ ...MOVE, app: "erp" }, planCtx())).rejects.toThrow(/is no website/);
@@ -263,7 +261,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("records the new domain and member in one commit, and keeps the previous hosts' records for the alias; an abort puts the previous ones back", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     for (const name of ["www.example.ch", "example.ch"]) {
@@ -290,7 +288,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("puts nothing back on abort once another run moved the website on", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const prt = ports({ registrations, repo: withDomain() }, WEBSITE_APPS);
     const planned = await makeTenantSetWebsiteDomainDef(prt).planStream!(MOVE, planCtx());
@@ -303,7 +301,7 @@ describe("tenant-set-website-domain", () => {
     expect(logs.some((l) => l.includes("stands at example.net now"))).toBe(true);
   });
   it("gives a website alias domains at the same domain, and drops one again, its records with it", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     const probe = new FakePublicProbe({ "https://example.ch/": OK, "https://www.example.ch/": REDIRECTS, "https://example.de/": REDIRECTS, "https://www.example.de/": REDIRECTS });
@@ -334,7 +332,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("refuses an alias that is the domain, named twice, or a host the tenant serves, a domain another website has as alias, nothing changed, and a move to a current alias", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch", aliases: ["example.de"] }, { name: "shop", folder: "web", site: "shop", domain: "example.net", aliases: ["example.it"] }]);
     const def = makeTenantSetWebsiteDomainDef(ports({ registrations }, WEBSITE_APPS));
     await expect(def.planStream!({ ...MOVE, domain: "example.it" }, planCtx())).rejects.toThrow(/example\.it is a host another website/);
@@ -347,7 +345,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("repairs a website that stands at its domain but misses a host record: writes that record alone, and records nothing", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     // The apex stands, written for the tenant; www.example.ch was never written.
@@ -371,7 +369,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("refuses a website that stands at its domain with every host record standing, or pointing elsewhere", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     dns.seed("example.ch", "CNAME", "acme.example.com");
@@ -381,7 +379,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("names in the repair plan the hosts it leaves alone, where a record somebody else wrote stands", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch", aliases: ["example.de"] }]);
     const dns = new FakeDnsProvider();
     dns.seed("example.ch", "CNAME", "acme.example.com");
@@ -395,7 +393,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("says why it cannot repair where no DNS provider is configured, or the website's zone is managed elsewhere", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const without = makeTenantSetWebsiteDomainDef(ports({ registrations, repo: withDomain() }, WEBSITE_APPS));
     await expect(without.planStream!({ ...MOVE, domain: "example.ch" }, planCtx())).rejects.toThrow(/already served at example\.ch; no DNS provider is configured on this manager, so its host records are set at the provider of each host/);
@@ -406,7 +404,7 @@ describe("tenant-set-website-domain", () => {
   });
 
   it("refuses to start where a mail record beside its hosts changed since the plan", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }]);
     const dns = new FakeDnsProvider();
     dns.seed("example.org", "MX", "10 mx.example.net");

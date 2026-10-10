@@ -4,7 +4,7 @@ import type { RunView } from "../../../shared/api-types.ts";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import {
   getTenant, setTenantFollowReleases, getTenantAppCatalog, recordOwnerCredential, removeTenantApp, offboardTenant, suspendTenant, resumeTenant, restartTenantWorkloads, purgeTenant,
-  setTenantSize, setTenantRouting, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants, planRun,
+  setTenantSize, setTenantDemo, setTenantVersions, planTenantLineMove, backupTenant, restoreTenant, migrateTenant, listTenantTargets, listTenantBackups, listRuns, listTenants, planRun,
   type TenantDetailView, type TenantView,
 } from "../api.ts";
 import { groupTenantEnvironments, tenantConfirmTitle, tenantRowOffer, typedConfirmation } from "../tenantRows.ts";
@@ -13,7 +13,6 @@ import { listedWebsites, removedWebsites } from "../tenantAppRows.ts";
 import { relocationRun, relocationLine } from "../relocationBand.ts";
 import { ConfirmDialog } from "../components/ConfirmDialog.tsx";
 import { SetSizeDialog } from "../components/SetSizeDialog.tsx";
-import { SetRoutingAction } from "../components/SetRoutingAction.tsx";
 import { SetDemoAction } from "../components/SetDemoAction.tsx";
 import { TenantDomainActions } from "../components/TenantDomainActions.tsx";
 import { TenantMoveAction } from "../components/TenantMoveAction.tsx";
@@ -271,7 +270,6 @@ export function TenantDetail() {
           )}
           {/* Not offered on a suspended tenant: it renders no ingress, so its new address could never
               answer and the run's wait could not end — the route refuses it too. */}
-          {!unfinished && !t.suspended && <SetRoutingAction subdomain={t.subdomain} routing={t.routing} busy={busy} onRoute={(next) => void act(() => setTenantRouting(tenantId, next))} />}
           {!unfinished && !t.suspended && <SetDemoAction busy={busy} onSet={(demo) => void act(() => setTenantDemo(tenantId, demo))} />}
           {!unfinished && !t.suspended && <TenantDomainActions t={t} busy={busy} act={act} />}
           {!unfinished && !t.suspended && <TenantVersionsAction tenantId={tenantId} subdomain={t.subdomain} busy={busy} onSet={(versions) => void act(() => setTenantVersions(tenantId, versions))} onMoveLine={(line) => void act(() => planTenantLineMove(tenantId, line))} following={t.followReleases} onFollow={(on) => void setTenantFollowReleases(tenantId, on).then(() => setTenant((cur) => cur && { ...cur, followReleases: on })).catch((err: unknown) => setError(msg(err)))} />}

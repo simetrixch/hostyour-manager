@@ -4,8 +4,8 @@ import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { APP_OVERLAYS, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant, tenantWith } from "./tenant-website.fixture.ts";
+import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb, seedClusters } from "./add-app.fixture.ts";
+import { WEBSITE_APPS, tenantWith } from "./tenant-website.fixture.ts";
 import { makeTenantSetWebsiteSiteDef } from "./tenant-website-site.run.ts";
 
 // A website of a live tenant moved to another site of the tenant's bundle: the site, its member and the
@@ -35,7 +35,7 @@ describe("tenant-set-website-site", () => {
   const website = [{ name: "example-ch", folder: "web", site: "main", domain: "example.ch" }];
 
   it("plans the site and the bundle release in one move, with the member resolved again at the new site", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith(website);
     const result = await makeTenantSetWebsiteSiteDef(ports({ registrations, repo: repoWith() }, WEBSITE_APPS)).planStream!(RENAME, planCtx());
     expect(result.outcome === "planned" ? "planned" : result.summary).toBe("planned");
@@ -48,7 +48,7 @@ describe("tenant-set-website-site", () => {
   });
 
   it("refuses an app that is no website, the site it serves, a site another website serves, and a site the release does not list", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith([...website, { name: "shop", folder: "web", site: "shop", domain: "example.net" }]);
     const def = makeTenantSetWebsiteSiteDef(ports({ registrations, repo: repoWith("apps:\n  - name: web\n    title: Website\n    sites: [main, renamed, shop]\n") }, WEBSITE_APPS));
     await expect(def.planStream!({ ...RENAME, app: "erp" }, planCtx())).rejects.toThrow(/is no website/);
@@ -58,7 +58,7 @@ describe("tenant-set-website-site", () => {
   });
 
   it("refuses a bundle that is no image tag, one older than the tenant runs, one off the engines' line, and one the registry does not hold", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const def = (over: Parameters<typeof ports>[0]) => makeTenantSetWebsiteSiteDef(ports({ registrations: tenantWith(website), ...over }, WEBSITE_APPS));
     await expect(def({ repo: repoWith() }).planStream!({ ...RENAME, appsImageTag: "latest" }, planCtx())).rejects.toThrow();
     const older = "0.0.9-stable-20251201000000-0123456";
@@ -76,7 +76,7 @@ describe("tenant-set-website-site", () => {
   });
 
   it("PLANTED DEFECT: writes the site, the member and the bundle release in one commit, and keeps the website's databases", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const books = new FakePlatformRepo();
     const registrations = tenantWith(website, undefined, books);
     const before = (await registrations.readTenant("prod", GUID))!.entry;
@@ -100,7 +100,7 @@ describe("tenant-set-website-site", () => {
   });
 
   it("refuses to write where another run moved the website or the bundle since the plan", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith(website);
     const prt = ports({ registrations, repo: repoWith() }, WEBSITE_APPS);
     const planned = await makeTenantSetWebsiteSiteDef(prt).planStream!(RENAME, planCtx());
@@ -120,7 +120,7 @@ describe("tenant-set-website-site", () => {
   });
 
   it("refuses an abort once the new site is written: the catalog's migration renames the records on the first boot", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = tenantWith(website);
     const prt = ports({ registrations, repo: repoWith() }, WEBSITE_APPS);
     const def = makeTenantSetWebsiteSiteDef(prt);

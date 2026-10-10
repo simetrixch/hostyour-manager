@@ -9,8 +9,8 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, db, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant } from "./tenant-website.fixture.ts";
+import { GUID, db, planCtx, ports, useMemoryDb, seedClusters } from "./add-app.fixture.ts";
+import { WEBSITE_APPS } from "./tenant-website.fixture.ts";
 
 // One tenant at two stages under one zone: the stage rule puts every test host at
 // <x>.test.<zone>, under the zone's apex. That nesting is the rule's own, so a site at the apex at
@@ -26,7 +26,7 @@ function registered(stage: Stage, own: string, site: { domain: string }): Tenant
   const all = [{ name: "erp" }, { folder: "web", ...SITE, ...site }];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "simetrix", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,
-    routing: "path", ownDomain: own, ownDomainRedirects: [`www.${own}`],
+    ownDomain: own, ownDomainRedirects: [`www.${own}`],
   });
   const w = tenantRegistrationWrite(stage, GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -35,13 +35,13 @@ function registered(stage: Stage, own: string, site: { domain: string }): Tenant
 
 /** tnt_1 at `stage` on `own`, and a second row `other` holding `otherOwn` at the other stage. */
 function world(stage: Stage, own: string, other: { guid: string; stage: Stage; own: string }): FakeDnsProvider {
-  seedWebsiteTenant();
+  seedClusters();
   db.db.update(clusters).set({ stage }).where(eq(clusters.id, "cls_1")).run();
   db.db.update(tenants).set({ stage, subdomain: "simetrix", ownDomain: own, ownDomainRedirects: [`www.${own}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: other.stage, domain: "s2.example", name: "s2", status: "active" }).run();
   db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_2", guid: other.guid, subdomain: other.guid === GUID ? "simetrix" : "other", stage: other.stage,
-    members: ["auth"], identityProvider: "auth", routing: "path", ownDomain: other.own, ownDomainRedirects: [`www.${other.own}`], status: "active" }).run();
+    members: ["auth"], identityProvider: "auth", ownDomain: other.own, ownDomainRedirects: [`www.${other.own}`], status: "active" }).run();
   const dns = new FakeDnsProvider();
   dns.zones = [ZONE];
   return dns;

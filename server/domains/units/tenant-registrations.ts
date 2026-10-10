@@ -27,7 +27,7 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
 import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
-import { STAGE, type MemberRouting, type Stage } from "../../../shared/enums.ts";
+import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
 // declared here and mirrored there — see that file's tenants section for what a mirror costs.
@@ -88,9 +88,6 @@ export interface ScannedTenant {
    *  product names the members that tenant actually has. */
   members: string[];
   identityProvider: string;
-  /** How the tenant's members are addressed below its zone, off its own registration — what the DNS
-   *  inventory names the tenant's record by (the wildcard or the zone). */
-  routing: MemberRouting;
   /** The tenant's own domain, or "" — the inventory lists its record beside the zone's. */
   ownDomain: string;
   /** The hosts that redirect to the own domain, and its alias domains — the inventory lists their records too. */
@@ -198,7 +195,7 @@ export class TenantRegistrations {
       status: "read",
       entry: {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
-        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, routing: r.data.routing, ownDomain: r.data.ownDomain,
+        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
         senderDomain: r.data.senderDomain ?? "",
       },
@@ -376,15 +373,6 @@ export class TenantRegistrations {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     return this.write(stage, guid, { ...current.entry, size, quota }, `size(${guid}) ${trailer(runId)}`);
-  }
-
-  /** Write how the tenant's members are addressed below its zone. One field of one file, like the
-   *  flips above; writing the routing it already has commits nothing. tenant-set-routing moves the
-   *  DNS record around this write. */
-  async setRouting(stage: Stage, guid: string, routing: MemberRouting, runId: string): Promise<{ commit: string }> {
-    const current = await this.readTenant(stage, guid);
-    if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    return this.write(stage, guid, { ...current.entry, routing }, `routing(${guid}): ${routing} ${trailer(runId)}`);
   }
 
   async setDemo(stage: Stage, guid: string, demo: boolean, runId: string): Promise<{ commit: string }> {

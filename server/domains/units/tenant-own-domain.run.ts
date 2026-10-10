@@ -7,12 +7,12 @@ import { tenants } from "../../db/schema/inventory.ts";
 import type { Db } from "../../db/client.ts";
 import { TENANT_SETTLED_STATUS } from "../../../shared/enums.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
-import { attestTenantTargetStep, loadTenantCluster, type TenantCluster } from "./lifecycle.ts";
+import { attestTenantTargetStep, loadTenantCluster, type TenantCluster, type TenantLifecyclePorts } from "./lifecycle.ts";
 import { refuseOffStageHosts } from "./stage-hosts.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { tenantMemberUrl, tenantZone } from "#unit/server/unit-dns.ts";
 import { aliasHosts, tenantOwnHosts as ownHosts } from "#unit/shared/unit-host.ts";
-import type { TenantSetRoutingPorts } from "./tenant-routing.run.ts";
+import type { PublicProbe } from "#unit/server/adapters/http-probe/port.ts";
 import { appName, TenantMemberRecordSchema } from "../../../shared/tenant.ts";
 import {
   checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, provisionOwnDomainRecord, recordsToReplace, removeOwnDomainRecord,
@@ -28,8 +28,8 @@ const OWN_DOMAIN_NEXT = "The previous hosts still stand: retry this step once th
 //
 // WHY IT EXISTS. A tenant is reached at its zone `<subdomain>.<stage apex>`. A customer may bring an
 // own domain instead, which replaces the zone as the tenant's one host: every member stands under a
-// path of it (so it needs `path` routing), and the zone's own record stays, because the product's
-// charts answer the zone with a redirect to the domain. The customer may switch the domain later.
+// path of it, and the zone's own record stays, because the product's charts keep the identity
+// provider's key file on the zone. The customer may switch the domain later.
 //
 // THE DOMAIN'S RECORD is a CNAME onto the tenant's ZONE, never onto a cluster: the zone record follows
 // the cluster through every move and rename, so a record in a zone the customer manages never has to
@@ -59,7 +59,7 @@ const OWN_DOMAIN_NEXT = "The previous hosts still stand: retry this step once th
 // THE MAIL RECORDS BESIDE THE HOSTS: the run writes only CNAME records, and the plan hashes the MX, SPF,
 // DMARC and autodiscover records at each host's domain; the run refuses to start where one changed.
 //
-// THE WAIT BEFORE THE REMOVAL, as in tenant-set-routing: the previous hosts' records go only once the
+// THE WAIT BEFORE THE REMOVAL: the previous hosts' records go only once the
 // tenant's IdP answers a 2xx at the new host and every redirect host answers a redirect, and the wait
 // and the removal are one step, so skipping a failed wait removes nothing. An abort records the
 // previous hosts again and removes the new hosts' records where this run wrote them.
@@ -137,7 +137,13 @@ function sameHosts(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && [...a].sort().join(" ") === [...b].sort().join(" ");
 }
 
-export type TenantSetOwnDomainPorts = TenantSetRoutingPorts & WebsiteMemberPorts;
+export type TenantSetOwnDomainPorts = TenantLifecyclePorts & WebsiteMemberPorts & {
+  /** Reads the tenant's IdP from the outside — the probe verify-quiesced reads a quiesced unit with. */
+  probe: PublicProbe;
+  /** How long the wait asks before it fails the run, and how long it pauses between two asks. */
+  routingWaitMs: number;
+  routingPollMs: number;
+};
 
 /** The host a tenant is reached at: its own domain, or its zone where it has none. */
 function tenantHost(tc: TenantCluster, apex: string, domain: string): string {
@@ -207,7 +213,6 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
         if (!standsAt(p.previous, p.previousRedirects, p.previousAliases) && !standsAt(p.ownDomain, p.ownDomainRedirects, p.ownDomainAliases)) {
           throw errValidation(`tenant ${tc.subdomain} has the own hosts ${standingHosts(tc).join(", ") || "none"} now, not those of when this run was planned — plan it again`);
         }
-        if (p.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing now — an own domain needs path routing; plan it again`);
         ctx.registerCleanup(restoreOwnDomainCleanup(ports, p));
         const host = tenantHost(tc, await ports.resolveUnitApex(tc.domain, tc.stage), p.ownDomain);
         const websites = p.carriedWebsites.map((w) => ({ app: w.app, domain: host, member: w.member }));
@@ -224,7 +229,7 @@ function tenantSetOwnDomainSteps(ports: TenantSetOwnDomainPorts, p: TenantSetOwn
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
-        const url = `${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
+        const url = `${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, p.ownDomain)}/`;
         const seen = await waitForAnswer(ctx, ports, url, "a 2xx", (s) => s >= 200 && s < 300, OWN_DOMAIN_NEXT);
         ctx.log("meta", `${url} answers (${seen}) — the tenant is served at ${tenantHost(tc, apex, p.ownDomain)}`);
         if (p.carriedWebsites.length) await waitForWebsiteRoot(ctx, ports, tenantHost(tc, apex, p.ownDomain), OWN_DOMAIN_NEXT);
@@ -304,7 +309,6 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
       if (tc.ownDomain !== params.previous || !sameHosts(tc.ownDomainRedirects, params.previousRedirects) || !sameHosts(tc.ownDomainAliases, params.previousAliases)) {
         throw errValidation(`tenant ${tc.subdomain} has the own hosts ${standingHosts(tc).join(", ") || "none"}, not those this request says — it moved since; ask again`);
       }
-      if (params.ownDomain !== "" && tc.routing !== "path") throw errValidation(`tenant ${tc.subdomain} is on ${tc.routing} routing — an own domain serves every member under a path of it, so move the tenant to path routing first`);
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const zone = tenantZone(tc.subdomain, tc.stage, apex);
       const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
@@ -343,7 +347,7 @@ export function makeTenantSetOwnDomainDef(ports: TenantSetOwnDomainPorts): RunDe
         targetId: params.tenantId,
         summary:
           `${params.previous === params.ownDomain ? "Re-apply" : `Move tenant ${tc.guid} from ${params.previous || zone} to`} ${newHost} (${tc.domain}, ${tc.stage}): ` +
-          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row${carried}, wait until ${tenantMemberUrl("path", tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/${carriedWebsites.length ? ` and https://${newHost}/` : ""} answers with a 2xx` +
+          `${params.ownDomain ? `point ${hostsOf(params).join(", ")} at ${zone}, ` : ""}record it on the registration and the row${carried}, wait until ${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, params.ownDomain)}/${carriedWebsites.length ? ` and https://${newHost}/` : ""} answers with a 2xx` +
           `${redirects.length ? ` and ${redirects.map((h) => `https://${h}/`).join(", ")} with a redirect` : ""}` +
           `${oldRecords.length ? `, then remove the records of ${oldRecords.join(", ")}` : ""}. The product's charts must serve ${newHost}${redirects.length ? " and its redirect hosts" : ""}, with certificates, for the wait to end. ` +
           `Where this installation does not manage the DNS zone of a host, set its record (CNAME onto ${zone}) BEFORE approving: from the moment the domain is recorded, the tenant answers only there.` +

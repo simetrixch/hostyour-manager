@@ -205,7 +205,7 @@ export function makeTenantSetSizeDef(ports: TenantOnboardPorts): RunDefinition<T
         appDatabases: Object.fromEntries(e.apps.filter((a) => a.databases).map((a) => [a.name, a.databases!])),
         probeGuid: tc.guid, subdomain: e.subdomain, seedUsers: e.seedUsers, demo: e.demo === true,
         appsImage: e.appsImage, appsImageTag: e.appsImageTag, ownDomain: e.ownDomain, ownDomainRedirects: e.ownDomainRedirects,
-        approvedTags: e.approvedTags, routing: e.routing, quota, size: params.size,
+        approvedTags: e.approvedTags, quota, size: params.size,
         clusterValueFiles: await ports.resolveClusterValueFiles(tc.domain, tc.stage),
         ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
       }, { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal });

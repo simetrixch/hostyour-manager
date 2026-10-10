@@ -60,7 +60,6 @@ export function writeRegistrationStep(ports: TenantOnboardPorts, p: CreateTenant
         // As the approved validation froze them: this copy is the one the CHARTS read, and it must
         // say what the tenant WAS created with, not what the manifest says when it is read back.
         members: p.members, identityProvider: p.identityProvider,
-        routing: p.routing,
         apps: p.apps,
         // Resolved HERE, at write time, against the size table as it stands now — see the params
         // field. Per MEMBER: every member namespace of this tenant gets this ceiling.

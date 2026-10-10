@@ -146,8 +146,8 @@ export async function resolveTeardownTarget(
  *  between attest-target and record-provisional, read-only. The replace set above is resolved at PLAN
  *  time and frozen into params, but the run's locks are only taken at approve — so two create-tenant
  *  plans for ONE subdomain can both freeze replaces=[] and be approved in turn, and the second would
- *  stand its fan-out beside the first on the one public FQDN `*.<subdomain>.<unitApex>`
- *  (provision-dns re-points the shared wildcard underneath the winner). This step re-resolves the
+ *  stand its fan-out beside the first on the one public FQDN `<subdomain>.<unitApex>`
+ *  (provision-dns re-points the shared zone record underneath the winner). This step re-resolves the
  *  same-subdomain tenants at EXECUTE time — the run holds the deploy repository branch lock, so the
  *  answer cannot move underneath it — and refuses any guid the approved plan did not name as a
  *  replace target. The run's OWN guid is excluded: on a resume its row and registration already
@@ -188,9 +188,9 @@ export function ensureSubdomainFreeStep(
 
 /** A replace target standing on ANOTHER cluster of this installation is refused at the PLAN, before
  *  any teardown runs. The replace teardown removes the old registration and prunes its fan-out, and
- *  only then would provision-dns read the wildcard `*.<subdomain>.<stage apex>` at that cluster's
+ *  only then would provision-dns read the zone `<subdomain>.<stage apex>` at that cluster's
  *  address and refuse it (unit-dns.ts readStandingHost) — with the replaced tenant already gone.
- *  Gate G27 refuses the same collision where the old wildcard stands; this reads the inventory and
+ *  Gate G27 refuses the same collision where the old zone record stands; this reads the inventory and
  *  the pointer, so it holds where no record was ever written too. Names both clusters. */
 export function assertReplacesOnTargetCluster(
   replaces: readonly TenantTeardownTarget[],

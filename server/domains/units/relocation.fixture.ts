@@ -90,7 +90,7 @@ export function tenantEntry(over: Partial<TenantRegistration> = {}): TenantRegis
   return {
     cluster: SOURCE.cluster,
     members: testMembers(TENANT_APPS),
-    identityProvider: TENANT_IDP, routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+    identityProvider: TENANT_IDP, ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain: SUBDOMAIN,
     apps: TENANT_APPS.map((a) => ({ ...a, seedReference: false, seedDemo: false, selections: {} })),
     seedUsers: false, quota: seedQuota("small"),

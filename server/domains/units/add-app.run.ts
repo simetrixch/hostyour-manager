@@ -122,11 +122,6 @@ export const AddAppParams = z.object({
 });
 export type AddAppParams = z.infer<typeof AddAppParams>;
 
-/** Why a tenant on another routing than `path` takes no website: a website's hosts point at the tenant's
- *  zone, and only path routing gives the zone itself a record (host routing records only its wildcard). */
-export const WEBSITE_NEEDS_PATH = (subdomain: string, routing: string): string =>
-  `tenant ${subdomain} is on ${routing} routing — a website's hosts point at the tenant's zone, which has a record of its own only under path routing; move the tenant to path routing first`;
-
 /** What add-app reads beyond the onboarding ports: the probe and its wait, for a website's hosts. */
 export type AddAppPorts = TenantOnboardPorts & Pick<WebsiteDomainPorts, "probe" | "routingWaitMs" | "routingPollMs">;
 
@@ -357,7 +352,6 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       let bundle: AppsManifest | null = null;
       if (website) {
         if (current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) throw errValidation(`site "${website.site}" already runs in tenant ${tc.guid}`);
-        if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
         const serving = current.entry.apps.find((a) => a.domain === website.domain);
         if (serving) throw errValidation(`${website.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
         const apex = await ports.resolveUnitApex(tc.domain, tc.stage);

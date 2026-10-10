@@ -11,7 +11,7 @@ import type { Step, StepCtx } from "../../executor/types.ts";
 import type { Db } from "../../db/client.ts";
 import { apps, clusters, tenants } from "../../db/schema/inventory.ts";
 import { errNotFound } from "../../kernel/errors.ts";
-import type { MemberRouting, Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 import type { Registrations } from "#unit/server/registrations.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import type { BuildRbacWriter, ClusterKubeResolver } from "../../adapters/kube/port.ts";
@@ -89,8 +89,8 @@ export interface TenantLifecyclePorts {
   resolver: ClusterKubeResolver;
   deployRepoUrl: string;
   argoWatchTimeoutMs: number;
-  /** The tenant's ONE DNS record (the wildcard or the zone, as its routing names it): tenant-offboard
-   *  and tenant-purge remove it, tenant-set-routing moves it. Optional but UNCONDITIONALLY needed by
+  /** The tenant's ONE DNS record (its zone): tenant-offboard
+   *  and tenant-purge remove it. Optional but UNCONDITIONALLY needed by
    *  those steps — absent ⇒ they fail loud, never a silent skip. */
   dns?: DnsProvider;
   /** Public resolvers: what a name answers to the rest of the world, which a record replacement
@@ -136,9 +136,6 @@ export interface TenantCluster {
    *  constant `auth` plus an implied trio stood here instead. */
   members: string[];
   identityProvider: string;
-  /** How the tenant's members are addressed below its zone, as recorded on its row: what its DNS
-   *  record is named and where its IdP answers (plugins/unit/shared/unit-host.ts). */
-  routing: MemberRouting;
   /** The tenant's own domain, or "" where it is reached at its zone (plugins/unit/shared/unit-host.ts). */
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
@@ -168,7 +165,6 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     clusterId: cluster.id,
     members: tenant.members,
     identityProvider: tenant.identityProvider,
-    routing: tenant.routing,
     ownDomain: tenant.ownDomain,
     ownDomainRedirects: tenant.ownDomainRedirects,
     ownDomainAliases: tenant.ownDomainAliases,

@@ -22,7 +22,7 @@ import { FakePublicDns } from "../../adapters/dns/testing/fake-public-dns.ts";
 import { FakePublicProbe } from "#unit/server/adapters/http-probe/testing/fake.ts";
 import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeClusterKubeResolver } from "../../adapters/kube/testing/fake.ts";
 import { testMembers, TEST_QUOTA } from "./tenant-members.fixture.ts";
-import type { MemberRouting, Stage } from "../../../shared/enums.ts";
+import type { Stage } from "../../../shared/enums.ts";
 
 
 // The tenant-set-own-domain run driven through the real Executor: a tenant with its registration, its
@@ -53,13 +53,12 @@ export function useOwnDomainHarness() {
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
 
-  async function make(opts: { routing?: MemberRouting; ownDomain?: string; ownDomainRedirects?: string[]; answers?: string[]; redirecting?: string[]; unmanaged?: string[]; stage?: Stage } = {}) {
+  async function make(opts: { ownDomain?: string; ownDomainRedirects?: string[]; answers?: string[]; redirecting?: string[]; unmanaged?: string[]; stage?: Stage } = {}) {
     const stage = opts.stage ?? "prod";
     const dir = mkdtempSync(join(tmpdir(), "mgr-owndomain-"));
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    const routing = opts.routing ?? "path";
     const ownDomain = opts.ownDomain ?? "";
     const ownDomainRedirects = opts.ownDomainRedirects ?? [];
     const reg = new TenantRegistrations(new FakePlatformRepo());
@@ -75,12 +74,12 @@ export function useOwnDomainHarness() {
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage, domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage,
-      members: ["auth", "jobs", "report"], identityProvider: "auth", routing, ownDomain, ownDomainRedirects, suspended: false, status: "active",
+      members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain, ownDomainRedirects, suspended: false, status: "active",
     }).run();
     await reg.commitTenant({
       stage, guid: GUID, runId: "run_crt",
       registration: {
-        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing, ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "", displayName: "",
+        cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", ownDomain, ownDomainRedirects, approvedTags: {}, senderDomain: "", displayName: "",
         seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
       },
     });

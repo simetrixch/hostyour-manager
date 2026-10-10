@@ -32,7 +32,7 @@ export const ASKED = `https://post.example.com/api/public/sender-domains/${DOMAI
 export const MEMBERS = ["auth", "jobs", "report"];
 export const ISSUERS_ROUTE = "https://post.{stageApex}/api/internal/sender-domains/{domain}/issuers";
 export const BOUND_AT = (domain: string): string => `https://post.example.com/api/internal/sender-domains/${domain}/issuers`;
-export const ISSUER = "https://auth.acme.example.com";
+export const ISSUER = "https://acme.example.com/auth";
 export const OTHER_ISSUER = "https://shop.example.org/auth";
 export const KEPT = "k".repeat(64);
 
@@ -184,7 +184,7 @@ export async function make(opts: MakeOptions = {}, handles: DbHandle[] = [], dir
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",
     registration: {
-      cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain, displayName: "",
+      cluster: "s1", subdomain: "acme", apps: [], members: testMembers(), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain, displayName: "",
       seedUsers: false, quota: TEST_QUOTA, resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     },
   });

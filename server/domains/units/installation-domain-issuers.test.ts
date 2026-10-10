@@ -92,8 +92,8 @@ describe("installation domain issuer rebind", () => {
   });
 
   it("a new issuer post lists already arms no compensation, so an abort leaves it bound", async () => {
-    const before = tenantMemberUrl("host", "auth", "prod", "shop", FROM, "");
-    const after = tenantMemberUrl("host", "auth", "prod", "shop", TO, "");
+    const before = tenantMemberUrl("auth", "prod", "shop", FROM, "");
+    const after = tenantMemberUrl("auth", "prod", "shop", TO, "");
     const h = await makeIssuerTestHarness({ lists: { [SENDER_DOMAIN]: [before, after] } }, handles, dirs);
     const def = makeInstallationDomainDef(h.actions);
     const planned = await def.planStream!({ fromDomain: FROM, toDomain: TO, dryRun: false }, { db: h.db.db, log: () => undefined, signal: new AbortController().signal });

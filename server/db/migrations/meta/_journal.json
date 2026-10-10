@@ -183,6 +183,13 @@
       "when": 1791470169052,
       "tag": "0025_drop-per-app-google-translation-book",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "6",
+      "when": 1791594003300,
+      "tag": "0026_drop-tenants-routing",
+      "breakpoints": true
     }
   ]
 }

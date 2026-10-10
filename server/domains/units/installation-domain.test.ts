@@ -8,7 +8,7 @@ import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { FakeDnsProvider } from "../../adapters/dns/testing/fake.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
-import { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantRecordName, tenantZone } from "#unit/shared/unit-host.ts";
+import { consumerUnitHost, tenantIssuerRecord, tenantMemberUrl, tenantZone } from "#unit/shared/unit-host.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -35,12 +35,12 @@ function seed(stage: Stage, withOverride = false): void {
   cloud.seed(cloud.booksBranch, `registrations/${name}/${stage}.yaml`, JSON.stringify(consumer));
   const members = structuredClone(testMembers(["web"]));
   if (withOverride) members[0]!.sources[0]!.values = { cookieDomain: `.shop.${FROM}` };
-  const tenant = { cluster: "s1", members, identityProvider: "auth", routing: "host" as const, ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", subdomain: "shop",
+  const tenant = { cluster: "s1", members, identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", subdomain: "shop",
     apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {} }], seedUsers: false, quota: seedQuota("small"), resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" };
   const write = tenantRegistrationWrite(stage, GUID, tenant);
   deploy.seed(deploy.booksBranch, write.path, write.content);
-  const unitHost = consumerUnitHost(name, stage, FROM), tenantHost = tenantRecordName("host", "shop", stage, FROM);
-  const issuerName = tenantIssuerRecord("_idp", "host", "auth", stage, "shop", FROM).name, issuer = tenantMemberUrl("host", "auth", stage, "shop", FROM, "");
+  const unitHost = consumerUnitHost(name, stage, FROM), tenantHost = tenantZone("shop", stage, FROM);
+  const issuerName = tenantIssuerRecord("_idp", "auth", stage, "shop", FROM).name, issuer = tenantMemberUrl("auth", stage, "shop", FROM, "");
   for (const [host, kind, owner] of [[unitHost, "consumer", name], [tenantHost, "tenant", GUID]] as const) {
     dns.seed(host, "CNAME", OLD_HOST);
     recordDnsWrite(db.db, { name: host, type: "CNAME", content: OLD_HOST, act: "inserted", owner: { kind, name: owner, stage }, runId: "run_seed" });
@@ -84,7 +84,7 @@ describe("installation domain unit phase", () => {
     seed("prod");
     const snapshot = await readInstallationDomain(db.db, ports(), FROM, TO);
     expect(snapshot.blockers).toEqual([]);
-    expect(snapshot.records.filter(r => r.type === "CNAME").map(r => [r.targetName, r.after])).toEqual([[`post.${TO}`, OLD_HOST], [`*.shop.${TO}`, OLD_HOST]]);
+    expect(snapshot.records.filter(r => r.type === "CNAME").map(r => [r.targetName, r.after])).toEqual([[`post.${TO}`, OLD_HOST], [`shop.${TO}`, OLD_HOST]]);
     await applyInstallationDomain(ctx(), ports(), snapshot, false, "run_move");
     expect(dns.record(`post.${TO}`, "CNAME")).toBe(OLD_HOST); expect(dns.record(`post.${FROM}`, "CNAME")).toBe(OLD_HOST);
     const map = parseDocument(cloud.read(cloud.booksBranch, oldMap)!);
@@ -153,7 +153,7 @@ describe("installation domain unit phase", () => {
     await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow(/book entry disagrees/);
   });
   it("refuses an unrelated private TXT issuer without exposing its value", async () => {
-    seed("prod"); const mark = tenantIssuerRecord("_idp", "host", "auth", "prod", "shop", FROM).name;
+    seed("prod"); const mark = tenantIssuerRecord("_idp", "auth", "prod", "shop", FROM).name;
     const content = "https://outside.example/auth?token=private-fixture";
     dns.seed(mark, "TXT", content);
     recordDnsWrite(db.db, { name: mark, type: "TXT", content, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });
@@ -170,14 +170,14 @@ describe("installation domain unit phase", () => {
     await applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move");
     await applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move");
     expect(dns.record(`post.${TO}`, "CNAME")).toBeUndefined(); expect(dns.record(`post.${FROM}`, "CNAME")).toBe(OLD_HOST);
-    expect(await dns.listRecordContents({ name: tenantIssuerRecord("_idp", "host", "auth", "prod", "shop", FROM).name, type: "TXT" })).toContain("unrelated-TXT");
+    expect(await dns.listRecordContents({ name: tenantIssuerRecord("_idp", "auth", "prod", "shop", FROM).name, type: "TXT" })).toContain("unrelated-TXT");
     expect((await tenantRegistrations.readTenant("prod", GUID))?.entry).toMatchObject({ resetNonce: "keep-data", suspended: true });
     expect(parseDocument(cloud.read(cloud.booksBranch, mapPath)!).getIn(["global", "unrelated"])).toBe("keep");
     expect(findDnsWrite(db.db, { name: `post.${TO}`, type: "CNAME" })).toBeNull();
   });
   it("accepts old names already repointed by the completed machine phase", async () => {
     seed("prod");
-    for (const name of [consumerUnitHost("post", "prod", FROM), tenantRecordName("host", "shop", "prod", FROM)]) {
+    for (const name of [consumerUnitHost("post", "prod", FROM), tenantZone("shop", "prod", FROM)]) {
       dns.seed(name, "CNAME", NEW_HOST);
       const book = findDnsWrite(db.db, { name, type: "CNAME" })!;
       recordDnsWrite(db.db, { ...book, content: NEW_HOST, runId: "run_machine" });

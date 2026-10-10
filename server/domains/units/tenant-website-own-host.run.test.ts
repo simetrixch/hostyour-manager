@@ -12,8 +12,8 @@ import { makeTenantSetWebsiteDomainDef } from "./tenant-website-domain.run.ts";
 import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant } from "./tenant-website.fixture.ts";
+import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb, seedClusters } from "./add-app.fixture.ts";
+import { WEBSITE_APPS } from "./tenant-website.fixture.ts";
 
 // A website on the tenant's own domain has no alias of its own: the website chart refuses one there,
 // and the old names of the own host are the tenant's own-domain aliases. So a move onto the own domain
@@ -29,7 +29,7 @@ function at(apps: { name: string; site: string; domain: string; aliases?: string
   const all = [{ name: "erp" }, ...apps.map((a) => ({ folder: "web", ...a }))];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,
-    routing: "path", ownDomain: OWN, ownDomainRedirects: [`www.${OWN}`], ...(ownDomainAliases.length ? { ownDomainAliases } : {}),
+    ownDomain: OWN, ownDomainRedirects: [`www.${OWN}`], ...(ownDomainAliases.length ? { ownDomainAliases } : {}),
   });
   const w = tenantRegistrationWrite("test", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -37,7 +37,7 @@ function at(apps: { name: string; site: string; domain: string; aliases?: string
 }
 
 function atTest(): FakeDnsProvider {
-  seedWebsiteTenant();
+  seedClusters();
   db.db.update(clusters).set({ stage: "test" }).where(eq(clusters.id, "cls_1")).run();
   db.db.update(tenants).set({ stage: "test", ownDomain: OWN, ownDomainRedirects: [`www.${OWN}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
@@ -144,7 +144,7 @@ describe("a TEST move from the example.org zone into the example.net zone", () =
     const all = [{ name: "erp" }, ...apps.map((a) => ({ folder: "web", ...a }))];
     const parsed = TenantRegistrationSchema.parse({
       cluster: "s1", subdomain: "acme", members: testMembers(all), identityProvider: "auth", apps: all, quota: seedQuota("small"), ...TEST_BUNDLE,
-      routing: "path", ownDomain: own, ownDomainRedirects: [`www.${own}`], ...(ownDomainAliases.length ? { ownDomainAliases } : {}),
+      ownDomain: own, ownDomainRedirects: [`www.${own}`], ...(ownDomainAliases.length ? { ownDomainAliases } : {}),
     });
     const w = tenantRegistrationWrite("test", GUID, parsed);
     repo.seed(repo.booksBranch, w.path, w.content);

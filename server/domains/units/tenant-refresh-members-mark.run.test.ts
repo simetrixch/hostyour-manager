@@ -12,7 +12,7 @@ useMemoryDb();
 
 const LABELLED = MANIFEST_YAML.replace("tenant:\n  members:", "tenant:\n  issuerRecordLabel: _digita-idp\n  members:");
 /** The fixture tenant: acme at prod under example.com, routed by host, its identity provider `auth`. */
-const MARK_NAME = "_digita-idp.auth.acme.example.com";
+const MARK_NAME = "_digita-idp.acme.example.com";
 
 describe("tenant-refresh-members puts the identity provider's DNS mark in place", () => {
   it("publishes the standing tenant's mark where the product declares the label, and books it for the tenant", async () => {
@@ -24,7 +24,7 @@ describe("tenant-refresh-members puts the identity provider's DNS mark in place"
     const step = makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "publish-issuer-record");
     expect(step).toBeDefined();
     await step!.run(stepCtx(p, [], []));
-    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual(["https://auth.acme.example.com"]);
+    expect(await dns.listRecordContents({ name: MARK_NAME, type: "TXT" })).toEqual(["https://acme.example.com/auth"]);
     expect(listDnsWrites(db.db).find((w) => w.name === MARK_NAME)?.owner).toEqual({ kind: "tenant", name: GUID, stage: "prod" });
   });
 

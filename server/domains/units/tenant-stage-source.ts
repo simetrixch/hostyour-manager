@@ -79,7 +79,7 @@ export async function planStandingStage(
     probeGuid: source.guid, subdomain: entry.subdomain, seedUsers: false, demo: entry.demo === true,
     quota: resolveUnitQuota(ctx.db, request.size, TENANT_BRINGS), size: request.size,
     appsImage: entry.appsImage, appsImageTag: entry.appsImageTag, ownDomain, ownDomainRedirects,
-    approvedTags, routing: entry.routing, clusterValueFiles, clusterFqdn: rc.domain,
+    approvedTags, clusterValueFiles, clusterFqdn: rc.domain,
     ...(ports.deployCredentialId ? { credentialId: ports.deployCredentialId } : {}),
   }, { repo: ports.repo, helm: ports.helm, log: ctx.log, signal: ctx.signal, ...standingHostFrom(ports.dns, ctx.db, ctx.signal) });
   if (outcome.verdict !== "pass") return { outcome: "rejected", summary: `Add ${placement.stage} to tenant ${source.guid} rejected: ${outcome.report.gates.filter((g) => g.status !== "pass").map((g) => g.id).join(", ")}`, planJson: outcome.report };
@@ -88,7 +88,7 @@ export async function planStandingStage(
     guid: source.guid, subdomain: entry.subdomain, stage: placement.stage,
     clusterId: rc.clusterId, cluster: rc.cluster, domain: rc.domain, chartsRef: outcome.resolvedSha,
     registryHost, apps, members: outcome.memberRecords, identityProvider: entry.identityProvider,
-    routing: entry.routing, seedUsers: false, demo: entry.demo === true, size: request.size, owner: source.owner,
+    seedUsers: false, demo: entry.demo === true, size: request.size, owner: source.owner,
     // A new stage is shown under the name the stage it is added from carries.
     displayName: entry.displayName,
     report: outcome.report, expectedApps: tenantApplicationSet(members.map((m) => m.name), source.guid, placement.stage),

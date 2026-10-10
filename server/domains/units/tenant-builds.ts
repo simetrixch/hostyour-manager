@@ -348,7 +348,6 @@ export interface RefreshImagesParams {
   members?: ValidateTenantRequest["members"];
   identityProvider?: string | undefined;
   ownDomain?: string | undefined;
-  routing?: ValidateTenantRequest["routing"];
   ownDomainRedirects?: readonly string[] | undefined;
   approvedTags?: Record<string, Record<string, string>> | undefined;
   seedUsers: boolean;
@@ -407,7 +406,6 @@ export function refreshImagesStep(ports: RefreshImagesPorts, p: RefreshImagesPar
           ...(p.isStandingTenant ? { isStandingTenant: true } : {}),
           ...(p.members ? { members: p.members } : {}),
           ...(p.identityProvider ? { identityProvider: p.identityProvider } : {}),
-          ...(p.routing ? { routing: p.routing } : {}),
           ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
           ...(p.approvedTags ? { approvedTags: p.approvedTags } : {}),
           probeGuid: p.guid,

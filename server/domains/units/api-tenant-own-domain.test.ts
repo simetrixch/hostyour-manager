@@ -22,7 +22,7 @@ describe("POST /api/tenants/:id/own-domain", () => {
     h.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
     h.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth",
-      routing: "path", ownDomain: "www.customer.test", ownDomainRedirects: ["customer.test"], suspended: false, status: "active",
+      ownDomain: "www.customer.test", ownDomainRedirects: ["customer.test"], suspended: false, status: "active",
     }).run();
     const planned: unknown[] = [];
     const executor = { planStreamed: async (_kind: string, params: unknown) => { planned.push(params); return { runId: "run_1" }; } } as unknown as Executor;

@@ -10,7 +10,7 @@ import { makeAddAppDef } from "./add-app.run.ts";
 import { revertAppendCleanup } from "./add-app-abort.ts";
 import { makeTenantSetWebsiteMainDef } from "./tenant-website-main.run.ts";
 import { ctx, db, GUID, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
+import { WEBSITE_APPS, tenantWith, websitePorts } from "./tenant-website.fixture.ts";
 
 // The tenant's main website: the one website of a tenant marked `main`, served at / of its domain. The
 // mark moves with a deploy, an abort of that deploy, a remove and the run that marks a deployed website,
@@ -83,7 +83,7 @@ describe("add-app for a website marked main", () => {
   };
 
   it("plans the mark, the website that holds it today and the summary that names the one that loses it", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const result = await planAdd(tenantWith([SHOP, BLOG]), MAIN);
     expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch", main: true });
     expect(result.params.previousMain).toBe("shop-site");
@@ -91,14 +91,14 @@ describe("add-app for a website marked main", () => {
   });
 
   it("plans no mark, and no previous holder to give back, for a website not marked", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const result = await planAdd(tenantWith([SHOP]), { ...MAIN, main: false });
     expect(result.params.website).toEqual({ folder: "web", site: "main", domain: "example.ch" });
     expect(result.plan.summary).not.toContain("main website");
   });
 
   it("refuses the mark on a request that names no website", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     await expect(makeAddAppDef(ports({}, WEBSITE_APPS)).planStream!({ tenantId: "tnt_1", app: "crm", main: true }, planCtx())).rejects.toThrow(/only a website can be the main website/);
   });
 

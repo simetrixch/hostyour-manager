@@ -13,9 +13,9 @@ import { parseAppsManifest } from "../../../shared/apps-manifest.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import { TEST_BUNDLE } from "./tenant-members.fixture.ts";
 import { bundleReleaseTag } from "./engine-line.ts";
-import { GUID, NEW_APP, REGISTRY_HOST, ctx, db, params, planCtx, ports, scriptBundle, seededPlatformRepo, TEMPLATE_APPS, useMemoryDb } from "./add-app.fixture.ts";
+import { GUID, NEW_APP, REGISTRY_HOST, ctx, db, params, planCtx, ports, scriptBundle, seededPlatformRepo, TEMPLATE_APPS, useMemoryDb, seedClusters } from "./add-app.fixture.ts";
 import { BUNDLE, ORG, SHA, TEMPLATE_MANIFEST, TEMPLATE_URL, UNIT } from "./tenant-apps-repo.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant, websitePorts } from "./tenant-website.fixture.ts";
+import { WEBSITE_APPS, websitePorts } from "./tenant-website.fixture.ts";
 
 useMemoryDb();
 
@@ -44,7 +44,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   const HELPER = { "scripts/helper.mjs": "export const helper = true;\n" };
 
   it("plans a site its bundle lists and the template lacks, and the write-tree neither requires nor writes that site's folder from the template", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = websitePorts({ dns: new FakeDnsProvider() });
     scriptBundle(prt, { "apps.yaml": manifestOf(webEntry(["main", "simplidigita-ai"])) });
     const result = await makeAddAppDef(prt).planStream!(OWN_SITE, planCtx());
@@ -60,7 +60,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("PLANTED DEFECT: refuses a site its bundle does not list, naming the site, the folder and the release, though the template lists it", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const template = { ...WEBSITE_APPS, "apps.yaml": manifestOf(webEntry(["main", "shop", "simplidigita-ai"])), "webs/simplidigita-ai/website.json": "{}\n" };
     const prt = websitePorts({ dns: new FakeDnsProvider() }, template);
     scriptBundle(prt, { "apps.yaml": manifestOf(webEntry(["main", "shop"])) });
@@ -69,7 +69,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("PLANTED INNOCENT: takes the folder and the site from the template where the bundle carries no website folder", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = websitePorts({ dns: new FakeDnsProvider() });
     scriptBundle(prt, { "apps.yaml": manifestOf() });
     const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
@@ -81,14 +81,14 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("PLANTED DEFECT: refuses a bundle that cannot be read, naming the repository and the release, and plans nothing from the template", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = ports({ dns: new FakeDnsProvider() }, WEBSITE_APPS);
     await expect(makeAddAppDef(prt).planStream!(WEBSITE, planCtx()))
       .rejects.toThrow(`${TEST_BUNDLE.appsRepo} carries no apps.yaml at ${RELEASE}, so the apps the tenant runs cannot be read`);
   });
 
   it("PLANTED DEFECT: refuses a site listed by a registration whose bundle is not the one this run extends", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const stale = { appsRepo: "https://github.com/acme-org/acme-apps.git", appsImage: "acme-apps", appsImageTag: TEST_BUNDLE.appsImageTag };
     const prt = ports({ dns: new FakeDnsProvider(), registrations: new TenantRegistrations(seededPlatformRepo(stale)) }, WEBSITE_APPS);
     scriptBundle(prt, { "apps.yaml": WEBSITE_APPS["apps.yaml"] }, stale.appsRepo);
@@ -97,7 +97,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("PLANTED DEFECT: copies no template file into the bundle for a site it lists, though the repository lacks a root file of the template, and logs that nothing is committed", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = websitePorts({ dns: new FakeDnsProvider() }, { ...WEBSITE_APPS, ...HELPER });
     scriptBundle(prt, { "apps.yaml": manifestOf(webEntry(["main", "simplidigita-ai"])) });
     const result = await makeAddAppDef(prt).planStream!(OWN_SITE, planCtx());
@@ -112,7 +112,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("PLANTED INNOCENT: a new tenant gets its first tree from the template, the root files included", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const registrations = new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" }));
     const prt = ports({ dns: new FakeDnsProvider(), registrations }, { ...WEBSITE_APPS, ...HELPER });
     const result = await makeAddAppDef(prt).planStream!(WEBSITE, planCtx());
@@ -123,7 +123,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("adding a template app to a standing bundle still writes the root files the repository lacks", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = ports({ dns: new FakeDnsProvider() }, { ...TEMPLATE_APPS(), ...HELPER });
     const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     if (result.outcome !== "planned") throw new Error(`rejected: ${result.summary}`);
@@ -135,7 +135,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
   });
 
   it("names the tenant's bundle, its site and its release in the plan's summary, log and write-tree title for a site it lists, and not the template", async () => {
-    seedWebsiteTenant();
+    seedClusters();
     const prt = websitePorts({ dns: new FakeDnsProvider() });
     scriptBundle(prt, { "apps.yaml": manifestOf(webEntry(["main", "simplidigita-ai"])) });
     const logs: string[] = [];
@@ -166,7 +166,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
     /** A planned add-app of `request` on the tenant whose bundle stands at TEST_BUNDLE's tag with
      *  `standing` as its apps.yaml, and whose build plane builds it again at BUILT_TAG with `built`. */
     async function plannedBuild(request: Record<string, unknown>, template: Record<string, string>, manifests: { standing: string; built: string }): Promise<{ step: (name: string) => Promise<void>; reader: FakeRepoReader; params: AddAppParams; bundleRefs: (from: number) => string[]; registrations: TenantRegistrations }> {
-      seedWebsiteTenant();
+      seedClusters();
       db.db.insert(servers).values({ id: "srv_m", name: "m1", host: "5.6.7.8", sshUser: "root", role: "master", status: "healthy" }).run();
       db.db.insert(clusters).values({ id: "cls_m", serverId: "srv_m", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
       const buildPlane = new FakeBuildPlane();
@@ -220,7 +220,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
     });
 
     it("PLANTED DEFECT: fails by name, and does not judge the site against the template, where the registration names no apps repository", async () => {
-      seedWebsiteTenant();
+      seedClusters();
       const template = { ...WEBSITE_APPS, "apps.yaml": manifestOf(webEntry(["main", "shop", "simplidigita-ai"])) };
       const prt = websitePorts({ registrations: new TenantRegistrations(seededPlatformRepo({ appsImage: "", appsImageTag: "" })) }, template);
       const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
@@ -229,7 +229,7 @@ describe("add-app for a website of the tenant's own bundle", () => {
     });
 
     it("PLANTED DEFECT: refuses by name a new stage's size beside a site from the bundle, whose registration this step does not read", async () => {
-      seedWebsiteTenant();
+      seedClusters();
       const prt = websitePorts({}, WEBSITE_APPS);
       const app = { name: "simplidigita-ai", folder: "web", site: "simplidigita-ai", domain: "simplidigita.ai", seedReference: false, seedDemo: false, selections: {} };
       const step = refreshImagesStep(prt, { guid: GUID, domain: "s1.example", stage: "prod", subdomain: "acme", apps: [app], seedUsers: false, registryHost: REGISTRY_HOST, requiredImages: [], appsImage: UNIT, siteFromBundle: true, size: "small" }, { appsImageTag: BUILT_TAG });

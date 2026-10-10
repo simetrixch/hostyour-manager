@@ -10,8 +10,8 @@ import { makeTenantSetOwnDomainDef } from "./tenant-own-domain.run.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TENANT_MANIFEST_PATH } from "./gates/tenant-gates.ts";
 import { APP_OVERLAYS, testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb } from "./add-app.fixture.ts";
-import { WEBSITE_APPS, seedWebsiteTenant } from "./tenant-website.fixture.ts";
+import { GUID, MANIFEST_YAML, SHA, ctx, db, params, planCtx, ports, useMemoryDb, seedClusters } from "./add-app.fixture.ts";
+import { WEBSITE_APPS } from "./tenant-website.fixture.ts";
 import { tenantZone } from "#unit/shared/unit-host.ts";
 
 // A website on the tenant's own host has no domain of its own: the website chart serves it at the root
@@ -29,7 +29,7 @@ function at(repo: FakePlatformRepo, showAliases: string[] = []): TenantRegistrat
   const apps = [{ name: "erp" }, ...[{ name: "show", site: "main", domain: OLD, ...(showAliases.length ? { aliases: showAliases } : {}) }, CYCLESHOP].map((a) => ({ folder: "web", ...a }))];
   const registration = TenantRegistrationSchema.parse({
     cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE,
-    routing: "path", ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`],
+    ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`],
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -43,7 +43,7 @@ const withDomain = () => new FakeRepoReader({
 });
 
 function world(opts: { showAliases?: string[]; siteRoot?: number } = {}) {
-  seedWebsiteTenant();
+  seedClusters();
   db.db.update(tenants).set({ ownDomain: OLD, ownDomainRedirects: [`www.${OLD}`], ownDomainAliases: [] }).where(eq(tenants.id, "tnt_1")).run();
   const dns = new FakeDnsProvider();
   dns.zones = ["example.org", "example.net"];

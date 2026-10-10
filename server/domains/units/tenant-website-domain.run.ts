@@ -11,7 +11,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { checkMailRecordsStep, customerHostProblem, mailRecordHashes, mailRecordSentence, hostRecordStates, removeOwnDomainRecord, type HostRecordState, replacementSentence, MailRecordHash, ReplacedRecord } from "./own-domain-records.ts";
 import { otherTenantsWebsiteHosts, provisionWebsiteRecordsStep, removeWebsiteRecordsCleanup, tenantWebsiteHosts, waitForWebsite, websiteHosts, websiteRecordHosts, websiteRecordsToReplace } from "./website-domain.ts";
 import { DnsZoneUnknownError } from "../../adapters/dns/port.ts";
-import { WEBSITE_NEEDS_PATH, type AddAppPorts } from "./add-app.run.ts";
+import type { AddAppPorts } from "./add-app.run.ts";
 import { resolveWebsiteMember } from "./website-member.ts";
 import { refuseOffStageHosts } from "./stage-hosts.ts";
 
@@ -243,7 +243,6 @@ export function makeTenantSetWebsiteDomainDef(ports: AddAppPorts): RunDefinition
       if (standsAt(entry, req.domain, aliases)) return planRecordRepair(ports, ctx, tc, current.entry, req.app, req.domain, aliases);
       const serving = current.entry.apps.find((a) => a.name !== req.app && a.domain === req.domain);
       if (serving) throw errValidation(`${req.domain} is already the domain of website "${serving.name}" in tenant ${tc.guid}`);
-      if (tc.routing !== "path") throw errValidation(WEBSITE_NEEDS_PATH(tc.subdomain, tc.routing));
       const apex = await ports.resolveUnitApex(tc.domain, tc.stage);
       const websites = await otherTenantsWebsiteHosts(ports.registrations, tc.guid);
       // A host the tenant already serves — its own domain's, or another website's — is no alias of this one.

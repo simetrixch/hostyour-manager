@@ -33,7 +33,7 @@ import type { DnsInventoryView, DnsWritesView } from "../../shared/dns.ts";
 // runKinds.ts follows for RunKind. TenantStatus carries the tenant-only "provisioning" state.
 // AppProvenance is ONE list for both unit kinds, so ConsumerView and TenantView print the same word
 // for the same fact — a hand-written union here is what let the two cards disagree about it.
-import type { AppProvenance, AppStatus, MemberRouting, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
+import type { AppProvenance, AppStatus, RunKind, Stage, TenantAdminState, TenantStatus } from "../../shared/enums.ts";
 import type { DataPart, SizeComponent, UnitComposition, UnitSize } from "#unit/shared/unit-size.ts";
 import { post, put, req } from "./request.ts";
 
@@ -461,8 +461,6 @@ export interface TenantView {
   clusterId: string;
   domain: string;
   stage: Stage;
-  /** How the members are addressed below the zone — a host each, or a path of the zone itself. */
-  routing: MemberRouting;
   /** The tenant's own domain, or "" where it is reached at its zone. */
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
@@ -657,10 +655,6 @@ export const restoreTenant = (tenantId: string, targetClusterId: string, generat
  *  wildcard record updated; the source is cleared last. */
 export const migrateTenant = (tenant: Pick<TenantView, "id" | "stage" | "clusterId">, targetClusterId: string): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenant.id}/migrate`, { stage: tenant.stage, sourceClusterId: tenant.clusterId, targetClusterId });
-/** Plan the move onto the other member routing: the new record first, the old one removed once the
- *  identity provider answers at its new address. */
-export const setTenantRouting = (tenantId: string, routing: MemberRouting): Promise<{ runId: string }> =>
-  post<{ runId: string }>(`/api/tenants/${tenantId}/routing`, { routing });
 
 export const setTenantDemo = (tenantId: string, demo: boolean): Promise<{ runId: string }> =>
   post<{ runId: string }>(`/api/tenants/${tenantId}/demo`, { demo });

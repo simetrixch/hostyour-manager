@@ -67,14 +67,14 @@ export function tenantActivateStep(ports: TenantOnboardPorts, p: CreateTenantPar
       if (!token) {
         throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — the tenant's crypto secret must exist after a green smoke; refusing to invite the first admin without it`);
       }
-      // The tenant's identity-provider address: the one its routing gives the IdP member (shared/
+      // The tenant's identity-provider address: the one `tenantMemberUrl` gives the IdP member (shared/
       // unit-host.ts tenantMemberUrl) — the address its chart renders the ingress for. The apex is read
       // off the TARGET cluster's own values chain (the resolver provision-dns composes the tenant's
       // record from), so the address this posts to is one that record covers.
       // A tenant is created at its zone; an own domain is set on it later (tenant-set-own-domain).
       const unitApex = await ports.resolveUnitApex(p.domain, p.stage);
-      if (p.issuerRecordLabel) await requireIssuerRecordResolves(ports, tenantIssuerRecord(p.issuerRecordLabel, p.routing, p.identityProvider, p.stage, p.subdomain, unitApex));
-      const idpUrl = tenantMemberUrl(p.routing, p.identityProvider, p.stage, p.subdomain, unitApex, "");
+      if (p.issuerRecordLabel) await requireIssuerRecordResolves(ports, tenantIssuerRecord(p.issuerRecordLabel, p.identityProvider, p.stage, p.subdomain, unitApex));
+      const idpUrl = tenantMemberUrl(p.identityProvider, p.stage, p.subdomain, unitApex, "");
       const url = `${idpUrl}/api/v1/bootstrap/invite-admin`;
       // The token rides ONLY the declared header — never the URL, the body, or a log line.
       ctx.log("meta", `inviting the first tenant admin: POST ${url} with header X-Bootstrap-Token (token withheld)`);

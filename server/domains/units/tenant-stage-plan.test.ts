@@ -149,7 +149,7 @@ describe("tenant stages share identity while provisioning independently", () => 
 
   it.each([
     { cluster: "s2" }, { subdomain: "different" }, { identityProvider: "jobs" },
-    { routing: "path" }, { ownDomain: "different.example" }, { suspended: true }, { quiesced: true },
+    { ownDomain: "different.example" }, { suspended: true }, { quiesced: true },
     { resetNonce: "2" }, { appsRepo: "https://github.com/acme/different.git" },
     { appsImage: "different-bundle" },
   ] satisfies Partial<TenantRegistration>[])("refuses source definition drift %j before creating a stage", async (change) => {
@@ -197,7 +197,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     (p.dns as FakeDnsProvider).zones = ["example.org"];
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
     const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", domain: "cycleshop.show.example.org", databases: ["core"] }];
-    const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), routing: "path", ownDomain: "show.example.org", ownDomainRedirects: ["www.show.example.org"], quota: seedQuota("small") });
+    const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), ownDomain: "show.example.org", ownDomainRedirects: ["www.show.example.org"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
@@ -209,7 +209,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("PLANTED DEFECT: refuses a stage for a domain whose zone cannot be read, and never takes its last two labels for one", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const entry = TenantRegistrationSchema.parse({ ...current, routing: "path", ownDomain: "show.example.org", ownDomainRedirects: [], quota: seedQuota("small") });
+    const entry = TenantRegistrationSchema.parse({ ...current, ownDomain: "show.example.org", ownDomainRedirects: [], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);
@@ -230,7 +230,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     // a list without one, an empty list, an empty map and a map holding one.
     const INNOCENT = { mixed: ["company.example.it", "other.example"], plain: ["other.example"], none: [], blank: {}, nested: { inner: {} } };
     const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, ...INNOCENT, site: { domain: "company.example", aliases: ["company.example.it"] }, redirect: { hosts: ["company.example.it"] } } })) } : m);
-    const entry = TenantRegistrationSchema.parse({ ...current, apps, members, routing: "path", ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
+    const entry = TenantRegistrationSchema.parse({ ...current, apps, members, ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
     p.registrations = new TenantRegistrations(books);

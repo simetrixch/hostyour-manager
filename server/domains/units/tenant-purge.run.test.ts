@@ -73,7 +73,7 @@ afterEach(() => { db.sqlite.close(); });
 /** The tenant as it stands in GitOps (one app) — committed by the tests that need a pointer. */
 function entry(cluster = "s1"): TenantRegistration {
   return {
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", routing: "host", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     cluster, subdomain: SUB, apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
@@ -224,7 +224,7 @@ describe("tenant-purge plan", () => {
   it("promises the wildcard delete only where the target names a subdomain, and removes the booked records either way", async () => {
     seedCluster(); // no row, and no pointer: the purge knows no subdomain of this tenant
     const unnamed = await planned(ports(new TenantRegistrations(new FakePlatformRepo())));
-    expect(unnamed.plan.summary).not.toContain("remove the tenant's wildcard DNS record");
+    expect(unnamed.plan.summary).not.toContain("remove the tenant's zone DNS record");
     expect(unnamed.plan.summary).toContain("remove only the DNS records of its own domains that the book of DNS writes names as this tenant's, none under the platform's domain");
     // An earlier purge removed the registration and failed before remove-dns: the book still names the
     // tenant's own-domain record, and it goes even though no subdomain names the wildcard.
@@ -241,7 +241,7 @@ describe("tenant-purge plan", () => {
     // A pointer that names the subdomain: the record is the tenant's own and goes.
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
-    expect((await planned(ports(reg))).plan.summary).toContain("remove the tenant's wildcard DNS record");
+    expect((await planned(ports(reg))).plan.summary).toContain("remove the tenant's zone DNS record");
   });
 
   it("removes the tenant's own-domain records the book names also where the purge knows its subdomain", async () => {
@@ -261,7 +261,7 @@ describe("tenant-purge plan", () => {
     seedCluster(); // no row and no pointer: the purge knows no subdomain of this tenant
     const p = ports(new TenantRegistrations(new FakePlatformRepo()));
     const dns = p.dns as FakeDnsProvider;
-    const wildcard = "*.acme.example.com";
+    const wildcard = "acme.example.com";
     const provision = (unit: string, runId: string) => provisionUnitDns({ runId, db: db.db, log: () => {}, checkpoint: () => {} } as unknown as StepCtx, { dns, unit, kind: "tenant", stage: "prod", recordName: wildcard, clusterFqdn: "s1.example", runKind: "tenant-create" });
     await provision(GUID, "run_a"); // this tenant wrote it, and its first purge failed before remove-dns
     await provision("ffffffffffff", "run_b"); // a newer tenant on the same subdomain finds it standing as its own and books nothing
@@ -276,14 +276,14 @@ describe("tenant-purge plan", () => {
     seedSecondCluster(); // the tenant lived there once, under another unit apex
     const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
     const dns = p.dns as FakeDnsProvider;
-    for (const name of ["*.acme.other.example", "shop.acme.example"]) {
+    for (const name of ["acme.other.example", "shop.acme.example"]) {
       recordDnsWrite(db.db, { name, type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "dev" }, runId: "run_a" });
       dns.seed(name, "CNAME", "s2.example");
     }
     // The tenant stands at dev on clusters whose own stage is prod: a cluster's stage says nothing about a unit's.
     const unnamed = await planned(p, { ...REQUEST, stage: "dev" });
     await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
-    expect(dns.record("*.acme.other.example", "CNAME")).toBe("s2.example");
+    expect(dns.record("acme.other.example", "CNAME")).toBe("s2.example");
     expect(dns.record("shop.acme.example", "CNAME")).toBeUndefined();
   });
 
@@ -291,7 +291,7 @@ describe("tenant-purge plan", () => {
     seedCluster(); // cls_1 is a prod cluster, and the purged tenant and the newer one stood on it at dev
     const p = ports(new TenantRegistrations(new FakePlatformRepo()));
     const dns = p.dns as FakeDnsProvider;
-    const wildcard = "*.acme.example.com";
+    const wildcard = "acme.example.com";
     const provision = (unit: string, runId: string) => provisionUnitDns({ runId, db: db.db, log: () => {}, checkpoint: () => {} } as unknown as StepCtx, { dns, unit, kind: "tenant", stage: "dev", recordName: wildcard, clusterFqdn: "s1.example", runKind: "tenant-create" });
     await provision(GUID, "run_a");
     await provision("ffffffffffff", "run_b");
@@ -306,11 +306,11 @@ describe("tenant-purge plan", () => {
     db.db.update(clusters).set({ status }).where(eq(clusters.id, "cls_2")).run();
     const p = { ...ports(new TenantRegistrations(new FakePlatformRepo())), resolveUnitApex: async (domain: string) => (domain === "s2.example" ? "other.example" : "example.com") };
     const dns = p.dns as FakeDnsProvider;
-    recordDnsWrite(db.db, { name: "*.acme.other.example", type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
-    dns.seed("*.acme.other.example", "CNAME", "s2.example");
+    recordDnsWrite(db.db, { name: "acme.other.example", type: "CNAME", content: "s2.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+    dns.seed("acme.other.example", "CNAME", "s2.example");
     const unnamed = await planned(p);
     await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
-    expect(dns.record("*.acme.other.example", "CNAME")).toBe("s2.example");
+    expect(dns.record("acme.other.example", "CNAME")).toBe("s2.example");
   });
 
   it("spares the platform records under its own cluster's apex also where that cluster no longer counts as hosting", async () => {
@@ -318,11 +318,11 @@ describe("tenant-purge plan", () => {
     db.db.update(clusters).set({ status: "removed" }).where(eq(clusters.id, "cls_1")).run(); // a purge runs for leftovers there
     const p = ports(new TenantRegistrations(new FakePlatformRepo()));
     const dns = p.dns as FakeDnsProvider;
-    recordDnsWrite(db.db, { name: "*.acme.example.com", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
-    dns.seed("*.acme.example.com", "CNAME", "s1.example");
+    recordDnsWrite(db.db, { name: "acme.example.com", type: "CNAME", content: "s1.example", act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_a" });
+    dns.seed("acme.example.com", "CNAME", "s1.example");
     const unnamed = await planned(p);
     await makeTenantPurgeDef(p).steps(unnamed.params).find((x) => x.name === "remove-dns")!.run({ runId: "run_purge", stepName: "remove-dns", db: db.db, params: unnamed.params, log: () => {} } as unknown as StepCtx);
-    expect(dns.record("*.acme.example.com", "CNAME")).toBe("s1.example");
+    expect(dns.record("acme.example.com", "CNAME")).toBe("s1.example");
   });
 
   it("fails, removing no booked record, where a cluster's unit apex cannot be read without a subdomain, and names the cluster", async () => {
@@ -391,7 +391,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("plans sender from tenant row with senderDomain and step calls DELETE with issuer at filled route URL", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -401,17 +401,17 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
     const prt = ports(reg, { unitCall, senderDomainIssuers: async () => ROUTE });
 
     const { params, plan } = await planned(prt);
-    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://auth.${SUB}.example.com` });
+    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://${SUB}.example.com/auth` });
     expect(plan.summary).toContain(SENDER_DOMAIN);
-    expect(plan.summary).toContain(`https://auth.${SUB}.example.com`);
-    expect(plan.summary).toContain(`It unbinds https://auth.${SUB}.example.com at ${SENDER_DOMAIN} in the product's mail service`);
+    expect(plan.summary).toContain(`https://${SUB}.example.com/auth`);
+    expect(plan.summary).toContain(`It unbinds https://${SUB}.example.com/auth at ${SENDER_DOMAIN} in the product's mail service`);
 
     const step = makeTenantPurgeDef(prt).steps(params).find((s) => s.name === "unbind-sender-issuer")!;
     const logs: string[] = [];
     await step.run({ runId: "run_purge", stepName: "unbind-sender-issuer", db: db.db, creds, params, log: (_s: string, t: string) => logs.push(t), checkpoint: () => {} } as unknown as StepCtx);
 
-    expect(unitCall.calls).toEqual([{ method: "DELETE", url: `https://post.example.com/api/sender-domains/${encodeURIComponent(SENDER_DOMAIN)}/issuers`, key: KEY_VAL, body: { issuer: `https://auth.${SUB}.example.com` } }]);
-    expect(logs.some((l) => l.includes("post (prod) no longer lets https://auth.acme.example.com send from mail.example.org"))).toBe(true);
+    expect(unitCall.calls).toEqual([{ method: "DELETE", url: `https://post.example.com/api/sender-domains/${encodeURIComponent(SENDER_DOMAIN)}/issuers`, key: KEY_VAL, body: { issuer: `https://${SUB}.example.com/auth` } }]);
+    expect(logs.some((l) => l.includes("post (prod) no longer lets https://acme.example.com/auth send from mail.example.org"))).toBe(true);
   });
 
   it("plans sender from live registration when no inventory row stands", async () => {
@@ -422,13 +422,13 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
     const prt = ports(reg, { senderDomainIssuers: async () => ROUTE });
 
     const { params, plan } = await planned(prt);
-    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://auth.${SUB}.example.com` });
-    expect(plan.summary).toContain(`It unbinds https://auth.${SUB}.example.com at ${SENDER_DOMAIN} in the product's mail service`);
+    expect(params.sender).toEqual({ domain: SENDER_DOMAIN, issuer: `https://${SUB}.example.com/auth` });
+    expect(plan.summary).toContain(`It unbinds https://${SUB}.example.com/auth at ${SENDER_DOMAIN} in the product's mail service`);
   });
 
   it("PLANTED INNOCENT: a tenant with senderDomain: \"\" → sender null, no unit call, the log says so", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: "", status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: "", status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -450,7 +450,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("PLANTED DEFECT: the fake answers 500 → the step throws and the purge fails, the error naming the domain", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -468,7 +468,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("the route absent (senderDomainIssuers answers null) → no call, the log names the binding left", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", routing: "host", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -485,7 +485,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
     expect(unitCall.calls).toHaveLength(0);
     expect(logs.some((l) =>
       l.includes("the product declares no senderDomainIssuers route") &&
-      l.includes(`https://auth.${SUB}.example.com stays bound at ${SENDER_DOMAIN}`),
+      l.includes(`https://${SUB}.example.com/auth stays bound at ${SENDER_DOMAIN}`),
     )).toBe(true);
   });
 });

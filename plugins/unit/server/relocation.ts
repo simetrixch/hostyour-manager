@@ -59,7 +59,7 @@ export interface RelocationWorld {
   /** The source cluster's SHORT name (what the registration's cluster field carries). */
   sourceCluster: string;
   /** The unit's public base URL — a consumer's `https://<label>.<stage apex>`, a tenant's IdP member
-   *  (every tenant has one) at the address its routing gives it, which is what verify-quiesced
+   *  (every tenant has one) at `<zone>/<member>`, which is what verify-quiesced
    *  probes from the outside. */
   publicUrl: string;
   /** Every namespace of the unit on its cluster (a consumer: one; a tenant: one per member). */
@@ -118,8 +118,7 @@ export interface RelocationWorld {
    *  consumer's source Application is pruned, a tenant's source CR is gone. */
   verifySourceHandleReleased(ctx: StepCtx): Promise<void>;
   /** The unit's public record names — what switch-dns updates, never recomposed elsewhere: the unit's
-   *  one record, and for a tenant with a host-routed identity provider mark the issuer host's record
-   *  beside it. The apex comes off the TARGET's values chain (where the unit will serve). */
+   *  one record. The apex comes off the TARGET's values chain (where the unit will serve). */
   dnsRecordNames(ctx: StepCtx, target: TargetCluster): Promise<string[]>;
   /** Kind-specific completeness beyond the listing jobs — a tenant proves its crypto material
    *  materialized on the target. Absent ⇒ the jobs are the whole check. */
