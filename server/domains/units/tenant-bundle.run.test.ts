@@ -100,7 +100,7 @@ function fakeTenantSeeder(): VaultSeeder {
   return {
     seed: no, patchApp: no, seedPostgres: no, seedMongodb: no, seedRedis: no, seedMariadb: no, seedBuildRepoPat: no, refreshBuildRepoPat: no,
     deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {},
-    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {}, replaceTenantE2ePassword: async () => {}, deleteTenantE2ePassword: async () => {},
+    seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {}, replaceTenantE2ePassword: async () => {}, seedTenantE2ePassword: async () => ({ created: true }), deleteTenantE2ePassword: async () => {},
   };
 }
 /** The ports of a tenant WITHOUT the App and the template — what withAppsTemplate adds. */

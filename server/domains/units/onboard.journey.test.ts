@@ -33,7 +33,7 @@ import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 const SHA = "a".repeat(40);
 const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh in the onboard journey"));
-const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedMariadb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {}, replaceTenantE2ePassword: async () => {}, deleteTenantE2ePassword: async () => {} };
+const noSeeder: VaultSeeder = { seed: async () => ({ created: true }), patchApp: async () => {}, seedPostgres: async () => ({ created: true }), seedMongodb: async () => ({ created: true }), seedRedis: async () => ({ created: true }), seedMariadb: async () => ({ created: true }), seedBuildRepoPat: async () => ({ created: true }), refreshBuildRepoPat: async () => {}, deleteBuildRepoPat: async () => {}, deleteApp: async () => {}, deletePostgres: async () => {}, deleteMongodb: async () => {}, deleteRedis: async () => {}, deleteMariadb: async () => {}, seedTenantCrypto: async () => ({ created: true }), seedTenantAppKey: async () => ({ created: true }), listTenantAppKeys: async () => [], replaceGoogleTranslation: async () => {}, seedTenantGoogleTranslation: async () => ({ created: true }), deleteTenantGoogleTranslation: async () => {}, deleteTenantAppKeys: async () => ({ deleted: [] }), deleteTenantCrypto: async () => {}, replaceTenantE2ePassword: async () => {}, seedTenantE2ePassword: async () => ({ created: true }), deleteTenantE2ePassword: async () => {} };
 
 
 /** A FakePlatformRepo whose cluster values chain carries `global.unitApex` — onboard's planStream
@@ -243,6 +243,7 @@ describe("onboard end-to-end journey (real Executor, fake adapters)", () => {
       async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
       async deleteTenantCrypto(): Promise<void> {}
       async replaceTenantE2ePassword(): Promise<void> {}
+      async seedTenantE2ePassword(): Promise<VaultSeedOutcome> { return { created: true }; }
       async deleteTenantE2ePassword(): Promise<void> {}
     }
     const seeder = new RecordingSeeder();

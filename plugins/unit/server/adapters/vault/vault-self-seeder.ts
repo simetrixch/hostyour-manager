@@ -339,6 +339,24 @@ export class VaultSelfSeeder implements VaultSeeder {
     }
   }
 
+  async seedTenantE2ePassword(input: TenantE2ePasswordWriteInput): Promise<VaultSeedOutcome> {
+    const { addr, token } = await this.login();
+    try {
+      const path = tenantE2ePasswordPath(input.stage, input.guid);
+      const res = await fetch(`${addr}/v1/${KV_MOUNT}/data/${path}`, {
+        method: "POST",
+        headers: { "x-vault-token": token, "content-type": "application/json" },
+        body: JSON.stringify({ data: { password: input.password }, options: { cas: 0 } }),
+      });
+      if (res.ok) return { created: true };
+      const detail = await res.text().catch(() => "");
+      if (res.status === 400 && detail.includes("check-and-set")) return { created: false };
+      throw new VaultError(`vault end-to-end password seed put failed for ${KV_MOUNT}/${path} (${res.status})`, res.status);
+    } finally {
+      await this.revoke(addr, token).catch(() => undefined);
+    }
+  }
+
   async deleteTenantE2ePassword(input: TenantCryptoDeleteInput): Promise<void> {
     const { addr, token } = await this.login();
     try {

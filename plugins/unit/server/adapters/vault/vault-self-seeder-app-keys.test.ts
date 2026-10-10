@@ -62,6 +62,19 @@ describe("VaultSelfSeeder tenant app keys", () => {
     await withSelf(async (seeder) => expect(seeder.seedTenantGoogleTranslation({ stage: "prod", guid: "g1" })).rejects.toThrow(/Google translation settings seed put failed/));
   });
 
+  it("PLANTED DEFECT: seeds a demo tenant's end-to-end password create-only, and leaves a standing one", async () => {
+    const input = { stage: "prod" as const, guid: "g1", password: "minted" };
+    await withSelf(async (seeder) => {
+      expect(await seeder.seedTenantE2ePassword(input)).toEqual({ created: true });
+      const put = vault.recorded.find((r) => r.method === "POST" && r.url.includes("/data/"));
+      expect(put).toMatchObject({ url: "/v1/secret/data/prod/tenants/g1/e2e", body: { data: { password: "minted" }, options: { cas: 0 } } });
+    });
+    vault.dataPut = { status: 400, body: JSON.stringify({ errors: ["check-and-set parameter did not match the current version"] }) };
+    await withSelf(async (seeder) => expect(await seeder.seedTenantE2ePassword(input)).toEqual({ created: false }));
+    vault.dataPut = { status: 403, body: "permission denied" };
+    await withSelf(async (seeder) => expect(seeder.seedTenantE2ePassword(input)).rejects.toThrow(/end-to-end password seed put failed/));
+  });
+
   it("purges the tenant's Google translation settings with a metadata delete, and takes an absent entry as gone", async () => {
     await withSelf(async (seeder) => {
       await seeder.deleteTenantGoogleTranslation({ stage: "prod", guid: "g1" });

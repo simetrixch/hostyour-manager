@@ -381,6 +381,11 @@ export interface VaultSeeder {
    *  end-to-end task on the master may read this leaf, and never the tenant's signing key beside it.
    *  Write-only: nothing is read. */
   replaceTenantE2ePassword(input: TenantE2ePasswordWriteInput): Promise<void>;
+  /** Create a demo tenant's end-to-end password ONCE (cas=0), for create-tenant: an entry that
+   *  stands is left as it is (`created: false`). A re-run of the create must not replace it, because
+   *  the tenant's auth may already have read the standing value at its start, and the end-to-end task
+   *  would then sign in with a password the auth does not know. Write-only: nothing is read. */
+  seedTenantE2ePassword(input: TenantE2ePasswordWriteInput): Promise<VaultSeedOutcome>;
   /** Remove a tenant's end-to-end password, all versions (demo off, purge), so nothing can sign in
    *  to a tenant that is no demo with it. An absent entry (404) is ok; every other non-2xx fails the
    *  run. */

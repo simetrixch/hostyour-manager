@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { StepCtx } from "../../executor/types.ts";
-import type { TenantAppKeySeedInput, VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { seedTenantAppKeyStep, seedTenantAppKeys, seedTenantWebsiteKeys } from "./tenant-app-keys.ts";
+import type { TenantAppKeySeedInput, TenantE2ePasswordWriteInput, VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
+import { seedDemoE2ePassword, seedTenantAppKeyStep, seedTenantAppKeys, seedTenantWebsiteKeys } from "./tenant-app-keys.ts";
 
 // Every tenant app's Password field key, and every tenant website's revalidate secret and form
 // signing key: one per app and kind, 32 random bytes as base64, written create-only into the app's own
@@ -125,5 +125,28 @@ describe("the step that keys an app joining a standing tenant", () => {
 
   it("refuses by name where no seeder is wired", async () => {
     await expect(seedTenantAppKeyStep(undefined, "password-field-key", "prod", "g1", "crm").run(ctx([]))).rejects.toThrow(/no Vault seeder is wired/);
+  });
+});
+
+describe("a demo tenant's end-to-end password at creation", () => {
+  const logged = (logs: string[]) => ({ log: (_s: string, t: string) => logs.push(t) });
+
+  it("is 32 random bytes as hex, written create-only to the tenant's e2e leaf, and never logged", async () => {
+    const writes: TenantE2ePasswordWriteInput[] = [];
+    const seeder = { seedTenantE2ePassword: async (i: TenantE2ePasswordWriteInput) => { writes.push(i); return { created: true }; } } as unknown as VaultSeeder;
+    const logs: string[] = [];
+    expect(await seedDemoE2ePassword(seeder, "prod", "g1", logged(logs))).toEqual({ created: true });
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toMatchObject({ stage: "prod", guid: "g1" });
+    expect(writes[0]!.password).toMatch(/^[0-9a-f]{64}$/);
+    expect(logs).toEqual(["end-to-end password of demo tenant g1 written to prod/tenants/g1/e2e"]);
+  });
+
+  it("leaves a password that already stands untouched, and says so", async () => {
+    // A re-run of the create must not change a password the tenant's auth may already have started with.
+    const seeder = { seedTenantE2ePassword: async () => ({ created: false }), replaceTenantE2ePassword: () => Promise.reject(new Error("creation never replaces it")) } as unknown as VaultSeeder;
+    const logs: string[] = [];
+    expect(await seedDemoE2ePassword(seeder, "prod", "g1", logged(logs))).toEqual({ created: false });
+    expect(logs[0]).toMatch(/prod\/tenants\/g1\/e2e already stands and was left UNTOUCHED/);
   });
 });

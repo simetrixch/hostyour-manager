@@ -22,6 +22,7 @@ export class FakePurgeSeeder implements VaultSeeder {
   readonly deletedAppKeys: TenantCryptoDeleteInput[] = [];
   async deleteTenantCrypto(i: TenantCryptoDeleteInput): Promise<void> { this.deletedCrypto.push(i); }
   async replaceTenantE2ePassword(): Promise<void> { throw new Error("purge never writes an end-to-end password"); }
+  async seedTenantE2ePassword(): Promise<VaultSeedOutcome> { throw new Error("purge never writes an end-to-end password"); }
   readonly deletedE2e: TenantCryptoDeleteInput[] = []; async deleteTenantE2ePassword(i: TenantCryptoDeleteInput): Promise<void> { this.deletedE2e.push(i); }
   async deleteBuildRepoPat(): Promise<void> {}
   async deleteApp(): Promise<void> {}
