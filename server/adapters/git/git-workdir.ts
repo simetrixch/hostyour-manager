@@ -6,7 +6,7 @@
 import { chmod, mkdir, readdir, readFile as fsReadFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, relative, resolve, sep } from "node:path";
-import { errValidation } from "../../kernel/errors.ts";
+import { errUpstream, errValidation } from "../../kernel/errors.ts";
 import { runGit } from "./git-exec.ts";
 import type { RepoFileWrite } from "./port.ts";
 
@@ -87,11 +87,26 @@ export async function listWorkdirDir(workdir: string, relPath: string): Promise<
 // keeps to the branch's own line: a merge that carried another branch in counts where it changed the
 // file, that branch's own commits do not. `AM` and not the exclusion form `d`: on the git of the Manager
 // image (2.39) `--diff-filter=d` answers no commit at all. Same lexical guard as the readers above; the
-// contents come from git's object store, not from the worktree.
+// contents come from git's object store, not from the worktree, all of them through one `cat-file --batch`:
+// a file with a hundred versions would otherwise start a hundred git processes, which a CPU-limited pod
+// pays for in seconds.
 export async function readWorkdirFileHistory(workdir: string, relPath: string): Promise<string[]> {
   safePath(workdir, relPath);
   const shas = (await runGit(["log", "--first-parent", "--diff-filter=AM", "--format=%H", "--", relPath], { cwd: workdir })).split("\n").filter(Boolean);
-  return Promise.all(shas.map((sha) => runGit(["show", `${sha}:${relPath}`], { cwd: workdir })));
+  if (shas.length === 0) return [];
+  const out = Buffer.from(await runGit(["cat-file", "--batch"], { cwd: workdir, input: shas.map((sha) => `${sha}:${relPath}\n`).join("") }), "utf8");
+  const contents: string[] = [];
+  let at = 0;
+  for (const sha of shas) {
+    // Each answer is "<object> blob <size>\n", then <size> bytes, then "\n".
+    const headerEnd = out.indexOf(0x0a, at);
+    const header = out.subarray(at, headerEnd).toString("utf8").split(" ");
+    if (header[1] !== "blob") throw errUpstream(`git cat-file found no blob for ${sha}:${relPath} (${header.join(" ")})`);
+    const size = Number(header[2]);
+    contents.push(out.subarray(headerEnd + 1, headerEnd + 1 + size).toString("utf8"));
+    at = headerEnd + 1 + size + 1;
+  }
+  return contents;
 }
 
 // Whether the checkout's index records a workdir-relative file as 100755. The index is git's own record

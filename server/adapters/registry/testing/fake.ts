@@ -7,6 +7,8 @@ import type { RegistryProbe, ImageRef, RegistryMaintenance, ManifestDigest } fro
 export class FakeRegistryProbe implements RegistryProbe {
   /** Every probed coordinate, in order, as "<repo>:<tag>". */
   readonly probes: string[] = [];
+  /** Every repository whose tags were listed, in order. */
+  readonly listed: string[] = [];
   private readonly missing: Set<string>;
   private readonly tags: Readonly<Record<string, readonly string[]>>;
 
@@ -27,6 +29,7 @@ export class FakeRegistryProbe implements RegistryProbe {
   }
 
   async listTags(ref: Omit<ImageRef, "tag">): Promise<string[]> {
+    this.listed.push(ref.repo);
     return [...(this.tags[ref.repo] ?? [])];
   }
 }

@@ -26,7 +26,7 @@ import { isDeepStrictEqual } from "node:util";
 import { bundleReleaseRefusal, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import { standingAppDatabases } from "./tenant-app-databases.ts";
 import {
-  restoreVersionsCleanup, sameApprovals, stagePinsAndNamesOf, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
+  restoreVersionsCleanup, sameApprovals, stagePinsAndNamesOf, tenantBundlePart, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
   type Approvals, type TenantVersionPart,
 } from "./tenant-versions.ts";
 
@@ -95,9 +95,12 @@ export const TenantRefreshMembersParams = z.object({
    *  issuerRecordLabel), as the manifest declared it at the plan; absent where it declares none. A
    *  standing tenant gets its mark here, the one run that carries a change of the manifest to it. */
   issuerRecordLabel: z.string().optional(),
-  /** The tenant's own apps bundle and the tag it stands at ("" where it has none). */
+  /** The tenant's own apps bundle and the tag the run puts it at ("" where it has none). */
   appsImage: z.string(),
   appsImageTag: z.string(),
+  /** The bundle's tag and the apps with their database lists when this was planned; an abort writes them back. */
+  previousAppsImageTag: z.string(),
+  previousApps: z.array(TenantAppSchema),
   /** The units that build what the registry lacks, resolved at plan time (planBuildUnits). */
   buildUnits: z.array(BuildUnitSchema).default([]),
   /** The tenant's versions when this was planned (#296); an abort writes them back. */
@@ -162,22 +165,28 @@ function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMembe
   return (byName) => synced(byName) && members.every((m, i) => rendersEntry(byName.get(p.expectedApps[i]!), m, p.previous.find((b) => b.name === m.name), deployRepoUrl, stage));
 }
 
-/** On abort: write back the member entries the registration carried before this run — only while it
- *  still carries this run's own entries. Entries another run wrote since are that run's, and stay. */
+/** Whether the registration's bundle tag is one this run planned from or writes: anything else was
+ *  written by another run or a release since, together with the database lists of that bundle. */
+const ownBundleTag = (p: TenantRefreshMembersParams, tag: string | undefined): boolean =>
+  (tag ?? "") === p.previousAppsImageTag || (tag ?? "") === p.appsImageTag;
+
+/** On abort: write back the member entries, the apps' database lists and the bundle tag the
+ *  registration carried before this run — only while it still carries this run's own entries and
+ *  bundle. Entries another run wrote since are that run's, and stay. */
 function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Cleanup {
   return {
     name: "restore-members",
     title: "Write the previous member entries back into the registration",
     run: async (ctx) => {
       const current = await ports.registrations.readTenant(p.stage, p.guid);
-      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous))) {
-        ctx.log("meta", `tenant ${p.guid}'s member entries are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
+      if (!current || (!sameMembers(current.entry.members, p.members) && !sameMembers(current.entry.members, p.previous)) || !ownBundleTag(p, current.entry.appsImageTag)) {
+        ctx.log("meta", `tenant ${p.guid}'s member entries or bundle are not the ones this run writes — this run never wrote them, or another run wrote others since; left as they are`);
         return;
       }
       await refreshMemberPolicies(ports, p, p.previous);
-      const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId);
+      const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId, p.previousApps, p.previousAppsImageTag || undefined);
       await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
-      ctx.log("meta", `tenant ${p.guid} members back to the entries before this run (${commit}); the apps' database lists stay as their catalog entries declare them`);
+      ctx.log("meta", `tenant ${p.guid} members, database lists and bundle back to what they were before this run (${commit})`);
     },
   };
 }
@@ -257,10 +266,14 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
           throw errValidation(`tenant ${p.guid}'s ${MEMBERS_CHANGED} — plan it again`);
         }
+        // The database lists were resolved at the bundle the plan saw; beside another they are wrong.
+        if (!ownBundleTag(p, current.entry.appsImageTag)) {
+          throw errValidation(`tenant ${p.guid}'s apps bundle moved to ${current.entry.appsImageTag ?? "none"} since this run was planned at ${p.previousAppsImageTag || "none"} — plan it again`);
+        }
         ctx.registerCleanup(restoreMembersCleanup(ports, p));
         // Admit the namespace labels before the registration asks ArgoCD to write them.
         await refreshMemberPolicies(ports, p, p.members);
-        const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps);
+        const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.members, ctx.runId, p.apps, p.appsImageTag || undefined);
         ctx.db.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit });
         await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
@@ -295,13 +308,15 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
 }
 
 /** Every part whose version the run moves, `part old → new`, and apart from them every one it moves
- *  back: a downgrade is chosen on purpose, so it is said rather than refused. */
-function versionMoves(parts: readonly TenantVersionPart[], after: Approvals): { forward: string[]; back: string[] } {
+ *  back: a downgrade is chosen on purpose, so it is said rather than refused. The apps bundle runs the
+ *  tag the registration holds, not an approval. */
+function versionMoves(parts: readonly TenantVersionPart[], after: Approvals, bundle: { name: string; tag: string } | undefined): { forward: string[]; back: string[] } {
   const forward: string[] = [];
   const back: string[] = [];
   for (const part of parts) {
     const builds = new Set(part.builds.map((b) => b.name));
-    const next = [...new Set(Object.values(after).flatMap((held) => Object.entries(held).filter(([b]) => builds.has(b)).map(([, t]) => t)))];
+    const next = part.name === bundle?.name ? [bundle.tag]
+      : [...new Set(Object.values(after).flatMap((held) => Object.entries(held).filter(([b]) => builds.has(b)).map(([, t]) => t)))];
     if (next.length === part.running.length && next.every((t) => part.running.includes(t))) continue;
     const newest = part.running[0];
     const line = `${part.name} ${part.running.join(" / ")} → ${next.join(" / ")}`;
@@ -344,9 +359,26 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       ctx.log(`deploy trunk carried into the books branch ${ports.registrations.branch}`);
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
-      const { apps, appsImage, appsImageTag, seedUsers, subdomain, quota, size } = current.entry;
+      const { apps, appsImage, seedUsers, subdomain, quota, size } = current.entry;
       const demo = current.entry.demo === true;
-      const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
+      const channels = await ports.channelStages();
+      // A part's version is chosen only where it may run at the stage and every image of the part stands in the registry.
+      const assertChoice = async (part: TenantVersionPart, tag: string): Promise<void> => {
+        const refusal = versionRefusal(tag, part, channels, tc.stage);
+        if (refusal) throw errValidation(`${part.name} of tenant ${tc.subdomain} cannot run ${tag} — ${refusal}`);
+        for (const b of part.builds) {
+          if (!(await ports.registryProbe.imageExists({ registryHost, repo: b.image, tag }, { signal: ctx.signal }))) {
+            throw errValidation(`${registryHost}/${b.image}:${tag} is not in the registry — a version is chosen only where every image of its part stands there`);
+          }
+        }
+      };
+      // The bundle release declares the apps' database lists the members are resolved with, so its move
+      // is settled first.
+      const bundle = await tenantBundlePart(ports, tc.stage, current.entry);
+      const bundleTag = bundle ? req.versions[bundle.name] : undefined;
+      if (bundle && bundleTag) await assertChoice(bundle, bundleTag);
+      const appsImageTag = bundleTag ?? current.entry.appsImageTag;
+      const appDatabases = await standingAppDatabases((b, signal) => tenantBundleManifest(ports, b, signal), { ...current.entry, ...(appsImageTag ? { appsImageTag } : {}) }, ctx);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
@@ -391,28 +423,26 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         );
       }
       const changed = members.filter((m) => !sameMembers([m], previous.filter((b) => b.name === m.name)));
-      const parts = await tenantVersionParts(ports, tc.stage, members, current.entry.approvedTags);
-      const channels = await ports.channelStages();
+      const parts = await tenantVersionParts(ports, tc.stage, members, current.entry.approvedTags, current.entry);
       const chosenVersions: Record<string, string> = {};
       for (const [name, tag] of Object.entries(req.versions)) {
         const part = parts.find((p) => p.name === name);
         if (!part) throw errValidation(`tenant ${tc.subdomain} has no part "${name}" — its parts are ${parts.map((p) => p.name).join(", ") || "none"}`);
-        const refusal = versionRefusal(tag, part, channels, tc.stage);
-        if (refusal) throw errValidation(`${name} of tenant ${tc.subdomain} cannot run ${tag} — ${refusal}`);
-        for (const b of part.builds) {
-          if (!(await ports.registryProbe.imageExists({ registryHost, repo: b.image, tag }, { signal: ctx.signal }))) {
-            throw errValidation(`${registryHost}/${b.image}:${tag} is not in the registry — a version is chosen only where every image of its part stands there`);
-          }
-          chosenVersions[b.name] = tag;
-        }
+        if (part.name === bundle?.name) continue;
+        await assertChoice(part, tag);
+        for (const b of part.builds) chosenVersions[b.name] = tag;
       }
       // A build the tenant does not hold yet starts at its stage pin; write-versions reads the pins again when it runs.
       const approved = withChosenVersions(current.entry.approvedTags, await stagePinsAndNamesOf((chart) => ports.registrations.listPinnedBuilds(tc.stage, chart), members), chosenVersions);
       // The engines this run puts the tenant on have to fit the bundle it runs, read off the tenant's
-      // own repository at the release the bundle was built from where a version moves a line
-      // (engine-line.ts); write-versions judges again with the pins as they stand then.
-      throwEngineLineRefusal(await bundleReleaseRefusal(ports, current.entry, current.entry.approvedTags, approved, ctx), `tenant ${tc.subdomain} cannot run these versions`);
-      const moves = versionMoves(parts, approved);
+      // own repository at the release the bundle was built from where a version moves a line, and
+      // always where the bundle moves (engine-line.ts); write-versions judges again with the pins as
+      // they stand then.
+      throwEngineLineRefusal(
+        await bundleReleaseRefusal(ports, { appsRepo: current.entry.appsRepo, appsImageTag }, bundleTag ? {} : current.entry.approvedTags, approved, ctx),
+        `tenant ${tc.subdomain} cannot run these versions`,
+      );
+      const moves = versionMoves(parts, approved, bundle && appsImageTag ? { name: bundle.name, tag: appsImageTag } : undefined);
       // A build the tenant held no version of renders its stage pin; recording it changes nothing that runs.
       const recorded = Object.entries(approved).flatMap(([m, builds]) =>
         Object.entries(builds).filter(([b]) => current.entry.approvedTags[m]?.[b] === undefined && chosenVersions[b] === undefined).map(([b, t]) => `${m}/${b} ${t}`));
@@ -427,7 +457,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       // Each app with the database list the tenant's own repository declares now, which every member reads.
       const listedApps = withAppDatabases(apps, outcome.appDatabases);
       const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
-      const isCurrent = changed.length === 0 && relisted.length === 0 && sameApprovals(approved, current.entry.approvedTags) && planned.builds.units.length === 0;
+      const isCurrent = changed.length === 0 && relisted.length === 0 && sameApprovals(approved, current.entry.approvedTags) && appsImageTag === current.entry.appsImageTag && planned.builds.units.length === 0;
       const params: TenantRefreshMembersParams = {
         tenantId: tc.tenantId,
         guid: tc.guid,
@@ -442,6 +472,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
         requiredImages,
         syncUnits: tenantSyncUnits(requiredImages, await ports.attestedBuilds()),
         subdomain, owner: tc.owner, apps: listedApps, seedUsers, demo, appsImage, appsImageTag: appsImageTag ?? "",
+        previousAppsImageTag: current.entry.appsImageTag ?? "", previousApps: apps,
         buildUnits: planned.builds.units,
         previousApproved: current.entry.approvedTags,
         chosenVersions,

@@ -27,6 +27,11 @@ describe("GitPlatformRepo, a file's history on the books branch", () => {
       await write("charts/example-engine/pins-prod.yaml", "tag: b\n");
       expect(await repo.withBranch(BOOKS, (books) => books.readFileHistory("charts/example-engine/pins-prod.yaml"))).toEqual(["tag: b\n", "tag: a\n"]);
       expect(await repo.withBranch(BOOKS, (books) => books.readFileHistory("charts/never.yaml"))).toEqual([]);
+      // Contents are cut by their byte size: a multibyte character, an empty version and one without
+      // a final newline each come back as written.
+      await write("charts/example-engine/pins-prod.yaml", "");
+      await write("charts/example-engine/pins-prod.yaml", "tag: ä\n\nnext: ü");
+      expect(await repo.withBranch(BOOKS, (books) => books.readFileHistory("charts/example-engine/pins-prod.yaml"))).toEqual(["tag: ä\n\nnext: ü", "", "tag: b\n", "tag: a\n"]);
     },
     SLOW,
   );

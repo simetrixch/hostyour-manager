@@ -4,7 +4,7 @@ import type { TenantLifecyclePorts } from "./lifecycle.ts";
 
 // A TENANT'S APPS BUNDLE GOES WITH ITS LAST APP (hostyour-manager#217). The build-only registration
 // of the tenant's own apps repository (`<bundle>-<subdomain>`, tenant-apps-tree.ts) stands as long
-// as an app of the tenant does: remove-app takes it back when the app it drops was the last one, and
+// as an app of a tenant that records its image does: remove-app takes it back when the app it drops was the last one, and
 // every tenant removal (offboard, purge, the replace and abort teardowns) takes it back with the
 // tenant. Two things go together, because they were written together by tenant-apps-repo: the
 // bundle's build-only registration (registrations/<unit>/build.yaml), and — where the tenant stays —
@@ -33,14 +33,15 @@ export async function removeTenantAppsRegistration(ctx: StepCtx, ports: TenantLi
   }
   const { appsRepo, appsImage } = current.entry;
   ctx.log("meta", `repository ${appsRepo} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`);
-  // An unreadable sibling cannot prove that the shared build registration is unused.
-  const siblings = await Promise.all(STAGE.filter((stage) => stage !== t.stage).map(async (stage) => {
-    const sibling = await ports.registrations.scanTenant(stage, t.guid);
-    return sibling.status === "unreadable" || (sibling.status === "read" && (await ports.registrations.readTenant(stage, t.guid))?.entry.appsImage === appsImage);
-  }));
-  const shared = siblings.some(Boolean);
-  if (shared) {
-    ctx.log("meta", `build registration of ${appsImage} stays for another stage of tenant ${t.guid}`);
+  // The build registration is the bundle's, not the tenant's: every tenant at every stage that records
+  // the same image builds from it, and a registration that cannot be read cannot prove it does not.
+  const scans = await Promise.all(STAGE.map((stage) => ports.registrations.listTenantPointers(stage)));
+  const user = scans.flatMap((s) => s.pointers).find((p) => p.appsImage === appsImage && !(p.stage === t.stage && p.guid === t.guid));
+  const unreadable = scans.flatMap((s) => s.skipped)[0];
+  if (user) {
+    ctx.log("meta", `build registration of ${appsImage} stays for tenant ${user.guid} at ${user.stage}`);
+  } else if (unreadable) {
+    ctx.log("meta", `build registration of ${appsImage} stays: ${unreadable.reason}`);
   } else if (ports.buildRegistrations) {
     const { removed } = await ports.buildRegistrations.removeBuildRegistration(appsImage, ctx.runId);
     ctx.log("meta", removed ? `build registration of ${appsImage} removed` : `build registration of ${appsImage} already absent`);

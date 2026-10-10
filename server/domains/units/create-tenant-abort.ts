@@ -15,6 +15,7 @@ import { removeIssuerRecordsStep, tenantTeardownSteps, type TenantTeardownOpts, 
 // create-tenant-activate.ts has.
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import { removeBookedRecords } from "#unit/server/unit-dns.ts";
+import { tenantE2ePasswordPath } from "#unit/server/adapters/vault/seeder-port.ts";
 
 /** The create-tenant ABORT flavour of the shared teardown: the compensating inverse of everything this
  *  run deploys. FAIL-LOUD, exactly like tenant-offboard and for its reason — an abort deletes no Tenant
@@ -30,7 +31,7 @@ const ABORT_TEARDOWN: TenantTeardownOpts = {
   // "offboarded", never "purged": an abort issues no cluster-side delete of its own, so the
   // rolled-back tenant's namespaces and Vault crypto entry all still
   // stand — a purge is still the run kind that reaps them, which is exactly what an "offboarded" row goes
-  // on offering. The member DATABASES do NOT survive the rollback: the prune it waits for deletes
+  // on offering. A demo's end-to-end password does not stand: no registration names a demo any more. The member DATABASES do NOT survive the rollback: the prune it waits for deletes
   // every member's ServiceClaim, and the service-provisioner drops a claim's databases together with
   // its user on any claim deletion, prune included.
   settledStatus: "offboarded",
@@ -80,11 +81,21 @@ function abortTeardownTarget(p: CreateTenantParams): TenantTeardownTarget {
  *  registration in record-provisional builds: both call exactly this one function. */
 export function createTenantCleanups(ports: TenantOnboardPorts, p: CreateTenantParams): Cleanup[] {
   // The `cascade` deletes NO cluster state (see ABORT_TEARDOWN); it removes the identity provider's DNS
-  // mark provision-dns may have published, which would otherwise outlive the tenant this run never made.
+  // mark provision-dns may have published, which would otherwise outlive the tenant this run never made,
+  // and the end-to-end password seed-tenant-crypto wrote for a demo.
   const target = abortTeardownTarget(p);
   return tenantTeardownSteps(ports, target, ABORT_TEARDOWN, [removeIssuerRecordsStep(ports, target, ABORT_TEARDOWN), ...(p.sourceTenantId ? [{
     name: `abort-${p.guid}-remove-stage-hosts`, title: `Roll back ${p.guid}: remove the new stage's recorded hosts`,
     run: (ctx: Parameters<Cleanup["run"]>[0]) => removeBookedRecords(ctx, { dns: ports.dns, owner: { kind: "tenant", name: p.guid, stage: p.stage }, except: [] }),
+  }] : []), ...(p.demo ? [{
+    name: `abort-${p.guid}-remove-e2e-password`, title: `Roll back ${p.guid}: remove the end-to-end tests' password from Vault`,
+    run: async (ctx: Parameters<Cleanup["run"]>[0]) => {
+      const path = tenantE2ePasswordPath(p.stage, p.guid);
+      // seed-tenant-crypto refuses to run without a seeder, so without one nothing was written here.
+      if (!ports.seeder) { ctx.log("meta", `no Vault seeder is wired — nothing was written to ${path}`); return; }
+      await ports.seeder.deleteTenantE2ePassword({ stage: p.stage, guid: p.guid });
+      ctx.log("meta", `end-to-end password ${path} destroyed (all versions), or none stood`);
+    },
   }] : [])]);
 }
 

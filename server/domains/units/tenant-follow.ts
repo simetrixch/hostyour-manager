@@ -80,7 +80,7 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
   for (let attempt = 1; ; attempt++) {
     const read = await deps.ports.registrations.readTenant(tc.stage, tc.guid);
     if (!read) return `tenant ${tc.guid} has no registration at ${tc.stage}`;
-    const versions = followedVersions(await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags));
+    const versions = followedVersions(await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags, read.entry));
     const moves = Object.entries(versions).map(([part, tag]) => `${part} to ${tag}`).join(", ");
     if (moves === "") return `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin`;
     const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });

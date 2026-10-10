@@ -120,7 +120,7 @@ export async function readLineMove(
   if (!bundle) return { line: running.line, toLine: line, target: null, refusals: [`no release of ${appsRepo} that ${stage} takes declares engine line ${line}`], standing: false };
 
   const tParts = performance.now();
-  const parts = await tenantVersionParts(ports, stage, entry.members, entry.approvedTags);
+  const parts = await tenantVersionParts(ports, stage, entry.members, entry.approvedTags, entry);
   input.log(`parts and their released tags: ${Math.round(performance.now() - tParts)} ms`);
   const part = parts.find((p) => p.builds.some((b) => b.name === bundle.engine.build));
   if (!part) return { line: running.line, toLine: line, target: null, refusals: [`no member of tenant ${entry.subdomain} renders ${bundle.engine.build}, the engine ${bundle.release} is written for`], standing: false };

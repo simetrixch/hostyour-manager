@@ -94,6 +94,9 @@ export interface ScannedTenant {
   ownDomainRedirects: string[];
   ownDomainAliases: string[];
   senderDomain: string;
+  /** The apps bundle image this tenant builds from, or "" — a removal keeps the bundle's build
+   *  registration while any other tenant records the same image. */
+  appsImage: string;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -104,6 +107,14 @@ export type TenantScan =
   | { status: "absent" }
   | { status: "unreadable"; reason: string }
   | { status: "read"; entry: ScannedTenant };
+
+/** A build a stage pin file names now, with every tag the file has named for it, newest first. */
+export interface PinHistory {
+  name: string;
+  image: string;
+  tag: string;
+  released: string[];
+}
 
 export interface TenantRead {
   entry: TenantRegistration;
@@ -197,7 +208,7 @@ export class TenantRegistrations {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
         members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
-        senderDomain: r.data.senderDomain ?? "",
+        senderDomain: r.data.senderDomain ?? "", appsImage: r.data.appsImage ?? "",
       },
     };
   }
@@ -412,8 +423,9 @@ export class TenantRegistrations {
    *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries each
    *  app's database list as its catalog entry declares it now. Only that list is taken: every other
    *  field of an app, and an app the list does not name, stays as the registration holds it at this
-   *  write, so a run that changed an app since the plan keeps what it wrote. */
-  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = []): Promise<{ commit: string }> {
+   *  write, so a run that changed an app since the plan keeps what it wrote. `appsImageTag`, where
+   *  given, moves the apps bundle in the same commit, because the bundle release declares the lists. */
+  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = [], appsImageTag?: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const lists = new Map(listedApps.map((a) => [a.name, a.databases]));
@@ -423,7 +435,7 @@ export class TenantRegistrations {
       const listed = lists.get(a.name);
       return listed ? { ...rest, databases: [...listed] } : rest;
     });
-    return this.write(stage, guid, { ...current.entry, members: [...members], apps }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
+    return this.write(stage, guid, { ...current.entry, members: [...members], apps, ...(appsImageTag ? { appsImageTag } : {}) }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
   }
 
   /** Each app's database list, as `listsFor` answers it off the apps the registration holds, written
@@ -451,22 +463,28 @@ export class TenantRegistrations {
     return raw === null ? [] : pinnedBuildsIn(raw);
   }
 
-  /** The builds a chart's stage pin file names now, each with every tag the file has named for it on
-   *  the books branch, newest first: what releases have made available at this stage, then and now.
-   *  One turn, so the pins and their history are read off the same commit. */
-  async listPinHistory(stage: Stage, chart: string): Promise<{ name: string; image: string; tag: string; released: string[] }[]> {
-    const path = `${chart}/pins-${stage}.yaml`;
-    const { now, history } = await this.repo.withBranch(this.branch, async (books) => ({ now: await books.readFile(path), history: await books.readFileHistory(path) }));
-    if (now === null) return [];
-    const released = new Map<string, string[]>();
-    for (const raw of history) {
-      for (const b of pinnedBuildsIn(raw)) {
-        const tags = released.get(b.name) ?? [];
-        if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
-        released.set(b.name, tags);
+  /** The builds each stage pin file names now (`<pinsDir>/pins-<stage>.yaml`, the directory of a chart
+   *  or of an apps bundle), each with every tag the file has named for it on the books branch, newest
+   *  first: what releases have made available at this stage, then and now. ONE turn for every
+   *  directory, because a turn fetches and resets the books worktree, and so the pins and their
+   *  history are read off the same commit. A directory without a pin file answers []. */
+  async listPinHistories(stage: Stage, pinsDirs: readonly string[]): Promise<ReadonlyMap<string, PinHistory[]>> {
+    const files = await this.repo.withBranch(this.branch, (books) => Promise.all([...new Set(pinsDirs)].map(async (pinsDir) => {
+      const path = `${pinsDir}/pins-${stage}.yaml`;
+      return { pinsDir, now: await books.readFile(path), history: await books.readFileHistory(path) };
+    })));
+    return new Map(files.map(({ pinsDir, now, history }) => {
+      if (now === null) return [pinsDir, []];
+      const released = new Map<string, string[]>();
+      for (const raw of history) {
+        for (const b of pinnedBuildsIn(raw)) {
+          const tags = released.get(b.name) ?? [];
+          if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
+          released.set(b.name, tags);
+        }
       }
-    }
-    return pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }));
+      return [pinsDir, pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }))];
+    }));
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it

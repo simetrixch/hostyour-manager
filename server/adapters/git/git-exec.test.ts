@@ -60,3 +60,23 @@ describe("the budget a git is held to", () => {
 
   it("cleans up", () => cleanUp());
 });
+
+describe("the input a git is handed", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "hostyour-git-input-"));
+
+  it("rejects with git's own failure when git exits before it reads its input, and nothing is left unheard", async () => {
+    // Outside a repository `cat-file` exits at once, and the input, larger than a pipe holds, meets a
+    // closed pipe: the EPIPE is an 'error' event on the child's stdin, which, unheard, ends the process.
+    const raised = await runGit(["cat-file", "--batch"], { cwd, input: "x".repeat(4 * 1024 * 1024) }).catch((e: unknown) => e);
+
+    expect(raised).toBeInstanceOf(AppError);
+    expect((raised as AppError).message).toContain("git cat-file failed");
+  });
+
+  it("hands a git that reads its input all of it", async () => {
+    const sha = await runGit(["hash-object", "--stdin"], { cwd, input: "x\n" });
+    expect(sha.trim()).toBe("587be6b4c3f93f93c489c0111bba5596147a26cb");
+  });
+
+  it("cleans up", () => rmSync(cwd, { recursive: true, force: true }));
+});

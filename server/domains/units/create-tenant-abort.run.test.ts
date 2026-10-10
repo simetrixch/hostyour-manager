@@ -131,6 +131,8 @@ interface Harness {
   argo: FakeMasterArgoReader;
   projects: FakeMasterProjectWriter;
   cluster: FakeClusterReader;
+  /** Every end-to-end password entry the run destroyed, as `<stage>/<guid>`. */
+  deletedE2e: string[];
 }
 
 /** The create-tenant family wired to the in-memory fakes, behind the SAME kind-agnostic Runs API the
@@ -145,10 +147,11 @@ async function harness(over: { activator?: FakeActivator } = {}): Promise<Harnes
   // The bootstrap token the `activate` step reads off the target slave. The guid is minted by the plan,
   // so its namespace cannot be scripted up front — the reader answers for whichever namespace is asked.
   cluster.readSecretValue = () => Promise.resolve("boot_tok_abc");
+  const deletedE2e: string[] = [];
 /** A VaultSeeder for the tenant runs: create-tenant seeds the crypto entry through it, and nothing
  *  else here touches Vault. `created: true` models the normal first run; the consumer-side methods
  *  throw, because a tenant run reaching one of them would be a wiring mistake, not a pass. */
-function fakeTenantSeeder(): VaultSeeder {
+function fakeTenantSeeder(deletedE2e: string[]): VaultSeeder {
   return {
     seed: () => Promise.reject(new Error("a tenant run never seeds a consumer entry")),
     patchApp: async () => undefined,
@@ -168,7 +171,7 @@ function fakeTenantSeeder(): VaultSeeder {
     deleteTenantAppKeys: async () => ({ deleted: [] }),
     deleteTenantCrypto: async () => {},
     replaceTenantE2ePassword: async () => {}, seedTenantE2ePassword: async () => ({ created: true }),
-    deleteTenantE2ePassword: async () => {},
+    deleteTenantE2ePassword: async ({ stage, guid }) => { deletedE2e.push(`${stage}/${guid}`); },
   };
 }
 
@@ -176,7 +179,7 @@ function fakeTenantSeeder(): VaultSeeder {
       // The Vault seeder the seed-tenant-crypto step writes through. Records nothing: what it wrote is
       // irrecoverable by design (the Manager holds no read grant), so a test can only assert THAT the
       // entry was created, which the step log carries.
-      seeder: fakeTenantSeeder(),
+      seeder: fakeTenantSeeder(deletedE2e),
       // The object store the seed step makes the tenant's bucket in and mints its key from — the
       // platform's own, so no operator value stands behind it (hostyour-cloud#197).
       objectStore: new FakeObjectStore(),
@@ -206,7 +209,7 @@ function fakeTenantSeeder(): VaultSeeder {
     registerAuth: () => undefined,
     registerProtected: (a) => registerRunRoutes(a, { executor, db: db.db, bus, config, logger }),
   });
-  return { app, cookie: await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" }), executor, registrations, argo, projects, cluster };
+  return { app, cookie: await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" }), executor, registrations, argo, projects, cluster, deletedE2e };
 }
 
 /** Plan through the streaming planner and hand back the runId + the params it FROZE (the minted guid and
@@ -304,6 +307,38 @@ describe("aborting a create-tenant run whose tenant went LIVE", () => {
       expect(h.projects.get("argocd", memberAppProject(params.guid, member, "prod"))).toBeUndefined(); // every member's AppProject deleted
     }
     expect(tenantRow(params.guid)?.status).toBe("offboarded");
+  });
+});
+
+describe("aborting a demo create-tenant run", () => {
+  /** A create that fails at watch-sync-set, before its tenant is live, aborted with its rollback. */
+  async function abortUnfinished(h: Harness, body: Record<string, unknown>): Promise<CreateTenantParams> {
+    seedClusters();
+    const { runId, params } = await planTenant(h, body);
+    h.argo.setStatus({ syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy" });
+    await h.executor.approve(runId, {
+      "tenant-storage:key": Buffer.from("r2-access-key", "utf8"),
+      "tenant-storage:secret": Buffer.from("r2-secret-key", "utf8"),
+      "activation-input:storageEndpoint": Buffer.from("https://acct.eu.r2.cloudflarestorage.com", "utf8"),
+    });
+    await h.executor.settle(runId);
+    expect(getRun(db.db, runId)?.steps.find((s) => s.name === "seed-tenant-crypto")?.status).toBe("ok");
+    expect((await abortRun(h, runId)).status).toBe(202);
+    await h.executor.settle(runId);
+    expect(getRun(db.db, runId)?.status).toBe("cancelled");
+    return params;
+  }
+
+  it("PLANTED DEFECT: the rollback destroys the end-to-end password the create seeded", async () => {
+    const h = await harness();
+    const params = await abortUnfinished(h, { ...REQUEST, demo: true });
+    expect(h.deletedE2e).toEqual([`prod/${params.guid}`]);
+  });
+
+  it("PLANTED INNOCENT: the rollback of a create that is no demo destroys no end-to-end password", async () => {
+    const h = await harness();
+    await abortUnfinished(h, REQUEST);
+    expect(h.deletedE2e).toEqual([]);
   });
 });
 
