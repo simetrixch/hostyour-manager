@@ -130,6 +130,8 @@ class FakeSeeder implements VaultSeeder {
   async deleteTenantGoogleTranslation(): Promise<void> {}
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
+  async replaceTenantE2ePassword(): Promise<void> {}
+  async deleteTenantE2ePassword(): Promise<void> {}
 }
 
 function platformRepo(...domains: string[]): FakePlatformRepo {
