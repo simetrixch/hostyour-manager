@@ -4,7 +4,7 @@ import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import type { BranchScope } from "../../adapters/git/port.ts";
-import { TenantRegistrations, tenantRegistrationWrite, type PinHistory } from "./tenant-registrations.ts";
+import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { readTenantVersions, sameApprovals, stagePinsAndNamesOf, stagePinsOf, withChosenVersions, withMissingPins, type Approvals, type StagePins } from "./tenant-versions.ts";
@@ -175,41 +175,46 @@ describe("tenant versions", () => {
     });
   });
 
-  it("reads the registration in one books turn and every pin file in one more, lists each image's tags once, and logs the time of each read", async () => {
+  it("reads the registration and every pin file in one books turn, lists each image's tags once, and logs the time of each read", async () => {
     const registrations = releasedThenPutBack();
     const turns = countTurns(registrations);
     const ports = versionPorts(registrations);
     const lines: string[] = [];
     await readTenantVersions(asPorts(ports), db.db, "tnt_1", undefined, (line) => lines.push(line));
-    expect(turns).toEqual([registrations.branch, registrations.branch]);
+    expect(turns).toEqual([registrations.branch]);
     expect([...ports.registryProbe.listed].sort()).toEqual(["example-auth", "example-engine", "example-worker"]);
     expect(lines.map((l) => l.replace(/\d+ ms$/, "N ms")).sort()).toEqual([
+      "attested builds: N ms",
       "channel stages: N ms",
       "cluster values: N ms",
-      "parts and their stage pins: N ms",
-      "registration: N ms",
+      "registration and stage pins: N ms",
       "registry tags of 3 images: N ms",
       `versions read of tenant ${GUID}: N ms`,
     ]);
   });
 
-  it("PLANTED DEFECT: a pin read that opens one turn per pin file breaks the bound of two turns", async () => {
+  it("PLANTED DEFECT: a read that takes the pins in a turn of their own breaks the bound of one turn, and answers the same parts", async () => {
     const registrations = releasedThenPutBack();
+    const oneTurn = await readTenantVersions(asPorts(versionPorts(registrations)), db.db, "tnt_1", undefined, () => {});
     const turns = countTurns(registrations);
-    const oneTurn = registrations.listPinHistories.bind(registrations);
-    registrations.listPinHistories = async (stage, pinsDirs) => {
-      const each = new Map<string, PinHistory[]>();
-      for (const dir of pinsDirs) each.set(dir, (await oneTurn(stage, [dir])).get(dir) ?? []);
-      return each;
+    registrations.readTenantWithPinHistories = async (stage, guid, pinsDirsOf) => {
+      const read = await registrations.readTenant(stage, guid);
+      return read && { ...read, pins: await registrations.listPinHistories(stage, pinsDirsOf(read.entry)) };
     };
-    await readTenantVersions(asPorts(versionPorts(registrations)), db.db, "tnt_1", undefined, () => {});
-    expect(turns.length).toBeGreaterThan(2);
+    expect(await readTenantVersions(asPorts(versionPorts(registrations)), db.db, "tnt_1", undefined, () => {})).toEqual(oneTurn);
+    expect(turns.length).toBeGreaterThan(1);
   });
 
-  it("logs the time of the read that failed, and the whole read, where the tenant is not onboarded", async () => {
+  it("logs the time of every read and of the whole read where the tenant is not onboarded", async () => {
     const lines: string[] = [];
     const ports = versionPorts(new TenantRegistrations(new FakePlatformRepo()));
     await expect(readTenantVersions(asPorts(ports), db.db, "tnt_1", undefined, (line) => lines.push(line))).rejects.toThrow(`tenant ${GUID} is not onboarded`);
-    expect(lines.map((l) => l.replace(/\d+ ms$/, "N ms"))).toEqual(["registration: N ms", `versions read of tenant ${GUID}: N ms`]);
+    expect(lines.map((l) => l.replace(/\d+ ms$/, "N ms")).sort()).toEqual([
+      "attested builds: N ms",
+      "channel stages: N ms",
+      "cluster values: N ms",
+      "registration and stage pins: N ms",
+      `versions read of tenant ${GUID}: N ms`,
+    ]);
   });
 });

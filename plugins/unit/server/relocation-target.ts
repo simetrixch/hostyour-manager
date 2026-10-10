@@ -2,7 +2,8 @@
 // rule that admits one. Read from the clusters inventory, with the short name derived the ONE way
 // the platform derives it (cluster-marking.ts) — the same name the registration's cluster field and
 // the AppProject destination pin carry. The unit keeps its own stage through a relocation — the
-// registration keeps its path — and the cluster's stage is the platform's, so no stage is read here.
+// registration keeps its path. No stage is read here: a tenant's relocation resolves its target through
+// resolveTenantCluster, which refuses a machine of another stage; a consumer's is not held to it.
 import { eq } from "drizzle-orm";
 import type { Db } from "#core/server/db/client.ts";
 import { clusters } from "#core/server/db/schema/inventory.ts";
@@ -16,7 +17,7 @@ export interface TargetCluster {
 }
 
 /** Resolve a relocation target: the cluster must exist and be ACTIVE (a unit cannot land on a
- *  cluster that is not serving). Any active cluster takes a unit of any stage. */
+ *  cluster that is not serving). */
 export function loadActiveTargetCluster(db: Db, clusterId: string): TargetCluster {
   const row = db.select({ id: clusters.id, domain: clusters.domain, name: clusters.name, status: clusters.status }).from(clusters).where(eq(clusters.id, clusterId)).get();
   if (!row) throw errNotFound(`cluster ${clusterId}`);

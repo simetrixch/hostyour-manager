@@ -196,8 +196,8 @@ export function removeDnsCleanup(ports: OnboardPorts, p: DeployableOnboardParams
 
 /** attest-target: fail-closed deploy-state freshness check on the TARGET cluster (step 0 of a
  *  mutating run). Reads the deploy-state on the target's own reader (a slave over its bearer, or the
- *  master). The DOMAIN is compared and the cluster's stage is not: the deploy-state's stage is the
- *  platform's, and a unit at any stage may land on a cluster of any stage. */
+ *  master). The DOMAIN is compared and the cluster's stage is not: whether a machine may take a
+ *  unit's stage is decided from the inventory before the run, never from the deploy-state. */
 export function attestTargetStep(ports: OnboardPorts, p: DeployableOnboardParams): Step {
   return {
     name: "attest-target",

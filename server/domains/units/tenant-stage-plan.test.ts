@@ -41,15 +41,15 @@ async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<Te
 }
 
 describe("tenant stages share identity while provisioning independently", () => {
-  it("plans all selected stages with one guid, TEST on a machine of its own", async () => {
+  it("plans all selected stages with one guid, each on a machine of its own stage", async () => {
     const p = stagePorts();
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: [{ stage: "dev", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: [{ stage: "dev", clusterId: "cls_3" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") throw new Error(result.summary);
     const stages = [result.params, ...result.params.additionalStages!];
     expect(stages.map((s) => s.stage)).toEqual(["prod", "test", "dev"]);
     expect(new Set(stages.map((s) => s.guid)).size).toBe(1);
-    expect(stages.map((s) => s.clusterId)).toEqual(["cls_1", "cls_2", "cls_1"]);
+    expect(stages.map((s) => s.clusterId)).toEqual(["cls_1", "cls_2", "cls_3"]);
     const steps = makeCreateTenantDef(p).steps(result.params);
     expect(steps[0]!.name).toBe("attest-target");
     expect(new Set(steps.map((s) => s.name)).size).toBe(steps.length);
@@ -270,8 +270,8 @@ describe("stage resources cannot reach a sibling", () => {
       const remove = vi.spyOn(buildRegistrations, "removeBuildRegistration").mockResolvedValue({ removed: true });
       const logs: string[] = [];
       const ctx = { ...context({} as CreateTenantParams), log: (_kind: string, line: string) => { logs.push(line); } } as StepCtx;
-      await removeTenantAppsRegistration(ctx, { ...p, buildRegistrations }, { stage: "prod", guid: GUID }, { clear: false });
-      return { remove, logs, source };
+      const error = await removeTenantAppsRegistration(ctx, { ...p, buildRegistrations }, { stage: "prod", guid: GUID }, { clear: false }).then(() => undefined, (e: Error) => e);
+      return { remove, logs, source, error, registrations: p.registrations };
     }
 
     it("keeps it while another tenant at another stage records the same image", async () => {
@@ -283,16 +283,22 @@ describe("stage resources cannot reach a sibling", () => {
     });
 
     it("removes it where another tenant records a different image", async () => {
-      const { remove, source } = await removeProdTenant((books, source) => {
+      const { remove, error, source } = await removeProdTenant((books, source) => {
         const write = tenantRegistrationWrite("test", OTHER, { ...source, appsImage: "another-bundle" }); books.seed(books.booksBranch, write.path, write.content);
       });
+      expect(error).toBeUndefined();
       expect(remove).toHaveBeenCalledWith(source.appsImage, "run_stages");
     });
 
-    it("keeps it while another tenant's registration cannot be read", async () => {
-      const { remove, logs, source } = await removeProdTenant((books) => books.seed(books.booksBranch, `registrations/${OTHER}/test.yaml`, "subdomain: [unclosed\n"));
+    it("PLANTED DEFECT: fails, naming every registration it cannot read, and leaves the build registration and the tenant's registration in place", async () => {
+      const { remove, error, registrations } = await removeProdTenant((books) => {
+        books.seed(books.booksBranch, `registrations/${OTHER}/test.yaml`, "subdomain: [unclosed\n");
+        books.seed(books.booksBranch, "registrations/notes.txt", "stray\n");
+      });
+      expect(error?.message).toContain(`registrations/${OTHER}/test.yaml is not valid YAML`);
+      expect(error?.message).toContain("registrations/notes.txt is not a <guid> directory");
       expect(remove).not.toHaveBeenCalled();
-      expect(logs.some((line) => line.startsWith(`build registration of ${source.appsImage} stays: registrations/${OTHER}/test.yaml is not valid YAML`))).toBe(true);
+      expect(await registrations.readTenant("prod", GUID)).not.toBeNull();
     });
   });
 

@@ -149,8 +149,8 @@ export const apps = sqliteTable("apps", {
   // The UNIT's stage — the operator's input at the onboarding, stated by the registration path
   // registrations/<name>/<stage>.yaml, and the second half of the row's identity: a unit stands at
   // one stage in exactly one place, so (name, stage) is the unique key and `clusterId` is a fact the
-  // row records, never a key. The cluster's own `stage` column is the platform's and says nothing
-  // about a unit: one unit may stand at test and at prod on one cluster, two rows with one clusterId.
+  // row records, never a key. The cluster's own `stage` is the one stage it serves
+  // (shared/cluster-stage.ts): the scheduled check reports a unit row whose stage differs from it.
   //
   // NOT NULL, because the one INSERT of this table cannot produce a null and a null would break it:
   // every row is written by upsertAppRow (domains/units/onboard-steps.ts), whose AppRowValues

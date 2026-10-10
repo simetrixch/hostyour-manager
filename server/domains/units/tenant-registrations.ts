@@ -11,8 +11,8 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 //
 // ONE FILE per tenant per stage: registrations/<guid>/<stage>.yaml. The guid is the DIRECTORY and the
 // stage is the FILE NAME, so the path IS the identity and the body repeats neither. The stage is the
-// tenant's own, and the `cluster` field names any active cluster — a tenant may stand at several
-// stages under one guid, on one cluster or on several. Every field of
+// tenant's own, and the `cluster` field names the machine that stage stands on, which serves that stage
+// (resolveTenantCluster), so the stages of one guid stand on machines of their own. Every field of
 // TenantRegistrationSchema is written on EVERY commit, which is what makes the read-modify-write ops
 // below safe: a field a writer does not re-emit is silently dropped from the file, and a dropped
 // cluster would mis-target a LIVE tenant's fan-out (prune+selfHeal cascade). The round-trip tests pin
@@ -130,6 +130,26 @@ export function tenantRegistrationWrite(stage: Stage, guid: string, registration
 function pinnedBuildsIn(raw: string): { name: string; image: string; tag: string }[] {
   const builds = (parseYaml(raw) as { builds?: { name?: unknown; image?: unknown; tag?: unknown }[] } | null)?.builds ?? [];
   return builds.flatMap((b) => (typeof b.name === "string" && typeof b.image === "string" ? [{ name: b.name, image: b.image, tag: typeof b.tag === "string" ? b.tag : "" }] : []));
+}
+
+/** The pin histories of `pinsDirs` inside an already-fetched books worktree (listPinHistories). */
+async function pinHistoriesIn(books: BranchScope, stage: Stage, pinsDirs: readonly string[]): Promise<ReadonlyMap<string, PinHistory[]>> {
+  const files = await Promise.all([...new Set(pinsDirs)].map(async (pinsDir) => {
+    const path = `${pinsDir}/pins-${stage}.yaml`;
+    return { pinsDir, now: await books.readFile(path), history: await books.readFileHistory(path) };
+  }));
+  return new Map(files.map(({ pinsDir, now, history }) => {
+    if (now === null) return [pinsDir, []];
+    const released = new Map<string, string[]>();
+    for (const raw of history) {
+      for (const b of pinnedBuildsIn(raw)) {
+        const tags = released.get(b.name) ?? [];
+        if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
+        released.set(b.name, tags);
+      }
+    }
+    return [pinsDir, pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }))];
+  }));
 }
 
 /** One registration file's body, strict: THROWS on a body that is no YAML or fails the schema. */
@@ -469,22 +489,24 @@ export class TenantRegistrations {
    *  directory, because a turn fetches and resets the books worktree, and so the pins and their
    *  history are read off the same commit. A directory without a pin file answers []. */
   async listPinHistories(stage: Stage, pinsDirs: readonly string[]): Promise<ReadonlyMap<string, PinHistory[]>> {
-    const files = await this.repo.withBranch(this.branch, (books) => Promise.all([...new Set(pinsDirs)].map(async (pinsDir) => {
-      const path = `${pinsDir}/pins-${stage}.yaml`;
-      return { pinsDir, now: await books.readFile(path), history: await books.readFileHistory(path) };
-    })));
-    return new Map(files.map(({ pinsDir, now, history }) => {
-      if (now === null) return [pinsDir, []];
-      const released = new Map<string, string[]>();
-      for (const raw of history) {
-        for (const b of pinnedBuildsIn(raw)) {
-          const tags = released.get(b.name) ?? [];
-          if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
-          released.set(b.name, tags);
-        }
-      }
-      return [pinsDir, pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }))];
-    }));
+    return this.repo.withBranch(this.branch, (books) => pinHistoriesIn(books, stage, pinsDirs));
+  }
+
+  /** ONE tenant's registration for a stage and the pin histories (listPinHistories) of the directories
+   *  `pinsDirsOf` names for it, in ONE turn: the turn's fetch costs more than every read inside it, and
+   *  the pins are read off the same commit as the registration. Null where the tenant is not onboarded. */
+  async readTenantWithPinHistories(
+    stage: Stage,
+    guid: string,
+    pinsDirsOf: (entry: TenantRegistration) => readonly string[],
+  ): Promise<(TenantRead & { pins: ReadonlyMap<string, PinHistory[]> }) | null> {
+    const path = registrationPath(stage, guid);
+    return this.repo.withBranch(this.branch, async (books) => {
+      const raw = await books.readFile(path);
+      if (raw === null) return null;
+      const entry = parseRegistration(path, raw);
+      return { entry, pins: await pinHistoriesIn(books, stage, pinsDirsOf(entry)) };
+    });
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it

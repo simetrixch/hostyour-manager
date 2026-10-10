@@ -90,6 +90,13 @@ export async function tenantBundlePart(
   return bundlePart(bundle, new Map(attested.map((a) => [a.build, a.unit])), pins.get(pinsDir) ?? []);
 }
 
+/** The directories of the stage pin files a tenant's parts read: every chart its members render, and
+ *  its apps bundle's. */
+function versionPinsDirs(members: readonly TenantMemberRecord[], bundle: Pick<TenantRegistration, "appsImage">): string[] {
+  const charts = [...new Set(members.flatMap((m) => m.sources.map((s) => s.chart)))];
+  return bundle.appsImage ? [...charts, bundlePinsDir(bundle.appsImage)] : charts;
+}
+
 /** The tenant's parts: every build its members' charts pin at the stage, grouped by the unit whose build
  *  registration claims it; a build no unit claims is a part of its own. A pin that names no released
  *  image (a chart's placeholder) is left out, as stagePinsOf leaves it out. The apps bundle is one more
@@ -101,9 +108,19 @@ export async function tenantVersionParts(
   approved: Approvals,
   bundle: Pick<TenantRegistration, "appsImage" | "appsImageTag">,
 ): Promise<TenantVersionPart[]> {
-  const charts = [...new Set(members.flatMap((m) => m.sources.map((s) => s.chart)))];
+  const [attested, pinsOf] = await Promise.all([ports.attestedBuilds(), ports.registrations.listPinHistories(stage, versionPinsDirs(members, bundle))]);
+  return versionPartsOf(members, approved, bundle, attested, pinsOf);
+}
+
+/** tenantVersionParts over pins and attested builds already read. */
+function versionPartsOf(
+  members: readonly TenantMemberRecord[],
+  approved: Approvals,
+  bundle: Pick<TenantRegistration, "appsImage" | "appsImageTag">,
+  attested: readonly { unit: string; build: string }[],
+  pinsOf: ReadonlyMap<string, PinHistory[]>,
+): TenantVersionPart[] {
   const bundleDir = bundle.appsImage ? bundlePinsDir(bundle.appsImage) : undefined;
-  const [attested, pinsOf] = await Promise.all([ports.attestedBuilds(), ports.registrations.listPinHistories(stage, bundleDir ? [...charts, bundleDir] : charts)]);
   const unitOf = new Map(attested.map((a) => [a.build, a.unit]));
   const parts = new Map<string, { builds: Map<string, PinnedBuild>; running: Set<string> }>();
   for (const m of members) {
@@ -158,14 +175,17 @@ export async function readTenantVersions(
   };
   const tc = loadTenantCluster(db, tenantId);
   // Logged on every path, a refused or failed read included, because the time is what tells which read is slow.
+  // The registration and its pins share one books turn, whose fetch is the dearest read here; nothing
+  // else waits for it.
   try {
-    const read = await timed("registration", () => ports.registrations.readTenant(tc.stage, tc.guid));
-    if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
-    const [valueFiles, channels, parts] = await Promise.all([
+    const [read, attested, valueFiles, channels] = await Promise.all([
+      timed("registration and stage pins", () => ports.registrations.readTenantWithPinHistories(tc.stage, tc.guid, (entry) => versionPinsDirs(entry.members, entry))),
+      timed("attested builds", () => ports.attestedBuilds()),
       timed("cluster values", () => ports.resolveClusterValueFiles(tc.domain, tc.stage)),
       timed("channel stages", () => ports.channelStages()),
-      timed("parts and their stage pins", () => tenantVersionParts(ports, tc.stage, read.entry.members, read.entry.approvedTags, read.entry)),
     ]);
+    if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
+    const parts = versionPartsOf(read.entry.members, read.entry.approvedTags, read.entry, attested, read.pins);
     const registryHost = registryHostFromChain(valueFiles);
     return {
       stage: tc.stage,

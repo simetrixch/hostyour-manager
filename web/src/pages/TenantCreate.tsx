@@ -138,7 +138,7 @@ export function TenantCreate() {
                 </option>
               ))}
             </select>
-            <span className="field__hint">Any active cluster, for each stage that has no machine of its own; TEST and PROD each choose theirs.</span>
+            <span className="field__hint">Any active cluster. It stands in for each selected stage of its own stage that has no machine of its own.</span>
           </label>
           <fieldset className="field">
             <legend className="field__label">Stages</legend>
@@ -160,7 +160,7 @@ export function TenantCreate() {
                 </div>
               );
             })}
-            <span className="field__hint">One tenant identity. Each selected stage has its own data, users, sessions and keys. Stages may share a machine, except TEST and PROD: each of those two is given its own.</span>
+            <span className="field__hint">One tenant identity. Each selected stage has its own data, users, sessions and keys, on a machine that serves that stage.</span>
           </fieldset>
 
           {/* The placement read-out that makes the two fields above checkable instead of merely stated:
