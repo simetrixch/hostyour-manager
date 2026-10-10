@@ -492,7 +492,7 @@ function purgeSteps(ports: PurgePorts, params: PurgeParams): Step[] {
           ctx.log("meta", `no inventory row for ${t.name} on cluster ${t.clusterId} — nothing to mark; the orphan's cluster + Vault footprint was purged by name`);
           return;
         }
-        localTx(ctx, (tx) => tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(apps.id, row.id)).run());
+        localTx(ctx, (tx) => tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId }).where(eq(apps.id, row.id)).run());
         ctx.checkpoint({ row: row.id, status: "offboarded" });
         ctx.log("meta", `consumer ${t.name} recorded as offboarded on cluster ${t.clusterId} (row kept)`);
       },

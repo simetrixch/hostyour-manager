@@ -1,13 +1,12 @@
 import type { UnitCheck } from "../../../shared/preflight.ts";
 import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import { stampColumns, deletionColumns } from "./stamps.ts";
 import {
   SERVER_STATUS, SERVER_ROLE, SERVER_TAILNET_STATE, SERVER_PASSWORD_LOGIN_STATE, SERVER_AUTHORIZED_KEYS_STATE,
   STAGE, APP_STATUS, TENANT_STATUS, TENANT_ADMIN_STATE,
   APP_PROVENANCE, CLUSTER_STATUS, PLANE_STATE,
 } from "../../../shared/enums.ts";
-
-const now = sql`(unixepoch('subsec') * 1000)`;
 
 // The inventory tables: the servers the platform owns, the clusters on them, and what is deployed
 // on those clusters (consumer apps, tenants and their per-app fan-out).
@@ -89,23 +88,25 @@ export const servers = sqliteTable("servers", {
   authorizedKeysState: text("authorized_keys_state", { enum: SERVER_AUTHORIZED_KEYS_STATE }).notNull().default("unknown"),
   authorizedKeysJson: text("authorized_keys_json", { mode: "json" }),  // ServerAuthorizedKeysV0 (shared/operator-keys.ts)
   notes: text("notes"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
   // WHEN THIS MANAGER LAST PROVED IT CAN LOG IN TO THE MACHINE WITH ITS OWN KEY. `verify-key-login`
   // (domains/runs/defs/manager-key.kit.ts) writes it, over a session that authenticates with the
   // sealed ssh_key credential and with nothing else, so the stamp is a reading and not a state
   // somebody chose. It says that login answered at that moment and nothing else: how far a
   // deployment got is `status`, and whether the key still stands is the credential.
   adoptedAt: integer("adopted_at", { mode: "timestamp_ms" }),
+  ...stampColumns(),
+  ...deletionColumns(),
 }, (t) => [
-  uniqueIndex("servers_name_uq").on(t.name),
-  uniqueIndex("servers_host_port_uq").on(t.host, t.sshPort),
+  // A deleted server keeps its row; its name and address are free for the next one.
+  uniqueIndex("servers_name_uq").on(t.name).where(sql`deleted IS NULL`),
+  uniqueIndex("servers_host_port_uq").on(t.host, t.sshPort).where(sql`deleted IS NULL`),
   // At most ONE server carries the master part. Indexed on the PREDICATE with a partial WHERE, so
   // the slaves (whose predicate is 0) stay out of the index entirely — otherwise every slave would
   // collide with every other slave on 0. The predicate is the one MASTER_ROLES (shared/enums.ts)
   // spells, kept as an expression so the index reads as the rule it enforces.
   uniqueIndex("servers_one_master_uq")
     .on(sql`(role = 'master')`)
-    .where(sql`role = 'master'`),
+    .where(sql`role = 'master' AND deleted IS NULL`),
 ]);
 
 export const clusters = sqliteTable("clusters", {
@@ -126,6 +127,7 @@ export const clusters = sqliteTable("clusters", {
   // there is a single writer reasons about the column as if it settled once.
   planeJson: text("plane_json", { mode: "json" }),
   provisionedAt: integer("provisioned_at", { mode: "timestamp_ms" }),
+  ...stampColumns(),
 }, (t) => [
   uniqueIndex("clusters_server_uq").on(t.serverId),                // one VM = one cluster
   uniqueIndex("clusters_domain_uq").on(t.domain),
@@ -177,19 +179,14 @@ export const apps = sqliteTable("apps", {
   // The private half lives in Vault only; this half is what the Mail page publishes. Null for every
   // unit that is no mail sender, and for a sender whose entry stood before it named a key.
   dkimPublicKey: text("dkim_public_key"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
-  // When a writer last moved this row (status, cluster, last run, the measured check) — the
-  // column tenants carries, written by EVERY update of an apps row (hostyour-manager#224).
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
+  ...stampColumns(),
 }, (t) => [uniqueIndex("apps_name_stage_uq").on(t.name, t.stage)]);
 
 // A tenant (multi-app package) deployed on a cluster. Unlike a consumer `apps` row, a tenant fans
 // out to one ArgoCD Application per MEMBER (auth/jobs/report plus one per app), each in its own
 // namespace <guid>-<member>-<stage>, so it carries the guid identity instead of a single
 // repoUrl/chartPath. Unique on (guid, stage), the tenant twin of the consumer key: a tenant may stand
-// at several stages under one guid, each row its own, and the cluster is a fact the row records. The
-// row is mutable (suspend/resume field-flips, add-app), unlike the append-once `apps` row — hence
-// updatedAt.
+// at several stages under one guid, each row its own, and the cluster is a fact the row records.
 // Written by the create-tenant Run's `record-provisional` step (the FIRST writer — it records INTENT
 // before any git/kube mutation, status "provisioning", so a run that dies mid-way still leaves a row
 // every removal run kind can name) and settled to "active" by its `record-inventory` step; read by
@@ -238,7 +235,7 @@ export const tenants = sqliteTable("tenants", {
   // tenant stand below a host of that one, where a cookie scoped to the outer host reaches the inner
   // one, which the operator accepts for two tenants of the same owner. Null for every other tenant.
   nestsUnder: text("nests_under"),
-  owner: text("owner"),
+  repoOwner: text("repo_owner"),
   provenance: text("provenance", { enum: APP_PROVENANCE }).notNull().default("manager"),
   lastRunId: text("last_run_id"),                                 // loose ref to runs(id)
   // TENANT_STATUS, never the consumer APP_STATUS: a tenant additionally has "provisioning" (recorded
@@ -258,8 +255,7 @@ export const tenants = sqliteTable("tenants", {
   adminCheckedAt: integer("admin_checked_at", { mode: "timestamp_ms" }),
   // What the scheduled check last measured on this tenant (its zone record), like apps.checkJson.
   checkJson: text("check_json", { mode: "json" }).$type<UnitCheck>(),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
-  updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull().default(now),
+  ...stampColumns(),
 }, (t) => [uniqueIndex("tenants_guid_stage_uq").on(t.guid, t.stage)]);
 
 // A single app inside a tenant's guid × apps[] matrix (Application <guid>-<name>-<stage>). One row
@@ -277,5 +273,6 @@ export const tenantApps = sqliteTable("tenant_apps", {
   // The site a website serves, null for an app: what keeps a removed website out of the Apps list
   // once the registration no longer names it.
   site: text("site"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
-}, (t) => [uniqueIndex("tenant_apps_tenant_name_uq").on(t.tenantId, t.name)]);
+  ...stampColumns(),
+  ...deletionColumns(),
+}, (t) => [uniqueIndex("tenant_apps_tenant_name_uq").on(t.tenantId, t.name).where(sql`deleted IS NULL`)]);

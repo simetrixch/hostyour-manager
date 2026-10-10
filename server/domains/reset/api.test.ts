@@ -90,8 +90,8 @@ describe("reset API (POST /api/reset)", () => {
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
     // a master row (so masterFqdn derives m1.example.com) + a slave row (to prove the wipe)
-    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_m','m1','m1.example.com','m1','master','ready')").run();
-    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready')").run();
+    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_m','m1','m1.example.com','m1','master','ready', 'op_system', 'op_system')").run();
+    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready', 'op_system', 'op_system')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const session = new SessionCodec(db.db, config);
     let reseedCalledWithAuditCount = -1;
@@ -361,7 +361,7 @@ describe("reset API (POST /api/reset)", () => {
     });
     const { app, db, session } = make(client);
     landRow = () => {
-      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_late','late','9.9.9.9','root','slave','ready')").run();
+      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_late','late','9.9.9.9','root','slave','ready', 'op_system', 'op_system')").run();
     };
 
     const res = await post(app, await cookie(session), { confirm: "RESET", wipeDb: true, deleteBranches: ["s1.example.com"], includeMaster: false });

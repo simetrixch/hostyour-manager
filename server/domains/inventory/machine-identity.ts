@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { servers } from "../../db/schema/inventory.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
@@ -97,7 +97,7 @@ export type RestateMachineIdentityInput = z.infer<typeof RestateMachineIdentityI
  *     no recorded machine-id, which would report a repair that repaired nothing.
  */
 export function restateMachineIdentity(db: Db, id: string, input: RestateMachineIdentityInput): void {
-  const row = db.select().from(servers).where(eq(servers.id, id)).get();
+  const row = db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
   if (!row) throw errNotFound(`server ${id} not found`);
   const pf = (row.preflightJson as Record<string, unknown> | null) ?? {};
   const pinned = typeof pf.hostKey === "string" ? pf.hostKey : undefined;

@@ -65,7 +65,7 @@ export function tenantUnitProbes(ports: TenantProbePorts): UnitProbes {
         } catch (err) {
           findings.push(failedProbe("units", `The build units of ${t.subdomain}`, err));
         }
-        ctx.db.update(tenants).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(tenants.id, t.id)).run();
+        ctx.db.update(tenants).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(tenants.id, t.id)).run();
         done.probed += 1;
         done.attention += findings.filter((f) => f.status !== "pass").length;
       }

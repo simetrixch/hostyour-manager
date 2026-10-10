@@ -72,7 +72,7 @@ describe("clusters + locks API", () => {
   it("the master (this manager) is NOT a managed server — never in clusters.servers, rides clusters.master", async () => {
     const { app, db, cookie } = await make();
     db.sqlite
-      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes) VALUES ('srv_m','m1','1.2.3.4','root','master','ready','secret-notes')")
+      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes, owner, modified_by) VALUES ('srv_m','m1','1.2.3.4','root','master','ready','secret-notes', 'op_system', 'op_system')")
       .run();
     const clusters = (await (await app.request("/api/clusters", authed(cookie))).json()) as ClustersView;
     expect(clusters.servers).toEqual([]); // manages nothing yet — the master must not count
@@ -86,10 +86,10 @@ describe("clusters + locks API", () => {
   it("a master + a slave → servers counts the slave only (with only ServerView fields, no secrets/notes)", async () => {
     const { app, db, cookie } = await make();
     db.sqlite
-      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes) VALUES ('srv_m','m1','1.2.3.4','root','master','ready','secret-notes')")
+      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes, owner, modified_by) VALUES ('srv_m','m1','1.2.3.4','root','master','ready','secret-notes', 'op_system', 'op_system')")
       .run();
     db.sqlite
-      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready','slave-notes')")
+      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, notes, owner, modified_by) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready','slave-notes', 'op_system', 'op_system')")
       .run();
     const clusters = (await (await app.request("/api/clusters", authed(cookie))).json()) as ClustersView;
     expect(clusters.servers).toHaveLength(1);

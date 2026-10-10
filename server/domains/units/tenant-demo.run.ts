@@ -93,7 +93,7 @@ function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
         }
         ctx.registerCleanup(restoreDemo(ports, p));
         // Persist ownership before git commits, so a crash after that commit can retry or undo it.
-        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         const { commit } = await ports.registrations.setDemo(tc.stage, tc.guid, p.demo, ctx.runId);
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${tc.guid}: demo ${p.previous} → ${p.demo}; members ${p.members.join(", ")} (${commit})`);

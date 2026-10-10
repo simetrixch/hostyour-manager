@@ -74,7 +74,7 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
             repoCredentialId = await resolveRepoCredentialId({ repoURL: c.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
           } catch (e) {
             findings = [{ id: "identity", title: `The unit ${c.name}`, severity: "hard", status: "fail", detail: e instanceof Error ? e.message : String(e) }];
-            ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();
+            ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(apps.id, c.id)).run();
             done.probed += 1;
             done.attention += 1;
             continue;
@@ -83,7 +83,7 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
           const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
           findings = await consumerFindings(onboard, p, unitProbeCtx(ctx, c.name), perRepo);
         }
-        ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings }, updatedAt: now }).where(eq(apps.id, c.id)).run();
+        ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(apps.id, c.id)).run();
         done.probed += 1;
         done.attention += findings.filter((f) => f.status !== "pass").length;
       }

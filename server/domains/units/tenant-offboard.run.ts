@@ -1,5 +1,5 @@
 import { tenantOwnHosts } from "#unit/shared/unit-host.ts";
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, isNull, notInArray } from "drizzle-orm";
 import type { RunDefinition, Step } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -160,8 +160,8 @@ function offboardSteps(ports: TenantLifecyclePorts, params: TenantLifecycleParam
         const keep = atLeastAsSettledAs("offboarded");
         const before = ctx.db.select({ status: tenants.status }).from(tenants).where(eq(tenants.id, tenantId)).get();
         localTx(ctx, (tx) => {
-          tx.update(tenantApps).set({ status: "offboarded", lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, tenantId), notInArray(tenantApps.status, keep))).run();
-          tx.update(tenants).set({ status: "offboarded", lastRunId: ctx.runId, updatedAt: new Date() }).where(and(eq(tenants.id, tenantId), notInArray(tenants.status, keep))).run();
+          tx.update(tenantApps).set({ status: "offboarded", lastRunId: ctx.runId }).where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), notInArray(tenantApps.status, keep))).run();
+          tx.update(tenants).set({ status: "offboarded", lastRunId: ctx.runId }).where(and(eq(tenants.id, tenantId), notInArray(tenants.status, keep))).run();
         });
         // The log follows what the row actually did — a step reporting an offboard it did not record
         // would be the same false statement one layer down (the run log is where an operator reads what

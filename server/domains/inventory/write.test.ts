@@ -8,7 +8,8 @@ import { parseConfig } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { createServer, deleteServer, purgeBootstrapPassword, serverCredFlags, CreateServerInput } from "./write.ts";
-import { getServer } from "./read.ts";
+import { getServer, listServers } from "./read.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 
 const logger = createLogger(
   parseConfig({
@@ -26,12 +27,12 @@ describe("inventory server CRUD", () => {
     for (const h of handles.splice(0)) h.sqlite.close();
     for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
   });
-  function setup(): { db: DbHandle["db"]; store: CredentialStore } {
+  function setup(): { db: DbHandle["db"]; sqlite: DbHandle["sqlite"]; store: CredentialStore } {
     const dir = mkdtempSync(join(tmpdir(), "mgr-inv-"));
     dirs.push(dir);
     const h = openDb(join(dir, "c.db"));
     handles.push(h);
-    return { db: h.db, store: new CredentialStore({ db: h.db, logger }) };
+    return { db: h.db, sqlite: h.sqlite, store: new CredentialStore({ db: h.db, logger }) };
   }
 
   it("creates a bare server; notes withheld; and it holds no credential of any kind", () => {
@@ -64,9 +65,21 @@ describe("inventory server CRUD", () => {
     });
     expect((await serverCredFlags(store)).get(view.id)?.hasKey).toBe(true);
 
-    await deleteServer(db, store, view.id);
+    await runAsActor("op_a", () => deleteServer(db, store, view.id));
     expect(getServer(db, view.id, undefined)).toBeUndefined();
+    expect(listServers(db, undefined)).toEqual([]);
     expect(await serverCredFlags(store)).toEqual(new Map());
+    await expect(deleteServer(db, store, view.id)).rejects.toThrow(/not found/);
+  });
+
+  it("keeps a deleted server's row, names who deleted it, and frees its name and address for the next server", async () => {
+    const { db, store, sqlite } = setup();
+    const view = createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
+    await runAsActor("op_a", () => deleteServer(db, store, view.id));
+    expect(sqlite.prepare("SELECT id, deleted IS NOT NULL AS gone, deleted_by FROM servers").all()).toEqual([{ id: view.id, gone: 1, deleted_by: "op_a" }]);
+    const again = createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
+    expect(again.id).not.toBe(view.id);
+    expect(listServers(db, undefined).map((s) => s.id)).toEqual([again.id]);
   });
 
   it("purges a password sealed beside a row before this surface stopped sealing one, and says whether there was one", async () => {

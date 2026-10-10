@@ -88,13 +88,13 @@ export function candidatesFrom(rows: readonly (Candidate & { suspended: boolean;
 export function verdictFor(input: {
   reached: boolean;
   admins?: number;
-  createdAt: Date;
+  creation: Date;
   now: Date;
 }): TenantAdminState {
   if (!input.reached) return "unreachable";
   if ((input.admins ?? 0) > 0) return "ok";
   // Zero administrators, and young enough that the invitation may still be out.
-  return input.now.getTime() - input.createdAt.getTime() < ADMIN_GRACE_MS ? "ok" : "none";
+  return input.now.getTime() - input.creation.getTime() < ADMIN_GRACE_MS ? "ok" : "none";
 }
 
 function checkStep(ports: CheckTenantsPorts): Step {
@@ -113,7 +113,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
           clusterId: tenants.clusterId,
           suspended: tenants.suspended,
           status: tenants.status,
-          createdAt: tenants.createdAt,
+          creation: tenants.creation,
           domain: clusters.domain,
         })
         .from(tenants)
@@ -163,7 +163,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
             });
             if (answer.reached) {
               admins = answer.admins;
-              state = verdictFor({ reached: true, admins: answer.admins, createdAt: row.createdAt, now });
+              state = verdictFor({ reached: true, admins: answer.admins, creation: row.creation, now });
             } else {
               state = "unreachable";
               because = answer.because;
@@ -180,7 +180,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
         tally[state] += 1;
         ctx.db
           .update(tenants)
-          .set({ adminState: state, adminCount: admins, adminCheckedAt: now, updatedAt: now })
+          .set({ adminState: state, adminCount: admins, adminCheckedAt: now })
           .where(eq(tenants.id, t.id))
           .run();
 

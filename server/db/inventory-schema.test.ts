@@ -64,9 +64,9 @@ describe("inventory tenants + tenant_apps", () => {
     expect(t?.provenance).toBe("manager");
     expect(t?.status).toBe("active");
     // Nullable columns default to null; timestamps are populated by the DB default.
-    expect(t?.owner).toBeNull();
-    expect(t?.createdAt).toBeInstanceOf(Date);
-    expect(t?.updatedAt).toBeInstanceOf(Date);
+    expect(t?.repoOwner).toBeNull();
+    expect(t?.creation).toBeInstanceOf(Date);
+    expect(t?.modified).toBeInstanceOf(Date);
 
     const apps = db.db.select().from(tenantApps).where(eq(tenantApps.tenantId, tId)).all();
     expect(apps.map((a) => a.name)).toEqual(["web"]);
@@ -129,14 +129,14 @@ describe("apps.stage", () => {
   }
 
   const insert = (db: DbHandle, id: string, stage: string | null): void => {
-    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES (?, 'cls_1', 'acme', 'acme', ?)").run(id, stage);
+    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage, owner, modified_by) VALUES (?, 'cls_1', 'acme', 'acme', ?, 'op_system', 'op_system')").run(id, stage);
   };
 
   it("refuses a row that names no stage", () => {
     const db = fresh();
     seedCluster(db);
-    expect(() => insert(db, "app_1", null)).toThrow(/NOT NULL/i);
-    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host) VALUES ('app_2','cls_1','acme','acme')").run()).toThrow(/NOT NULL/i);
+    expect(() => insert(db, "app_1", null)).toThrow(/NOT NULL constraint failed: apps.stage/);
+    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, owner, modified_by) VALUES ('app_2','cls_1','acme','acme', 'op_system', 'op_system')").run()).toThrow(/NOT NULL constraint failed: apps.stage/);
   });
 
   it("holds UNIQUE(name, stage) across clusters — the upsert key finds one row or none, and one name at two stages on one cluster is two rows", () => {
@@ -147,7 +147,7 @@ describe("apps.stage", () => {
     insert(db, "app_1", "prod");
     expect(() => insert(db, "app_2", "prod")).toThrow(/UNIQUE/i);
     // The same (name, stage) on ANOTHER cluster is the same unit twice — refused.
-    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES ('app_3', 'cls_2', 'acme', 'acme', 'prod')").run()).toThrow(/UNIQUE/i);
+    expect(() => db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage, owner, modified_by) VALUES ('app_3', 'cls_2', 'acme', 'acme', 'prod', 'op_system', 'op_system')").run()).toThrow(/UNIQUE/i);
     // The same name at another stage on the SAME cluster is the unit's second stage — allowed.
     insert(db, "app_4", "test");
   });
@@ -160,13 +160,13 @@ describe("apps.stage", () => {
   it("defaults provenance to the product's name in the DDL, on apps and on tenants", () => {
     const db = fresh();
     seedCluster(db);
-    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage) VALUES ('app_d','cls_1','acme','acme','prod')").run();
+    db.sqlite.prepare("INSERT INTO apps (id, cluster_id, name, host, stage, owner, modified_by) VALUES ('app_d','cls_1','acme','acme','prod', 'op_system', 'op_system')").run();
     expect(db.sqlite.prepare("SELECT provenance FROM apps WHERE id='app_d'").get()).toEqual({ provenance: "manager" });
 
     db.sqlite
       .prepare(
-        "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) " +
-          "VALUES ('tnt_d','cls_1','zsjs023ctne0','acme','prod','auth','[\"auth\"]')",
+        "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members, owner, modified_by) " +
+          "VALUES ('tnt_d','cls_1','zsjs023ctne0','acme','prod','auth','[\"auth\"]', 'op_system', 'op_system')",
       )
       .run();
     expect(db.sqlite.prepare("SELECT provenance FROM tenants WHERE id='tnt_d'").get()).toEqual({ provenance: "manager" });

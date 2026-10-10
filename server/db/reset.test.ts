@@ -12,8 +12,8 @@ import { inDependencyOrder } from "../boot/plugin-set.ts";
 // order + the KEEP set are both exercised.
 function seedClusters(db: DbHandle): void {
   const s = db.sqlite;
-  s.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready')").run();
-  s.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, status) VALUES ('cl_s','srv_s','prod','s1.example.com','s1','active')").run();
+  s.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready', 'op_system', 'op_system')").run();
+  s.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, status, owner, modified_by) VALUES ('cl_s','srv_s','prod','s1.example.com','s1','active', 'op_system', 'op_system')").run();
   s.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES ('cred_s','ssh_key','k','server','srv_s','ssh-key','plain:v0:AA==','fp')").run();
   s.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('run_1','deploy-slave','server','srv_s','{}','{}','succeeded','op_system','op_system')").run();
   s.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status, owner, modified_by) VALUES ('st_1','run_1',0,'x','X','ok','op_system','op_system')").run();
@@ -28,8 +28,8 @@ function seedClusters(db: DbHandle): void {
 // stops the wipe at a different DELETE and they are seeded separately.
 function seedTenant(db: DbHandle, withApp: boolean): void {
   const s = db.sqlite;
-  s.prepare("INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) VALUES ('tnt_s','cl_s','zsjs023ctne0','acme.example.com','prod','auth','[\"auth\",\"jobs\",\"report\"]')").run();
-  if (withApp) s.prepare("INSERT INTO tenant_apps (id, tenant_id, name) VALUES ('tna_s','tnt_s','web')").run();
+  s.prepare("INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members, owner, modified_by) VALUES ('tnt_s','cl_s','zsjs023ctne0','acme.example.com','prod','auth','[\"auth\",\"jobs\",\"report\"]', 'op_system', 'op_system')").run();
+  if (withApp) s.prepare("INSERT INTO tenant_apps (id, tenant_id, name, owner, modified_by) VALUES ('tna_s','tnt_s','web', 'op_system', 'op_system')").run();
 }
 
 const rowCount = (db: DbHandle, table: string): number =>

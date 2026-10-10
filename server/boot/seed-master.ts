@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import { readFileSync } from "node:fs";
 import type { Db } from "../db/client.ts";
 import type { Config } from "../kernel/config.ts";
@@ -96,7 +96,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
   if (!m) return; // no MASTER_FQDN → nothing to seed
 
   // ---- 1. Upsert the one role=master row (servers_one_master_uq keeps it singular/race-safe).
-  let master = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  let master = db.select().from(servers).where(and(inArray(servers.role, [...MASTER_ROLES]), isNull(servers.deleted))).get();
   if (!master) {
     const id = srvId();
     const name = clusterShortName(m.fqdn);
@@ -128,7 +128,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
     }
     writeAudit(db, { action: "server.master_seeded", targetKind: "server", targetId: id, detail: { name, host: m.fqdn } });
     logger.info({ id, name, host: m.fqdn, sshUser: m.sshUser }, "seeded the role=master server row (this control host)");
-    master = db.select().from(servers).where(eq(servers.id, id)).get();
+    master = db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
     if (!master) return; // unreachable in practice; keeps the type narrow
   } else {
     // Reconcile config drift onto the existing row (host/user/lan can change across installs).
@@ -141,7 +141,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         .run();
       writeAudit(db, { action: "server.master_reconciled", targetKind: "server", targetId: master.id, detail: { host: m.fqdn, sshUser: m.sshUser } });
       logger.warn({ id: master.id, host: m.fqdn, sshUser: m.sshUser }, "reconciled the role=master row to the configured MASTER_* values");
-      master = db.select().from(servers).where(eq(servers.id, master.id)).get() ?? master;
+      master = db.select().from(servers).where(and(eq(servers.id, master.id), isNull(servers.deleted))).get() ?? master;
     }
   }
 
@@ -217,7 +217,7 @@ async function convergeMaster(db: Db, creds: CredentialStore, masterId: string, 
  *  it. */
 async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, logger: Logger): Promise<void> {
   const sealed = (await creds.list({ subject: { kind: "server", id: masterId }, purpose: "ssh-key", excludeRotated: true })).length > 0;
-  const row = db.select().from(servers).where(eq(servers.id, masterId)).get();
+  const row = db.select().from(servers).where(and(eq(servers.id, masterId), isNull(servers.deleted))).get();
   if (!row) return;
   const want = sealed ? "healthy" : "degraded";
   if (row.status === want || (row.status !== "healthy" && row.status !== "degraded")) return;
@@ -230,7 +230,7 @@ async function stateMasterKey(db: Db, creds: CredentialStore, masterId: string, 
 }
 
 async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: MasterConfig, logger: Logger): Promise<boolean> {
-  let master = db.select().from(servers).where(eq(servers.id, masterId)).get();
+  let master = db.select().from(servers).where(and(eq(servers.id, masterId), isNull(servers.deleted))).get();
   if (!master) {
     logger.warn({ id: masterId }, "role=master row vanished while converging — stopping (the next boot re-seeds it)");
     return true; // retrying cannot help
@@ -250,7 +250,7 @@ async function pinAndSeal(db: Db, creds: CredentialStore, masterId: string, m: M
     if (pf.hostKey !== fpRead.fp && mayWrite) {
       db.update(servers).set({ preflightJson: { ...pf, hostKey: fpRead.fp } }).where(eq(servers.id, master.id)).run();
       logger.info({ id: master.id, hostKey: fpRead.fp }, "pinned the master sshd host-key fingerprint on the master row");
-      master = db.select().from(servers).where(eq(servers.id, master.id)).get() ?? master;
+      master = db.select().from(servers).where(and(eq(servers.id, master.id), isNull(servers.deleted))).get() ?? master;
     }
   }
 

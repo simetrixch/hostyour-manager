@@ -65,7 +65,7 @@
 //
 // Boundary: domain layer — the db schema, shared/ and the git PlatformRepo port only. Deliberately
 // imports NO other domain (inventory is the base domain every other one may read, not the reverse).
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
@@ -394,7 +394,7 @@ export function projectClusterMarking(
   const row = db
     .select({ clusterId: clusters.id, stage: clusters.stage, serverId: servers.id, role: servers.role })
     .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .innerJoin(servers, and(eq(clusters.serverId, servers.id), isNull(servers.deleted)))
     .where(eq(clusters.domain, marking.fqdn))
     .get();
   if (!row) throw errValidation(`no cluster registered for ${marking.fqdn} — nothing to project the cluster map onto`);

@@ -55,7 +55,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit", "0028_stamp-inventory"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -94,7 +94,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     handles.push(h);
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'organisation_identities'").all()).toEqual([]); // 0004 dropped it again
     expect(h.sqlite.prepare("SELECT count(*) AS n FROM __drizzle_migrations").get()).toEqual({ n: journal.entries.length });
-    expect(h.sqlite.prepare("SELECT id, created_at, updated_at FROM apps").all()).toEqual([{ id: "app_1", created_at: 1700000000000, updated_at: 1700000000000 }]); // 0002: carried, updated_at = created_at
+    expect(h.sqlite.prepare("SELECT id, creation, modified FROM apps").all()).toEqual([{ id: "app_1", creation: 1700000000000, modified: 1700000000000 }]); // 0002: carried, updated_at = created_at; 0028 renames both
     expect(h.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'apps' AND name NOT LIKE 'sqlite_%'").all()).toEqual([{ name: "apps_name_stage_uq" }]);
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('credentials') WHERE name = 'server_id'").all()).toEqual([]); // 0004
     expect(h.sqlite.prepare("SELECT name FROM pragma_table_info('apps') WHERE name = 'repo_credential_id'").all()).toEqual([]); // 0006
@@ -251,6 +251,77 @@ describe("openDb — migration phase + append-only invariants", () => {
     // The rebuilds dropped the append-only triggers with their tables; 0027 creates them again.
     expect(() => h.sqlite.prepare("UPDATE events SET text = 'x' WHERE id = 'evt_1'").run()).toThrow(/append-only/);
     expect(() => h.sqlite.prepare("DELETE FROM audit WHERE id = 'aud_credential'").run()).toThrow(/append-only/);
+    expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+  });
+
+  // Before 0028 a server, a cluster, an app, a tenant and a tenant app recorded at most their times, and
+  // a server or a master cluster its creator in the audit; 0028 carries each into the stamp columns.
+  it("carries the recorded times and creators of servers, clusters, apps, tenants and tenant apps into their stamps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
+    dirs.push(dir);
+    const upTo0027 = join(dir, "up-to-0027");
+    mkdirSync(join(upTo0027, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    const before = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === "0028_stamp-inventory"));
+    writeFileSync(join(upTo0027, "meta/_journal.json"), JSON.stringify({ ...journal, entries: before }));
+    for (const e of before) copyFileSync(join(MIGRATIONS_DIR, `${e.tag}.sql`), join(upTo0027, `${e.tag}.sql`));
+    const file = join(dir, "manager.db");
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: upTo0027 });
+    const server = standing.prepare("INSERT INTO servers (id, name, host, ssh_user, role, created_at, adopted_at) VALUES (?, ?, ?, 'root', ?, ?, ?)");
+    server.run("srv_m", "m1", "10.0.0.1", "master", 1000, null);
+    server.run("srv_1", "s1", "10.0.0.2", "slave", 2000, 2500);
+    server.run("srv_2", "s2", "10.0.0.3", "slave", 3000, null);
+    const cluster = standing.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, provisioned_at) VALUES (?, ?, 'prod', ?, ?, ?)");
+    cluster.run("cls_m", "srv_m", "m1.example", "m1", null);
+    cluster.run("cls_1", "srv_1", "s1.example", "s1", 4000);
+    cluster.run("cls_2", "srv_2", "s2.example", "s2", null);
+    const audit = standing.prepare("INSERT INTO audit (id, action, target_kind, target_id, creation, modified, owner, modified_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+    audit.run("aud_1", "server.master_seeded", "server", "srv_m", 1000, 1000, "op_system", "op_system");
+    audit.run("aud_2", "cluster.master_seeded", "cluster", "cls_m", 1100, 1100, "op_system", "op_system");
+    audit.run("aud_3", "server.created", "server", "srv_1", 2000, 2000, "op_emergency", "op_emergency");
+    // A later change of the server names who changed it, never who created it.
+    audit.run("aud_4", "server.machine_identity_restated", "server", "srv_1", 2600, 2600, "op_system", "op_system");
+    standing.prepare("INSERT INTO apps (id, cluster_id, name, stage, host, created_at, updated_at) VALUES ('app_1', 'cls_1', 'post', 'prod', 'post.example', 5000, 6000)").run();
+    standing.prepare("INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members, owner, created_at, updated_at) VALUES ('tnt_1', 'cls_1', 'abcdefghjkmn', 'acme', 'prod', 'idp', '[]', 'acme-org', 7000, 8000)").run();
+    standing.prepare("INSERT INTO tenant_apps (id, tenant_id, name, created_at) VALUES ('tna_1', 'tnt_1', 'erp', 9000)").run();
+    standing.close();
+    const migratedFrom = Date.now();
+    const h = openDb(file);
+    handles.push(h);
+    const q = (sql: string): unknown[] => h.sqlite.prepare(sql).all();
+    expect(q("SELECT id, creation, modified, owner, modified_by, deleted, deleted_by FROM servers ORDER BY id")).toEqual([
+      { id: "srv_1", creation: 2000, modified: 2500, owner: "op_emergency", modified_by: "unrecorded", deleted: null, deleted_by: null },
+      { id: "srv_2", creation: 3000, modified: 3000, owner: "unrecorded", modified_by: "unrecorded", deleted: null, deleted_by: null },
+      { id: "srv_m", creation: 1000, modified: 1000, owner: "op_system", modified_by: "unrecorded", deleted: null, deleted_by: null },
+    ]);
+    const clusters = q("SELECT id, creation, modified, owner, modified_by FROM clusters ORDER BY id") as { id: string; creation: number; modified: number }[];
+    expect(clusters).toEqual([
+      { id: "cls_1", creation: 4000, modified: 4000, owner: "unrecorded", modified_by: "unrecorded" },
+      { id: "cls_2", creation: expect.any(Number), modified: expect.any(Number), owner: "unrecorded", modified_by: "unrecorded" },
+      { id: "cls_m", creation: 1100, modified: 1100, owner: "op_system", modified_by: "unrecorded" },
+    ]);
+    // Nothing recorded when cls_2 was added, so the migration's time stands.
+    const added = clusters.find((c) => c.id === "cls_2");
+    expect(added?.creation).toBeGreaterThanOrEqual(migratedFrom);
+    expect(added?.modified).toBe(added?.creation);
+    expect(q("SELECT id, creation, modified, owner, modified_by FROM apps")).toEqual([{ id: "app_1", creation: 5000, modified: 6000, owner: "unrecorded", modified_by: "unrecorded" }]);
+    expect(q("SELECT id, repo_owner, creation, modified, owner, modified_by FROM tenants")).toEqual([
+      { id: "tnt_1", repo_owner: "acme-org", creation: 7000, modified: 8000, owner: "unrecorded", modified_by: "unrecorded" },
+    ]);
+    expect(q("SELECT id, creation, modified, owner, modified_by, deleted, deleted_by FROM tenant_apps")).toEqual([
+      { id: "tna_1", creation: 9000, modified: 9000, owner: "unrecorded", modified_by: "unrecorded", deleted: null, deleted_by: null },
+    ]);
+    // The unique indexes now hold live rows only: a deleted row frees its name and address.
+    const addServer = h.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, owner, modified_by) VALUES ('srv_3', 's2', '10.0.0.3', 'root', 'op_system', 'op_system')");
+    expect(() => addServer.run()).toThrow(/UNIQUE/);
+    h.sqlite.prepare("UPDATE servers SET deleted = 1, deleted_by = 'op_system' WHERE id = 'srv_2'").run();
+    addServer.run();
+    const addApp = h.sqlite.prepare("INSERT INTO tenant_apps (id, tenant_id, name, owner, modified_by) VALUES ('tna_2', 'tnt_1', 'erp', 'op_system', 'op_system')");
+    expect(() => addApp.run()).toThrow(/UNIQUE/);
+    h.sqlite.prepare("UPDATE tenant_apps SET deleted = 1, deleted_by = 'op_system' WHERE id = 'tna_1'").run();
+    addApp.run();
+    expect(h.sqlite.pragma("foreign_key_check")).toEqual([]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 

@@ -61,7 +61,7 @@ function mainWebsiteSteps(ports: TenantOnboardPorts, p: TenantSetWebsiteMainPara
         }
         ctx.registerCleanup(restoreMainWebsite(ports, p));
         // Persist ownership before git commits, so a crash after that commit can retry or undo it.
-        ctx.db.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         const { commit } = await ports.registrations.setWebsiteMain(tc.stage, tc.guid, p.app, ctx.runId);
         ctx.checkpoint({ commit });
         ctx.log("meta", `tenant ${tc.guid}: main website ${p.previous ?? "none"} → ${p.app}; members ${p.members.join(", ")} (${commit})`);

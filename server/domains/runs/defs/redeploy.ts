@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Step, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers } from "../../../db/schema/inventory.ts";
@@ -124,7 +124,7 @@ function redeploySteps(params: RedeployParams, ports: RedeployPorts): Step[] {
   // path: the boot check calls steps({}) with no params at all, purely to assert that step 0 is
   // attest-target, and on that question the two arms agree — so it gets the shorter shape and a real
   // run, which always names a server, gets the arm that server's role earns.
-  const role = ports.db.select({ role: servers.role }).from(servers).where(eq(servers.id, params.serverId)).get()?.role;
+  const role = ports.db.select({ role: servers.role }).from(servers).where(and(eq(servers.id, params.serverId), isNull(servers.deleted))).get()?.role;
   if (role !== undefined && !isMasterRole(role)) {
     return deploySlaveSteps({ target, mode: "redeploy" }, ports);
   }

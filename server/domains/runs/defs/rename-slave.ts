@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, isNull, notInArray } from "drizzle-orm";
 import type { Cleanup, RunDefinition, Step, StepCtx } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { apps, clusters, servers } from "../../../db/schema/inventory.ts";
@@ -129,7 +129,7 @@ function repointIdentityStep(p: RenameSlaveParams): Step {
       // ARMED BEFORE THE WRITE, so an abort after it finds its way back.
       ctx.registerCleanup(restoreIdentityCleanup(p));
       const moved = localTx(ctx, (tx) => {
-        const server = tx.select().from(servers).where(eq(servers.id, p.serverId)).get();
+        const server = tx.select().from(servers).where(and(eq(servers.id, p.serverId), isNull(servers.deleted))).get();
         if (!server) throw errValidation(`server ${p.serverId} does not exist`);
         // THE HOST FOLLOWS WHERE IT NAMED THE OLD FQDN: every session of this run reaches the machine
         // there, and the machine answers at the new name now. A host stated some other way — an

@@ -20,7 +20,7 @@
 // No line is classified by its comment: a comment is text on the machine, and anyone who can
 // append to authorized_keys can write either marker into it. The markers exist for the removal
 // grep, never for this reading.
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import type { SshSession } from "../../adapters/ssh/port.ts";
 import { servers } from "../../db/schema/inventory.ts";
@@ -116,7 +116,7 @@ export async function recordAuthorizedKeysReading(
   session: SshSession,
   serverId: string,
 ): Promise<AuthorizedKeysReadingResult | null> {
-  const row = ctx.db.select({ name: servers.name }).from(servers).where(eq(servers.id, serverId)).get();
+  const row = ctx.db.select({ name: servers.name }).from(servers).where(and(eq(servers.id, serverId), isNull(servers.deleted))).get();
   if (!row) throw errNotFound(`server ${serverId} not found`);
   const sealed = await ctx.creds.list({ subject: { kind: "server", id: serverId }, purpose: "ssh-key" });
   const cap = await remoteScriptCapture(ctx, session, "authorized-keys-probe", AUTHORIZED_KEYS_PROBE_SCRIPT, { timeoutMs: 60_000 });

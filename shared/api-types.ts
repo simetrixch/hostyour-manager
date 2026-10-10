@@ -228,7 +228,7 @@ export interface ServerView {
    *  key stood is refused by every run that attests it, and the card can only offer the one act that
    *  clears the id where there is an id to clear (server/domains/inventory/machine-identity.ts). */
   machineIdRecorded: boolean;
-  createdAt: number;
+  creation: number;
   /** When this manager last proved it can log in to the machine with its own key — the stamp
    *  `verify-key-login` writes (server/domains/runs/defs/manager-key.kit.ts). Null where no run has
    *  taken that reading on the machine. */

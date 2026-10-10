@@ -322,7 +322,7 @@ describe("schema census: every column has a writer", () => {
   it("parses the schema (the census has something to check)", () => {
     expect(tables.size).toBeGreaterThanOrEqual(10);
     expect(columns.some((c) => c.table === "runs" && c.prop === "planJson")).toBe(true);
-    expect(columns.find((c) => c.table === "tenantApps" && c.prop === "createdAt")?.hasDefault).toBe(true);
+    expect(columns.find((c) => c.table === "tenantApps" && c.prop === "status")?.hasDefault).toBe(true);
     // The stamp columns a table spreads in: drizzle fills the four, a writer the deletion pair.
     expect(columns.filter((c) => c.table === "runs" && ["creation", "modified", "owner", "modifiedBy"].includes(c.prop)).map((c) => c.hasDefault)).toEqual([true, true, true, true]);
     expect(columns.filter((c) => c.table === "runs" && ["deleted", "deletedBy"].includes(c.prop)).map((c) => c.hasDefault)).toEqual([false, false]);

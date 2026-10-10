@@ -1,7 +1,8 @@
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
+import { deletion } from "../../db/schema/stamps.ts";
 import { srvId } from "../../kernel/ids.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -114,15 +115,15 @@ export function createServer(db: Db, input: CreateServerInput): ServerView {
   return view;
 }
 
-/** Delete a not-yet-clustered server: purge its credentials (hard) then remove the row. Refuses
+/** Delete a not-yet-clustered server: purge its credentials, then mark the row deleted. Refuses
  *  once a cluster exists (that is a rebuild/remove Run, not a delete). */
 export async function deleteServer(db: Db, creds: CredentialStore, id: string): Promise<void> {
-  const row = db.select().from(servers).where(eq(servers.id, id)).get();
+  const row = db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
   if (!row) throw errValidation(`server ${id} not found`);
   if (isMasterRole(row.role)) throw errValidation("The master (this manager) cannot be deleted.");
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, id)).get();
   if (cluster) throw errValidation("This server has a cluster — remove the cluster first (a rebuild/remove Run), not delete.");
   for (const c of await creds.list({ subject: { kind: "server", id } })) await creds.purge(c.id);
-  db.delete(servers).where(eq(servers.id, id)).run();
+  db.update(servers).set(deletion()).where(eq(servers.id, id)).run();
   writeAudit(db, { action: "server.deleted", targetKind: "server", targetId: id, detail: { name: row.name } });
 }

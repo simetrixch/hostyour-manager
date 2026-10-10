@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
@@ -228,7 +228,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         const current = await ports.registrations.readTenant(p.stage, p.guid);
         if (!current) throw errNotFound(`tenant ${p.guid} is not onboarded (no registration) — cannot append an app`);
         if (current.entry.apps.some((a) => a.name === p.app)) {
-          ctx.db.update(tenants).set({ approvedTags: current.entry.approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+          ctx.db.update(tenants).set({ approvedTags: current.entry.approvedTags }).where(eq(tenants.id, p.tenantId)).run();
           ctx.log("meta", `app "${p.app}" already present in tenant ${p.guid} — append already committed, skipping`);
           return;
         }
@@ -236,7 +236,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         // the bundle the registration names, which record-apps-repo moved to this pass's build.
         const approved = await addedMemberVersions(ports, p.stage, current.entry, p.app, p.member, ctx);
         const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, ...(p.databases ? { databases: p.databases } : {}), runId: ctx.runId });
-        ctx.db.update(tenants).set({ approvedTags, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+        ctx.db.update(tenants).set({ approvedTags }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
       },
@@ -283,11 +283,11 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         // Overwrite-idempotent: upsert the tenant_apps row on (tenantId, name) and bump the tenant
         // row's lastRunId/updatedAt. ONE tx so a crash leaves a consistent, resumable picture.
         localTx(ctx, (tx) => {
-          const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, p.tenantId), eq(tenantApps.name, p.app))).get();
+          const ex = tx.select().from(tenantApps).where(and(eq(tenantApps.tenantId, p.tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, p.app))).get();
           const site = p.website?.site ?? null;
           if (ex) tx.update(tenantApps).set({ status: "active", lastRunId: ctx.runId, site }).where(eq(tenantApps.id, ex.id)).run();
           else tx.insert(tenantApps).values({ id: mintTenantAppId(), tenantId: p.tenantId, name: p.app, status: "active", lastRunId: ctx.runId, site }).run();
-          tx.update(tenants).set({ lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(tenants.id, p.tenantId)).run();
+          tx.update(tenants).set({ lastRunId: ctx.runId }).where(eq(tenants.id, p.tenantId)).run();
         });
         ctx.log("meta", `app "${p.app}" recorded in tenant ${p.guid}`);
       },

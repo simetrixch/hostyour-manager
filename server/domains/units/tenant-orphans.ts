@@ -39,7 +39,7 @@
 // reads and the registrations's git reads. The scan CLONES the deploy repository, which is why its route is
 // operator-triggered and fail-soft, never a page-load read.
 import { z } from "zod";
-import { and, eq, notInArray } from "drizzle-orm";
+import { and, eq, isNull, notInArray } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers, tenants } from "../../db/schema/inventory.ts";
 import { STAGE, TENANT_SETTLED_STATUS, type Stage } from "../../../shared/enums.ts";
@@ -129,7 +129,7 @@ async function scanOrphanObjects(db: Db, resolver: ClusterKubeResolver, pointed:
   const out: OrphanTenantView[] = [];
   const active = db.select({ id: clusters.id, serverId: clusters.serverId }).from(clusters).where(eq(clusters.status, "active")).all();
   for (const cluster of active) {
-    const server = db.select({ name: servers.name }).from(servers).where(eq(servers.id, cluster.serverId)).get();
+    const server = db.select({ name: servers.name }).from(servers).where(and(eq(servers.id, cluster.serverId), isNull(servers.deleted))).get();
     const clusterName = server?.name ?? cluster.id;
     let read: { appProjects: string[]; policies: string[]; namespaces: string[] };
     try {

@@ -8,7 +8,7 @@ import { ConsumerCardHead } from "./ConsumerCardHead.tsx";
 vi.mock("react-router", () => ({ Link: ({ to, children, className }: { to: string; children: import("react").ReactNode; className?: string }) => createElement("a", { href: to, className }, children) }));
 
 const row = (id: string, stage: ConsumerView["stage"], domain: string): ConsumerView =>
-  ({ id, name: "acme", stage, status: "active", domain, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", updatedAt: 0 } as ConsumerView);
+  ({ id, name: "acme", stage, status: "active", domain, repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", modified: 0 } as ConsumerView);
 
 describe("ConsumerCardHead", () => {
   it("shows a consumer once with its stages, and offers + add onboarding at the stage it does not stand at", () => {

@@ -258,8 +258,8 @@ describe("what a planner may read off the credentials table", () => {
     dirs.push(dir);
     const handle = openDb(join(dir, "manager.db"));
     closers.push(() => handle.sqlite.close());
-    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_a','s1','2.2.2.1','root','slave')").run();
-    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role) VALUES ('srv_b','s2','2.2.2.2','root','slave')").run();
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, owner, modified_by) VALUES ('srv_a','s1','2.2.2.1','root','slave', 'op_system', 'op_system')").run();
+    handle.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, owner, modified_by) VALUES ('srv_b','s2','2.2.2.2','root','slave', 'op_system', 'op_system')").run();
     return { db: handle.db, store: new CredentialStore({ db: handle.db, logger }) };
   }
   afterEach(() => {

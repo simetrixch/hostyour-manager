@@ -171,7 +171,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     approvedTags: tenant.approvedTags,
     senderDomain: tenant.senderDomain,
     displayName: tenant.displayName,
-    owner: tenant.owner ?? tenant.subdomain,
+    owner: tenant.repoOwner ?? tenant.subdomain,
   };
 }
 

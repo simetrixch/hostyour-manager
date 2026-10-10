@@ -4,7 +4,7 @@
 // the tenant card (GET /api/tenants/:id/live, which calls driftOf, plugins/unit/server/live-drift.ts), and the name-keyed detected
 // probe (GET /api/consumers/live). One implementation is the whole guarantee
 // that no two cards can ever describe the same live situation differently.
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import { MASTER_ROLES, type Stage, type ArgoSync } from "../../../shared/enums.ts";
@@ -59,7 +59,7 @@ export async function probeConsumerLive(
   const masterCluster = db
     .select({ domain: clusters.domain })
     .from(clusters)
-    .innerJoin(servers, eq(servers.id, clusters.serverId))
+    .innerJoin(servers, and(eq(servers.id, clusters.serverId), isNull(servers.deleted)))
     .where(inArray(servers.role, [...MASTER_ROLES]))
     .get();
   const argocdUrl = consumerArgocdUrl(masterCluster?.domain ?? null, argoNamespace, appName);

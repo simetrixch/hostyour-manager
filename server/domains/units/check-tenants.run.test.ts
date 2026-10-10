@@ -15,32 +15,32 @@ describe("check-tenants — turning a reading into a verdict", () => {
   const fresh = new Date(now.getTime() - 60_000);
 
   it("an administrator present is ok", () => {
-    expect(verdictFor({ reached: true, admins: 1, createdAt: old, now })).toBe("ok");
-    expect(verdictFor({ reached: true, admins: 7, createdAt: old, now })).toBe("ok");
+    expect(verdictFor({ reached: true, admins: 1, creation: old, now })).toBe("ok");
+    expect(verdictFor({ reached: true, admins: 7, creation: old, now })).toBe("ok");
   });
 
   it("REFUSAL 1: unreachable is never a finding about administrators", () => {
     // A tenant mid-restart, mid-deploy or behind a DNS change did not answer. That says nothing
     // about whether anybody can administer it, and reporting it as if it did is how the whole check
     // gets ignored.
-    expect(verdictFor({ reached: false, createdAt: old, now })).toBe("unreachable");
+    expect(verdictFor({ reached: false, creation: old, now })).toBe("unreachable");
   });
 
   it("REFUSAL 2: zero administrators inside the grace period is not a finding", () => {
     // A tenant onboarded minutes ago has none yet — that is its normal state while the first-admin
     // invitation is out. Without this, the FIRST check of every new tenant is a false alarm.
-    expect(verdictFor({ reached: true, admins: 0, createdAt: fresh, now })).toBe("ok");
+    expect(verdictFor({ reached: true, admins: 0, creation: fresh, now })).toBe("ok");
   });
 
   it("zero administrators past the grace period IS the finding", () => {
-    expect(verdictFor({ reached: true, admins: 0, createdAt: old, now })).toBe("none");
+    expect(verdictFor({ reached: true, admins: 0, creation: old, now })).toBe("none");
   });
 
   it("the boundary belongs to the grace period, not to the finding", () => {
     const exactly = new Date(now.getTime() - ADMIN_GRACE_MS);
-    expect(verdictFor({ reached: true, admins: 0, createdAt: exactly, now })).toBe("none");
+    expect(verdictFor({ reached: true, admins: 0, creation: exactly, now })).toBe("none");
     const justInside = new Date(now.getTime() - ADMIN_GRACE_MS + 1);
-    expect(verdictFor({ reached: true, admins: 0, createdAt: justInside, now })).toBe("ok");
+    expect(verdictFor({ reached: true, admins: 0, creation: justInside, now })).toBe("ok");
   });
 });
 

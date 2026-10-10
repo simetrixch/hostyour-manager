@@ -114,7 +114,7 @@ function unbindIssuerCleanup(ports: TenantSetSenderDomainPorts, p: TenantSetSend
 
 async function writeSenderDomain(ports: TenantSetSenderDomainPorts, tc: TenantCluster, db: Parameters<Step["run"]>[0]["db"], domain: string, runId: string): Promise<string> {
   const { commit } = await ports.registrations.setSenderDomain(tc.stage, tc.guid, domain, runId);
-  db.update(tenants).set({ senderDomain: domain, lastRunId: runId, updatedAt: new Date() }).where(eq(tenants.id, tc.tenantId)).run();
+  db.update(tenants).set({ senderDomain: domain, lastRunId: runId }).where(eq(tenants.id, tc.tenantId)).run();
   return commit;
 }
 

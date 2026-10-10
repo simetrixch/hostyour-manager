@@ -1,6 +1,6 @@
 import { isIP } from "node:net";
 import { z } from "zod";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import type { Step, Cleanup, RunDefinition } from "../../../executor/types.ts";
 import type { Db } from "../../../db/client.ts";
 import { servers, clusters } from "../../../db/schema/inventory.ts";
@@ -717,7 +717,7 @@ function recordOf(value: unknown): Record<string, unknown> {
  *  leave the machine — would act on the control host itself. Asked of the inventory, because a role
  *  is a fact of the row and never something an operator states. */
 function refuseMaster(db: Db, serverId: string): void {
-  const row = db.select({ name: servers.name, role: servers.role }).from(servers).where(eq(servers.id, serverId)).get();
+  const row = db.select({ name: servers.name, role: servers.role }).from(servers).where(and(eq(servers.id, serverId), isNull(servers.deleted))).get();
   if (row && isMasterRole(row.role)) {
     throw errValidation(
       `${row.name} stands at role ${row.role}: a master carries the slave part from its own installation, so there is nothing this run adds to it — ` +

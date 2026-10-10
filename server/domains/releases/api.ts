@@ -16,7 +16,7 @@
 // `apps: null` is the same rule one level down — the branch was never read, which is not "the
 // branch pins nothing".
 import type { Hono } from "hono";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { clusters, servers } from "../../db/schema/inventory.ts";
 import type { AppEnv } from "../../http/app-env.ts";
@@ -46,7 +46,7 @@ function installationRows(db: Db) {
       stage: clusters.stage,
     })
     .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .innerJoin(servers, and(eq(clusters.serverId, servers.id), isNull(servers.deleted)))
     .all()
     .sort((a, b) => Number(isMasterRole(b.role)) - Number(isMasterRole(a.role)) || a.name.localeCompare(b.name));
 }

@@ -281,7 +281,7 @@ describe("boot/seed-master — master self-registration", () => {
     const { db, store } = setup();
     // A leftover slave named "m1" (== the derived master name) blocks the insert.
     db.sqlite
-      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_stray','m1','9.9.9.9','root','slave','ready')")
+      .prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_stray','m1','9.9.9.9','root','slave','ready', 'op_system', 'op_system')")
       .run();
     await seedMaster(db.db, store, cfg({ MASTER_FQDN: "m1.example.com", MASTER_SSH_USER: "m1" }), logger);
     // No master row created; the stray row is untouched; boot did not throw.

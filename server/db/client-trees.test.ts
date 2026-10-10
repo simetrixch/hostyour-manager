@@ -81,7 +81,7 @@ describe("openDb over the migration trees of the compiled plugins", () => {
 const PREVIOUS_HEAD = "0012_tenants-approved-tags";
 const ROW_IN_EVERY_TABLE = [
   "INSERT INTO servers (id, name, host, ssh_user) VALUES ('srv_1', 's1', '10.0.0.1', 'm1')",
-  "INSERT INTO clusters (id, server_id, stage, domain, name) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com', 's1')",
+  "INSERT INTO clusters (id, server_id, stage, domain, name, provisioned_at) VALUES ('cl_1', 'srv_1', 'prod', 's1.example.com', 's1', 1700000000000)",
   "INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES ('cred_1', 'ssh_key', 'k', 'server', 'srv_1', 'ssh-key', 'plain:v0:AA==', 'fp')",
   "INSERT INTO apps (id, cluster_id, name, stage, host) VALUES ('app_1', 'cl_1', 'post', 'prod', 'post')",
   "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members) VALUES ('tnt_1', 'cl_1', 'abcdefghjkmn', 'acme', 'prod', 'idp', '[\"idp\"]')",

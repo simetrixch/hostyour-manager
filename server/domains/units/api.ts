@@ -1,5 +1,5 @@
 import type { Hono } from "hono";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import type { Executor } from "../../executor/executor.ts";
 import type { CredentialStore } from "../../security/store.ts";
@@ -120,7 +120,7 @@ function targetClusters(db: Db): Array<{ id: string; domain: string; stage: Stag
   return db
     .select({ id: clusters.id, domain: clusters.domain, stage: clusters.stage, status: clusters.status })
     .from(clusters)
-    .innerJoin(servers, eq(servers.id, clusters.serverId))
+    .innerJoin(servers, and(eq(servers.id, clusters.serverId), isNull(servers.deleted)))
     .where(and(eq(clusters.status, "active"), inArray(servers.role, [...SLAVE_ROLES])))
     .all();
 }
@@ -148,8 +148,8 @@ export function registerConsumerRoutes(app: Hono<AppEnv>, deps: ConsumerOnboardA
           status: apps.status,
           lastRunId: apps.lastRunId,
           check: apps.checkJson,
-          createdAt: apps.createdAt,
-          updatedAt: apps.updatedAt,
+          creation: apps.creation,
+          modified: apps.modified,
         })
         .from(apps)
         .innerJoin(clusters, eq(apps.clusterId, clusters.id))
@@ -486,9 +486,9 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const tenant = db.select(TENANT_COLUMNS).from(tenants).innerJoin(clusters, eq(tenants.clusterId, clusters.id)).where(eq(tenants.id, id)).get();
     if (!tenant) throw errNotFound(`tenant ${id}`);
     const appRows = db
-      .select({ id: tenantApps.id, name: tenantApps.name, status: tenantApps.status, lastRunId: tenantApps.lastRunId, site: tenantApps.site, createdAt: tenantApps.createdAt })
+      .select({ id: tenantApps.id, name: tenantApps.name, status: tenantApps.status, lastRunId: tenantApps.lastRunId, site: tenantApps.site, creation: tenantApps.creation })
       .from(tenantApps)
-      .where(eq(tenantApps.tenantId, id))
+      .where(and(eq(tenantApps.tenantId, id), isNull(tenantApps.deleted)))
       .all();
     return c.json({ ...tenant, apps: appRows });
   });

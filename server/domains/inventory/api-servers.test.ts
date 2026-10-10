@@ -109,10 +109,10 @@ describe("server inventory API", () => {
       ["srv_m", "m1", "master", "cls_m", MASTER],
       ["srv_s", "s1", "slave", "cls_s", SLAVE],
     ] as const) {
-      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES (?,?,?,'root',?,'healthy')").run(id, name, domain, role);
-      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name) VALUES (?,?,'prod',?,?)").run(cls, id, domain, domain.split(".")[0]);
+      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES (?,?,?,'root',?,'healthy', 'op_system', 'op_system')").run(id, name, domain, role);
+      db.sqlite.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, owner, modified_by) VALUES (?,?,'prod',?,?, 'op_system', 'op_system')").run(cls, id, domain, domain.split(".")[0]);
     }
-    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_b','b1','203.0.113.9','root','slave','bare')").run();
+    db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, owner, modified_by) VALUES ('srv_b','b1','203.0.113.9','root','slave','bare', 'op_system', 'op_system')").run();
   }
 
   describe("GET /api/servers", () => {
@@ -304,7 +304,7 @@ describe("server inventory API", () => {
     /** A slave this manager has already reached: a host key pinned, a machine-id recorded, and the
      *  preflight checks that share the document with the pin. */
     function seedReached(db: DbHandle): void {
-      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, machine_id, preflight_json) VALUES ('srv_r','r1','203.0.113.10','hostyour1','slave','ready',?,?)")
+      db.sqlite.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status, machine_id, preflight_json, owner, modified_by) VALUES ('srv_r','r1','203.0.113.10','hostyour1','slave','ready',?,?, 'op_system', 'op_system')")
         .run(MACHINE_ID, JSON.stringify({ hostKey: PINNED, checkedAt: 42, checks: [] }));
     }
 

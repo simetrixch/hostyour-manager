@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { HeadlampKubeconfig } from "../../../adapters/kube/port.ts";
 import { createHash } from "node:crypto";
 import type { Db } from "../../../db/client.ts";
@@ -159,7 +159,7 @@ export const APP_SYNC_TIMEOUT_MS = 10 * 60_000;
 export const APP_SYNC_POLL_MS = 10_000;
 
 export function loadServer(db: Db, id: string): typeof servers.$inferSelect {
-  const row = db.select().from(servers).where(eq(servers.id, id)).get();
+  const row = db.select().from(servers).where(and(eq(servers.id, id), isNull(servers.deleted))).get();
   if (!row) throw errNotFound(`server ${id} not found`);
   return row;
 }
@@ -184,7 +184,7 @@ export function slaveApiHost(server: typeof servers.$inferSelect): string {
  *  the master hosts the slave-management plane, so deploying a slave without one is
  *  meaningless. */
 export function loadMaster(db: Db): typeof servers.$inferSelect {
-  const row = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  const row = db.select().from(servers).where(and(inArray(servers.role, [...MASTER_ROLES]), isNull(servers.deleted))).get();
   if (!row) throw errValidation("no master server registered — the platform needs exactly one role=master server (this manager's host) before a slave can be deployed");
   return row;
 }

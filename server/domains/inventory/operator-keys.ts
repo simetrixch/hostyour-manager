@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
 import { operatorKeys } from "../../db/schema/operator-keys.ts";
@@ -64,7 +64,7 @@ function serversHolding(db: Db, fingerprint: string): {
 } {
   const holding: { id: string; name: string; kind: AuthorizedKeyKind }[] = [];
   const undecided: string[] = [];
-  for (const r of db.select({ id: servers.id, name: servers.name, doc: servers.authorizedKeysJson }).from(servers).all()) {
+  for (const r of db.select({ id: servers.id, name: servers.name, doc: servers.authorizedKeysJson }).from(servers).where(isNull(servers.deleted)).all()) {
     const read = readServerAuthorizedKeys(r.doc);
     if (read.kind === "unsupported" || read.kind === "unreadable") {
       undecided.push(r.name);

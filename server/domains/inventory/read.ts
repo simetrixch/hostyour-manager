@@ -1,4 +1,4 @@
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
@@ -70,6 +70,7 @@ export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefi
   return db
     .select()
     .from(servers)
+    .where(isNull(servers.deleted))
     .all()
     .map(
       (r): ServerView => ({
@@ -91,7 +92,7 @@ export function listServers(db: Db, flags: Map<string, ServerCredFlags> | undefi
         authorizedKeys: readServerAuthorizedKeys(r.authorizedKeysJson),
         hostKeyPinned: (r.preflightJson as { hostKey?: string } | null)?.hostKey ?? null,
         machineIdRecorded: r.machineId !== null,
-        createdAt: r.createdAt.getTime(),
+        creation: r.creation.getTime(),
         adoptedAt: r.adoptedAt ? r.adoptedAt.getTime() : null,
         hasPassword: flags?.get(r.id)?.hasPassword ?? false,
         hasKey: flags?.get(r.id)?.hasKey ?? false,
@@ -110,7 +111,7 @@ export function getServer(db: Db, id: string, flags: Map<string, ServerCredFlags
  *  fallback (the master is registered by name, not IP) — the same precedence as
  *  masterFqdnOf in runs/defs/deploy-slave.kit.ts. Undefined when no master row exists yet. */
 export function masterFqdn(db: Db): string | undefined {
-  const master = db.select().from(servers).where(inArray(servers.role, [...MASTER_ROLES])).get();
+  const master = db.select().from(servers).where(and(inArray(servers.role, [...MASTER_ROLES]), isNull(servers.deleted))).get();
   if (!master) return undefined;
   const cluster = db.select().from(clusters).where(eq(clusters.serverId, master.id)).get();
   return cluster?.domain ?? master.host;
@@ -164,7 +165,7 @@ export function resolveMasterCluster(db: Db): { clusterId: string; domain: strin
   const row = db
     .select({ id: clusters.id, domain: clusters.domain })
     .from(clusters)
-    .innerJoin(servers, eq(clusters.serverId, servers.id))
+    .innerJoin(servers, and(eq(clusters.serverId, servers.id), isNull(servers.deleted)))
     .where(inArray(servers.role, [...MASTER_ROLES]))
     .get();
   if (!row) throw errValidation("no master control cluster is registered in inventory — seed the master first (MASTER_FQDN)");

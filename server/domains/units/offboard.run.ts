@@ -424,7 +424,7 @@ function offboardSteps(ports: OffboardPorts, params: OffboardParams): Step[] {
       run: async (ctx) => {
         // soft state, never a row delete. Keep the row (history + a future re-onboard);
         // flip status to offboarded and tie it to this run.
-        localTx(ctx, (tx) => tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(apps.id, appId)).run());
+        localTx(ctx, (tx) => tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId }).where(eq(apps.id, appId)).run());
         const ac = loadAppCluster(ctx.db, appId);
         ctx.log("meta", `consumer ${ac.name} recorded as offboarded on cluster ${ac.clusterId} (row kept)`);
       },

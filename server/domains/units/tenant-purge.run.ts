@@ -646,7 +646,7 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
         })
         .from(tenants)
         .where(and(eq(tenants.guid, req.guid), eq(tenants.stage, req.stage)))
-        .orderBy(desc(tenants.updatedAt))
+        .orderBy(desc(tenants.modified))
         .limit(1)
         .get();
       const source = row ?? scannedEntry;

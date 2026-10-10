@@ -197,6 +197,13 @@
       "when": 1791622404451,
       "tag": "0027_stamp-runs-and-audit",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "6",
+      "when": 1791624131780,
+      "tag": "0028_stamp-inventory",
+      "breakpoints": true
     }
   ]
 }

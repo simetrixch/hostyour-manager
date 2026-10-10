@@ -70,7 +70,7 @@ export function settleProvisionalRowCleanup(_ports: OnboardPorts, p: DeployableO
       const settled = localTx(ctx, (tx) => {
         const row = tx.select({ id: apps.id, status: apps.status }).from(apps).where(and(eq(apps.name, p.consumerName), eq(apps.stage, p.stage))).get();
         if (!row || row.status !== "provisioning") return row?.status ?? null;
-        tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId, updatedAt: new Date() }).where(eq(apps.id, row.id)).run();
+        tx.update(apps).set({ status: "offboarded", lastRunId: ctx.runId }).where(eq(apps.id, row.id)).run();
         return "offboarded";
       });
       ctx.log("meta", settled === "offboarded"
@@ -392,7 +392,7 @@ export function upsertAppRow(tx: Db, values: AppRowValues, opts: { keepStatusOnU
     // actually running.
     const { status: _status, ...withoutStatus } = values;
     const keep = opts.keepStatusOnUpdate && existing.status !== "offboarded";
-    tx.update(apps).set({ ...(keep ? withoutStatus : values), updatedAt: new Date() }).where(eq(apps.id, existing.id)).run();
+    tx.update(apps).set({ ...(keep ? withoutStatus : values) }).where(eq(apps.id, existing.id)).run();
   } else {
     tx.insert(apps).values({ id: appId(), ...values }).run();
   }

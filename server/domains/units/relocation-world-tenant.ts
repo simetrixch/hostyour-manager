@@ -3,7 +3,7 @@
 // nothing moves on its own. The delta from the consumer world is exactly the bracket: SET watches
 // over the fan-out, one AppProject per member, the CR as the handle the source must release, and
 // the relocating annotation that turns the source CR's delete into that release.
-import { eq, and, notInArray } from "drizzle-orm";
+import { eq, and, isNull, notInArray } from "drizzle-orm";
 import type { StepCtx } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
@@ -60,7 +60,7 @@ async function tenantAppNames(ports: TenantRelocationPorts, ctx: StepCtx, tenant
   return ctx.db
     .select({ name: tenantApps.name })
     .from(tenantApps)
-    .where(and(eq(tenantApps.tenantId, tenantId), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS])))
+    .where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), notInArray(tenantApps.status, [...TENANT_SETTLED_STATUS])))
     .all()
     .map((r) => r.name);
 }
@@ -276,9 +276,9 @@ export function tenantWorld(ports: TenantRelocationPorts, tenantId: string): Wor
         const entry = await ports.registrations.readTenant(tc.stage, tc.guid);
         const appNames = entry?.entry.apps.map((a) => a.name) ?? apps;
         localTx(c, (tx) => {
-          tx.update(tenants).set({ clusterId: target.clusterId, status: "active", suspended: false, lastRunId: c.runId, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
+          tx.update(tenants).set({ clusterId: target.clusterId, status: "active", suspended: false, lastRunId: c.runId }).where(eq(tenants.id, tenantId)).run();
           for (const name of appNames) {
-            tx.update(tenantApps).set({ status: "active", lastRunId: c.runId }).where(and(eq(tenantApps.tenantId, tenantId), eq(tenantApps.name, name))).run();
+            tx.update(tenantApps).set({ status: "active", lastRunId: c.runId }).where(and(eq(tenantApps.tenantId, tenantId), isNull(tenantApps.deleted), eq(tenantApps.name, name))).run();
           }
         });
         c.log("meta", `tenant ${tc.guid} recorded on cluster ${target.clusterId} (active, ${appNames.length} app(s))`);
