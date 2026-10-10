@@ -30,7 +30,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { builtBundleEngine, bundleFolderSites, bundleLacksSite, bundleReleaseTag, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import { seedTenantAppKeyStep } from "./tenant-app-keys.ts";
+import { seedTenantAppKeyStep, TENANT_WEB_MEMBER } from "./tenant-app-keys.ts";
 import { assertAddAppAbortable, revertAppendCleanup } from "./add-app-abort.ts";
 import { AddAppRequest } from "./add-app-request.ts";
 
@@ -213,8 +213,8 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
     seedTenantAppKeyStep(ports.seeder, "service-key", p.stage, p.guid, p.app),
     ...(p.website
       ? [
-        seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, p.app),
-        seedTenantAppKeyStep(ports.seeder, "form-signing-key", p.stage, p.guid, p.app),
+        seedTenantAppKeyStep(ports.seeder, "revalidate-secret", p.stage, p.guid, TENANT_WEB_MEMBER),
+        seedTenantAppKeyStep(ports.seeder, "form-signing-key", p.stage, p.guid, TENANT_WEB_MEMBER),
       ]
       : []),
     {

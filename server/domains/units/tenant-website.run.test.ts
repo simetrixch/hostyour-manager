@@ -36,6 +36,9 @@ describe("add-app for a website", () => {
     // the renderer that read them.
     expect(names.slice(names.indexOf("seed-password-field-key"), names.indexOf("append-app") + 1))
       .toEqual(["seed-password-field-key", "seed-service-key", "seed-revalidate-secret", "seed-form-signing-key", "append-app"]);
+    // The two website keys are the tenant's, held by its web server, never the new website's own.
+    const titles = def.steps(result.params).filter((s) => s.name === "seed-revalidate-secret" || s.name === "seed-form-signing-key").map((s) => s.title);
+    expect(titles).toEqual(["Write the revalidate secret of web", "Write the form signing key of web"]);
     expect(names.slice(names.indexOf("watch-sync-set"))).toEqual(["watch-sync-set", "smoke", "record-inventory"]);
     expect(result.plan.summary).toContain("It is a website of site main. It is served at /web/main of the tenant's host.");
     const main = await def.planStream!({ ...WEBSITE, main: true }, planCtx());

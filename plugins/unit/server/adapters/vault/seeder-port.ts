@@ -233,12 +233,13 @@ export interface TenantCryptoDeleteInput {
 }
 
 /** The kinds of key a tenant app has, each ONE entry per app one level below the tenant's entry,
- *  because that entry is written create-only and takes no property later. The kind is the folder
- *  below the tenant's entry and the property the value stands under:
+ *  because that entry is written create-only and takes no property later. The two website keys are one
+ *  entry per tenant instead, under the member name of the tenant web server that serves every site.
+ *  The kind is the folder below the tenant's entry and the property the value stands under:
  *  - `password-field-key`: what the app's engine encrypts a Password field's value with.
- *  - `revalidate-secret`: what a website's engine signs a cache purge of its renderer with, and the
- *    renderer checks it by.
- *  - `form-signing-key`: what a website's renderer signs each record form it places with, and checks
+ *  - `revalidate-secret`: what a website's engine signs a cache purge of the tenant web server with,
+ *    and the web server checks it by.
+ *  - `form-signing-key`: what the tenant web server signs each record form it places with, and checks
  *    the form's post against.
  *  - `service-key`: what an app's engine proves itself with to its tenant's identity provider, which
  *    hands it a short-lived token for digita-post in exchange; every app has one, website or not.

@@ -4,7 +4,7 @@ import { servers, clusters, tenants, tenantApps } from "../../db/schema/inventor
 import type { StepCtx } from "../../executor/types.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { TenantAppKeySeedInput, VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { ensureTenantAppKeys, seedTenantAppKeyStep, seedTenantAppKeys } from "./tenant-app-keys.ts";
+import { ensureTenantAppKeys, seedTenantAppKeyStep, seedTenantAppKeys, seedTenantWebsiteKeys } from "./tenant-app-keys.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 
 // Every tenant app's Password field key, and every tenant website's revalidate secret and form
@@ -46,11 +46,23 @@ describe("a tenant app's Password field key", () => {
     for (const w of seeder.writes) expect(Buffer.from(w.data["password-field-key"]!, "base64")).toHaveLength(32);
   });
 
-  it("a website's revalidate secret is 32 random bytes as base64 under its own kind and property", async () => {
+  it("a revalidate secret is 32 random bytes as base64 under its own kind and property", async () => {
     const seeder = recordingSeeder();
-    await seedTenantAppKeys(seeder, "revalidate-secret", "prod", "g1", ["simetrix-ch"]);
-    expect(seeder.writes.map((w) => [w.kind, w.app, Object.keys(w.data)])).toEqual([["revalidate-secret", "simetrix-ch", ["revalidate-secret"]]]);
+    await seedTenantAppKeys(seeder, "revalidate-secret", "prod", "g1", ["web"]);
+    expect(seeder.writes.map((w) => [w.kind, w.app, Object.keys(w.data)])).toEqual([["revalidate-secret", "web", ["revalidate-secret"]]]);
     expect(Buffer.from(seeder.writes[0]!.data["revalidate-secret"]!, "base64")).toHaveLength(32);
+  });
+
+  it("PLANTED DEFECT: gives a tenant with two websites one revalidate secret and one form signing key, under web", async () => {
+    const seeder = recordingSeeder();
+    await seedTenantWebsiteKeys(seeder, "prod", "g1", [{}, { site: "main" }, { site: "shop" }], { log: () => undefined });
+    expect(seeder.writes.map((w) => `${w.kind}/${w.app}`)).toEqual(["revalidate-secret/web", "form-signing-key/web"]);
+  });
+
+  it("PLANTED INNOCENT: gives a tenant without a website no website key", async () => {
+    const seeder = recordingSeeder();
+    await seedTenantWebsiteKeys(seeder, "prod", "g1", [{}, {}], { log: () => undefined });
+    expect(seeder.writes).toEqual([]);
   });
 
   it("PLANTED DEFECT: is never shared, between two apps or between two tenants", async () => {
@@ -81,25 +93,25 @@ describe("the step that keys an app joining a standing tenant", () => {
     expect(logs.join("\n")).toContain("Password field keys under prod/tenants/g1/password-field-key/: written for crm");
   });
 
-  it("writes a website's revalidate secret under its own step", async () => {
+  it("writes the tenant's revalidate secret under its own step, held by web", async () => {
     const seeder = recordingSeeder();
     const logs: string[] = [];
-    const step = seedTenantAppKeyStep(seeder, "revalidate-secret", "prod", "g1", "simetrix-ch");
+    const step = seedTenantAppKeyStep(seeder, "revalidate-secret", "prod", "g1", "web");
     await step.run(ctx(logs));
     expect(step.name).toBe("seed-revalidate-secret");
-    expect(seeder.writes.map((w) => [w.kind, w.app])).toEqual([["revalidate-secret", "simetrix-ch"]]);
-    expect(logs.join("\n")).toContain("Revalidate secrets under prod/tenants/g1/revalidate-secret/: written for simetrix-ch");
+    expect(seeder.writes.map((w) => [w.kind, w.app])).toEqual([["revalidate-secret", "web"]]);
+    expect(logs.join("\n")).toContain("Revalidate secrets under prod/tenants/g1/revalidate-secret/: written for web");
   });
 
-  it("writes a website's form signing key under its own step, as 32 random bytes under its own property", async () => {
+  it("writes the tenant's form signing key under its own step, held by web, as 32 random bytes under its own property", async () => {
     const seeder = recordingSeeder();
     const logs: string[] = [];
-    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "g1", "simetrix-ch");
+    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "g1", "web");
     await step.run(ctx(logs));
     expect(step.name).toBe("seed-form-signing-key");
-    expect(seeder.writes.map((w) => [w.kind, w.app, Object.keys(w.data)])).toEqual([["form-signing-key", "simetrix-ch", ["form-signing-key"]]]);
+    expect(seeder.writes.map((w) => [w.kind, w.app, Object.keys(w.data)])).toEqual([["form-signing-key", "web", ["form-signing-key"]]]);
     expect(Buffer.from(seeder.writes[0]!.data["form-signing-key"]!, "base64")).toHaveLength(32);
-    expect(logs.join("\n")).toContain("Form signing keys under prod/tenants/g1/form-signing-key/: written for simetrix-ch");
+    expect(logs.join("\n")).toContain("Form signing keys under prod/tenants/g1/form-signing-key/: written for web");
   });
 
   it("writes an app's service key under its own step, as 32 random bytes under its own property, website or not", async () => {
@@ -120,11 +132,11 @@ describe("the step that keys an app joining a standing tenant", () => {
 
 describe("the boot pass over every tenant app", () => {
   let db: DbHandle;
-  // What each tenant's registration lists: a website is an entry that names a domain.
-  const registered: Record<string, { name: string; folder?: string; site?: string; domain?: string }[]> = {
-    ga: [{ name: "erp" }, { name: "jobs", domain: "jobs.example" }], // jobs is purged: no secret
-    gb: [{ name: "erp" }, { name: "shop", folder: "web", site: "shop", domain: "shop.example" }],
-    gc: [{ name: "site", domain: "gone.example" }], // an offboarded tenant: no secret
+  // What each tenant's registration lists: a website is an entry that names a site.
+  const registered: Record<string, { name: string; folder?: string; site?: string }[]> = {
+    ga: [{ name: "erp" }, { name: "jobs", folder: "web", site: "jobs" }], // jobs is purged: no secret
+    gb: [{ name: "erp" }, { name: "shop", folder: "web", site: "shop" }],
+    gc: [{ name: "site", folder: "web", site: "site" }], // an offboarded tenant: no secret
   };
   const registrations = (unreadable: string[] = []) => ({
     readTenant: async (_stage: string, guid: string) => {
@@ -153,18 +165,18 @@ describe("the boot pass over every tenant app", () => {
     ]).run();
   });
 
-  it("keys every app of every tenant that is not gone, every website among them with its revalidate secret and form signing key, and counts what already stood", async () => {
+  it("keys every app of every tenant that is not gone, every tenant with a website its revalidate secret and form signing key under web, and counts what already stood", async () => {
     const seeder = recordingSeeder(["gb/erp"]);
     const result = await ensureTenantAppKeys({ db: db.db, seeder, registrations: registrations(), logger: silent });
-    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/shop", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop", "gb/service-key/erp", "gb/service-key/shop"]);
+    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/web", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/web", "gb/service-key/erp", "gb/service-key/shop"]);
     expect(seeder.google).toEqual(["ga", "gb"]);
     expect(result).toEqual({ created: 8, existing: 2, failed: [] });
   });
 
-  it("writes a website's form signing key only where none stands, and keeps the one that does", async () => {
+  it("writes the tenant's form signing key only where none stands, and keeps the one that does", async () => {
     const said: string[] = [];
     const logger = { ...silent, info: (_fields: unknown, line: string) => said.push(line) } as unknown as Logger;
-    const result = await ensureTenantAppKeys({ db: db.db, seeder: recordingSeeder(["gb/form-signing-key/shop"]), registrations: registrations(), logger });
+    const result = await ensureTenantAppKeys({ db: db.db, seeder: recordingSeeder(["gb/form-signing-key/web"]), registrations: registrations(), logger });
     expect(result).toEqual({ created: 9, existing: 1, failed: [] });
     expect(said.some((line) => line.startsWith("Form signing keys under prod/tenants/gb/form-signing-key/"))).toBe(false);
     expect(said.at(-1)).toBe("tenant app keys: 9 written, 1 already standing, 0 failed");
@@ -176,7 +188,7 @@ describe("the boot pass over every tenant app", () => {
     const logger = { info: record, error: record, warn: record, debug: record } as unknown as Logger;
     const seeder = recordingSeeder();
     await ensureTenantAppKeys({ db: db.db, seeder, registrations: registrations(), logger });
-    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "gb", "shop");
+    const step = seedTenantAppKeyStep(seeder, "form-signing-key", "prod", "gb", "web");
     await step.run({ checkpoint: (data: unknown) => said.push(JSON.stringify(data)), log: (_stream: string, text: string) => said.push(text) } as unknown as StepCtx);
     const keys = seeder.writes.flatMap((w) => Object.values(w.data)).filter((value) => value !== "");
     expect(keys.length).toBeGreaterThan(0);
@@ -212,19 +224,19 @@ describe("the boot pass over every tenant app", () => {
     const seeder = recordingSeeder([], ["gb/service-key"]);
     const result = await ensureTenantAppKeys({ db: db.db, seeder, registrations: registrations(), logger: silent });
     expect(result.failed).toEqual(["prod/gb/service-key"]);
-    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/shop", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop"]);
+    expect(written(seeder)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/web", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/web"]);
   });
 
-  it("PLANTED DEFECT: a form signing key that cannot be written leaves the website's other keys written", async () => {
+  it("PLANTED DEFECT: a form signing key that cannot be written leaves the tenant's other keys written", async () => {
     const refused = recordingSeeder([], ["gb/form-signing-key"]);
     expect((await ensureTenantAppKeys({ db: db.db, seeder: refused, registrations: registrations(), logger: silent })).failed).toEqual(["prod/gb/form-signing-key"]);
-    expect(written(refused)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/shop", "gb/service-key/erp", "gb/service-key/shop"]);
+    expect(written(refused)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/revalidate-secret/web", "gb/service-key/erp", "gb/service-key/shop"]);
   });
 
   it("PLANTED DEFECT: a revalidate secret that cannot be written, or a registration that cannot be read, leaves the Password field keys written", async () => {
     const refused = recordingSeeder([], ["gb/revalidate-secret"]);
     expect((await ensureTenantAppKeys({ db: db.db, seeder: refused, registrations: registrations(), logger: silent })).failed).toEqual(["prod/gb/revalidate-secret"]);
-    expect(written(refused)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/shop", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/service-key/erp", "gb/service-key/shop"]);
+    expect(written(refused)).toEqual(["ga/password-field-key/erp", "ga/service-key/erp", "gb/form-signing-key/web", "gb/password-field-key/erp", "gb/password-field-key/shop", "gb/service-key/erp", "gb/service-key/shop"]);
     const unread = recordingSeeder();
     expect((await ensureTenantAppKeys({ db: db.db, seeder: unread, registrations: registrations(["gb"]), logger: silent })).failed)
       .toEqual(["prod/gb/revalidate-secret", "prod/gb/form-signing-key"]);
