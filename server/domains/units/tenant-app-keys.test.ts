@@ -10,23 +10,16 @@ import { seedTenantAppKeyStep, seedTenantAppKeys, seedTenantWebsiteKeys } from "
 /** A seeder that remembers every key it was handed, answers "exists" for the apps in [standing] (a
  *  guid and app for every kind, or a guid, kind and app for one), and fails for a guid, or a guid and
  *  kind, in [failFor]. */
-function recordingSeeder(standing: string[] = [], failFor: string[] = []): VaultSeeder & { writes: TenantAppKeySeedInput[]; google: string[] } {
+function recordingSeeder(standing: string[] = [], failFor: string[] = []): VaultSeeder & { writes: TenantAppKeySeedInput[] } {
   const writes: TenantAppKeySeedInput[] = [];
-  const google: string[] = [];
   return {
     writes,
-    google,
-    seedTenantGoogleTranslation: async (input: { guid: string }) => {
-      if (failFor.includes(input.guid) || failFor.includes(`${input.guid}/google-translation`)) throw new Error("vault Google translation settings seed put failed (403)");
-      google.push(input.guid);
-      return { created: !standing.includes(`${input.guid}/google-translation`) };
-    },
     seedTenantAppKey: async (input: TenantAppKeySeedInput) => {
       if (failFor.includes(input.guid) || failFor.includes(`${input.guid}/${input.kind}`)) throw new Error("vault tenant app key seed put failed (403)");
       writes.push(input);
       return { created: !standing.includes(`${input.guid}/${input.app}`) && !standing.includes(`${input.guid}/${input.kind}/${input.app}`) };
     },
-  } as unknown as VaultSeeder & { writes: TenantAppKeySeedInput[]; google: string[] };
+  } as unknown as VaultSeeder & { writes: TenantAppKeySeedInput[] };
 }
 
 
