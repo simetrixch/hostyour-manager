@@ -63,9 +63,6 @@ export async function boot(): Promise<void> {
   // App can release at any hour, not only the one after its onboarding (#184).
   void wired.refreshAppTokens();
   scheduleAppTokenRefresh(wired.refreshAppTokens, logger);
-  // Every tenant app's Password field key and every tenant website's revalidate secret, where one is
-  // missing — once, behind the listener.
-  void wired.mintTenantAppKeys();
   // The registry reaper, once a day at the configured hour (UTC), on this server's own database and
   // credentials; unconfigured, it does not run and the boot says so.
   if (wired.reapRegistry && config.registryReaper) scheduleRegistryReap(wired.reapRegistry, logger, config.registryReaper.hourUtc);
