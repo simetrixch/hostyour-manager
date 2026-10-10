@@ -6,6 +6,8 @@ import { FakeMasterArgoReader } from "../../adapters/kube/testing/fake.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { makeTenantSetDemoDef } from "./tenant-demo.run.ts";
 import { ctx, db, GUID, params, planCtx, ports, seedClusters, useMemoryDb } from "./add-app.fixture.ts";
+import type { TenantOnboardPorts } from "./create-tenant.run.ts";
+import type { StepCtx } from "../../executor/types.ts";
 
 useMemoryDb();
 
@@ -14,6 +16,19 @@ function rendering(demo: boolean | undefined): Map<string, ArgoAppStatus> {
     sync: "Synced", health: "Healthy", syncRevision: null, targetRevision: null,
     syncSources: [{ repoURL: "https://github.com/acme/acme-deploy.git", revision: "abc", path: `charts/example-${m}`, valuesObject: { tenant: demo === undefined ? {} : { demo } } }],
   } as ArgoAppStatus]));
+}
+
+/** The Vault side of the demo switch, recorded. Any other seeder call fails the test, the tenant's
+ *  crypto entry among them. */
+function recordingSeeder() {
+  const writes: { stage: string; guid: string; password: string }[] = [];
+  const deletes: { stage: string; guid: string }[] = [];
+  const seeder = {
+    replaceTenantE2ePassword: async (i: { stage: string; guid: string; password: string }) => void writes.push(i),
+    deleteTenantE2ePassword: async (i: { stage: string; guid: string }) => void deletes.push(i),
+    seedTenantCrypto: async () => { throw new Error("the demo switch never writes the tenant's crypto entry"); },
+  } as unknown as NonNullable<TenantOnboardPorts["seeder"]>;
+  return { seeder, writes, deletes };
 }
 
 async function planned(prt: ReturnType<typeof ports>, demo: boolean) {
@@ -27,21 +42,76 @@ describe("standing tenant demo switch", () => {
   it("switches on and off, preserves the whole registration, refreshes Argo and names every live member", async () => {
     seedClusters();
     const argo = new FakeMasterArgoReader({ statuses: rendering(true) });
-    const prt = ports({ argo });
+    const vault = recordingSeeder();
+    const prt = ports({ argo, seeder: vault.seeder });
     const before = (await prt.registrations.readTenant("prod", GUID))!.entry;
     const { def, p } = await planned(prt, true);
     // Inventory's members list deliberately lacks erp; the live registration supplies all four.
     expect(p.members).toEqual(["auth", "jobs", "report", "erp"]);
-    expect(def.steps(p)[0]?.name).toBe("attest-target");
+    expect(def.steps(p).map((s) => s.name)).toEqual(["attest-target", "mint-e2e-password", "write-demo", "watch-members"]);
     const logs: string[] = [];
     for (const step of def.steps(p)) await step.run(ctx(params(), step.name, logs));
     expect((await prt.registrations.readTenant("prod", GUID))?.entry).toEqual({ ...before, demo: true });
     expect(argo.operations).toContain("refresh-set:argocd/tenants");
     expect(logs.some((l) => l.includes("auth, jobs, report, erp") && l.includes("rendered"))).toBe(true);
-    const off = ports({ registrations: prt.registrations, argo: new FakeMasterArgoReader({ statuses: rendering(undefined) }) });
+    expect(vault.writes.map(({ stage, guid }) => ({ stage, guid }))).toEqual([{ stage: "prod", guid: GUID }]);
+    expect(vault.writes[0]?.password).toMatch(/^[0-9a-f]{64}$/);
+    expect(vault.deletes).toEqual([]);
+    const off = ports({ registrations: prt.registrations, argo: new FakeMasterArgoReader({ statuses: rendering(undefined) }), seeder: vault.seeder });
     const next = await planned(off, false);
+    // The value is taken back only once no member renders demo any more.
+    expect(next.def.steps(next.p).map((s) => s.name)).toEqual(["attest-target", "write-demo", "watch-members", "drop-e2e-password"]);
     for (const step of next.def.steps(next.p)) await step.run(ctx(params(), step.name, []));
     expect((await prt.registrations.readTenant("prod", GUID))?.entry).toEqual(before);
+    expect(vault.deletes).toEqual([{ stage: "prod", guid: GUID }]);
+    expect(vault.writes).toHaveLength(1);
+  });
+
+  it("PLANTED DEFECT: every switch on writes a fresh value, and it reaches no log, checkpoint or table", async () => {
+    seedClusters();
+    const vault = recordingSeeder();
+    const logs: string[] = [];
+    const checkpoints: unknown[] = [];
+    const recording = (step: string): StepCtx => ({ ...ctx(params(), step, logs), checkpoint: (c: unknown) => void checkpoints.push(c) });
+    const prt = ports({ seeder: vault.seeder });
+    for (const demo of [true, false, true]) {
+      const { def, p } = await planned(ports({ registrations: prt.registrations, argo: new FakeMasterArgoReader({ statuses: rendering(demo || undefined) }), seeder: vault.seeder }), demo);
+      for (const step of def.steps(p)) await step.run(recording(step.name));
+    }
+    const [first, second] = vault.writes.map((w) => w.password);
+    expect(first).not.toBe(second);
+    const tables = db.sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[];
+    const stored = JSON.stringify(tables.map(({ name }) => db.sqlite.prepare(`SELECT * FROM "${name}"`).all()));
+    for (const value of [first!, second!]) {
+      expect(logs.filter((line) => line.includes(value))).toEqual([]);
+      expect(JSON.stringify(checkpoints)).not.toContain(value);
+      expect(stored).not.toContain(value);
+    }
+  });
+
+  it("PLANTED DEFECT: a switch to the mode the tenant already has is refused, so no value is minted that its auth never takes", async () => {
+    seedClusters();
+    const vault = recordingSeeder();
+    const prt = ports({ seeder: vault.seeder });
+    await expect(planned(prt, false)).rejects.toThrow(/is no demo — there is nothing to switch/);
+    await prt.registrations.setDemo("prod", GUID, true, "run_before");
+    await expect(planned(prt, true)).rejects.toThrow(/is already a demo — there is nothing to switch/);
+    expect(vault.writes).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: an undone switch on takes the value back, and leaves it while the tenant stays a demo", async () => {
+    seedClusters();
+    const vault = recordingSeeder();
+    const prt = ports({ argo: new FakeMasterArgoReader({ statuses: rendering(true) }), seeder: vault.seeder });
+    const { def, p } = await planned(prt, true);
+    for (const name of ["mint-e2e-password", "write-demo"]) await def.steps(p).find((s) => s.name === name)!.run(ctx(params(), name, []));
+    const [restore, undo] = def.cleanups!(p);
+    expect([restore?.name, undo?.name]).toEqual(["restore-demo", "undo-e2e-password"]);
+    await undo!.run(ctx(params(), "undo-e2e-password", []));
+    expect(vault.deletes).toEqual([]);
+    await restore!.run(ctx(params(), "restore-demo", []));
+    await undo!.run(ctx(params(), "undo-e2e-password", []));
+    expect(vault.deletes).toEqual([{ stage: "prod", guid: GUID }]);
   });
 
   it("PLANTED DEFECT: one old-valued member cannot pass with Synced and Healthy status", async () => {

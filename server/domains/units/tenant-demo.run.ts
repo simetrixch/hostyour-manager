@@ -10,6 +10,8 @@ import { memberApplication } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import { readStandingTenant } from "./tenant-standing.ts";
+import { mintSecretValue } from "#unit/server/secret-mint.ts";
+import { tenantE2ePasswordPath } from "#unit/server/adapters/vault/seeder-port.ts";
 
 export const TenantSetDemoRequest = z.object({ tenantId: z.string().startsWith("tnt_"), demo: z.boolean() });
 export const TenantSetDemoParams = TenantSetDemoRequest.extend({
@@ -36,9 +38,50 @@ function restoreDemo(ports: TenantOnboardPorts, p: TenantSetDemoParams): Cleanup
   };
 }
 
+function seederOf(ports: TenantOnboardPorts): NonNullable<TenantOnboardPorts["seeder"]> {
+  if (!ports.seeder) throw errValidation("no Vault seeder is wired — a demo tenant's end-to-end password cannot be written or removed");
+  return ports.seeder;
+}
+
+/** Remove the end-to-end password once the tenant is no demo, so nothing signs in to a tenant that is
+ *  no demo with it. While the registration still says demo, it stays. */
+async function dropE2ePasswordUnlessDemo(ports: TenantOnboardPorts, p: TenantSetDemoParams, ctx: StepCtx): Promise<void> {
+  const { tc, entry } = await currentDemo(ports, p, ctx);
+  const path = tenantE2ePasswordPath(tc.stage, tc.guid);
+  if (entry.demo ?? false) {
+    ctx.log("meta", `tenant ${tc.guid} is a demo — its end-to-end password at ${path} stays`);
+    return;
+  }
+  await seederOf(ports).deleteTenantE2ePassword({ stage: tc.stage, guid: tc.guid });
+  ctx.log("meta", `end-to-end password ${path} destroyed (all versions), or none stood`);
+}
+
+function undoE2ePassword(ports: TenantOnboardPorts, p: TenantSetDemoParams): Cleanup {
+  return {
+    name: "undo-e2e-password", title: "Remove the end-to-end password unless the tenant is a demo",
+    run: (ctx) => dropE2ePasswordUnlessDemo(ports, p, ctx),
+  };
+}
+
+/** A demo tenant's end-to-end password: minted BEFORE the registration says demo, because the auth
+ *  of a demo reads it through an ExternalSecret that fails its sync while the entry is missing. A
+ *  run that is undone takes it back once restore-demo left the tenant no demo. */
+function mintE2ePasswordStep(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step {
+  return {
+    name: "mint-e2e-password", title: "Mint the end-to-end tests' password into Vault",
+    run: async (ctx) => {
+      const { tc } = await currentDemo(ports, p, ctx);
+      ctx.registerCleanup(undoE2ePassword(ports, p));
+      await seederOf(ports).replaceTenantE2ePassword({ stage: tc.stage, guid: tc.guid, password: mintSecretValue("hex32") });
+      ctx.log("meta", `end-to-end password of tenant ${tc.guid} written to ${tenantE2ePasswordPath(tc.stage, tc.guid)}; its auth starts with it once it renders demo`);
+    },
+  };
+}
+
 function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
   return [
     attestTenantTargetStep(ports, p.tenantId),
+    ...(p.demo ? [mintE2ePasswordStep(ports, p)] : []),
     {
       name: "write-demo", title: `Set demo mode ${p.demo ? "on" : "off"} for every member`,
       run: async (ctx) => {
@@ -78,6 +121,8 @@ function demoSteps(ports: TenantOnboardPorts, p: TenantSetDemoParams): Step[] {
         ctx.log("meta", `tenant ${tc.guid}: demo ${p.demo} rendered and Synced + Healthy for ${p.members.join(", ")}`);
       },
     },
+    // Only once no member renders demo any more, so no auth still reads the entry through its ExternalSecret.
+    ...(p.demo ? [] : [{ name: "drop-e2e-password", title: "Remove the end-to-end tests' password from Vault", run: (ctx: StepCtx) => dropE2ePasswordUnlessDemo(ports, p, ctx) }]),
   ];
 }
 
@@ -90,7 +135,11 @@ export function makeTenantSetDemoDef(ports: TenantOnboardPorts): RunDefinition<T
       const tc = loadTenantCluster(ctx.db, request.tenantId);
       const current = await ports.registrations.readTenant(tc.stage, tc.guid);
       if (!current) throw errNotFound(`tenant ${tc.guid} has no registration at ${tc.stage}`);
-      const params = { ...request, previous: current.entry.demo ?? false, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
+      const previous = current.entry.demo ?? false;
+      // A switch on for a demo would mint a value its auth never takes, since nothing in its rendering
+      // changes and the auth reads the value only when it starts.
+      if (request.demo === previous) throw errValidation(`tenant ${tc.subdomain} is ${previous ? "already a demo" : "no demo"} — there is nothing to switch`);
+      const params = { ...request, previous, guid: tc.guid, clusterId: tc.clusterId, members: current.entry.members.map((m) => m.name) };
       await currentDemo(ports, params, ctx);
       const steps = demoSteps(ports, params);
       return { outcome: "planned", params, plan: {
@@ -99,6 +148,6 @@ export function makeTenantSetDemoDef(ports: TenantOnboardPorts): RunDefinition<T
         steps: steps.map((s) => ({ name: s.name, title: s.title })), targets: [], locks: tenantLocks(ports.registrations), warnings: [], requiredSecrets: [],
       } };
     },
-    steps: (params) => demoSteps(ports, params), cleanups: (params) => [restoreDemo(ports, params)],
+    steps: (params) => demoSteps(ports, params), cleanups: (params) => [restoreDemo(ports, params), undoE2ePassword(ports, params)],
   };
 }
