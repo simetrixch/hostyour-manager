@@ -415,8 +415,9 @@ export class TenantRegistrations {
    *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries each
    *  app's database list as its catalog entry declares it now. Only that list is taken: every other
    *  field of an app, and an app the list does not name, stays as the registration holds it at this
-   *  write, so a run that changed an app since the plan keeps what it wrote. */
-  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = []): Promise<{ commit: string }> {
+   *  write, so a run that changed an app since the plan keeps what it wrote. `appsImageTag`, where
+   *  given, moves the apps bundle in the same commit, because the bundle release declares the lists. */
+  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = [], appsImageTag?: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
     const lists = new Map(listedApps.map((a) => [a.name, a.databases]));
@@ -426,7 +427,7 @@ export class TenantRegistrations {
       const listed = lists.get(a.name);
       return listed ? { ...rest, databases: [...listed] } : rest;
     });
-    return this.write(stage, guid, { ...current.entry, members: [...members], apps }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
+    return this.write(stage, guid, { ...current.entry, members: [...members], apps, ...(appsImageTag ? { appsImageTag } : {}) }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
   }
 
   /** Each app's database list, as `listsFor` answers it off the apps the registration holds, written
@@ -454,11 +455,12 @@ export class TenantRegistrations {
     return raw === null ? [] : pinnedBuildsIn(raw);
   }
 
-  /** The builds a chart's stage pin file names now, each with every tag the file has named for it on
-   *  the books branch, newest first: what releases have made available at this stage, then and now.
-   *  One turn, so the pins and their history are read off the same commit. */
-  async listPinHistory(stage: Stage, chart: string): Promise<{ name: string; image: string; tag: string; released: string[] }[]> {
-    const path = `${chart}/pins-${stage}.yaml`;
+  /** The builds a stage pin file names now (`<pinsDir>/pins-<stage>.yaml`, the directory of a chart or
+   *  of an apps bundle), each with every tag the file has named for it on the books branch, newest
+   *  first: what releases have made available at this stage, then and now. One turn, so the pins and
+   *  their history are read off the same commit. */
+  async listPinHistory(stage: Stage, pinsDir: string): Promise<{ name: string; image: string; tag: string; released: string[] }[]> {
+    const path = `${pinsDir}/pins-${stage}.yaml`;
     const { now, history } = await this.repo.withBranch(this.branch, async (books) => ({ now: await books.readFile(path), history: await books.readFileHistory(path) }));
     if (now === null) return [];
     const released = new Map<string, string[]>();

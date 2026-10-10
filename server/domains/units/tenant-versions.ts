@@ -9,6 +9,11 @@
 // A PART is the set of builds one unit releases together (its build registration), so one release tag
 // names every image of it and a choice moves them all: a tenant never runs the engine of one release
 // beside the app of another.
+//
+// THE APPS BUNDLE IS A PART TOO. Its release moves its own stage pin (bundles/<image>/pins-<stage>.yaml,
+// in the shape of a chart's pin file), and the tenant runs the tag its registration holds
+// (appsImageTag). The Versions run moves that tag together with both copies of every app's database
+// list, which the bundle declares.
 import { eq } from "drizzle-orm";
 import type { Cleanup, Step, StepCtx } from "../../executor/types.ts";
 import type { Stage } from "../../../shared/enums.ts";
@@ -54,14 +59,44 @@ export interface TenantVersionPart {
   running: string[];
 }
 
+/** The directory of a bundle's stage pin files on the books branch, written by the release pipeline. */
+export const bundlePinsDir = (appsImage: string): string => `bundles/${appsImage}`;
+
+/** The tenant's apps bundle as a part, running the tag the registration holds; undefined where the
+ *  tenant runs no bundle or no release has pinned it at the stage yet. */
+async function bundlePart(
+  ports: Pick<TenantOnboardPorts, "registrations">,
+  stage: Stage,
+  bundle: Pick<TenantRegistration, "appsImage" | "appsImageTag">,
+  unitOf: ReadonlyMap<string, string>,
+): Promise<TenantVersionPart | undefined> {
+  if (!bundle.appsImage || !bundle.appsImageTag) return undefined;
+  const builds = (await ports.registrations.listPinHistory(stage, bundlePinsDir(bundle.appsImage)))
+    .filter((b) => approvedImageTag.safeParse(b.tag).success)
+    .map((b) => ({ name: b.name, image: b.image, pin: b.tag, released: b.released }));
+  if (builds.length === 0) return undefined;
+  return { name: unitOf.get(bundle.appsImage) ?? bundle.appsImage, builds, running: [bundle.appsImageTag] };
+}
+
+/** The tenant's apps bundle as a part (bundlePart), read on its own. */
+export async function tenantBundlePart(
+  ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">,
+  stage: Stage,
+  bundle: Pick<TenantRegistration, "appsImage" | "appsImageTag">,
+): Promise<TenantVersionPart | undefined> {
+  return bundlePart(ports, stage, bundle, new Map((await ports.attestedBuilds()).map((a) => [a.build, a.unit])));
+}
+
 /** The tenant's parts: every build its members' charts pin at the stage, grouped by the unit whose build
  *  registration claims it; a build no unit claims is a part of its own. A pin that names no released
- *  image (a chart's placeholder) is left out, as stagePinsOf leaves it out. */
+ *  image (a chart's placeholder) is left out, as stagePinsOf leaves it out. The apps bundle is one more
+ *  part where its stage pin stands (bundlePart). */
 export async function tenantVersionParts(
   ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">,
   stage: Stage,
   members: readonly TenantMemberRecord[],
   approved: Approvals,
+  bundle: Pick<TenantRegistration, "appsImage" | "appsImageTag">,
 ): Promise<TenantVersionPart[]> {
   const unitOf = new Map((await ports.attestedBuilds()).map((a) => [a.build, a.unit]));
   const pinsOf = new Map<string, Promise<{ name: string; image: string; tag: string; released: string[] }[]>>();
@@ -79,9 +114,9 @@ export async function tenantVersionParts(
       }
     }
   }
-  return [...parts.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([name, p]) => ({ name, builds: [...p.builds.values()], running: [...p.running].sort(byNewest) }));
+  const memberParts = [...parts.entries()].map(([name, p]) => ({ name, builds: [...p.builds.values()], running: [...p.running].sort(byNewest) }));
+  const bundled = await bundlePart(ports, stage, bundle, unitOf);
+  return [...memberParts, ...(bundled ? [bundled] : [])].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Why a tenant at `stage` cannot be put on `tag` for `part`, or null where it can: the tag must be an
@@ -111,7 +146,7 @@ export async function readTenantVersions(
   if (!read) throw errNotFound(`tenant ${tc.guid} is not onboarded (no registration at ${tc.stage})`);
   const registryHost = registryHostFromChain(await ports.resolveClusterValueFiles(tc.domain, tc.stage));
   const channels = await ports.channelStages();
-  const parts = await tenantVersionParts(ports, tc.stage, read.entry.members, read.entry.approvedTags);
+  const parts = await tenantVersionParts(ports, tc.stage, read.entry.members, read.entry.approvedTags, read.entry);
   return {
     stage: tc.stage,
     parts: await Promise.all(parts.map(async (part) => {
