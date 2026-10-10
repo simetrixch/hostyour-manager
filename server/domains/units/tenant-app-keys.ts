@@ -24,9 +24,15 @@
 // which every app's ExternalSecret reads. They are not minted: the first entry holds every property
 // empty, which the plugin reads as not set, and an operator's typed value replaces it later through
 // its own write (tenant-google-translation.run.ts).
+//
+// THE END-TO-END PASSWORD of a demo tenant, <stage>/tenants/<guid>/e2e, is the password of the account
+// the end-to-end tests sign in with. The demo's auth reads it through the ExternalSecret that carries
+// the tenant's entry, and that sync fails while the leaf is missing, so a demo whose leaf is missing
+// gets no auth. Creation writes it create-only: a re-run must not change a password the auth may
+// already have started with. The demo switch writes it with its own replace (tenant-demo.run.ts).
 import type { Stage } from "../../../shared/enums.ts";
-import type { TenantAppKeyKind, VaultSeeder, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
-import { mintAes256Key } from "#unit/server/secret-mint.ts";
+import { tenantE2ePasswordPath, type TenantAppKeyKind, type VaultSeeder, type VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
+import { mintAes256Key, mintSecretValue } from "#unit/server/secret-mint.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
@@ -84,6 +90,15 @@ export async function seedTenantEngineKeys(seeder: VaultSeeder, stage: Stage, gu
   const googleTranslation = await seeder.seedTenantGoogleTranslation({ stage, guid });
   ctx.log("meta", tenantGoogleTranslationLine(stage, guid, googleTranslation));
   return { appKeys, serviceKeys, googleTranslation };
+}
+
+/** Creation seeds a demo tenant's end-to-end password before the registration starts its auth. */
+export async function seedDemoE2ePassword(seeder: VaultSeeder, stage: Stage, guid: string, ctx: Pick<StepCtx, "log">): Promise<VaultSeedOutcome> {
+  const outcome = await seeder.seedTenantE2ePassword({ stage, guid, password: mintSecretValue("hex32") });
+  ctx.log("meta", outcome.created
+    ? `end-to-end password of demo tenant ${guid} written to ${tenantE2ePasswordPath(stage, guid)}`
+    : `end-to-end password ${tenantE2ePasswordPath(stage, guid)} already stands and was left UNTOUCHED — the tenant's auth may already have started with it`);
+  return outcome;
 }
 
 /** Creation seeds the website keys of a tenant with a website before the registration starts the

@@ -21,7 +21,7 @@ import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { provisionTenantStorage } from "./tenant-storage.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
-import { seedTenantEngineKeys, seedTenantWebsiteKeys } from "./tenant-app-keys.ts";
+import { seedDemoE2ePassword, seedTenantEngineKeys, seedTenantWebsiteKeys } from "./tenant-app-keys.ts";
 import type { ObjectStore } from "../../adapters/object-store/port.ts";
 import { placeholderTagFromChain, registryHostFromChain, resolveTenantCluster } from "./tenant-values.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
@@ -395,7 +395,9 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
         // for the same reason: before the registration fans out into engines that read it
         // (tenant-app-keys.ts). Create-only as well, so a re-run keeps every key it finds.
         const { appKeys, serviceKeys, googleTranslation } = await seedTenantEngineKeys(ports.seeder, p.stage, p.guid, (p.apps ?? []).map((a) => a.name), ctx);
-        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys, serviceKeys, googleTranslation, websiteKeys: await seedTenantWebsiteKeys(ports.seeder, p.stage, p.guid, p.apps ?? [], ctx) });
+        // A demo tenant's end-to-end password, in the same step and for the same reason (tenant-app-keys.ts).
+        const e2ePassword = p.demo ? await seedDemoE2ePassword(ports.seeder, p.stage, p.guid, ctx) : undefined;
+        ctx.checkpoint({ tenantCrypto: p.guid, created, bucket: storage.bucket.bucket, bucketCreated: storage.created, appKeys, serviceKeys, googleTranslation, ...(e2ePassword ? { e2ePassword } : {}), websiteKeys: await seedTenantWebsiteKeys(ports.seeder, p.stage, p.guid, p.apps ?? [], ctx) });
         ctx.log(
           "meta",
           created

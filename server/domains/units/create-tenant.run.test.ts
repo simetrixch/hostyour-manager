@@ -429,16 +429,16 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     return { seen, logs, store };
   }
 
-  it("writes one Password field key and one service key per app into the app's own entries, and the tenant's empty Google translation settings, in the same step", async () => {
-    // Before the registration fans out into engines that read it (hostyour-manager#329).
+  it("writes one Password field key and one service key per app into the app's own entries, the tenant's empty Google translation settings, and a demo's end-to-end password, in the same step", async () => {
+    // Before the registration fans out into engines and an auth that read them.
     const keyed: string[] = [];
-    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; }, seedTenantGoogleTranslation: async (i) => { keyed.push(`${i.stage}/${i.guid}/google-translation`); return { created: true }; } });
-    expect(keyed).toEqual([...APPS.map((a) => `prod/${GUID}/password-field-key/${a.name}`), ...APPS.map((a) => `prod/${GUID}/service-key/${a.name}`), `prod/${GUID}/google-translation`]);
+    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; }, seedTenantGoogleTranslation: async (i) => { keyed.push(`${i.stage}/${i.guid}/google-translation`); return { created: true }; }, seedTenantE2ePassword: async (i) => { keyed.push(`${i.stage}/${i.guid}/e2e`); return { created: true }; } }, new FakeObjectStore(), { demo: true });
+    expect(keyed).toEqual([...APPS.map((a) => `prod/${GUID}/password-field-key/${a.name}`), ...APPS.map((a) => `prod/${GUID}/service-key/${a.name}`), `prod/${GUID}/google-translation`, `prod/${GUID}/e2e`]);
   });
 
-  it.each(["prod", "test"] as const)("seeds website keys before %s registration, and only Password keys for ordinary apps", async (stage) => {
+  it.each(["prod", "test"] as const)("seeds website keys before %s registration, only Password keys for ordinary apps, and no end-to-end password for a tenant that is no demo", async (stage) => {
     const keyed: string[] = [];
-    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; } }, new FakeObjectStore(), {
+    await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; }, seedTenantE2ePassword: async (i) => { keyed.push(`${i.stage}/${i.guid}/e2e`); return { created: true }; } }, new FakeObjectStore(), {
       stage, ...(stage === "test" ? { sourceTenantId: "tnt_prod" } : {}),
       apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", seedReference: false, seedDemo: false, selections: {} }],
     });

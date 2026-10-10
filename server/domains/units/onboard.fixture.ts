@@ -91,6 +91,7 @@ export class FakeSeeder implements VaultSeeder {
   async deleteTenantAppKeys(): Promise<{ deleted: string[] }> { return { deleted: [] }; }
   async deleteTenantCrypto(): Promise<void> {}
   async replaceTenantE2ePassword(): Promise<void> {}
+  async seedTenantE2ePassword(): Promise<VaultSeedOutcome> { return { created: true }; }
   async deleteTenantE2ePassword(): Promise<void> {}
 }
 
