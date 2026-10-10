@@ -209,6 +209,9 @@ jobs:
 
       # A version the registry already holds is skipped, so a rerun publishes
       # nothing twice. The dist-tag is the prerelease id (beta, alpha) or latest.
+      # pnpm packs (it rewrites workspace: ranges) and npm publishes: pnpm
+      # publish always asks GitHub for an OIDC id token and warns without
+      # id-token: write, which GitHub Packages never uses; npm does not warn.
       - name: Publish what is not yet published
         if: steps.scan.outputs.found == 'true'
         env:
@@ -224,5 +227,6 @@ jobs:
             tag=latest
             case "$version" in *-*) tag="${version#*-}"; tag="${tag%%.*}" ;; esac
             echo "publish: ${name}@${version} with dist-tag ${tag}"
-            (cd "$dir" && pnpm publish --no-git-checks --tag "$tag")
+            tarball="$(cd "$dir" && pnpm pack --json --pack-destination "$RUNNER_TEMP/packed" | jq -er .filename)"
+            npm publish "$tarball" --tag "$tag"
           done < "$RUNNER_TEMP/publishable.tsv"
