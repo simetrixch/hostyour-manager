@@ -5,7 +5,8 @@ import type { Hono } from "hono";
 import { pino } from "pino";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts"; import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { CredentialStore } from "../../security/store.ts";
 import { RunEventBus } from "../../executor/bus.ts";
@@ -40,7 +41,6 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { APP_OVERLAYS, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { ORG, TEMPLATE_SPEC, withAppsTemplate, recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 
@@ -54,7 +54,7 @@ let db: DbHandle;
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
 // The session's sub owns the runs it plans, under a foreign key onto operators; in production the
 // login writes that row.
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run(); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run(); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */

@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { makeOnboardDef, OnboardParams, DeployableOnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
 import { Registrations } from "#unit/server/registrations.ts";
@@ -13,7 +14,6 @@ import type { GateReport } from "../../../shared/gates.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import type { VaultSeeder } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
 // The check step's DRIFT BELT (onboard-check.ts): the gates re-run at the current default-branch
@@ -37,7 +37,7 @@ const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 function passReport(manifest: ConsumerManifest = MANIFEST): GateReport {

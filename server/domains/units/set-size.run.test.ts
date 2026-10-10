@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { and, eq } from "drizzle-orm";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, apps, tenants } from "../../db/schema/inventory.ts";
 import { unitSizes } from "#unit/server/schema.ts";
 import { makeSetSizeDef, makeTenantSetSizeDef, TenantSetSizeParams } from "./set-size.run.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
@@ -25,7 +25,7 @@ import type { Logger } from "../../kernel/logger.ts";
 const GUID = "zsjs023ctne0";
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { serializePointer } from "#unit/server/registration-laws.ts";
 import { Registrations } from "#unit/server/registrations.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
@@ -31,7 +31,7 @@ const MANIFEST: ConsumerManifest = {
 const CHART_PINS = 'builds:\n  - name: acme-api\n    image: acme-api\n    tag: "0.0.0"\n';
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 const report: GateReport = {

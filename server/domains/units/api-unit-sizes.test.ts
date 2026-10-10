@@ -5,7 +5,8 @@ import { pino } from "pino";
 import { createApp } from "../../http/app.ts";
 import { parseConfig } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters, apps } from "../../db/schema/inventory.ts";
 import { unitSizes } from "#unit/server/schema.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
@@ -13,7 +14,6 @@ import { registerUnitSizeRoutes } from "#unit/server/api-unit-sizes.ts";
 import { registerPluginRoutes } from "../../http/plugins-route.ts";
 import type { Executor } from "../../executor/executor.ts";
 import { registerSetSizeRoutes } from "./api-set-size.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
 import { seedQuota, UNIT_SIZE_SEED } from "#unit/shared/unit-size.ts";
@@ -27,7 +27,7 @@ const config = parseConfig({ ...REQUIRED_ENV, PUBLIC_URL: "https://m1.example", 
 const logger = pino({ level: "silent" });
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 /** One consumer on one cluster, registered with what it BRINGS — the fact the per-unit read composes

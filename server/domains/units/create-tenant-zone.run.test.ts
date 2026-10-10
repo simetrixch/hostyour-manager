@@ -5,8 +5,8 @@
 // live key — and nothing took those back. Here it refuses the plan, before any write.
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { listDnsWrites } from "../../db/dns-writes.ts";
 import { makeCreateTenantDef, CreateTenantParams, type TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -61,7 +61,7 @@ const CLEAN_DOCS: RenderedDoc[] = [
 ];
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 
 /** Both clusters of one installation — the names readStandingHost judges a zone record's CNAME against. */

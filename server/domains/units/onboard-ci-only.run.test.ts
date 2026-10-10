@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { CI_ENTRY_POINT } from "./onboard-ci-only.ts";
@@ -17,9 +17,8 @@ import { SHA, ports, FakeSeeder } from "./onboard.fixture.ts";
 
 let db: DbHandle;
 beforeEach(() => {
-  db = openDb(":memory:");
+  db = openUnitDb();
   recordTestOwners(db.db);
-  seedUnitSizes(db.db);
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "m1.example", name: "m1", status: "active" }).run();
 });

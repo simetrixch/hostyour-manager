@@ -81,7 +81,7 @@ describe("manager DB reset (db/reset.ts)", () => {
   it("keeps the unit sizes an operator edited, and the unit plugin's ledger", () => {
     const db = make();
     seedClusters(db);
-    db.sqlite.prepare("INSERT INTO unit_sizes (component, name, requests_cpu, requests_memory, limits_cpu, limits_memory, pods, persistent_volume_claims) VALUES ('base', 'small', '900m', '1Gi', '2', '2Gi', 10, 5)").run();
+    db.sqlite.prepare("INSERT INTO unit_sizes (component, name, requests_cpu, requests_memory, limits_cpu, limits_memory, pods, persistent_volume_claims, owner, modified_by) VALUES ('base', 'small', '900m', '1Gi', '2', '2Gi', 10, 5, 'op_system', 'op_system')").run();
 
     wipeManagerDb(db.sqlite, compiledPlugins);
     expect(db.sqlite.prepare("SELECT component, name, requests_cpu FROM unit_sizes").all()).toEqual([{ component: "base", name: "small", requests_cpu: "900m" }]);

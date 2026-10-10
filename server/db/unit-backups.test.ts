@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { openDb, type DbHandle } from "./client.ts";
 import { findBackup, findBackupOfRun, listBackups, recordBackupFinished, recordBackupPruned, recordBackupStarted } from "./unit-backups.ts";
+import { runAsActor } from "../kernel/actor.ts";
 
 // The book of backups: one row per generation of a unit's backup, never a byte of it (hostyour-cloud#254).
 
@@ -37,5 +38,14 @@ describe("the book of backups", () => {
     expect(findBackupOfRun(db.db, "run_2", unit)).toBeUndefined();
     expect(findBackup(db.db, { ...unit, generation: "20260928T101500Z" })?.folder).toBe("master.example/prod/tenants/zsjs023ctne0/20260928T101500Z");
     expect(findBackup(db.db, { ...unit, generation: "20260101T000000Z" })).toBeUndefined();
+  });
+
+  it("names the operator who started a generation and the one who settled it", () => {
+    runAsActor("op_a", () => start("20260928T030000Z", "run_1"));
+    const started = db.sqlite.prepare("SELECT creation, modified, owner, modified_by FROM unit_backups").get() as { creation: number; modified: number };
+    expect(started).toMatchObject({ owner: "op_a", modified_by: "op_a" });
+    expect(started.modified).toBe(started.creation);
+    runAsActor("op_b", () => recordBackupFinished(db.db, { ...unit, generation: "20260928T030000Z" }, { state: "ok" }));
+    expect(db.sqlite.prepare("SELECT creation, owner, modified_by FROM unit_backups").get()).toEqual({ creation: started.creation, owner: "op_a", modified_by: "op_b" });
   });
 });

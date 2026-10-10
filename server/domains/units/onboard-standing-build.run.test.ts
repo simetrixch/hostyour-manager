@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { recordTestOwners } from "./tenant-apps-repo.fixture.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { FakeGateRunner } from "../../adapters/gate-runner/testing/fake.ts";
@@ -16,7 +16,7 @@ import type { ConsumerManifest } from "../../../shared/consumer.ts";
 import { SHA, BUILD_ONLY_MANIFEST, passReport, ports, FakeSeeder } from "./onboard.fixture.ts";
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); recordTestOwners(db.db); });
 afterEach(() => { db.sqlite.close(); });
 const BASE = { repoURL: "https://github.com/x/acme.git" };
 function seedClusters(): void {

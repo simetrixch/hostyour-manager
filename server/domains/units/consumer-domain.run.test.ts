@@ -2,7 +2,8 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { parseConfig } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
@@ -13,7 +14,6 @@ import { getRun } from "../../executor/read.ts";
 import type { AnyRunDefinition } from "../../executor/types.ts";
 import { servers, clusters, apps, tenants } from "../../db/schema/inventory.ts";
 import { findDnsWrite } from "../../db/dns-writes.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { Registrations } from "#unit/server/registrations.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
@@ -50,9 +50,8 @@ describe("consumer-set-domain through the Executor", () => {
   async function make(opts: { fqdn?: string; answers?: string[]; status?: "active" | "suspended" } = {}) {
     const dir = mkdtempSync(join(tmpdir(), "mgr-consumerdomain-"));
     dirs.push(dir);
-    const db = openDb(join(dir, "manager.db"));
+    const db = openUnitDb(join(dir, "manager.db"));
     handles.push(db);
-    seedUnitSizes(db.db);
     const repo = new FakePlatformRepo();
     const reg = new Registrations(repo);
     repo.seed(repo.booksBranch, clusterMapPath(CLUSTER), `global:\n  unitApex: ${APEX}\n`);

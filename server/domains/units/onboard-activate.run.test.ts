@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, DeployableOnboardParams, type OnboardParams, type OnboardPorts } from "./onboard.run.ts";
 import { CHANNEL_STAGES, emptyZone } from "./onboard.fixture.ts";
@@ -17,7 +18,6 @@ import type { Logger } from "../../kernel/logger.ts";
 import type { GateReport } from "../../../shared/gates.ts";
 import type { VaultSeeder, VaultSeedInput, VaultSeedOutcome } from "#unit/server/adapters/vault/seeder-port.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { consumerSecretEntry, listSecretWrites } from "../../db/secret-writes.ts";
 import { FakeGitHubApp } from "../../adapters/github-app/testing/fake.ts";
 
@@ -29,7 +29,7 @@ const SHA = "a".repeat(40);
 let db: DbHandle;
 // The size table is seeded at BOOT (boot/wire.ts), not by the migration, so an in-memory database
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 // A example-auth-shaped activation: the seeded bootstrap token gates POST /api/v1/bootstrap/invite-admin

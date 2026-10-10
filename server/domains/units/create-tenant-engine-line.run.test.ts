@@ -5,8 +5,8 @@
 // the bundle release the run built. Kept apart from create-tenant.run.test.ts, which stands at the line
 // budget.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeCreateTenantDef, type TenantOnboardPorts } from "./create-tenant.run.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
@@ -49,7 +49,7 @@ const ENGINE_03 = 'engine:\n  build: example-engine\n  line: "0.3"\n';
 
 let db: DbHandle;
 beforeEach(() => {
-  db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db);
+  db = openUnitDb(); recordTestOwners(db.db);
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
 });

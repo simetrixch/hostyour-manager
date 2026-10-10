@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { seedUnitSizes } from "#unit/server/unit-size.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import type { ConsumerManifest } from "../../../shared/consumer.ts";
-import { openDb, type DbHandle } from "../../db/client.ts";
+import type { DbHandle } from "../../db/client.ts";
+import { openUnitDb } from "#unit/server/plugin.fixture.ts";
 import { servers, clusters } from "../../db/schema/inventory.ts";
 import { makeOnboardDef, type OnboardParams } from "./onboard.run.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
@@ -13,7 +13,7 @@ import type { Logger } from "../../kernel/logger.ts";
 import { SHA, MANIFEST, CHART_PINS, passReport, ports } from "./onboard.fixture.ts";
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+beforeEach(() => { db = openUnitDb(); });
 afterEach(() => { db.sqlite.close(); });
 
 function seedClusters(): void {
