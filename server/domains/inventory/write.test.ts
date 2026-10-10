@@ -36,7 +36,7 @@ describe("inventory server CRUD", () => {
 
   it("creates a bare server; notes withheld; and it holds no credential of any kind", () => {
     const { db, store } = setup();
-    const view = createServer(db, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", notes: "internal" });
+    const view = createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1", notes: "internal" });
     expect(view).toMatchObject({ name: "s5", host: "10.1.1.11", sshUser: "hostyour1", role: "slave", status: "bare", hasPassword: false, hasKey: false });
     expect(view).not.toHaveProperty("notes");
     expect(getServer(db, view.id, undefined)?.name).toBe("s5");
@@ -55,7 +55,7 @@ describe("inventory server CRUD", () => {
 
   it("deletes a bare server and purges the credentials a run sealed for it", async () => {
     const { db, store } = setup();
-    const view = createServer(db, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
+    const view = createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
     // The credential a machine really carries is the key a deployment installs, sealed by the run
     // and never by this surface.
     await store.seal({
@@ -64,7 +64,7 @@ describe("inventory server CRUD", () => {
     });
     expect((await serverCredFlags(store)).get(view.id)?.hasKey).toBe(true);
 
-    await deleteServer(db, store, "op_system", view.id);
+    await deleteServer(db, store, view.id);
     expect(getServer(db, view.id, undefined)).toBeUndefined();
     expect(await serverCredFlags(store)).toEqual(new Map());
   });
@@ -74,7 +74,7 @@ describe("inventory server CRUD", () => {
     // machine's own configuration, which is why the run kinds that shut a password door destroy it.
     // Idempotent, so a machine that carries none is answered rather than failed.
     const { db, store } = setup();
-    const view = createServer(db, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
+    const view = createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
     expect(await purgeBootstrapPassword(store, view.id)).toBe(false);
     await store.seal({
       kind: "other", label: `password for ${view.name}`, plaintext: Buffer.from("shared-secret-xyz"),
@@ -87,8 +87,8 @@ describe("inventory server CRUD", () => {
 
   it("rejects a duplicate name with a friendly error", () => {
     const { db } = setup();
-    createServer(db, "op_system", { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
-    expect(() => createServer(db, "op_system", { name: "s5", host: "9.9.9.9", sshUser: "root" })).toThrow(/already exists/);
+    createServer(db, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
+    expect(() => createServer(db, { name: "s5", host: "9.9.9.9", sshUser: "root" })).toThrow(/already exists/);
   });
 
   it("validates input (name charset + port range)", () => {

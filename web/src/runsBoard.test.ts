@@ -3,12 +3,12 @@ import type { LockView, QueuedRunView, RunView } from "../../shared/api-types.ts
 import { currentStepOf, formatElapsed, isOpenRun, locksHeldBy, queueLine, usualDurationOf } from "./runsBoard.ts";
 
 const run = (over: Partial<RunView>): RunView => ({
-  id: "run_1", kind: "noop", targetKind: "server", targetId: "srv_1", status: "running", summary: "", startedBy: "System",
-  steps: [], createdAt: 0, startedAt: 0, endedAt: null, deletedAt: null, cleanupsRegistered: false, aborted: false,
+  id: "run_1", kind: "noop", targetKind: "server", targetId: "srv_1", status: "running", summary: "", owner: "System",
+  steps: [], creation: 0, startedAt: 0, endedAt: null, deleted: null, cleanupsRegistered: false, aborted: false,
   requiredSecrets: [], optionalSecrets: [], requiredInputs: [], findings: [], secretHints: {}, ...over,
 });
 const step = (title: string, status: RunView["steps"][number]["status"]) => ({ name: title, title, status, startedAt: null, endedAt: null });
-const lock = (runId: string): LockView => ({ resource: "master-kube", key: "m", runId, acquiredAt: 0 });
+const lock = (runId: string): LockView => ({ resource: "master-kube", key: "m", runId, creation: 0 });
 const queuedRun = (over: Partial<QueuedRunView> = {}): QueuedRunView => ({
   runId: "run_1", kind: "noop", targetKind: "server", targetId: "srv_1",
   place: 1, approvedAt: 0, needsSecrets: false, waitsFor: [], ...over,

@@ -70,7 +70,7 @@ export function assertStepTransition(from: StepStatus, to: StepStatus): void {
 export const isTerminalRun = (s: RunStatus): boolean => s === "succeeded" || s === "cancelled";
 
 // Deletion is NOT a transition — it removes the run from the operator's view (SOFT
-// delete: deleted_at set, row + full log retained in the DB). Any SETTLED run is
+// delete: deleted set, row + full log retained in the DB). Any SETTLED run is
 // deletable — planned (never executed), failed (stopped mid-way), cancelled/discarded, or
 // succeeded (the owner may tidy the run list). Only an in-flight run (planning/approved/
 // running) is refused; it must settle first. A run is NEVER hard-deleted, and soft-delete

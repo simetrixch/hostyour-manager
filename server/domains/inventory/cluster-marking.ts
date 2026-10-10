@@ -389,7 +389,7 @@ export function buildPlaneFqdnFromMarkings(repo: PlatformRepo): BuildPlaneFqdnRe
 export function projectClusterMarking(
   db: Db,
   marking: ClusterMarking,
-  opts: { actor: string; runId?: string },
+  opts: { runId?: string } = {},
 ): { stage?: { from: Stage; to: Stage }; role?: { from: ServerRole; to: ServerRole } } {
   const row = db
     .select({ clusterId: clusters.id, stage: clusters.stage, serverId: servers.id, role: servers.role })
@@ -410,7 +410,6 @@ export function projectClusterMarking(
   }
   if (changed.stage || changed.role) {
     writeAudit(db, {
-      actor: opts.actor,
       action: "cluster.marking_projected",
       targetKind: "cluster",
       targetId: row.clusterId,

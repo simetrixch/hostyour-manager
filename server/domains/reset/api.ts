@@ -88,7 +88,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
     // Every refusal leaves an audit trace (log-everything) BEFORE it throws.
     const refuse = (err: AppError): never => {
       writeAudit(deps.db, {
-        actor: operator.sub, action: "manager.reset.refused",
+        action: "manager.reset.refused",
         detail: { reason: err.message, via: operator.via },
       });
       throw err;
@@ -279,7 +279,7 @@ export function registerResetRoutes(app: Hono<AppEnv>, deps: ResetApiDeps): void
       // survives even when the row does not.
       const detail = { via: operator.via, wipeDb: input.wipeDb, includeMaster: input.includeMaster, branches: outcomes, pointers, db: dbResult };
       try {
-        writeAudit(deps.db, { actor: operator.sub, action: "manager.reset", detail });
+        writeAudit(deps.db, { action: "manager.reset", detail });
       } catch (err) {
         log.error({ err: msg(err), actor: operator.sub, detail }, "reset: the audit entry could NOT be written — this log line is the only record of what the reset did");
       }

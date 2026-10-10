@@ -163,8 +163,8 @@ describe("installation domain issuer rebind", () => {
     expect(h.lists[SENDER_DOMAIN]).toEqual([tenant.issuerAfter]);
 
     h.db.sqlite.prepare(
-      "INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,started_by) VALUES(?,?,?,?,?,?,?,?)",
-    ).run("run_source", "installation-domain-move", "installation", h.cloud.booksBranch, JSON.stringify(movePlan.params), JSON.stringify(movePlan.plan), "failed", "op_system");
+      "INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,owner,modified_by) VALUES(?,?,?,?,?,?,?,?,?)",
+    ).run("run_source", "installation-domain-move", "installation", h.cloud.booksBranch, JSON.stringify(movePlan.params), JSON.stringify(movePlan.plan), "failed", "op_system", "op_system");
 
     const rollbackDef = makeInstallationDomainRollbackDef(h.actions);
     const rollbackPlan = await rollbackDef.planStream!({ sourceRunId: "run_source", dryRun: false }, { db: h.db.db, log: () => undefined, signal: new AbortController().signal });
@@ -240,8 +240,8 @@ describe("installation domain issuer rebind", () => {
     }
 
     h.db.sqlite.prepare(
-      "INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,started_by) VALUES(?,?,?,?,?,?,?,?)",
-    ).run("run_source", "installation-domain-move", "installation", h.cloud.booksBranch, JSON.stringify(planResult.params), JSON.stringify(planResult.plan), "failed", "op_system");
+      "INSERT INTO runs(id,kind,target_kind,target_id,params_json,plan_json,status,owner,modified_by) VALUES(?,?,?,?,?,?,?,?,?)",
+    ).run("run_source", "installation-domain-move", "installation", h.cloud.booksBranch, JSON.stringify(planResult.params), JSON.stringify(planResult.plan), "failed", "op_system", "op_system");
 
     const rollbackDef = makeInstallationDomainRollbackDef(h.actions);
     const rollbackPlan = await rollbackDef.planStream!({ sourceRunId: "run_source", dryRun: false }, { db: h.db.db, log: () => undefined, signal: new AbortController().signal });

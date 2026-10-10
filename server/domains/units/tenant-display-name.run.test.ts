@@ -82,7 +82,7 @@ describe("tenant-set-display-name through the Executor", () => {
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
       runDefinitions: new Map([["tenant-set-display-name", def as unknown as AnyRunDefinition]]),
-      sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+      sshFactory: () => Promise.reject(new Error("no ssh")),
     });
     const row = () => db.db.select({ n: tenants.displayName }).from(tenants).where(eq(tenants.id, "tnt_1")).get()?.n;
     const registered = async () => (await reg.readTenant("prod", GUID))?.entry.displayName;

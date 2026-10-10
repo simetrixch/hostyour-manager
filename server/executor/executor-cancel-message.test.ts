@@ -51,7 +51,7 @@ describe("Executor — what a cancelled step's run says", () => {
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    const executor = new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop" as RunKind, def]]), sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop" as RunKind, def]]), sshFactory: noSsh });
     const { runId } = await executor.plan("noop", {});
     await executor.approve(runId);
     await executor.cancel(runId);

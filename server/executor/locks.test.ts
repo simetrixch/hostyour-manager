@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { AppError } from "../kernel/errors.ts";
+import { runAsActor } from "../kernel/actor.ts";
 import { acquireLocks, releaseLocks, listLocks, deriveServerLocks } from "./locks.ts";
 
 describe("lock manager", () => {
@@ -24,8 +25,8 @@ describe("lock manager", () => {
   function seedRun(sqlite: DbHandle["sqlite"], id: string): void {
     sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
     sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run(id, "noop", "server", "srv", "{}", "{}", "approved", "op");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run(id, "noop", "server", "srv", "{}", "{}", "approved", "op", "op");
   }
 
   const busyCode = (fn: () => void): string | undefined => {
@@ -97,5 +98,19 @@ describe("lock manager", () => {
     acquireLocks(db, "run_a", [{ resource: "server", key: "s1" }]);
     releaseLocks(db, "run_a");
     expect(listLocks(db)).toHaveLength(0);
+  });
+
+  it("a released lock stays as a row that names who released it, and the same resource and key can be locked again", () => {
+    const { db, sqlite } = fresh();
+    seedRun(sqlite, "run_a");
+    seedRun(sqlite, "run_b");
+    runAsActor("op_a", () => acquireLocks(db, "run_a", [{ resource: "server", key: "s1" }]));
+    runAsActor("op_b", () => releaseLocks(db, "run_a"));
+    expect(busyCode(() => acquireLocks(db, "run_b", [{ resource: "server", key: "s1" }]))).toBeUndefined();
+    expect(sqlite.prepare("SELECT run_id, owner, deleted IS NOT NULL AS released, deleted_by FROM run_locks ORDER BY creation, run_id").all()).toEqual([
+      { run_id: "run_a", owner: "op_a", released: 1, deleted_by: "op_b" },
+      { run_id: "run_b", owner: "op_system", released: 0, deleted_by: null },
+    ]);
+    expect(listLocks(db).map((l) => l.runId)).toEqual(["run_b"]);
   });
 });

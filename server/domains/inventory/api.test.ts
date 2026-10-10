@@ -105,7 +105,7 @@ describe("clusters + locks API", () => {
   it("a planned run lands in needsYou and flips the verdict to warn", async () => {
     const { app, db, cookie } = await make();
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_p','noop','self','manager','{}','{\"summary\":\"x\"}','planned','op_system')")
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('run_p','noop','self','manager','{}','{\"summary\":\"x\"}','planned','op_system','op_system')")
       .run();
     const clusters = (await (await app.request("/api/clusters", authed(cookie))).json()) as ClustersView;
     expect(clusters.needsYou.map((r) => r.id)).toContain("run_p");
@@ -116,7 +116,7 @@ describe("clusters + locks API", () => {
     const { app, db, cookie } = await make();
     expect((await (await app.request("/api/locks", authed(cookie))).json()) as LockView[]).toEqual([]);
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_l','noop','server','srv','{}','{}','approved','op_system')")
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('run_l','noop','server','srv','{}','{}','approved','op_system','op_system')")
       .run();
     acquireLocks(db.db, "run_l", [{ resource: "server", key: "s1" }]);
     const locks = (await (await app.request("/api/locks", authed(cookie))).json()) as LockView[];

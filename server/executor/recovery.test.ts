@@ -152,7 +152,7 @@ describe("Executor recovery — retry / skip / abort-with-cleanup", () => {
       ["noop", testDef],
       ["consumer-purge", gatedDef],
     ]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh });
     return { db, executor };
   }
   afterEach(() => {

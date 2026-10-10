@@ -7,7 +7,6 @@ import { meta } from "../db/schema/meta.ts";
 import { writeAudit } from "../db/audit-writer.ts";
 import { credId } from "../kernel/ids.ts";
 import { now } from "../kernel/clock.ts";
-import { currentActor } from "../kernel/actor.ts";
 import { errNotFound, errNotConfigured, errInternal } from "../kernel/errors.ts";
 import type { CredentialKind, CredentialPurpose, CredentialSubjectKind } from "../../shared/enums.ts";
 import type { VaultKv } from "../adapters/vault/port.ts";
@@ -238,10 +237,7 @@ export class CredentialStore {
       })
       .run();
     input.plaintext.fill(0); // wipe the caller's buffer now that the row is written
-    // Every audit row here names the signed-in operator whose request performed the act;
-    // "system" only for work no request drove (boot seeding, resume).
     writeAudit(this.db, {
-      actor: currentActor() ?? "system",
       action: "credential.created",
       targetKind: "credential",
       targetId: id,
@@ -286,7 +282,6 @@ export class CredentialStore {
     }
     this.db.update(credentials).set({ lastUsedAt: new Date(now()) }).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {
-      actor: currentActor() ?? "system",
       action: "credential.used",
       targetKind: "credential",
       targetId: id,
@@ -321,7 +316,6 @@ export class CredentialStore {
     });
     this.db.update(credentials).set({ rotatedAt: new Date(now()) }).where(eq(credentials.id, oldId)).run();
     writeAudit(this.db, {
-      actor: currentActor() ?? "system",
       action: "credential.rotated",
       targetKind: "credential",
       targetId: ref.id,
@@ -336,7 +330,6 @@ export class CredentialStore {
     if (!row) throw errNotFound(`credential ${id} not found`);
     this.db.update(credentials).set({ revokedAt: new Date(now()) }).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {
-      actor: currentActor() ?? "system",
       action: "credential.revoked",
       targetKind: "credential",
       targetId: id,
@@ -354,7 +347,6 @@ export class CredentialStore {
     }
     this.db.delete(credentials).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {
-      actor: currentActor() ?? "system",
       action: "credential.purged",
       targetKind: "credential",
       targetId: id,

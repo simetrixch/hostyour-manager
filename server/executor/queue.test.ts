@@ -2,55 +2,17 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { pino } from "pino";
-import { z } from "zod";
+import { pino, type Logger } from "pino";
 import { openDb, type DbHandle } from "../db/client.ts";
-import { CredentialStore } from "../security/store.ts";
-import { RunEventBus } from "./bus.ts";
-import { Executor } from "./executor.ts";
+import type { Executor } from "./executor.ts";
 import { getRun, readEvents } from "./read.ts";
-import { listLocks } from "./locks.ts";
+import { listLocks, releaseLocks } from "./locks.ts";
 import { findFailedHolder, startQueuedRuns } from "./queue.ts";
 import { seedRunRows } from "./run-rows.fixture.ts";
-import type { SshFactory } from "../adapters/ssh/port.ts";
+import { SECRET, executorOver, plan, until, world } from "./queue.fixture.ts";
 import type { AnyRunDefinition } from "./types.ts";
-import type { RunKind } from "../../shared/enums.ts";
 
-const logger = pino({ level: "silent" });
-const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
-const SECRET = "consumer-secret:ROOT_PASSWORD";
 const TYPED = "a-typed-value-never-stored";
-
-const params = z.object({ name: z.string(), locks: z.array(z.string()), secret: z.boolean().optional() });
-type Params = z.infer<typeof params>;
-
-/** A world of runs whose one step each test steers by name: `failing` names fail, `blocking` names
- *  wait until the test opens their gate. Every run claims the git branches it names. */
-function world() {
-  const failing = new Set<string>();
-  const blocking = new Map<string, () => void>();
-  const started: string[] = [];
-  const def: AnyRunDefinition = {
-    kind: "noop",
-    paramsSchema: params,
-    mutating: false,
-    plan: async (p: Params) => ({
-      kind: "noop", targetKind: "self", targetId: "manager", summary: p.name,
-      steps: [{ name: "change", title: "Change" }], warnings: [], requiredSecrets: p.secret ? [SECRET] : [],
-      locks: p.locks.map((key) => ({ resource: "git-branch" as const, key })),
-    }),
-    steps: (p: Params) => [{
-      name: "change",
-      title: "Change",
-      run: async () => {
-        started.push(p.name);
-        if (blocking.has(p.name)) await new Promise<void>((r) => { blocking.set(p.name, r); });
-        if (failing.has(p.name)) throw new Error("half done");
-      },
-    }],
-  } as AnyRunDefinition;
-  return { def, failing, blocking, started, open: (name: string) => blocking.get(name)?.() };
-}
 
 describe("the run queue", () => {
   const handles: DbHandle[] = [];
@@ -65,18 +27,12 @@ describe("the run queue", () => {
     dirs.push(dir);
     return join(dir, "manager.db");
   }
-  function managerOver(path: string, def: AnyRunDefinition, log: typeof logger = logger): { db: DbHandle; executor: Executor } {
+  function managerOver(path: string, def: AnyRunDefinition, log?: Logger): { db: DbHandle; executor: Executor } {
     const db = openDb(path);
     handles.push(db);
-    const executor = new Executor({
-      db: db.db, creds: new CredentialStore({ db: db.db, logger: log }), bus: new RunEventBus(), logger: log,
-      runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system",
-    });
-    return { db, executor };
+    return { db, executor: executorOver(db, def, log) };
   }
-  const until = async (ok: () => boolean) => { for (let i = 0; i < 400 && !ok(); i++) await new Promise((r) => setTimeout(r, 5)); };
   const status = (db: DbHandle, runId: string) => getRun(db.db, runId)?.status;
-  const plan = async (ex: Executor, name: string, locks: string[], secret = false) => (await ex.plan("noop", { name, locks, secret })).runId;
   const secrets = () => ({ [SECRET]: Buffer.from(TYPED) });
 
   it("queues an approve that meets a held lock, and starts the run once the holder ends", async () => {
@@ -130,7 +86,7 @@ describe("the run queue", () => {
     await executor.approve(a);
     await until(() => w.started.includes("a"));
     await executor.approve(b);
-    db.sqlite.prepare("DELETE FROM run_locks WHERE run_id = ?").run(a); // the holder's lock goes, nobody dispatches yet
+    releaseLocks(db.db, a); // the holder's lock goes, nobody dispatches yet
     const second = openDb(path);
     handles.push(second);
     const first = startQueuedRuns(db.db, () => true);
@@ -252,7 +208,7 @@ describe("the run queue", () => {
     const a = await plan(executor, "a", ["deploy@main"]);
     await executor.approve(a);
     await executor.settle(a);
-    db.sqlite.prepare("DELETE FROM run_locks WHERE run_id = ?").run(a); // a failed run of a Manager that still let its locks go
+    releaseLocks(db.db, a); // a failed run of a Manager that still let its locks go
     const c = await plan(executor, "c", ["deploy@main"]);
     await executor.approve(c);
     await until(() => w.started.includes("c"));

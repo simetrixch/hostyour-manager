@@ -55,7 +55,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -193,13 +193,74 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });
 
+  // Before 0027 a run recorded its starter and its times in columns of its own, and the audit its
+  // actor; 0027 carries each into the stamp columns, and names an actor nothing recorded `unrecorded`.
+  it("carries the recorded times and actors of runs, steps, events, locks and audit into their stamps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
+    dirs.push(dir);
+    const upTo0026 = join(dir, "up-to-0026");
+    mkdirSync(join(upTo0026, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    const before = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === "0027_stamp-runs-and-audit"));
+    writeFileSync(join(upTo0026, "meta/_journal.json"), JSON.stringify({ ...journal, entries: before }));
+    for (const e of before) copyFileSync(join(MIGRATIONS_DIR, `${e.tag}.sql`), join(upTo0026, `${e.tag}.sql`));
+    const file = join(dir, "manager.db");
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: upTo0026 });
+    const run = standing.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by, created_at, approved_at, started_at, finished_at, deleted_at) VALUES (?, 'noop', 'server', 'srv_1', '{}', '{}', ?, ?, ?, ?, ?, ?, ?)");
+    run.run("run_done", "succeeded", "op_system", 1000, 2000, 3000, 4000, null);
+    run.run("run_deleted", "planned", "op_emergency", 5000, null, null, null, 6000);
+    run.run("run_deleted_unaudited", "failed", "op_system", 7000, null, 7500, 7600, 8000);
+    run.run("run_untouched", "planned", "op_emergency", 9000, null, null, null, null);
+    const audit = standing.prepare("INSERT INTO audit (id, ts, actor, action, run_id) VALUES (?, ?, ?, ?, ?)");
+    audit.run("aud_approved", 2000, "op_emergency", "run.approved", "run_done");
+    audit.run("aud_succeeded", 4000, "system", "run.succeeded", "run_done");
+    audit.run("aud_deleted", 6000, "op_emergency", "run.deleted", "run_deleted");
+    audit.run("aud_credential", 10, "system", "credential.created", null);
+    const step = standing.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status, started_at, finished_at) VALUES (?, ?, 0, 'a', 'A', ?, ?, ?)");
+    step.run("stp_done", "run_done", "succeeded", 3000, 3500);
+    step.run("stp_pending", "run_deleted", "pending", null, null);
+    standing.prepare("INSERT INTO events (id, run_id, step_id, ts, stream, seq, text) VALUES ('evt_1', 'run_done', 'stp_done', 3100, 'stdout', 0, 'hello')").run();
+    standing.prepare("INSERT INTO run_locks (resource, key, run_id, acquired_at) VALUES ('master-kube', 'm', 'run_done', 2500)").run();
+    standing.close();
+    const h = openDb(file);
+    handles.push(h);
+    const q = (sql: string): unknown[] => h.sqlite.prepare(sql).all();
+    expect(q("SELECT id, creation, modified, owner, modified_by, deleted, deleted_by FROM runs ORDER BY id")).toEqual([
+      { id: "run_deleted", creation: 5000, modified: 6000, owner: "op_emergency", modified_by: "op_emergency", deleted: 6000, deleted_by: "op_emergency" },
+      { id: "run_deleted_unaudited", creation: 7000, modified: 8000, owner: "op_system", modified_by: "unrecorded", deleted: 8000, deleted_by: "unrecorded" },
+      { id: "run_done", creation: 1000, modified: 4000, owner: "op_system", modified_by: "op_system", deleted: null, deleted_by: null },
+      { id: "run_untouched", creation: 9000, modified: 9000, owner: "op_emergency", modified_by: "op_emergency", deleted: null, deleted_by: null },
+    ]);
+    expect(q("SELECT id, creation, modified, owner, modified_by FROM steps ORDER BY id")).toEqual([
+      { id: "stp_done", creation: 1000, modified: 3500, owner: "op_system", modified_by: "unrecorded" },
+      { id: "stp_pending", creation: 5000, modified: 5000, owner: "op_emergency", modified_by: "op_emergency" },
+    ]);
+    expect(q("SELECT id, creation, modified, owner, modified_by FROM events")).toEqual([
+      { id: "evt_1", creation: 3100, modified: 3100, owner: "op_system", modified_by: "op_system" },
+    ]);
+    expect(q("SELECT resource, key, run_id, creation, modified, owner, modified_by, deleted, deleted_by, id FROM run_locks")).toEqual([
+      { resource: "master-kube", key: "m", run_id: "run_done", creation: 2500, modified: 2500, owner: "unrecorded", modified_by: "unrecorded", deleted: null, deleted_by: null, id: "lock_00000000000000000000000001" },
+    ]);
+    expect(q("SELECT id, creation, modified, owner, modified_by FROM audit ORDER BY id")).toEqual([
+      { id: "aud_approved", creation: 2000, modified: 2000, owner: "op_emergency", modified_by: "op_emergency" },
+      { id: "aud_credential", creation: 10, modified: 10, owner: "op_system", modified_by: "op_system" },
+      { id: "aud_deleted", creation: 6000, modified: 6000, owner: "op_emergency", modified_by: "op_emergency" },
+      { id: "aud_succeeded", creation: 4000, modified: 4000, owner: "op_system", modified_by: "op_system" },
+    ]);
+    // The rebuilds dropped the append-only triggers with their tables; 0027 creates them again.
+    expect(() => h.sqlite.prepare("UPDATE events SET text = 'x' WHERE id = 'evt_1'").run()).toThrow(/append-only/);
+    expect(() => h.sqlite.prepare("DELETE FROM audit WHERE id = 'aud_credential'").run()).toThrow(/append-only/);
+    expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+  });
+
   it("enforces append-only on events and audit (UPDATE and DELETE both raise)", () => {
     const { sqlite } = fresh();
     sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-      .run("run_x", "noop", "server", "srv_x", "{}", "{}", "planned", "op_system");
-    sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text) VALUES (?,?,?,?,?)").run("evt_x", "run_x", "stdout", 0, "hello");
-    sqlite.prepare("INSERT INTO audit (id, actor, action) VALUES (?,?,?)").run("aud_x", "system", "run.started");
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+      .run("run_x", "noop", "server", "srv_x", "{}", "{}", "planned", "op_system", "op_system");
+    sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, owner, modified_by) VALUES (?,?,?,?,?,?,?)").run("evt_x", "run_x", "stdout", 0, "hello", "op_system", "op_system");
+    sqlite.prepare("INSERT INTO audit (id, action, owner, modified_by) VALUES (?,?,?,?)").run("aud_x", "run.started", "op_system", "op_system");
 
     expect(() => sqlite.prepare("UPDATE events SET text='y' WHERE id='evt_x'").run()).toThrow(/append-only/);
     expect(() => sqlite.prepare("DELETE FROM events WHERE id='evt_x'").run()).toThrow(/append-only/);
@@ -211,8 +272,8 @@ describe("openDb — migration phase + append-only invariants", () => {
     const { sqlite } = fresh();
     const insert = (id: string, status: string) =>
       sqlite
-        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, started_by) VALUES (?,?,?,?,?,?,?)")
-        .run(id, "noop", "server", "srv_y", "{}", status, "op_system");
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?)")
+        .run(id, "noop", "server", "srv_y", "{}", status, "op_system", "op_system");
     expect(() => insert("run_bad", "planned")).toThrow(); // planned + NULL plan_json violates the CHECK
     expect(() => insert("run_ok", "failed")).not.toThrow(); // failed may carry no plan
   });

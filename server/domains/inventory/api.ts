@@ -26,7 +26,6 @@ export interface ServerApiDeps {
    *  (`serverCredFlags`), plus the purge a delete performs. Nothing on this surface seals one — a
    *  credential is placed on a machine by a run, never by a route. */
   creds: CredentialStore;
-  actor: () => string;
   /** The door probe a server card's reachability is read with. */
   probe: TcpProbe;
 }
@@ -79,11 +78,11 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
 
   app.post("/api/servers", async (c) => {
     const input = CreateServerInput.parse(await c.req.json().catch(() => ({})));
-    return c.json({ server: createServer(db, deps.actor(), input) }, 201);
+    return c.json({ server: createServer(db, input) }, 201);
   });
 
   app.delete("/api/servers/:id", async (c) => {
-    await deleteServer(db, creds, deps.actor(), c.req.param("id"));
+    await deleteServer(db, creds, c.req.param("id"));
     return c.json({ ok: true });
   });
 
@@ -100,7 +99,7 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
   // key on the next run.
   app.post("/api/servers/:id/machine-identity", async (c) => {
     const input = RestateMachineIdentityInput.parse(await c.req.json().catch(() => ({})));
-    restateMachineIdentity(db, deps.actor(), c.req.param("id"), input);
+    restateMachineIdentity(db, c.req.param("id"), input);
     return c.json({ ok: true });
   });
 
@@ -112,13 +111,13 @@ export function registerServerRoutes(app: Hono<AppEnv>, deps: ServerApiDeps): vo
 
   app.post("/api/operator-keys", async (c) => {
     const input = CreateOperatorKeyInput.parse(await c.req.json().catch(() => ({})));
-    return c.json({ key: createOperatorKey(db, deps.actor(), input) }, 201);
+    return c.json({ key: createOperatorKey(db, input) }, 201);
   });
 
   // Forgets the row; it takes nothing off any machine. The domain refuses while a stored reading
   // still finds the key on a host, because the removal run kind needs this row to name the line.
   app.delete("/api/operator-keys/:id", (c) => {
-    deleteOperatorKey(db, deps.actor(), c.req.param("id"));
+    deleteOperatorKey(db, c.req.param("id"));
     return c.json({ ok: true });
   });
 

@@ -70,7 +70,7 @@ export function registerTenantRefreshMembersRoutes(app: Hono<AppEnv>, deps: Tena
     const body = (await c.req.json().catch(() => ({}))) as { followReleases?: unknown };
     if (typeof body.followReleases !== "boolean") throw errValidation("followReleases must be true or false");
     db.update(tenants).set({ followReleases: body.followReleases, updatedAt: new Date() }).where(eq(tenants.id, tenantId)).run();
-    writeAudit(db, { actor: c.get("operator").sub, action: "tenant.follow-releases.set", targetKind: "tenant", targetId: tenantId, detail: { followReleases: body.followReleases } });
+    writeAudit(db, { action: "tenant.follow-releases.set", targetKind: "tenant", targetId: tenantId, detail: { followReleases: body.followReleases } });
     if (body.followReleases) void follower.checkTenant(tenantId);
     return c.json({ followReleases: body.followReleases });
   });

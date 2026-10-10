@@ -54,7 +54,9 @@ const logger = pino({ level: "silent" });
 const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 
 let db: DbHandle;
-beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); });
+// The session's sub owns the runs it plans, under a foreign key onto operators; in production the
+// login writes that row.
+beforeEach(() => { db = openDb(":memory:"); seedUnitSizes(db.db); db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run(); });
 afterEach(() => { db.sqlite.close(); });
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });
@@ -194,7 +196,7 @@ async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; execut
   const defs = enabled
     ? [makeCreateTenantDef(onboardPorts(reg)), makeTenantPurgeDef(lifecyclePorts(reg)), makeSuspendTenantDef(lifecyclePorts(reg))]
     : [];
-  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, defs), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, defs), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,

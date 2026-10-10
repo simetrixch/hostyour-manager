@@ -34,17 +34,17 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
     targetId: r.targetId,
     status: r.status,
     summary: summaryOf(r),
-    startedBy: getOperatorDisplayName(db, r.startedBy),
+    owner: getOperatorDisplayName(db, r.owner),
     steps: rows.map((s) => ({ name: s.name, title: s.title, status: s.status, startedAt: ms(s.startedAt), endedAt: ms(s.finishedAt) })),
     requiredSecrets: (r.planJson as { requiredSecrets?: string[] } | null)?.requiredSecrets ?? [],
     secretHints: (r.planJson as { secretHints?: Record<string, string> } | null)?.secretHints ?? {},
     optionalSecrets: (r.planJson as { optionalSecrets?: string[] } | null)?.optionalSecrets ?? [],
     findings: (r.planJson as { findings?: PreflightCheck[] } | null)?.findings ?? [],
     requiredInputs: (r.planJson as { requiredInputs?: { field: string; label: string }[] } | null)?.requiredInputs ?? [],
-    createdAt: r.createdAt.getTime(),
+    creation: r.creation.getTime(),
     startedAt: ms(r.startedAt),
     endedAt: ms(r.finishedAt),
-    deletedAt: ms(r.deletedAt),
+    deleted: ms(r.deleted),
     cleanupsRegistered,
     aborted,
   };
@@ -56,12 +56,12 @@ function toRunView(db: Db, r: typeof runs.$inferSelect): RunView {
  *  that keeps its locks is what blocks every later approve, and it must not fall out of the list
  *  behind newer runs. */
 export function listRuns(db: Db, limit = 100): RunView[] {
-  const holders = db.select({ runId: runLocks.runId }).from(runLocks).all().map((l) => l.runId);
+  const holders = db.select({ runId: runLocks.runId }).from(runLocks).where(isNull(runLocks.deleted)).all().map((l) => l.runId);
   const rows = [
-    ...db.select().from(runs).where(isNull(runs.deletedAt)).orderBy(desc(runs.createdAt)).limit(limit).all(),
-    ...db.select().from(runs).where(and(isNull(runs.deletedAt), holders.length > 0 ? or(inArray(runs.status, OPEN_RUN_STATUSES), inArray(runs.id, holders)) : inArray(runs.status, OPEN_RUN_STATUSES))).all(),
+    ...db.select().from(runs).where(isNull(runs.deleted)).orderBy(desc(runs.creation)).limit(limit).all(),
+    ...db.select().from(runs).where(and(isNull(runs.deleted), holders.length > 0 ? or(inArray(runs.status, OPEN_RUN_STATUSES), inArray(runs.id, holders)) : inArray(runs.status, OPEN_RUN_STATUSES))).all(),
   ];
-  const unique = [...new Map(rows.map((r) => [r.id, r])).values()].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
+  const unique = [...new Map(rows.map((r) => [r.id, r])).values()].sort((a, b) => b.creation.getTime() - a.creation.getTime());
   return unique.map((r) => toRunView(db, r));
 }
 
@@ -73,7 +73,7 @@ export function listRunDurations(db: Db, window = 20): RunDurationView[] {
   const rows = db
     .select({ kind: runs.kind, startedAt: runs.startedAt, finishedAt: runs.finishedAt })
     .from(runs)
-    .where(and(eq(runs.status, "succeeded"), isNull(runs.deletedAt)))
+    .where(and(eq(runs.status, "succeeded"), isNull(runs.deleted)))
     .orderBy(desc(runs.finishedAt))
     .all();
   const byKind = new Map<string, number[]>();
@@ -92,7 +92,7 @@ function median(values: number[]): number {
   return sorted.length % 2 === 1 ? sorted[mid]! : Math.round((sorted[mid - 1]! + sorted[mid]!) / 2);
 }
 
-/** By-id STILL resolves a soft-deleted run (deletedAt set on the view): a direct or
+/** By-id STILL resolves a soft-deleted run (deleted set on the view): a direct or
  *  bookmarked link keeps working and the full log stays inspectable retroactively —
  *  the UI renders it clearly marked as deleted, with every action disabled. */
 export function getRun(db: Db, id: string): RunView | undefined {
@@ -150,7 +150,7 @@ export function findActiveRunOn(db: Db, target: { kind: string; id: string }): {
   return db
     .select({ id: runs.id, kind: runs.kind, status: runs.status })
     .from(runs)
-    .where(and(eq(runs.targetKind, target.kind), eq(runs.targetId, target.id), inArray(runs.status, ["approved", "running", "failed"]), isNull(runs.deletedAt)))
+    .where(and(eq(runs.targetKind, target.kind), eq(runs.targetId, target.id), inArray(runs.status, ["approved", "running", "failed"]), isNull(runs.deleted)))
     .get();
 }
 
@@ -161,5 +161,5 @@ export function readEvents(db: Db, runId: string, afterSeq = -1): RunEventView[]
     .where(and(eq(events.runId, runId), gt(events.seq, afterSeq)))
     .orderBy(events.seq)
     .all()
-    .map((e) => ({ seq: e.seq, stream: e.stream, text: e.text, at: e.ts.getTime() }));
+    .map((e) => ({ seq: e.seq, stream: e.stream, text: e.text, at: e.creation.getTime() }));
 }

@@ -134,6 +134,7 @@ describe("openDb over the trees of the plugins this product compiles", () => {
     const coreOnlyFile = join(dir, "core-only.db");
     copyFileSync(file, coreOnlyFile);
     const coreOnly = new Database(coreOnlyFile);
+    coreOnly.pragma("foreign_keys = OFF"); // as openDb applies migrations: a table rebuild drops a referenced table
     migrate(drizzle(coreOnly), { migrationsFolder: CORE_MIGRATIONS });
     const before = { rows: rows(coreOnly), shape: shape(coreOnly) };
     coreOnly.close();

@@ -44,7 +44,7 @@ describe("Executor — noop happy path + resume", () => {
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
     const runDefinitions = buildRunDefinitions({ db: db.db });
-    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions, sshFactory: noSsh });
     return { db, executor, bus };
   }
   afterEach(() => {
@@ -97,7 +97,7 @@ describe("Executor — noop happy path + resume", () => {
 
     // A NEW executor (fresh process, empty RunSecrets) resumes.
     const store2 = new CredentialStore({ db: db.db, logger });
-    const executor2 = new Executor({ db: db.db, creds: store2, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
+    const executor2 = new Executor({ db: db.db, creds: store2, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });
     await executor2.resumeOnBoot();
 
     const run = getRun(db.db, runId);
@@ -111,7 +111,7 @@ describe("Executor — noop happy path + resume", () => {
     const { runId } = await executor.plan("noop", {});
     await executor.approve(runId);
     await executor.settle(runId);
-    const n = db.sqlite.prepare("SELECT count(*) AS n FROM run_locks").get() as { n: number };
+    const n = db.sqlite.prepare("SELECT count(*) AS n FROM run_locks WHERE deleted IS NULL").get() as { n: number };
     expect(n.n).toBe(0);
   });
 
@@ -143,7 +143,7 @@ describe("Executor — noop happy path + resume", () => {
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", failingDef]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh });
 
     const { runId } = await executor.plan("noop", {});
     await executor.approve(runId);
@@ -215,7 +215,7 @@ describe("Executor — a run whose failure the database cannot take", () => {
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(),
       logger: capturing, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]),
-      sshFactory: noSsh, actor: () => "op_system",
+      sshFactory: noSsh,
     });
     return { db, executor, lines };
   }
@@ -272,7 +272,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     handles.push(db);
     const store = new CredentialStore({ db: db.db, logger });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
-    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh, actor: () => "op_system" });
+    const executor = new Executor({ db: db.db, creds: store, bus: new RunEventBus(), logger, runDefinitions, sshFactory: noSsh });
     return { db, executor };
   }
   afterEach(() => {
@@ -358,7 +358,7 @@ describe("Executor — cancel between steps + concurrent resume", () => {
     // The crash picture resumeOnBoot finds: both approved, steps pending (as planned leaves them).
     db.sqlite.prepare("UPDATE runs SET status='approved'").run();
 
-    const { executor: executor2 } = { executor: new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system" }) };
+    const { executor: executor2 } = { executor: new Executor({ db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger, runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh }) };
     const resumeP = executor2.resumeOnBoot();
     // Both runs entered their step before resumeOnBoot's first await — the serial loop entered
     // only run A here and held run B back until A finished.
@@ -419,7 +419,7 @@ describe("Executor — a resume the database cannot take", () => {
     const lines: string[] = [];
     const capturing = pino({ level: "error" }, { write: (s: string) => { lines.push(s); } });
     const runDefinitions = new Map<RunKind, AnyRunDefinition>([["noop", def]]);
-    const common = { db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), runDefinitions, sshFactory: noSsh, actor: () => "op_system" };
+    const common = { db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), runDefinitions, sshFactory: noSsh };
     return { db, before: new Executor({ ...common, logger }), booting: new Executor({ ...common, logger: capturing }), lines };
   }
 

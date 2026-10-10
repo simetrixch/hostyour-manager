@@ -78,7 +78,7 @@ describe("consumer-set-domain through the Executor", () => {
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
       runDefinitions: new Map([["consumer-set-domain", def as unknown as AnyRunDefinition]]),
-      sshFactory: () => Promise.reject(new Error("no ssh")), actor: () => "op_system",
+      sshFactory: () => Promise.reject(new Error("no ssh")),
     });
     const domain = async (): Promise<string | undefined> => (await reg.readRegistration("prod", "acme"))?.entry.fqdn;
     return { db, dns, probe, executor, domain };

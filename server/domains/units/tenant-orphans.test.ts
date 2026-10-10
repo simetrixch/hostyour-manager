@@ -256,10 +256,10 @@ describe("resolveRunTenantState (what a create-tenant run's tenant IS now)", () 
    *  only-executor-touches-runs-schema); the executor's own recovery test takes the same escape. */
   const seedRun = (attest: "ok" | "failed" | "pending" = "ok"): void => {
     db.sqlite
-      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, started_by) VALUES (?, 'create-tenant', 'cluster', 'cls_1', '{}', 'failed', 'op_system')")
+      .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, status, owner, modified_by) VALUES (?, 'create-tenant', 'cluster', 'cls_1', '{}', 'failed', 'op_system', 'op_system')")
       .run(RUN);
     db.sqlite
-      .prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status) VALUES (?, ?, 0, 'attest-target', 'Attest the target cluster (deploy-state fresh)', ?)")
+      .prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status, owner, modified_by) VALUES (?, ?, 0, 'attest-target', 'Attest the target cluster (deploy-state fresh)', ?, 'op_system', 'op_system')")
       .run("step_1", RUN, attest);
   };
 

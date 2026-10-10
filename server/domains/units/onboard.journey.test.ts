@@ -135,7 +135,7 @@ function journeyBuildPlane(): FakeBuildPlane {
 function makeExecutor(ports: OnboardPorts): { executor: Executor; store: CredentialStore; bus: RunEventBus } {
   const store = new CredentialStore({ db: db.db, logger });
   const bus = new RunEventBus();
-  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, [makeOnboardDef(ports)]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, [makeOnboardDef(ports)]), sshFactory: noSsh });
   return { executor, store, bus };
 }
 

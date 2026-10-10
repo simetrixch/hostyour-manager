@@ -96,7 +96,7 @@ export type RestateMachineIdentityInput = z.infer<typeof RestateMachineIdentityI
  *   - and the statement that would move neither number: the pinned fingerprint on a row that carries
  *     no recorded machine-id, which would report a repair that repaired nothing.
  */
-export function restateMachineIdentity(db: Db, actor: string, id: string, input: RestateMachineIdentityInput): void {
+export function restateMachineIdentity(db: Db, id: string, input: RestateMachineIdentityInput): void {
   const row = db.select().from(servers).where(eq(servers.id, id)).get();
   if (!row) throw errNotFound(`server ${id} not found`);
   const pf = (row.preflightJson as Record<string, unknown> | null) ?? {};
@@ -131,7 +131,6 @@ export function restateMachineIdentity(db: Db, actor: string, id: string, input:
   }
   db.update(servers).set({ preflightJson: { ...pf, hostKey: stated }, machineId: null }).where(eq(servers.id, id)).run();
   writeAudit(db, {
-    actor,
     action: "server.machine_identity_restated",
     targetKind: "server",
     targetId: id,

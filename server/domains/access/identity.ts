@@ -3,6 +3,7 @@ import type { Db } from "../../db/client.ts";
 import { operators } from "../../db/schema/operators.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
 import { opId } from "../../kernel/ids.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 
 /**
  * Map an OIDC identity to a local operator. Keyed on the stable IdP subject.
@@ -25,6 +26,6 @@ export function upsertOperator(db: Db, identity: { subject: string; email?: stri
   db.insert(operators)
     .values({ id, subject: identity.subject, email: identity.email ?? null, username, displayName: base })
     .run();
-  writeAudit(db, { actor: id, action: "operator.upserted", detail: { subject: identity.subject } });
+  runAsActor(id, () => writeAudit(db, { action: "operator.upserted", detail: { subject: identity.subject } }));
   return id;
 }

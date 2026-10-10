@@ -17,8 +17,8 @@ import { runs, steps } from "../db/schema/runs.ts";
 // without them fails on the constraint. In production the Executor has written both before it
 // builds one.
 
-/** Seed one running run plus one step row per id, so a RunContext built on `runId` can log.
- *  `op_system` is the seeded actor for a run no human started (db/migrations/0000_baseline.sql). */
+/** Seed one running run plus one step row per id, so a RunContext built on `runId` can log. Outside a
+ *  request the rows are stamped with `op_system`, seeded by db/migrations/0000_baseline.sql. */
 export function seedRunRows(
   db: DbHandle,
   o: { runId: string; kind?: string; targetId?: string; steps: readonly { id: string; name: string }[] },
@@ -31,7 +31,6 @@ export function seedRunRows(
     paramsJson: {},
     planJson: {},
     status: "running",
-    startedBy: "op_system",
   }).run();
   o.steps.forEach((s, ordinal) => {
     db.db.insert(steps).values({ id: s.id, runId: o.runId, ordinal, name: s.name, title: s.name }).run();

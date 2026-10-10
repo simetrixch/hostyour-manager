@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { decodeTime } from "ulid";
 import { openDb, type DbHandle } from "./client.ts";
 import { writeAudit } from "./audit-writer.ts";
+import { runAsActor } from "../kernel/actor.ts";
 
 // `id` is the key an operator orders a trail by, and `ts` has millisecond resolution, so two rows
 // written inside one millisecond cannot be told apart by it. These tests are about that one
@@ -33,7 +34,7 @@ describe("audit id ordering (db/audit-writer.ts)", () => {
    *  read them back the way an operator reads a trail. */
   function writeAndReadBack(db: DbHandle): { id: string; position: number }[] {
     for (let i = 0; i < WRITES; i++) {
-      writeAudit(db.db, { actor: "op_probe", action: "probe.write", detail: { position: i } });
+      writeAudit(db.db, { action: "probe.write", detail: { position: i } });
     }
     const rows = db.sqlite
       .prepare("SELECT id, detail_json FROM audit WHERE action = 'probe.write' ORDER BY id")
@@ -78,9 +79,9 @@ describe("audit id ordering (db/audit-writer.ts)", () => {
   // would return one distinct millisecond here instead of two.
   it("the factory follows the clock instead of staying on a millisecond it has already used", async () => {
     const db = fresh();
-    writeAudit(db.db, { actor: "op_probe", action: "probe.gap", detail: { position: 0 } });
+    writeAudit(db.db, { action: "probe.gap", detail: { position: 0 } });
     await new Promise((resolve) => setTimeout(resolve, 5));
-    writeAudit(db.db, { actor: "op_probe", action: "probe.gap", detail: { position: 1 } });
+    writeAudit(db.db, { action: "probe.gap", detail: { position: 1 } });
 
     const rows = db.sqlite
       .prepare("SELECT id, detail_json FROM audit WHERE action = 'probe.gap' ORDER BY id")
@@ -89,5 +90,20 @@ describe("audit id ordering (db/audit-writer.ts)", () => {
     const milliseconds = rows.map((r) => millisecondOf(r.id));
     expect(new Set(milliseconds).size, "both writes landed in one millisecond, so no gap in time was exercised").toBe(2);
     expect([...milliseconds].sort((a, b) => a - b)).toEqual(milliseconds);
+  });
+});
+
+// audit is written once (its triggers refuse an update), so its stamps are settled by the insert.
+describe("audit stamps (db/schema/stamps.ts)", () => {
+  it("name the bound operator, else op_system, on owner and modified_by, at one time", () => {
+    const db = openDb(":memory:");
+    try {
+      runAsActor("op_a", () => writeAudit(db.db, { action: "probe.stamp" }));
+      writeAudit(db.db, { action: "probe.stamp" });
+      const rows = db.sqlite.prepare("SELECT owner, modified_by, modified = creation AS same FROM audit WHERE action = 'probe.stamp' ORDER BY id").all();
+      expect(rows).toEqual([{ owner: "op_a", modified_by: "op_a", same: 1 }, { owner: "op_system", modified_by: "op_system", same: 1 }]);
+    } finally {
+      db.sqlite.close();
+    }
   });
 });

@@ -147,8 +147,8 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     const claimsOf = async (runId: string, serverId: string): Promise<LockClaim[]> => {
       const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId }, { db: db.db });
       db.sqlite
-        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-        .run(runId, "cluster-tailnet-rejoin", "server", serverId, "{}", "{}", "approved", "op");
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(runId, "cluster-tailnet-rejoin", "server", serverId, "{}", "{}", "approved", "op", "op");
       return [...deriveServerLocks(plan.targets ?? []), ...(plan.locks ?? [])];
     };
 
@@ -166,8 +166,8 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     const claimsOf = async (runId: string, kind: TailnetKind, serverId: string): Promise<LockClaim[]> => {
       const plan = await DEFS[kind].plan({ serverId }, { db: db.db });
       db.sqlite
-        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES (?,?,?,?,?,?,?,?)")
-        .run(runId, kind, "server", serverId, "{}", "{}", "approved", "op");
+        .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(runId, kind, "server", serverId, "{}", "{}", "approved", "op", "op");
       return [...deriveServerLocks(plan.targets ?? []), ...(plan.locks ?? [])];
     };
 

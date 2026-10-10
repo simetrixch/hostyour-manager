@@ -28,7 +28,6 @@ export interface OwnerDeps {
   store: Pick<CredentialStore, "seal" | "revoke" | "list">;
   github: Pick<GitHubConsumer, "readOrgToken" | "readTokenAccess">;
   githubApp?: Pick<GitHubApp, "installationOrg"> | undefined;
-  actor: () => string;
 }
 
 /** The three scopes the owner's repository PAT carries — the consumer contract without
@@ -80,7 +79,7 @@ async function record(deps: OwnerDeps, org: string, purpose: "packages-reader" |
   const replaced = purpose === "packages-reader" ? standing?.packagesCredentialId ?? null : standing?.repoCredentialId ?? null;
   const ref = await deps.store.seal({ kind: "pat", label, plaintext, fingerprint, subject: { kind: "owner", id: org }, purpose });
   if (replaced) await deps.store.revoke(replaced, `replaced by ${ref.id} (${label})`);
-  writeAudit(deps.db, { actor: deps.actor(), action: "owner.credential_recorded", targetKind: "owner", targetId: org, detail: { purpose, credentialId: ref.id, fingerprint, replaced } });
+  writeAudit(deps.db, { action: "owner.credential_recorded", targetKind: "owner", targetId: org, detail: { purpose, credentialId: ref.id, fingerprint, replaced } });
   return { fingerprint, recordedAt: ref.recordedAt };
 }
 
@@ -125,5 +124,5 @@ export async function forgetOwnerCredential(deps: OwnerDeps, org: string, which:
   const id = which === "packages-reader" ? standing?.packagesCredentialId : standing?.repoCredentialId;
   if (!id) throw errNotFound(`owner ${org} records no ${which}`);
   await deps.store.revoke(id, `forgotten: ${which} of ${org}`);
-  writeAudit(deps.db, { actor: deps.actor(), action: "owner.credential_forgotten", targetKind: "owner", targetId: org, detail: { purpose: which, credentialId: id } });
+  writeAudit(deps.db, { action: "owner.credential_forgotten", targetKind: "owner", targetId: org, detail: { purpose: which, credentialId: id } });
 }

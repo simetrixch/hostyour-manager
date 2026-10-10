@@ -198,7 +198,7 @@ function harness(over: { manifest?: ConsumerManifest; activator?: FakeActivator;
     ...(over.activator ? { activator: over.activator } : {}),
   };
   const def = makeOnboardDef(ports) as unknown as AnyRunDefinition;
-  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: fakeCreds, bus: new RunEventBus(), logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh });
   return { executor, registrations, argo, projects, cluster, seeder, dns };
 }
 

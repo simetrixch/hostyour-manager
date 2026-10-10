@@ -9,7 +9,6 @@ import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { CredentialStore } from "../../security/store.ts";
-import { runActor } from "../../kernel/actor.ts";
 import { SessionCodec, SESSION_COOKIE } from "../access/session.ts";
 import { registerServerRoutes } from "./api.ts";
 import { FakeTcpProbe } from "../../adapters/net-probe/testing/fake.ts";
@@ -61,7 +60,7 @@ describe("server inventory API", () => {
     dirs.push(dir);
     const db = openDb(join(dir, "manager.db"));
     handles.push(db);
-    // The chokepoint attributes every write to the session's sub, and runs.started_by is an FK onto
+    // The chokepoint attributes every write to the session's sub, and runs.owner is an FK onto
     // operators — in production upsertOperator wrote that row at login; the harness mints the cookie
     // directly, so it seeds the row itself.
     db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
@@ -75,7 +74,7 @@ describe("server inventory API", () => {
       session,
       registerAuth: () => undefined,
       registerProtected: (a) =>
-        registerServerRoutes(a, { db: db.db, creds: store, actor: runActor, probe }),
+        registerServerRoutes(a, { db: db.db, creds: store, probe }),
     });
     const cookie = await session.mint({ sub: "op_test", groups: ["admins"], via: "oidc" });
     return { app, db, store, cookie, probe };
@@ -193,8 +192,8 @@ describe("server inventory API", () => {
       const h = await make();
       const res = await mutate(h.app, "POST", "/api/servers", h.cookie, { name: "s5", host: "10.1.1.11", sshUser: "hostyour1" });
       const { server } = (await res.json()) as { server: ServerView };
-      const actor = h.db.sqlite.prepare("SELECT actor FROM audit WHERE action = 'server.created' AND target_id = ?").get(server.id) as { actor: string };
-      expect(actor.actor).toBe("op_test");
+      const audit = h.db.sqlite.prepare("SELECT owner FROM audit WHERE action = 'server.created' AND target_id = ?").get(server.id) as { owner: string };
+      expect(audit.owner).toBe("op_test");
     });
 
     it("refuses a duplicate name with a 400 naming the collision", async () => {
@@ -352,8 +351,8 @@ describe("server inventory API", () => {
       const h = await make();
       seedReached(h.db);
       await mutate(h.app, "POST", "/api/servers/srv_r/machine-identity", h.cookie, { hostKeyFingerprint: PRESENTED });
-      const row = h.db.sqlite.prepare("SELECT actor, target_id, detail_json FROM audit WHERE action = 'server.machine_identity_restated'").get() as { actor: string; target_id: string; detail_json: string };
-      expect(row.actor).toBe("op_test");
+      const row = h.db.sqlite.prepare("SELECT owner, target_id, detail_json FROM audit WHERE action = 'server.machine_identity_restated'").get() as { owner: string; target_id: string; detail_json: string };
+      expect(row.owner).toBe("op_test");
       expect(row.target_id).toBe("srv_r");
       expect(JSON.parse(row.detail_json)).toMatchObject({ name: "r1", hostKeyWas: PINNED, hostKeyNow: PRESENTED, machineIdDropped: MACHINE_ID });
     });

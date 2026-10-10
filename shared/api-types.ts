@@ -261,14 +261,14 @@ export interface RunView extends RunApproveView {
   status: RunStatus;
   summary: string;
   /** The display name of the operator who planned the run; the Manager's own runs name its system operator. */
-  startedBy: string;
+  owner: string;
   steps: StepView[];
-  createdAt: number;
+  creation: number;
   startedAt: number | null;
   endedAt: number | null;
   /** Soft-delete marker: set = the run is gone from the runs list (its row + full log
    *  remain in the DB). Non-null only on a by-id read — listRuns never returns such runs. */
-  deletedAt: number | null;
+  deleted: number | null;
   /** Whether a completed step registered a compensation: what "Abort (cleanup)" would run. Where
    *  none did, the abort is not offered — there is nothing to clean up (#236). */
   cleanupsRegistered: boolean;
@@ -312,7 +312,7 @@ export interface LockView {
   resource: LockResource;
   key: string;
   runId: string;
-  acquiredAt: number;
+  creation: number;
 }
 
 export type ClustersVerdict = "ok" | "warn" | "down";

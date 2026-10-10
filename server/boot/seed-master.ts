@@ -126,7 +126,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
       }
       throw err;
     }
-    writeAudit(db, { actor: "system", action: "server.master_seeded", targetKind: "server", targetId: id, detail: { name, host: m.fqdn } });
+    writeAudit(db, { action: "server.master_seeded", targetKind: "server", targetId: id, detail: { name, host: m.fqdn } });
     logger.info({ id, name, host: m.fqdn, sshUser: m.sshUser }, "seeded the role=master server row (this control host)");
     master = db.select().from(servers).where(eq(servers.id, id)).get();
     if (!master) return; // unreachable in practice; keeps the type narrow
@@ -139,7 +139,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         .set({ host: m.fqdn, sshUser: m.sshUser, lanHost: nextLan, sshPort: m.sshPort })
         .where(eq(servers.id, master.id))
         .run();
-      writeAudit(db, { actor: "system", action: "server.master_reconciled", targetKind: "server", targetId: master.id, detail: { host: m.fqdn, sshUser: m.sshUser } });
+      writeAudit(db, { action: "server.master_reconciled", targetKind: "server", targetId: master.id, detail: { host: m.fqdn, sshUser: m.sshUser } });
       logger.warn({ id: master.id, host: m.fqdn, sshUser: m.sshUser }, "reconciled the role=master row to the configured MASTER_* values");
       master = db.select().from(servers).where(eq(servers.id, master.id)).get() ?? master;
     }
@@ -160,7 +160,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
         .run();
       // Audit + log ONLY on a real insert (inside the try) so a clash below never writes a false
       // "seeded" record.
-      writeAudit(db, { actor: "system", action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage } });
+      writeAudit(db, { action: "cluster.master_seeded", targetKind: "cluster", targetId: cid, detail: { serverId: master.id, domain: m.fqdn, stage: m.stage } });
       logger.info({ id: cid, serverId: master.id, domain: m.fqdn, stage: m.stage }, "seeded the master self-cluster row (this control host)");
     } catch (err) {
       // A stray clusters row already owns this domain (clusters_domain_uq). Degrade loudly — never
@@ -181,7 +181,7 @@ export async function seedMaster(db: Db, creds: CredentialStore, config: Config,
     // installs), mirroring the role=master server-row reconcile above. A master's name follows its
     // FQDN, as the branch program writes it into the master's own map on every regeneration.
     db.update(clusters).set({ stage: m.stage, domain: m.fqdn, name: clusterShortName(m.fqdn) }).where(eq(clusters.id, cluster.id)).run();
-    writeAudit(db, { actor: "system", action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
+    writeAudit(db, { action: "cluster.master_reconciled", targetKind: "cluster", targetId: cluster.id, detail: { domain: m.fqdn, stage: m.stage } });
     logger.warn({ id: cluster.id, domain: m.fqdn, stage: m.stage }, "reconciled the master self-cluster row to the configured MASTER_* values");
   }
 

@@ -199,7 +199,7 @@ function fakeTenantSeeder(): VaultSeeder {
   };
   // The sanctioned type-erasure at the registrations boundary, exactly as wire-units.ts does it.
   const def = makeCreateTenantDef(ports) as unknown as AnyRunDefinition;
-  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }, [def]), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const app = createApp({
     config, logger, getReadiness: () => ({ ok: true, checks: [] }), session,

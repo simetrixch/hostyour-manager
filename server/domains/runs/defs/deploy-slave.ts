@@ -568,7 +568,7 @@ export function deploySlaveSteps(input: SlaveInstallInput, ports: DeploySlavePor
         // THE ROW FOLLOWS THE MAP. The map is the writable place and the inventory columns are the
         // copy every role and stage decision in this process queries, so the act that rewrites the
         // map moves the copy in the same step.
-        projectClusterMarking(ctx.db, slaveMarking, { actor: "system", runId: ctx.runId });
+        projectClusterMarking(ctx.db, slaveMarking, { runId: ctx.runId });
         ctx.log("meta", changed
           ? `${clusterMapPath(domain)} on ${repo.booksBranch} now marks ${slaveMarking.name}: role ${role}, stage ${stage}, ${apiHost}:${SLAVE_API_PORT}, build plane ${slaveMarking.buildPlaneFqdn}`
           : `${clusterMapPath(domain)} already states this marking — nothing to commit`);

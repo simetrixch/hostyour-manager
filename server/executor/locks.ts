@@ -1,13 +1,15 @@
-import { eq, and, inArray } from "drizzle-orm";
+import { eq, and, inArray, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { runLocks, runs } from "../db/schema/runs.ts";
 import { errResourceBusy } from "../kernel/errors.ts";
+import { newId } from "../kernel/ids.ts";
+import { deletion } from "../db/schema/stamps.ts";
 import type { LockClaim, RunTargetRef } from "./types.ts";
 import type { LockView } from "../../shared/api-types.ts";
 
-// The run_locks manager. The mutex IS the primary key; acquisition is
+// The run_locks manager. The mutex is the unique index over the locks not released; acquisition is
 // all-or-nothing inside one transaction, deadlock-free by construction (no mid-run
-// acquisition). Held from the start through running, and on through failed or cancelled in the
+// acquisition). A release marks the row deleted, so it stays and names who released it. Held from the start through running, and on through failed or cancelled in the
 // middle, until the run succeeds, finishes its cleanup, is aborted or is deleted.
 
 export function deriveServerLocks(targets: RunTargetRef[]): LockClaim[] {
@@ -55,24 +57,30 @@ export function lockConflicts(taken: readonly TakenClaim[], claims: readonly Loc
  */
 export function acquireLocks(db: Db, runId: string, rawClaims: LockClaim[]): void {
   db.transaction((tx) => {
-    const all = tx.select().from(runLocks).all();
+    const all = tx.select().from(runLocks).where(isNull(runLocks.deleted)).all();
     const missing = dedupeClaims(rawClaims).filter((c) => !all.some((l) => l.runId === runId && l.resource === c.resource && l.key === c.key));
     const held = lockConflicts(all.filter((l) => l.runId !== runId), missing)[0];
     if (held) throw errResourceBusy("Resource busy", { resource: held.resource, key: held.key, holderRunId: held.runId });
-    for (const c of missing) tx.insert(runLocks).values({ resource: c.resource, key: c.key, runId }).run();
+    for (const c of missing) insertLock(tx, c, runId);
   });
 }
 
+/** Hold `claim` for `runId`. The unique index over the locks not released refuses a second holder. */
+export function insertLock(db: Db, claim: LockClaim, runId: string): void {
+  db.insert(runLocks).values({ id: newId("lock"), resource: claim.resource, key: claim.key, runId }).run();
+}
+
 export function releaseLocks(db: Db, runId: string): void {
-  db.delete(runLocks).where(eq(runLocks.runId, runId)).run();
+  db.update(runLocks).set(deletion()).where(and(eq(runLocks.runId, runId), isNull(runLocks.deleted))).run();
 }
 
 export function listLocks(db: Db): LockView[] {
   return db
     .select()
     .from(runLocks)
+    .where(isNull(runLocks.deleted))
     .all()
-    .map((r) => ({ resource: r.resource, key: r.key, runId: r.runId, acquiredAt: r.acquiredAt.getTime() }));
+    .map((r) => ({ resource: r.resource, key: r.key, runId: r.runId, creation: r.creation.getTime() }));
 }
 
 /**
@@ -89,7 +97,7 @@ export function reconcileLocks(db: Db): void {
       .all()
       .map((r) => r.id),
   );
-  for (const l of db.select().from(runLocks).all()) {
-    if (!held.has(l.runId)) db.delete(runLocks).where(and(eq(runLocks.resource, l.resource), eq(runLocks.key, l.key))).run();
+  for (const l of db.select().from(runLocks).where(isNull(runLocks.deleted)).all()) {
+    if (!held.has(l.runId)) db.update(runLocks).set(deletion()).where(eq(runLocks.id, l.id)).run();
   }
 }

@@ -37,7 +37,7 @@ beforeEach(() => {
 afterEach(() => { db.sqlite.close(); });
 
 function deps(over: Partial<OwnerDeps> = {}): OwnerDeps {
-  return { db: db.db, store, github, githubApp, actor: () => "op_test", ...over };
+  return { db: db.db, store, github, githubApp, ...over };
 }
 
 describe("the packages reader of an owner", () => {

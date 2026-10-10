@@ -27,11 +27,10 @@ export function beginStreamingPlan(
   if (!def) throw errValidation(`unknown run kind: ${kind}`);
   if (!def.planStream) throw errValidation(`run kind ${kind} has no streaming planner`);
   const id = genRunId();
-  const actor = deps.actor();
   deps.db.transaction((tx) =>
-    tx.insert(runs).values({ id, kind, targetKind: "cluster", targetId: id, paramsJson: (rawParams ?? {}) as Record<string, unknown>, planJson: null, status: "planning", startedBy: actor }).run(),
+    tx.insert(runs).values({ id, kind, targetKind: "cluster", targetId: id, paramsJson: (rawParams ?? {}) as Record<string, unknown>, planJson: null, status: "planning" }).run(),
   );
-  writeAudit(deps.db, { actor, action: "run.planning", targetKind: "cluster", targetId: id, runId: id, detail: { kind } });
+  writeAudit(deps.db, { action: "run.planning", targetKind: "cluster", targetId: id, runId: id, detail: { kind } });
   // ONE promise, as in Executor.fireExecute: the bookkeeping is chained on and the same object goes
   // into the map, so settle() and the map hold the same thing. `.finally()` attached and then discarded
   // makes a second promise no caller can reach, which is what surfaces as an unhandled rejection.
@@ -128,7 +127,7 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
         // and the failed run stays soft-deletable. No steps: nothing was planned.
         deps.db.transaction((tx) => tx.update(runs).set({ status: "failed", planJson: result.planJson, error: result.summary, finishedAt: new Date() }).where(eq(runs.id, runId)).run());
         ctx!.emitMeta(`✗ ${result.summary}`);
-        writeAudit(deps.db, { actor: "system", action: "run.failed", runId, detail: { rejected: true } });
+        writeAudit(deps.db, { action: "run.failed", runId, detail: { rejected: true } });
       }, result.summary);
       return;
     }
@@ -149,7 +148,7 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
       impls.forEach((s, i) => tx.insert(steps).values({ id: genStepId(), runId, ordinal: i, name: s.name, title: s.title, status: "pending" }).run());
     });
     ctx.emitMeta("✓ Validation passed — the plan is ready for approval");
-    writeAudit(deps.db, { actor: "system", action: "run.planned", runId, detail: { kind: def.kind, summary: result.plan.summary } });
+    writeAudit(deps.db, { action: "run.planned", runId, detail: { kind: def.kind, summary: result.plan.summary } });
     active.delete(runId);
     ctx.close();
   } catch (err) {
@@ -162,7 +161,7 @@ export async function runStreamingPlan(args: StreamingPlanArgs): Promise<void> {
       // the database just refused. The reason still reaches the operator on the run row above, and
       // the audit line below is then written rather than lost to a second throw.
       ctx?.emitMeta(aborted ? "✕ cancelled during validation" : `✗ validation failed: ${message}`);
-      writeAudit(deps.db, { actor: "system", action: aborted ? "run.cancelled" : "run.failed", runId, detail: { duringPlanning: true } });
+      writeAudit(deps.db, { action: aborted ? "run.cancelled" : "run.failed", runId, detail: { duringPlanning: true } });
     }, message);
   }
 }

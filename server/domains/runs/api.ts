@@ -34,8 +34,7 @@ function secretsFrom(raw: unknown): Record<string, Buffer> | undefined {
 /**
  * Kind-agnostic Runs API. Read paths hit read.ts; every mutation goes through
  * the Executor — the single write path. CSRF is enforced upstream by http/middleware/csrf.
- * The Executor's actor() resolves to the signed-in operator of the current request
- * (kernel/actor.ts, bound by the chokepoint middleware), so runs.started_by and the run
+ * The chokepoint binds the signed-in operator (kernel/actor.ts), so runs.owner and the run
  * audit rows name the human, not op_system.
  */
 /** How long a run's event stream may stay silent before it sends a comment line. A run's gates can
@@ -99,7 +98,7 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
           if (stream.aborted) break;
           const now = getRun(db, id);
           // Terminal or soft-deleted → nothing more will come.
-          if (!now || isTerminalRun(now.status) || now.deletedAt !== null) {
+          if (!now || isTerminalRun(now.status) || now.deleted !== null) {
             while (queue.length > 0) await sendOnce(queue.shift() as RunEventView);
             await end();
             break;
@@ -140,7 +139,7 @@ export function registerRunRoutes(app: Hono<AppEnv>, deps: RunApiDeps): void {
 
   // Status-gated SOFT delete (unlike discard, which parks the run at `cancelled` but keeps
   // it listed): only a planned, failed, or cancelled run may be deleted — the executor
-  // refuses anything else (succeeded, in-flight) with 409 ILLEGAL_TRANSITION. The run vanishes from the list (deleted_at set) while
+  // refuses anything else (succeeded, in-flight) with 409 ILLEGAL_TRANSITION. The run vanishes from the list (deleted set) while
   // its row + full log stay in the DB for retroactive inspection; GET /api/runs/:id still
   // resolves it, marked deleted. 200, not 202: the deletion is complete on return.
   app.delete("/api/runs/:id", async (c) => {

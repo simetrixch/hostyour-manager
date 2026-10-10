@@ -5,7 +5,6 @@
 // and the relocation surface its keys configure.
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "#core/server/plugin.ts";
-import { runActor } from "#core/server/kernel/actor.ts";
 import { unitSizes } from "./schema.ts";
 import { UnitEnv, unitConfig } from "./config.ts";
 import { seedUnitSizes } from "./unit-size.ts";
@@ -80,7 +79,7 @@ export const unitPlugin: Plugin<typeof UnitEnv> = {
       // the onboardings derive per unit, measured with the unit's own GitHub client.
       routes: (app) => {
         registerUnitSizeRoutes(app, { db: core.db });
-        registerOwnerRoutes(app, { db: core.db, store: core.store, github: provides.github, githubApp: core.githubApp, actor: runActor });
+        registerOwnerRoutes(app, { db: core.db, store: core.store, github: provides.github, githubApp: core.githubApp });
       },
       // Fill in any of the sizes this database does not carry yet, and touch none that it does:
       // create-only, so an installation that edited a size keeps its figures across every restart.

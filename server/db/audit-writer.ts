@@ -3,15 +3,17 @@ import { audit } from "./schema/audit.ts";
 import { newId } from "../kernel/ids.ts";
 
 /**
- * The audit id is what orders the trail: `ts` has millisecond resolution, so an operator asking
- * `SELECT ... FROM audit WHERE action = '...' ORDER BY ts` sees two events written inside one
+ * The audit id is what orders the trail: `creation` has millisecond resolution, so an operator asking
+ * `SELECT ... FROM audit WHERE action = '...' ORDER BY creation` sees two events written inside one
  * millisecond in an order that is not the order they happened in, with nothing on the row saying
  * so. `ORDER BY id` is exact instead, because kernel/ids.ts mints ids that rise with every write —
  * the platform's one answer for a tied timestamp, and the reason this file mints no id of its own.
  */
 
+/** Who acted is not part of the entry: the stamp columns record the actor of the call chain
+ *  (kernel/actor.ts runActor). A write on behalf of an operator outside a request, such as a login,
+ *  runs inside runAsActor(that operator). */
 export interface AuditEntry {
-  actor: string; // operator id, or "system" (resume-on-boot)
   action: string; // dot-namespaced action name
   targetKind?: string;
   targetId?: string;
@@ -27,7 +29,6 @@ export function writeAudit(db: Db, entry: AuditEntry): void {
   db.insert(audit)
     .values({
       id: newId("aud"),
-      actor: entry.actor,
       action: entry.action,
       targetKind: entry.targetKind ?? null,
       targetId: entry.targetId ?? null,

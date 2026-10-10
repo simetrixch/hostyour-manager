@@ -7,7 +7,7 @@ const now = sql`(unixepoch('subsec') * 1000)`;
 // OIDC login, keyed on the stable `subject`, and only domains/access may write here (dep-cruiser rule
 // only-access-writes-operators). Group membership is deliberately not stored — every session re-reads
 // it from the IdP. The baseline migration seeds op_system and op_emergency (username "emergency"); the
-// reset wipe keeps both, because runs.started_by has an FK onto this table and a break-glass session
+// reset wipe keeps both, because runs.owner has an FK onto this table and a break-glass session
 // with no operator row could not start a run at all.
 export const operators = sqliteTable("operators", {
   id: text("id").primaryKey(),                                     // "op_" + ulid

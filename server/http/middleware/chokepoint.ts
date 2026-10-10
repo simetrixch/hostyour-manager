@@ -59,7 +59,7 @@ export function chokepoint(config: Config, session: SessionCodec): MiddlewareHan
         });
       }
       // Attribute everything this request does — however deep the async chain — to the signed-in
-      // operator: the Executor's and CredentialStore's audit writes read it back via currentActor().
+      // operator: every row the request writes stamps it through runActor().
       return runAsActor(gate.operator.sub, () => next());
     }
     if (gate.kind === "unauthenticated") {

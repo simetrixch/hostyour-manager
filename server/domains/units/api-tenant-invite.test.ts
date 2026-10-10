@@ -61,7 +61,7 @@ async function makeTenant(apex?: string): Promise<{ app: Hono<AppEnv>; cookie: s
     }),
     argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
   });
-  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh, actor: () => "op_system" });
+  const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });
   const session = new SessionCodec(db.db, config);
   const activator = new FakeActivator();
   const app = createApp({

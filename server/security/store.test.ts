@@ -57,17 +57,17 @@ describe("CredentialStore (plaintext pass-through)", () => {
     expect(opened.equals(copy)).toBe(true);
   });
 
-  it("audits seal/open with the request's operator when one is bound, else 'system'", async () => {
+  it("audits seal/open with the request's operator when one is bound, else op_system", async () => {
     const { store, sqlite } = fresh();
     // Inside a request the chokepoint binds the operator (kernel/actor.ts); the store's audit rows
-    // must name that human. Outside any request (boot seeding, resume) they stay "system".
+    // must name that human. Outside any request (boot seeding, resume) they name op_system.
     const ref = await runAsActor("op_a", () => store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "x", plaintext: Buffer.from("secret-value"), fingerprint: "sha256:a" }));
     await runAsActor("op_a", () => store.open(ref.id, { purpose: "test" }));
-    const actors = (sqlite.prepare("SELECT actor, action FROM audit WHERE target_id=? ORDER BY ts").all(ref.id) as { actor: string; action: string }[]);
-    expect(actors.map((a) => [a.action, a.actor])).toEqual([["credential.created", "op_a"], ["credential.used", "op_a"]]);
+    const actors = (sqlite.prepare("SELECT owner, action FROM audit WHERE target_id=? ORDER BY creation").all(ref.id) as { owner: string; action: string }[]);
+    expect(actors.map((a) => [a.action, a.owner])).toEqual([["credential.created", "op_a"], ["credential.used", "op_a"]]);
     const boot = await store.seal({ kind: "pat", subject: { kind: "unit", id: "acme" }, purpose: "repository-identity", label: "y", plaintext: Buffer.from("secret-value"), fingerprint: "sha256:b" });
-    const row = sqlite.prepare("SELECT actor FROM audit WHERE target_id=? AND action='credential.created'").get(boot.id) as { actor: string };
-    expect(row.actor).toBe("system");
+    const row = sqlite.prepare("SELECT owner FROM audit WHERE target_id=? AND action='credential.created'").get(boot.id) as { owner: string };
+    expect(row.owner).toBe("op_system");
   });
 
   it("open on a revoked credential throws; the blob is kept for audit", async () => {

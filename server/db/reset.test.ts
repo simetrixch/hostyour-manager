@@ -15,12 +15,12 @@ function seedClusters(db: DbHandle): void {
   s.prepare("INSERT INTO servers (id, name, host, ssh_user, role, status) VALUES ('srv_s','s1','5.6.7.8','root','slave','ready')").run();
   s.prepare("INSERT INTO clusters (id, server_id, stage, domain, name, status) VALUES ('cl_s','srv_s','prod','s1.example.com','s1','active')").run();
   s.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint) VALUES ('cred_s','ssh_key','k','server','srv_s','ssh-key','plain:v0:AA==','fp')").run();
-  s.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_1','deploy-slave','server','srv_s','{}','{}','succeeded','op_system')").run();
-  s.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status) VALUES ('st_1','run_1',0,'x','X','ok')").run();
-  s.prepare("INSERT INTO events (id, run_id, stream, seq, text) VALUES ('ev_1','run_1','stdout',0,'hi')").run();
-  s.prepare("INSERT INTO run_locks (resource, key, run_id) VALUES ('server','s1','run_1')").run();
+  s.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('run_1','deploy-slave','server','srv_s','{}','{}','succeeded','op_system','op_system')").run();
+  s.prepare("INSERT INTO steps (id, run_id, ordinal, name, title, status, owner, modified_by) VALUES ('st_1','run_1',0,'x','X','ok','op_system','op_system')").run();
+  s.prepare("INSERT INTO events (id, run_id, stream, seq, text, owner, modified_by) VALUES ('ev_1','run_1','stdout',0,'hi','op_system','op_system')").run();
+  s.prepare("INSERT INTO run_locks (id, resource, key, run_id, owner, modified_by) VALUES ('lock_1','server','s1','run_1','op_system','op_system')").run();
   s.prepare("INSERT INTO meta (key, value) VALUES ('keystore.mode','plaintext')").run();
-  writeAudit(db.db, { actor: "op_system", action: "credential.created", targetKind: "credential", targetId: "cred_s" });
+  writeAudit(db.db, { action: "credential.created", targetKind: "credential", targetId: "cred_s" });
 }
 
 // A tenant on the seeded cluster; `withApp` adds the tenant_apps row hanging off it. The two rows sit
@@ -141,8 +141,8 @@ describe("manager DB reset (db/reset.ts)", () => {
       .all() as { name: string }[];
     expect(triggers.map((t) => t.name).sort()).toEqual(["audit_no_delete", "events_no_delete"]);
     // and they actually bite again
-    db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('run_2','noop','self','c','{}','{}','succeeded','op_system')").run();
-    db.sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text) VALUES ('ev_2','run_2','stdout',0,'x')").run();
+    db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('run_2','noop','self','c','{}','{}','succeeded','op_system','op_system')").run();
+    db.sqlite.prepare("INSERT INTO events (id, run_id, stream, seq, text, owner, modified_by) VALUES ('ev_2','run_2','stdout',0,'x','op_system','op_system')").run();
     expect(() => db.sqlite.prepare("DELETE FROM events").run()).toThrow(/append-only/);
   });
 
@@ -191,7 +191,7 @@ describe("manager DB reset (db/reset.ts)", () => {
   it("countLiveRuns counts only planning/approved/running", () => {
     const db = make();
     const ins = (id: string, status: string) =>
-      db.sqlite.prepare(`INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('${id}','noop','self','c','{}','{}','${status}','op_system')`).run();
+      db.sqlite.prepare(`INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('${id}','noop','self','c','{}','{}','${status}','op_system','op_system')`).run();
     ins("r_plan", "planned"); // parked — not live
     ins("r_done", "succeeded");
     expect(countLiveRuns(db.sqlite)).toBe(0);

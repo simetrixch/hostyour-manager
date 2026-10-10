@@ -567,7 +567,7 @@ export async function makeHarness(opts: { hosts?: HostsScript; keystore?: string
   const executor = new Executor({
     db: db.db, creds: store, bus: new RunEventBus(), logger,
     runDefinitions: buildRunDefinitions(runPorts),
-    sshFactory: hostsFactory(hosts), actor: () => "op_system",
+    sshFactory: hostsFactory(hosts),
   });
   if (opts.keystore) {
     db.db.insert(meta).values({ key: "keystore.mode", value: opts.keystore })

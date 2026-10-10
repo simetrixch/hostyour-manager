@@ -1,6 +1,5 @@
 import type { Hono } from "hono";
 import { loadConfig, type Config } from "../kernel/config.ts";
-import { runActor } from "../kernel/actor.ts";
 import { createLogger, type Logger } from "../kernel/logger.ts";
 import { openDb, type DbHandle } from "../db/client.ts";
 import { runSelfChecks, runAsyncSelfChecks, assertBlockingChecksPass, readinessOf, type CheckResult } from "./selfchecks.ts";
@@ -280,7 +279,6 @@ export async function wire(): Promise<Wired> {
     logger,
     runDefinitions,
     sshFactory: createSshSession,
-    actor: runActor,
   });
   phase("units, run definitions and executor");
   // Master self-registration (seed-master.ts): make a fresh DB carry the role=master row +
@@ -368,7 +366,7 @@ export async function wire(): Promise<Wired> {
       registerRunRoutes(a, { executor, db: db.db, bus, config, logger });
       registerInstallationDomainRoutes(a, db.db, installationDomainPorts);
       registerClustersRoutes(a, { db: db.db, storeMode: () => (store.mode() === "plaintext" ? "plaintext" : "sealed"), logger });
-      registerServerRoutes(a, { db: db.db, creds: store, actor: runActor, probe: new NetTcpProbe() });
+      registerServerRoutes(a, { db: db.db, creds: store, probe: new NetTcpProbe() });
       // The mail DNS of the installation, measured at public resolvers, and beside it every record
       // this installation is responsible for at the DNS provider. Both read-only: publishing and
       // removing are runs, so what a record costs is always planned and approved.

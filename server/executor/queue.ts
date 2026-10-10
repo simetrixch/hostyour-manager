@@ -2,7 +2,7 @@ import { and, asc, eq, isNull } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { runs, runLocks, steps } from "../db/schema/runs.ts";
 import type { QueuedRunView } from "../../shared/api-types.ts";
-import { dedupeClaims, deriveServerLocks, lockConflicts, type TakenClaim } from "./locks.ts";
+import { dedupeClaims, deriveServerLocks, insertLock, lockConflicts, type TakenClaim } from "./locks.ts";
 import { defaultTargets } from "./run-targets.ts";
 import type { LockClaim, PlanSnapshot } from "./types.ts";
 
@@ -25,11 +25,11 @@ interface QueueSlot { view: QueuedRunView; claims: LockClaim[] }
  *  or not, so a later run never overtakes it on a shared lock, and one that shares nothing with it
  *  never waits for it. `taken` ends as the held locks plus every reservation. */
 function walkQueue(db: Db, hasSecrets: HasSecrets): { slots: QueueSlot[]; taken: TakenClaim[] } {
-  const taken: TakenClaim[] = db.select().from(runLocks).all();
+  const taken: TakenClaim[] = db.select().from(runLocks).where(isNull(runLocks.deleted)).all();
   const queued = db
     .select({ id: runs.id, kind: runs.kind, targetKind: runs.targetKind, targetId: runs.targetId, approvedAt: runs.approvedAt, planJson: runs.planJson })
     .from(runs)
-    .where(and(eq(runs.status, "queued"), isNull(runs.deletedAt)))
+    .where(and(eq(runs.status, "queued"), isNull(runs.deleted)))
     .orderBy(asc(runs.approvedAt), asc(runs.id))
     .all();
   const slots = queued.map((r, i): QueueSlot => {
@@ -70,8 +70,8 @@ export function conflictsAtEndOfQueue(db: Db, claims: LockClaim[], hasSecrets: H
 
 /** Start every queued run that waits for nothing: take its locks and move it to `approved`, in one
  *  IMMEDIATE transaction, so a second dispatcher (another connection to the same file) waits for this
- *  one and then finds nothing left to start. The `status = 'queued'` condition and the run_locks
- *  primary key hold the same even without it: a run is never started twice, nor while a lock is held.
+ *  one and then finds nothing left to start. The `status = 'queued'` condition and the unique
+ *  index over the live run_locks hold the same even without it: a run is never started twice, nor while a lock is held.
  *  Answers the runs it started. */
 export function startQueuedRuns(db: Db, hasSecrets: HasSecrets): string[] {
   return db.transaction((tx) => {
@@ -80,7 +80,7 @@ export function startQueuedRuns(db: Db, hasSecrets: HasSecrets): string[] {
       if (view.needsSecrets || view.waitsFor.length > 0) continue;
       const moved = tx.update(runs).set({ status: "approved" }).where(and(eq(runs.id, view.runId), eq(runs.status, "queued"))).run();
       if (moved.changes !== 1) continue;
-      for (const c of claims) tx.insert(runLocks).values({ resource: c.resource, key: c.key, runId: view.runId }).run();
+      for (const c of claims) insertLock(tx, c, view.runId);
       started.push(view.runId);
     }
     return started;

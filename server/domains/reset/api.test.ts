@@ -154,7 +154,7 @@ describe("reset API (POST /api/reset)", () => {
   it("409 when a run is in flight (even without wipeDb)", async () => {
     const { client } = fakeGitHub();
     const { app, db, session } = make(client);
-    db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, started_by) VALUES ('r','noop','self','c','{}','{}','running','op_system')").run();
+    db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES ('r','noop','self','c','{}','{}','running','op_system','op_system')").run();
     const res = await post(app, await cookie(session), { ...req, deleteBranches: ["s1.example.com"] });
     expect(res.status).toBe(409);
     expect(auditRefusals(db)).toBe(1);
@@ -190,8 +190,8 @@ describe("reset API (POST /api/reset)", () => {
     expect(res.status).toBe(403);
     expect(auditRefusals(db)).toBe(1);
     // The refusal names the authority, which is the only thing the route read.
-    const refusal = db.sqlite.prepare("SELECT actor, detail_json AS d FROM audit WHERE action='manager.reset.refused'").get() as { actor: string; d: unknown };
-    expect(refusal.actor).toBe("op_emergency");
+    const refusal = db.sqlite.prepare("SELECT owner, detail_json AS d FROM audit WHERE action='manager.reset.refused'").get() as { owner: string; d: unknown };
+    expect(refusal.owner).toBe("op_emergency");
     expect(JSON.parse(String(refusal.d)) as Record<string, unknown>).toMatchObject({ via: "emergency" });
   });
 

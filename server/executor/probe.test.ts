@@ -79,7 +79,7 @@ describe("the two plan paths freeze the findings", () => {
     handles.push(db);
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,
-      runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh, actor: () => "op_system",
+      runDefinitions: new Map<RunKind, AnyRunDefinition>([["noop", def]]), sshFactory: noSsh,
     });
     return { db, executor };
   }

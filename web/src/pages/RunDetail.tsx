@@ -182,7 +182,7 @@ export function RunDetail() {
   function copyReport(): void {
     if (!run) return;
     const text = [
-      `Run: ${run.kind}  [${run.status}]${run.deletedAt !== null ? "  (deleted)" : ""}`,
+      `Run: ${run.kind}  [${run.status}]${run.deleted !== null ? "  (deleted)" : ""}`,
       `id: ${run.id}`,
       ...(run.summary ? [`summary: ${run.summary}`] : []),
       "",
@@ -236,13 +236,13 @@ export function RunDetail() {
         <div className="runhead__row">
           <h2 className="runhead__title">{run.kind}</h2>
           <span className={`badge badge--${run.status}`}>{run.status}</span>
-          {run.deletedAt !== null && <span className="badge badge--cancelled">deleted</span>}
+          {run.deleted !== null && <span className="badge badge--cancelled">deleted</span>}
           <span className="runhead__id">{run.id}</span>
         </div>
         {run.summary && <p className="runhead__summary">{run.summary}</p>}
       </header>
 
-      {run.deletedAt !== null && (
+      {run.deleted !== null && (
         <div className="actionbar">
           <span className="actionbar__text">
             This run was deleted — it no longer appears in the runs list. Its full log stays in the audit DB and remains
@@ -253,15 +253,15 @@ export function RunDetail() {
 
       {/* What the probes measured, above whichever approve the kind renders: the operator reads the
           world's answers before handing anything over (executor/probe.ts). */}
-      {run.deletedAt === null && run.status === "planned" && <PlanFindings findings={run.findings} />}
+      {run.deleted === null && run.status === "planned" && <PlanFindings findings={run.findings} />}
 
-      {run.deletedAt === null && run.status === "queued" && queued && (
+      {run.deleted === null && run.status === "queued" && queued && (
         <p role="alert" className="alert alert--info">
           Queued at place {queued.place}: {queueLine(queued)}.
         </p>
       )}
 
-      {run.deletedAt === null &&
+      {run.deleted === null &&
         (run.status === "planned" || (run.status === "queued" && queued?.needsSecrets)) &&
         run.kind === "cluster-deploy-slave" && (
           <DeploySlaveApproveForm
@@ -271,7 +271,7 @@ export function RunDetail() {
           />
         )}
 
-      {run.deletedAt === null &&
+      {run.deleted === null &&
         run.kind !== "cluster-deploy-slave" &&
         ((run.status === "planned" &&
           (run.requiredSecrets.length > 0 || run.optionalSecrets.length > 0 || run.requiredInputs.length > 0)) ||
@@ -287,7 +287,7 @@ export function RunDetail() {
           />
         )}
 
-      {run.deletedAt === null &&
+      {run.deleted === null &&
         run.status === "planned" &&
         run.kind !== "cluster-deploy-slave" &&
         run.requiredSecrets.length === 0 &&
@@ -342,7 +342,7 @@ export function RunDetail() {
           dialog standing. */}
       {asksTenantState && <FailedCreateTenantCallout key={runId} tenant={tenant} error={tenantError} />}
 
-      {run.deletedAt === null && run.aborted && (
+      {run.deleted === null && run.aborted && (
         <div className="actionbar">
           <span className="actionbar__text">This run was aborted — its compensations ran, or none were registered; nothing is left to resume.</span>
           <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
@@ -351,7 +351,7 @@ export function RunDetail() {
         </div>
       )}
 
-      {run.deletedAt === null && run.status === "cancelled" && !run.aborted && !recoverable(run) && (
+      {run.deleted === null && run.status === "cancelled" && !run.aborted && !recoverable(run) && (
         <div className="actionbar">
           <span className="actionbar__text">This plan was discarded before it started — nothing ran, and nothing is left to resume; plan it again if you still want it.</span>
           <button type="button" className="btn btn--danger" onClick={() => setConfirmDelete(true)}>
@@ -360,7 +360,7 @@ export function RunDetail() {
         </div>
       )}
 
-      {run.deletedAt === null && run.status === "succeeded" && (
+      {run.deleted === null && run.status === "succeeded" && (
         <div className="actionbar">
           {/* DELETING HIDES THE RUN AND TEARS NOTHING DOWN, which is what the executor states:
               a soft-deleted succeeded run keeps its inventory row and

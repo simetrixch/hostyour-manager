@@ -87,7 +87,7 @@ export async function serverCredFlags(creds: CredentialStore): Promise<Map<strin
 /** Insert a `bare` server + audit; returns its view. Synchronous, because adding a server writes two
  *  rows of this database and reaches no credential store: a machine nobody has reached yet holds no
  *  credential to seal. */
-export function createServer(db: Db, actor: string, input: CreateServerInput): ServerView {
+export function createServer(db: Db, input: CreateServerInput): ServerView {
   const id = srvId();
   try {
     db.insert(servers)
@@ -108,7 +108,7 @@ export function createServer(db: Db, actor: string, input: CreateServerInput): S
     }
     throw err;
   }
-  writeAudit(db, { actor, action: "server.created", targetKind: "server", targetId: id, detail: { name: input.name, host: input.host } });
+  writeAudit(db, { action: "server.created", targetKind: "server", targetId: id, detail: { name: input.name, host: input.host } });
   const view = getServer(db, id, new Map([[id, { hasPassword: false, hasKey: false }]]));
   if (!view) throw errValidation("server not found immediately after creation");
   return view;
@@ -116,7 +116,7 @@ export function createServer(db: Db, actor: string, input: CreateServerInput): S
 
 /** Delete a not-yet-clustered server: purge its credentials (hard) then remove the row. Refuses
  *  once a cluster exists (that is a rebuild/remove Run, not a delete). */
-export async function deleteServer(db: Db, creds: CredentialStore, actor: string, id: string): Promise<void> {
+export async function deleteServer(db: Db, creds: CredentialStore, id: string): Promise<void> {
   const row = db.select().from(servers).where(eq(servers.id, id)).get();
   if (!row) throw errValidation(`server ${id} not found`);
   if (isMasterRole(row.role)) throw errValidation("The master (this manager) cannot be deleted.");
@@ -124,5 +124,5 @@ export async function deleteServer(db: Db, creds: CredentialStore, actor: string
   if (cluster) throw errValidation("This server has a cluster — remove the cluster first (a rebuild/remove Run), not delete.");
   for (const c of await creds.list({ subject: { kind: "server", id } })) await creds.purge(c.id);
   db.delete(servers).where(eq(servers.id, id)).run();
-  writeAudit(db, { actor, action: "server.deleted", targetKind: "server", targetId: id, detail: { name: row.name } });
+  writeAudit(db, { action: "server.deleted", targetKind: "server", targetId: id, detail: { name: row.name } });
 }

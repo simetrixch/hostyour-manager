@@ -12,6 +12,7 @@ import {
 } from "../../../shared/operator-keys.ts";
 import type { OperatorKeyView } from "../../../shared/api-types.ts";
 import type { AuthorizedKeyKind } from "../../../shared/enums.ts";
+import { runActor } from "../../kernel/actor.ts";
 
 // The ONE writer of `operator_keys`: a human operator's own SSH public key, so the platform can
 // place it on a machine and take it off again.
@@ -106,7 +107,7 @@ export function listOperatorKeyIdentities(db: Db): OperatorKeyIdentity[] {
 /** Store an operator's public key. The pasted text is normalized to `<type> <base64>` — the comment
  *  the operator's own key carries is dropped, because the comment on the placed line is the marker a
  *  removal keys on and a line may only have one. */
-export function createOperatorKey(db: Db, actor: string, input: CreateOperatorKeyInput): OperatorKeyView {
+export function createOperatorKey(db: Db, input: CreateOperatorKeyInput): OperatorKeyView {
   const label = input.label.trim();
   if (!isOperatorKeyLabel(label)) {
     throw errValidation(
@@ -125,7 +126,7 @@ export function createOperatorKey(db: Db, actor: string, input: CreateOperatorKe
   const id = opkId();
   try {
     db.insert(operatorKeys)
-      .values({ id, label, publicKey: normalized.publicKey, type: normalized.type, fingerprint, createdBy: actor })
+      .values({ id, label, publicKey: normalized.publicKey, type: normalized.type, fingerprint, createdBy: runActor() })
       .run();
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint/i.test(err.message)) {
@@ -133,7 +134,7 @@ export function createOperatorKey(db: Db, actor: string, input: CreateOperatorKe
     }
     throw err;
   }
-  writeAudit(db, { actor, action: "operator_key.created", targetKind: "credential", targetId: id, detail: { label, fingerprint } });
+  writeAudit(db, { action: "operator_key.created", targetKind: "credential", targetId: id, detail: { label, fingerprint } });
   const view = listOperatorKeys(db).find((k) => k.id === id);
   if (!view) throw errValidation("operator key not found immediately after creation");
   return view;
@@ -158,7 +159,7 @@ export function createOperatorKey(db: Db, actor: string, input: CreateOperatorKe
  * whose content is unknown — and treating unknown as "the key is not there" is the one reading of it
  * that cannot be taken back, because the row is what the removal needs.
  */
-export function deleteOperatorKey(db: Db, actor: string, id: string): void {
+export function deleteOperatorKey(db: Db, id: string): void {
   const row = loadOperatorKey(db, id);
   const { holding, undecided } = serversHolding(db, row.fingerprint);
   if (holding.length > 0 || undecided.length > 0) {
@@ -181,5 +182,5 @@ export function deleteOperatorKey(db: Db, actor: string, id: string): void {
     ].join(" "));
   }
   db.delete(operatorKeys).where(eq(operatorKeys.id, id)).run();
-  writeAudit(db, { actor, action: "operator_key.deleted", targetKind: "credential", targetId: id, detail: { label: row.label, fingerprint: row.fingerprint } });
+  writeAudit(db, { action: "operator_key.deleted", targetKind: "credential", targetId: id, detail: { label: row.label, fingerprint: row.fingerprint } });
 }
