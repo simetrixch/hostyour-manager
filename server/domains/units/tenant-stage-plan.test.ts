@@ -257,6 +257,45 @@ describe("stage resources cannot reach a sibling", () => {
     expect(remove).toHaveBeenCalledWith(source.appsImage, "run_stages");
   });
 
+  describe("keeps a bundle build that another tenant records", () => {
+    const OTHER = "b2c3d4e5f6g7";
+    async function removeProdTenant(seedOther: (books: FakePlatformRepo, source: TenantRegistration) => void) {
+      const p = stagePorts();
+      const source = (await p.registrations.readTenant("prod", GUID))!.entry;
+      const books = new FakePlatformRepo();
+      const write = tenantRegistrationWrite("prod", GUID, source); books.seed(books.booksBranch, write.path, write.content);
+      seedOther(books, source);
+      p.registrations = new TenantRegistrations(books);
+      const buildRegistrations = new Registrations(new FakePlatformRepo());
+      const remove = vi.spyOn(buildRegistrations, "removeBuildRegistration").mockResolvedValue({ removed: true });
+      const logs: string[] = [];
+      const ctx = { ...context({} as CreateTenantParams), log: (_kind: string, line: string) => { logs.push(line); } } as StepCtx;
+      await removeTenantAppsRegistration(ctx, { ...p, buildRegistrations }, { stage: "prod", guid: GUID }, { clear: false });
+      return { remove, logs, source };
+    }
+
+    it("keeps it while another tenant at another stage records the same image", async () => {
+      const { remove, logs, source } = await removeProdTenant((books, source) => {
+        const write = tenantRegistrationWrite("test", OTHER, source); books.seed(books.booksBranch, write.path, write.content);
+      });
+      expect(remove).not.toHaveBeenCalled();
+      expect(logs).toContain(`build registration of ${source.appsImage} stays for tenant ${OTHER} at test`);
+    });
+
+    it("removes it where another tenant records a different image", async () => {
+      const { remove, source } = await removeProdTenant((books, source) => {
+        const write = tenantRegistrationWrite("test", OTHER, { ...source, appsImage: "another-bundle" }); books.seed(books.booksBranch, write.path, write.content);
+      });
+      expect(remove).toHaveBeenCalledWith(source.appsImage, "run_stages");
+    });
+
+    it("keeps it while another tenant's registration cannot be read", async () => {
+      const { remove, logs, source } = await removeProdTenant((books) => books.seed(books.booksBranch, `registrations/${OTHER}/test.yaml`, "subdomain: [unclosed\n"));
+      expect(remove).not.toHaveBeenCalled();
+      expect(logs.some((line) => line.startsWith(`build registration of ${source.appsImage} stays: registrations/${OTHER}/test.yaml is not valid YAML`))).toBe(true);
+    });
+  });
+
   it("an Add stage abort removes only that stage's recorded hosts", async () => {
     const p = stagePorts();
     const dns = new FakeDnsProvider(); p.dns = dns;

@@ -386,7 +386,7 @@ describe("the pointer scan reports what it could NOT read", () => {
         guid: GUID, subdomain: "simetrix", stage: "dev", cluster: "s1",
         members: ["auth", "jobs", "report", "erp"],
         ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [],
-        senderDomain: "", identityProvider: "auth",
+        senderDomain: "", identityProvider: "auth", appsImage: "",
         apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
       },
     });

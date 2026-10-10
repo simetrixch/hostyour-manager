@@ -94,6 +94,9 @@ export interface ScannedTenant {
   ownDomainRedirects: string[];
   ownDomainAliases: string[];
   senderDomain: string;
+  /** The apps bundle image this tenant builds from, or "" — a removal keeps the bundle's build
+   *  registration while any other tenant records the same image. */
+  appsImage: string;
 }
 
 /** The three HONEST outcomes of reading ONE tenant registration, kept apart because the callers act
@@ -197,7 +200,7 @@ export class TenantRegistrations {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
         members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
-        senderDomain: r.data.senderDomain ?? "",
+        senderDomain: r.data.senderDomain ?? "", appsImage: r.data.appsImage ?? "",
       },
     };
   }
