@@ -3,7 +3,8 @@ import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
 import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
-import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
+import type { BranchScope } from "../../adapters/git/port.ts";
+import { TenantRegistrations, tenantRegistrationWrite, type PinHistory } from "./tenant-registrations.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { testMembers, TEST_BUNDLE, TEST_CHANNEL_STAGES } from "./tenant-members.fixture.ts";
 import { readTenantVersions, sameApprovals, stagePinsAndNamesOf, stagePinsOf, withChosenVersions, withMissingPins, type Approvals, type StagePins } from "./tenant-versions.ts";
@@ -132,31 +133,83 @@ describe("tenant versions", () => {
     });
   });
 
+  /** The engine's pins as releases wrote them: OLD, then NEWER, and then NEW put back on the stage. */
+  const releasedThenPutBack = (): TenantRegistrations => books(
+    { erp: { "example-engine": NEW, "example-worker": NEW }, auth: { "example-auth": NEW } },
+    [{ "example-engine": OLD, "example-worker": OLD }, { "example-engine": NEWER, "example-worker": NEWER }, { "example-engine": NEW, "example-worker": NEW }],
+  );
+  const versionPorts = (registrations: TenantRegistrations) => ({
+    registrations,
+    attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-platform", build: "example-worker" }],
+    resolveClusterValueFiles: async () => [{ path: clusterMapPath("s1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example\n" }],
+    registryProbe: new FakeRegistryProbe({
+      tags: {
+        "example-engine": [OLDEST, OLD, NEW, NEWER, BETA, "latest"],
+        "example-worker": [OLD, NEW, NEWER, BETA],
+        "example-auth": [NEW],
+      },
+    }),
+    channelStages: async () => TEST_CHANNEL_STAGES,
+  });
+  const asPorts = (ports: ReturnType<typeof versionPorts>): TenantOnboardPorts => ports as unknown as TenantOnboardPorts;
+
+  /** Every books-branch turn the registrations open, in order: each one fetches and resets the books worktree. */
+  function countTurns(registrations: TenantRegistrations): string[] {
+    const repo = (registrations as unknown as { repo: FakePlatformRepo }).repo;
+    const turns: string[] = [];
+    const withBranch = repo.withBranch.bind(repo);
+    repo.withBranch = <T>(branch: string, fn: (scope: BranchScope) => Promise<T>): Promise<T> => {
+      turns.push(branch);
+      return withBranch(branch, fn);
+    };
+    return turns;
+  }
+
   it("offers per part the versions a stage pin named that every image of it stands at in the registry, newest first, one put back on the stage included, and none on a channel the stage does not take", async () => {
-    // The releases pinned OLD, then NEWER, and then put NEW back on the stage: NEWER stays available.
-    const registrations = books(
-      { erp: { "example-engine": NEW, "example-worker": NEW }, auth: { "example-auth": NEW } },
-      [{ "example-engine": OLD, "example-worker": OLD }, { "example-engine": NEWER, "example-worker": NEWER }, { "example-engine": NEW, "example-worker": NEW }],
-    );
-    const ports = {
-      registrations,
-      attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-platform", build: "example-worker" }],
-      resolveClusterValueFiles: async () => [{ path: clusterMapPath("s1.example"), content: "global:\n  endpoints:\n    registry:\n      host: zot.s1.example\n" }],
-      registryProbe: new FakeRegistryProbe({
-        tags: {
-          "example-engine": [OLDEST, OLD, NEW, NEWER, BETA, "latest"],
-          "example-worker": [OLD, NEW, NEWER, BETA],
-          "example-auth": [NEW],
-        },
-      }),
-      channelStages: async () => TEST_CHANNEL_STAGES,
-    } as unknown as TenantOnboardPorts;
-    expect(await readTenantVersions(ports, db.db, "tnt_1")).toEqual({
+    expect(await readTenantVersions(asPorts(versionPorts(releasedThenPutBack())), db.db, "tnt_1", undefined, () => {})).toEqual({
       stage: "prod",
       parts: [
         { name: "example-auth", builds: ["example-auth"], running: [NEW], versions: [{ tag: NEW, older: false }] },
         { name: "example-platform", builds: ["example-engine", "example-worker"], running: [NEW], versions: [{ tag: NEWER, older: false }, { tag: NEW, older: false }, { tag: OLD, older: true }] },
       ],
     });
+  });
+
+  it("reads the registration in one books turn and every pin file in one more, lists each image's tags once, and logs the time of each read", async () => {
+    const registrations = releasedThenPutBack();
+    const turns = countTurns(registrations);
+    const ports = versionPorts(registrations);
+    const lines: string[] = [];
+    await readTenantVersions(asPorts(ports), db.db, "tnt_1", undefined, (line) => lines.push(line));
+    expect(turns).toEqual([registrations.branch, registrations.branch]);
+    expect([...ports.registryProbe.listed].sort()).toEqual(["example-auth", "example-engine", "example-worker"]);
+    expect(lines.map((l) => l.replace(/\d+ ms$/, "N ms")).sort()).toEqual([
+      "channel stages: N ms",
+      "cluster values: N ms",
+      "parts and their stage pins: N ms",
+      "registration: N ms",
+      "registry tags of 3 images: N ms",
+      `versions read of tenant ${GUID}: N ms`,
+    ]);
+  });
+
+  it("PLANTED DEFECT: a pin read that opens one turn per pin file breaks the bound of two turns", async () => {
+    const registrations = releasedThenPutBack();
+    const turns = countTurns(registrations);
+    const oneTurn = registrations.listPinHistories.bind(registrations);
+    registrations.listPinHistories = async (stage, pinsDirs) => {
+      const each = new Map<string, PinHistory[]>();
+      for (const dir of pinsDirs) each.set(dir, (await oneTurn(stage, [dir])).get(dir) ?? []);
+      return each;
+    };
+    await readTenantVersions(asPorts(versionPorts(registrations)), db.db, "tnt_1", undefined, () => {});
+    expect(turns.length).toBeGreaterThan(2);
+  });
+
+  it("logs the time of the read that failed, and the whole read, where the tenant is not onboarded", async () => {
+    const lines: string[] = [];
+    const ports = versionPorts(new TenantRegistrations(new FakePlatformRepo()));
+    await expect(readTenantVersions(asPorts(ports), db.db, "tnt_1", undefined, (line) => lines.push(line))).rejects.toThrow(`tenant ${GUID} is not onboarded`);
+    expect(lines.map((l) => l.replace(/\d+ ms$/, "N ms"))).toEqual(["registration: N ms", `versions read of tenant ${GUID}: N ms`]);
   });
 });

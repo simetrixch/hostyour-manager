@@ -31,6 +31,8 @@ export interface RunGitOptions {
   /** Override the budget where the caller can wait less than the default — a check that runs
    *  before the listener stands is not a run somebody is watching. */
   timeoutMs?: number;
+  /** Written to git's stdin, for a command that reads its requests there (`cat-file --batch`). */
+  input?: string;
 }
 
 // Prompts hard-off — that is HALF of "a wedged fetch must fail, not hang": it ends a git waiting
@@ -71,7 +73,7 @@ function fail(args: readonly string[], e: unknown, budgetMs: number): never {
 export async function runGit(args: string[], opts: RunGitOptions): Promise<string> {
   const budgetMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   try {
-    const { stdout } = await execFileP("git", args, {
+    const running = execFileP("git", args, {
       cwd: opts.cwd,
       env: childEnv(opts.env),
       maxBuffer: opts.maxBuffer ?? DEFAULT_MAX_BUFFER,
@@ -79,6 +81,8 @@ export async function runGit(args: string[], opts: RunGitOptions): Promise<strin
       windowsHide: true,
       ...(opts.signal ? { signal: opts.signal } : {}),
     });
+    if (opts.input !== undefined) running.child.stdin?.end(opts.input);
+    const { stdout } = await running;
     return stdout;
   } catch (e) {
     fail(args, e, budgetMs);

@@ -108,6 +108,14 @@ export type TenantScan =
   | { status: "unreadable"; reason: string }
   | { status: "read"; entry: ScannedTenant };
 
+/** A build a stage pin file names now, with every tag the file has named for it, newest first. */
+export interface PinHistory {
+  name: string;
+  image: string;
+  tag: string;
+  released: string[];
+}
+
 export interface TenantRead {
   entry: TenantRegistration;
 }
@@ -455,23 +463,28 @@ export class TenantRegistrations {
     return raw === null ? [] : pinnedBuildsIn(raw);
   }
 
-  /** The builds a stage pin file names now (`<pinsDir>/pins-<stage>.yaml`, the directory of a chart or
-   *  of an apps bundle), each with every tag the file has named for it on the books branch, newest
-   *  first: what releases have made available at this stage, then and now. One turn, so the pins and
-   *  their history are read off the same commit. */
-  async listPinHistory(stage: Stage, pinsDir: string): Promise<{ name: string; image: string; tag: string; released: string[] }[]> {
-    const path = `${pinsDir}/pins-${stage}.yaml`;
-    const { now, history } = await this.repo.withBranch(this.branch, async (books) => ({ now: await books.readFile(path), history: await books.readFileHistory(path) }));
-    if (now === null) return [];
-    const released = new Map<string, string[]>();
-    for (const raw of history) {
-      for (const b of pinnedBuildsIn(raw)) {
-        const tags = released.get(b.name) ?? [];
-        if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
-        released.set(b.name, tags);
+  /** The builds each stage pin file names now (`<pinsDir>/pins-<stage>.yaml`, the directory of a chart
+   *  or of an apps bundle), each with every tag the file has named for it on the books branch, newest
+   *  first: what releases have made available at this stage, then and now. ONE turn for every
+   *  directory, because a turn fetches and resets the books worktree, and so the pins and their
+   *  history are read off the same commit. A directory without a pin file answers []. */
+  async listPinHistories(stage: Stage, pinsDirs: readonly string[]): Promise<ReadonlyMap<string, PinHistory[]>> {
+    const files = await this.repo.withBranch(this.branch, (books) => Promise.all([...new Set(pinsDirs)].map(async (pinsDir) => {
+      const path = `${pinsDir}/pins-${stage}.yaml`;
+      return { pinsDir, now: await books.readFile(path), history: await books.readFileHistory(path) };
+    })));
+    return new Map(files.map(({ pinsDir, now, history }) => {
+      if (now === null) return [pinsDir, []];
+      const released = new Map<string, string[]>();
+      for (const raw of history) {
+        for (const b of pinnedBuildsIn(raw)) {
+          const tags = released.get(b.name) ?? [];
+          if (b.tag && !tags.includes(b.tag)) tags.push(b.tag);
+          released.set(b.name, tags);
+        }
       }
-    }
-    return pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }));
+      return [pinsDir, pinnedBuildsIn(now).map((b) => ({ ...b, released: released.get(b.name) ?? [] }))];
+    }));
   }
 
   /** Write the image tags approved for this tenant alone. One field of one file; writing what it
