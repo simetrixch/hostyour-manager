@@ -34,14 +34,16 @@ export async function removeTenantAppsRegistration(ctx: StepCtx, ports: TenantLi
   const { appsRepo, appsImage } = current.entry;
   ctx.log("meta", `repository ${appsRepo} stands — this Manager deletes no repository (#241); it is the owner's to delete by hand once it is to go`);
   // The build registration is the bundle's, not the tenant's: every tenant at every stage that records
-  // the same image builds from it, and a registration that cannot be read cannot prove it does not.
+  // the same image builds from it. A registration that cannot be read cannot prove it does not, so the
+  // step fails rather than decide: the next step git-rms this tenant's registration, after which no
+  // rerun could find the build registration to take back.
   const scans = await Promise.all(STAGE.map((stage) => ports.registrations.listTenantPointers(stage)));
   const user = scans.flatMap((s) => s.pointers).find((p) => p.appsImage === appsImage && !(p.stage === t.stage && p.guid === t.guid));
-  const unreadable = scans.flatMap((s) => s.skipped)[0];
+  const unreadable = scans.flatMap((s) => s.skipped);
   if (user) {
     ctx.log("meta", `build registration of ${appsImage} stays for tenant ${user.guid} at ${user.stage}`);
-  } else if (unreadable) {
-    ctx.log("meta", `build registration of ${appsImage} stays: ${unreadable.reason}`);
+  } else if (unreadable.length > 0) {
+    throw new Error(`cannot tell whether another tenant builds from ${appsImage}: ${unreadable.length} registration(s) could not be read — ${unreadable.map((s) => s.reason).join("; ")}. Repair or remove them, then resume the run`);
   } else if (ports.buildRegistrations) {
     const { removed } = await ports.buildRegistrations.removeBuildRegistration(appsImage, ctx.runId);
     ctx.log("meta", removed ? `build registration of ${appsImage} removed` : `build registration of ${appsImage} already absent`);
