@@ -8,6 +8,7 @@ import { parseConfig } from "../../kernel/config.ts";
 import { REQUIRED_ENV } from "../../kernel/config.fixture.ts";
 import { createLogger } from "../../kernel/logger.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
+import { revokedSessions } from "../../db/schema/revoked-sessions.ts";
 import { SessionCodec, SESSION_COOKIE } from "./session.ts";
 import type { AppEnv } from "../../http/app-env.ts";
 import { LoginTxCodec, LOGIN_TX_COOKIE } from "./login-tx.ts";
@@ -117,6 +118,16 @@ describe("OIDC login flow + chokepoint end-to-end", () => {
     expect(setCookieValue(out, SESSION_COOKIE)).toBe(""); // cleared
     const reuse = await app.request("/protected", { headers: { cookie: `${SESSION_COOKIE}=${sess}`, accept: "application/json" } });
     expect(reuse.status).toBe(401); // jti revoked → invalid → gated
+  });
+
+  it("logout stamps the revoked session with the operator who signed out", async () => {
+    idp = await startMockIdp({ groups: ["admins"] });
+    const { app, db } = make(idp);
+    const sess = await login(app, idp);
+    const me = await app.request("/protected", { headers: { cookie: `${SESSION_COOKIE}=${sess}`, accept: "application/json" } });
+    const { sub } = (await me.json()) as { sub: string };
+    await app.request("/auth/logout", { headers: { cookie: `${SESSION_COOKIE}=${sess}` } });
+    expect(db.db.select({ owner: revokedSessions.owner, modifiedBy: revokedSessions.modifiedBy }).from(revokedSessions).all()).toEqual([{ owner: sub, modifiedBy: sub }]);
   });
 
   it("validateReturnTo rejects cross-origin and protocol-relative targets", async () => {

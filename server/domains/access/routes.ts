@@ -86,8 +86,11 @@ export function registerAuthRoutes(app: Hono<AppEnv>, deps: AuthRoutesDeps): voi
   app.on(["GET", "POST"], "/auth/logout", async (c) => {
     const verdict = await session.verify(getCookie(c, sessionCookie) ?? "");
     if (verdict.kind === "ok") {
-      session.revoke(verdict.session);
-      runAsActor(verdict.session.sub, () => writeAudit(db, { action: "session.ended" }));
+      // /auth/* sits before the chokepoint, so no request binds the operator who signs out.
+      runAsActor(verdict.session.sub, () => {
+        session.revoke(verdict.session);
+        writeAudit(db, { action: "session.ended" });
+      });
     }
     deleteCookie(c, sessionCookie, deleteOpts);
     let end: string | undefined;
