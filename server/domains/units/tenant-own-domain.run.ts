@@ -115,8 +115,8 @@ export type TenantSetOwnDomainPorts = TenantLifecyclePorts & {
   /** Reads the tenant's IdP from the outside — the probe verify-quiesced reads a quiesced unit with. */
   probe: PublicProbe;
   /** How long the wait asks before it fails the run, and how long it pauses between two asks. */
-  routingWaitMs: number;
-  routingPollMs: number;
+  answerWaitMs: number;
+  answerPollMs: number;
 };
 
 /** The host a tenant is reached at: its own domain, or its zone where it has none. */

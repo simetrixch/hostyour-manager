@@ -90,7 +90,7 @@ export function useOwnDomainHarness() {
         argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd",
       }),
       deployRepoUrl: "https://github.com/acme/acme-deploy.git", argoWatchTimeoutMs: 1000, resolveUnitApex: async () => "example.com",
-      dns, publicDns, probe, routingWaitMs: 0, routingPollMs: 0,
+      dns, publicDns, probe, answerWaitMs: 0, answerPollMs: 0,
     });
     const executor = new Executor({
       db: db.db, creds: new CredentialStore({ db: db.db, logger }), bus: new RunEventBus(), logger,

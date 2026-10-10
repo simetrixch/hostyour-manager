@@ -79,8 +79,8 @@ const TENANT_WATCH_TIMEOUT_MS = 15 * 60_000;
 // How long a move of an address waits for it to answer, and how often it asks:
 // the product's charts reach the cluster through the deploy carry and an ArgoCD sync, which take
 // minutes, so the budget is the carry's interval twice over.
-const ROUTING_WAIT_MS = 30 * 60_000;
-const ROUTING_POLL_MS = 15_000;
+const ANSWER_WAIT_MS = 30 * 60_000;
+const ANSWER_POLL_MS = 15_000;
 
 /** The credential id under which the tenant family's reader answers the deploy repository's configured read
  *  PAT — never a row of the store. Every other id the reader is handed is opened from the store. */
@@ -395,7 +395,7 @@ export function buildTenantOnboarding(
     makeTenantSetSizeDef(onboardPorts),
     // The own-domain move reads the IdP at its new address with the same public probe the moves
     // between clusters read with.
-    makeTenantSetOwnDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, routingWaitMs: ROUTING_WAIT_MS, routingPollMs: ROUTING_POLL_MS }),
+    makeTenantSetOwnDomainDef({ ...onboardPorts, probe: tenantRelocationPorts.probe, answerWaitMs: ANSWER_WAIT_MS, answerPollMs: ANSWER_POLL_MS }),
     makeOffboardTenantDef(lifecyclePorts),
     // tenant-purge / force-offboard removes a tenant's WHOLE footprint BY GUID even with no inventory
     // row (the orphaned partial create-tenant), and additionally destroys the crypto entry (the deprovision
