@@ -27,8 +27,8 @@ export type RecordPorts = Pick<TenantLifecyclePorts, "dns" | "publicDns">;
 /** What waiting for an answer reads: the probe, how long it asks, and how long it pauses between asks. */
 export interface AnswerWaitPorts {
   probe: PublicProbe;
-  routingWaitMs: number;
-  routingPollMs: number;
+  answerWaitMs: number;
+  answerPollMs: number;
 }
 
 /** Why `host` cannot be a customer's host of this tenant, or null: it lies in the platform's own name
@@ -224,19 +224,19 @@ export async function restoreReplacedRecords(ctx: StepCtx, ports: RecordPorts, r
 
 /** Ask `url` until `accepts` takes its status, or fail at the deadline naming what was waited for. */
 export async function waitForAnswer(ctx: StepCtx, ports: AnswerWaitPorts, url: string, wanted: string, accepts: (status: number) => boolean, next: string): Promise<string> {
-  const deadline = Date.now() + ports.routingWaitMs;
+  const deadline = Date.now() + ports.answerWaitMs;
   for (;;) {
     const seen = await ports.probe.probe(url, { signal: ctx.signal });
     if (seen.status !== null && accepts(seen.status)) return seen.detail;
     if (ctx.signal.aborted) throw errValidation(`the wait for ${url} was cancelled`);
     if (Date.now() >= deadline) {
       throw errValidation(
-        `${url} did not answer with ${wanted} within ${Math.round(ports.routingWaitMs / 60_000)} minutes (last: ${seen.detail}) — ` +
+        `${url} did not answer with ${wanted} within ${Math.round(ports.answerWaitMs / 60_000)} minutes (last: ${seen.detail}) — ` +
         `its record, its certificate or the product's charts are not in place yet. ${next}`,
       );
     }
-    ctx.log("meta", `${url} does not answer with ${wanted} yet (${seen.detail}); asking again in ${Math.round(ports.routingPollMs / 1000)}s`);
-    await sleep(ports.routingPollMs, ctx.signal);
+    ctx.log("meta", `${url} does not answer with ${wanted} yet (${seen.detail}); asking again in ${Math.round(ports.answerPollMs / 1000)}s`);
+    await sleep(ports.answerPollMs, ctx.signal);
   }
 }
 

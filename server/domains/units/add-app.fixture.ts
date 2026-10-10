@@ -129,8 +129,8 @@ export function ports(over: Partial<AddAppPorts> & FakeKube = {}, template: Reco
     helm: new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } }),
     registrations: new TenantRegistrations(seededPlatformRepo()),
     probe: new FakePublicProbe({}),
-    routingWaitMs: 0,
-    routingPollMs: 0,
+    answerWaitMs: 0,
+    answerPollMs: 0,
     resolver: new FakeClusterKubeResolver({
       clusterReader: cluster ?? new FakeClusterReader({
         deployState: { domain: "s1.example", stage: "prod", writtenAt: "2026-01-01T00:00:00Z", generation: 3 },
