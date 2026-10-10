@@ -55,7 +55,7 @@ describe("openDb — migration phase + append-only invariants", () => {
     const baselineOnly = join(dir, "baseline-only");
     mkdirSync(join(baselineOnly, "meta"), { recursive: true });
     const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
-    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit", "0028_stamp-inventory"]);
+    expect(journal.entries.map((e) => e.tag)).toEqual(["0000_baseline", "0001_organisation-identities", "0002_apps-updated-at", "0003_credential-subject-purpose", "0004_credential-subject-required", "0005_credential-subject-owner", "0006_apps-no-repo-credential", "0007_apps-dkim-public-key", "0008_clusters-name", "0009_tenants-routing", "0010_tenants-own-domain", "0011_tenants-own-domain-redirects", "0012_tenants-approved-tags", "0013_unit-sizes-to-unit", "0014_tenants-sender-domain", "0015_deploy-repository-names", "0016_secret-writes", "0017_unit-backups", "0018_tenant-follow-releases", "0019_tenant-nests-under", "0020_tenant-app-site", "0021_tenant-size", "0022_tenant-own-domain-aliases", "0023_tenant-display-name", "0024_revoked-sessions", "0025_drop-per-app-google-translation-book", "0026_drop-tenants-routing", "0027_stamp-runs-and-audit", "0028_stamp-inventory", "0029_stamp-operators-and-credentials"]);
     writeFileSync(join(baselineOnly, "meta/_journal.json"), JSON.stringify({ ...journal, entries: journal.entries.slice(0, 1) }));
     copyFileSync(join(MIGRATIONS_DIR, "0000_baseline.sql"), join(baselineOnly, "0000_baseline.sql"));
     const file = join(dir, "manager.db");
@@ -321,6 +321,79 @@ describe("openDb — migration phase + append-only invariants", () => {
     expect(() => addApp.run()).toThrow(/UNIQUE/);
     h.sqlite.prepare("UPDATE tenant_apps SET deleted = 1, deleted_by = 'op_system' WHERE id = 'tna_1'").run();
     addApp.run();
+    expect(h.sqlite.pragma("foreign_key_check")).toEqual([]);
+    expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
+  });
+
+  it("carries the recorded times and actors of operators, operator keys, meta, revoked sessions and credentials into their stamps", () => {
+    const dir = mkdtempSync(join(tmpdir(), "mgr-db-"));
+    dirs.push(dir);
+    const upTo0028 = join(dir, "up-to-0028");
+    mkdirSync(join(upTo0028, "meta"), { recursive: true });
+    const journal = JSON.parse(readFileSync(join(MIGRATIONS_DIR, "meta/_journal.json"), "utf8")) as { entries: { tag: string }[] };
+    const before = journal.entries.slice(0, journal.entries.findIndex((e) => e.tag === "0029_stamp-operators-and-credentials"));
+    writeFileSync(join(upTo0028, "meta/_journal.json"), JSON.stringify({ ...journal, entries: before }));
+    for (const e of before) copyFileSync(join(MIGRATIONS_DIR, `${e.tag}.sql`), join(upTo0028, `${e.tag}.sql`));
+    const file = join(dir, "manager.db");
+    const standing = new Database(file);
+    migrate(drizzle(standing), { migrationsFolder: upTo0028 });
+    const operator = standing.prepare("INSERT INTO operators (id, username, display_name, subject, created_at) VALUES (?, ?, ?, ?, ?)");
+    operator.run("op_ada", "ada", "Ada", "sub-ada", 1000);
+    operator.run("op_bob", "bob", "Bob", "sub-bob", 1100);
+    const audit = standing.prepare("INSERT INTO audit (id, action, target_kind, target_id, detail_json, creation, modified, owner, modified_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    audit.run("aud_1", "operator.upserted", null, null, null, 1000, 1000, "op_ada", "op_ada");
+    standing.prepare("INSERT INTO operator_keys (id, label, public_key, type, fingerprint, created_at, created_by) VALUES ('opk_1', 'ada', 'ssh-ed25519 AAAA', 'ssh-ed25519', 'SHA256:x', 2000, 'op_ada')").run();
+    standing.prepare("INSERT INTO meta (key, value, updated_at) VALUES ('probe', 'v', 3000)").run();
+    standing.prepare("INSERT INTO revoked_sessions (jti, expires_at) VALUES ('jti_1', 4000000000)").run();
+    const credential = standing.prepare("INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint, created_at, last_used_at, rotated_at, revoked_at) VALUES (?, 'pat', ?, 'owner', 'acme', 'repository-pat', ?, 'f', ?, ?, ?, ?)");
+    credential.run("cred_a", "untouched", "plain:v0:YQ==", 4000, null, null, null);
+    credential.run("cred_b", "used", "plain:v0:Yg==", 4100, 4500, null, null);
+    credential.run("cred_c", "rotated", "plain:v0:Yw==", 4200, null, 4800, null);
+    credential.run("cred_d", "successor", "plain:v0:ZA==", 4800, null, null, null);
+    credential.run("cred_e", "revoked", "plain:v0:ZQ==", 4300, null, null, 4400);
+    audit.run("aud_2", "credential.created", "credential", "cred_a", null, 4000, 4000, "op_ada", "op_ada");
+    audit.run("aud_3", "credential.created", "credential", "cred_b", null, 4100, 4100, "op_ada", "op_ada");
+    audit.run("aud_4", "credential.used", "credential", "cred_b", null, 4500, 4500, "op_bob", "op_bob");
+    audit.run("aud_5", "credential.created", "credential", "cred_c", null, 4200, 4200, "op_ada", "op_ada");
+    audit.run("aud_6", "credential.created", "credential", "cred_d", null, 4800, 4800, "op_system", "op_system");
+    // A rotation is audited on the new credential; the old one is named only under `supersedes`.
+    audit.run("aud_7", "credential.rotated", "credential", "cred_d", JSON.stringify({ supersedes: "cred_c", fingerprint: "f" }), 4800, 4800, "op_system", "op_system");
+    standing.close();
+    const migratedFrom = Date.now();
+    const h = openDb(file);
+    handles.push(h);
+    const q = (sql: string): unknown[] => h.sqlite.prepare(sql).all();
+    // The two seeded operators were written by nobody recorded; a signed-in operator wrote its own row.
+    expect(q("SELECT id, owner, modified_by FROM operators ORDER BY id")).toEqual([
+      { id: "op_ada", owner: "op_ada", modified_by: "op_ada" },
+      { id: "op_bob", owner: "unrecorded", modified_by: "unrecorded" },
+      { id: "op_emergency", owner: "unrecorded", modified_by: "unrecorded" },
+      { id: "op_system", owner: "unrecorded", modified_by: "unrecorded" },
+    ]);
+    expect(q("SELECT creation, modified FROM operators WHERE id = 'op_ada'")).toEqual([{ creation: 1000, modified: 1000 }]);
+    expect(q("SELECT id, creation, modified, owner, modified_by, deleted, deleted_by FROM operator_keys")).toEqual([
+      { id: "opk_1", creation: 2000, modified: 2000, owner: "op_ada", modified_by: "op_ada", deleted: null, deleted_by: null },
+    ]);
+    expect(q("SELECT key, creation, modified, owner, modified_by FROM meta WHERE key = 'probe'")).toEqual([
+      { key: "probe", creation: 3000, modified: 3000, owner: "unrecorded", modified_by: "unrecorded" },
+    ]);
+    // Nothing recorded when the session was revoked, so the migration's time stands.
+    const revoked = q("SELECT creation, modified, owner, modified_by FROM revoked_sessions") as { creation: number; modified: number }[];
+    expect(revoked).toEqual([{ creation: expect.any(Number), modified: expect.any(Number), owner: "unrecorded", modified_by: "unrecorded" }]);
+    expect(revoked[0]?.creation).toBeGreaterThanOrEqual(migratedFrom);
+    expect(revoked[0]?.modified).toBe(revoked[0]?.creation);
+    expect(q("SELECT id, encrypted_blob, creation, modified, owner, modified_by, deleted, deleted_by FROM credentials ORDER BY id")).toEqual([
+      { id: "cred_a", encrypted_blob: "plain:v0:YQ==", creation: 4000, modified: 4000, owner: "op_ada", modified_by: "op_ada", deleted: null, deleted_by: null },
+      { id: "cred_b", encrypted_blob: "plain:v0:Yg==", creation: 4100, modified: 4500, owner: "op_ada", modified_by: "op_bob", deleted: null, deleted_by: null },
+      { id: "cred_c", encrypted_blob: "plain:v0:Yw==", creation: 4200, modified: 4800, owner: "op_ada", modified_by: "op_system", deleted: null, deleted_by: null },
+      { id: "cred_d", encrypted_blob: "plain:v0:ZA==", creation: 4800, modified: 4800, owner: "op_system", modified_by: "op_system", deleted: null, deleted_by: null },
+      { id: "cred_e", encrypted_blob: "plain:v0:ZQ==", creation: 4300, modified: 4400, owner: "unrecorded", modified_by: "unrecorded", deleted: null, deleted_by: null },
+    ]);
+    // The key's unique indexes now hold live rows only: a deleted key frees its label and fingerprint.
+    const addKey = h.sqlite.prepare("INSERT INTO operator_keys (id, label, public_key, type, fingerprint, owner, modified_by) VALUES ('opk_2', 'ada', 'ssh-ed25519 AAAA', 'ssh-ed25519', 'SHA256:x', 'op_system', 'op_system')");
+    expect(() => addKey.run()).toThrow(/UNIQUE/);
+    h.sqlite.prepare("UPDATE operator_keys SET deleted = 1, deleted_by = 'op_system' WHERE id = 'opk_1'").run();
+    addKey.run();
     expect(h.sqlite.pragma("foreign_key_check")).toEqual([]);
     expect(h.sqlite.pragma("integrity_check", { simple: true })).toBe("ok");
   });

@@ -49,7 +49,7 @@ describe("openDb over the migration trees of the compiled plugins", () => {
 
     const coreOnly = openDb(file);
     handles.push(coreOnly);
-    coreOnly.sqlite.prepare("INSERT INTO meta (key, value) VALUES ('probe', 'kept'), ('other', 'kept too')").run();
+    coreOnly.sqlite.prepare("INSERT INTO meta (key, value, owner, modified_by) VALUES ('probe', 'kept', 'op_system', 'op_system'), ('other', 'kept too', 'op_system', 'op_system')").run();
     const coreLedger = count(coreOnly, "__drizzle_migrations");
     coreOnly.sqlite.close();
 

@@ -1,7 +1,6 @@
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-
-const now = sql`(unixepoch('subsec') * 1000)`;
+import { stampColumns } from "./stamps.ts";
 
 // An operator is an IdP identity, never a local account: upsertOperator writes the row at the first
 // OIDC login, keyed on the stable `subject`, and only domains/access may write here (dep-cruiser rule
@@ -15,7 +14,7 @@ export const operators = sqliteTable("operators", {
   displayName: text("display_name").notNull(),
   subject: text("subject"),                                        // the identity provider's OIDC `sub`
   email: text("email"),
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
+  ...stampColumns(),
 }, (t) => [
   uniqueIndex("operators_username_uq").on(t.username),
   uniqueIndex("operators_subject_uq").on(t.subject).where(sql`subject IS NOT NULL`),

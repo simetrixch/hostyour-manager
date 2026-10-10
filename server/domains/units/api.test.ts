@@ -54,7 +54,7 @@ let db: DbHandle;
 // starts without it — and G24 resolves the unit's quota against it while the gates run.
 // The session's sub owns the runs it plans, under a foreign key onto operators; in production the
 // login writes that row.
-beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run(); });
+beforeEach(() => { db = openDb(":memory:"); recordTestOwners(db.db); seedUnitSizes(db.db); db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run(); });
 afterEach(() => { db.sqlite.close(); });
 
 /** The manifest the consumer fixtures onboard: one declared build, so gate G18's manifest half holds. */

@@ -8,13 +8,14 @@ import { runAsActor } from "../../kernel/actor.ts";
 /**
  * Map an OIDC identity to a local operator. Keyed on the stable IdP subject.
  * Only the Access domain writes operators (dep-cruiser only-access-writes-operators). Group
- * membership is NOT stored — it is re-read from the IdP into each session.
+ * membership is NOT stored — it is re-read from the IdP into each session. The operator writes
+ * its own row: the sign-in is theirs, so the row's stamps name them.
  */
 export function upsertOperator(db: Db, identity: { subject: string; email?: string }): string {
   const existing = db.select().from(operators).where(eq(operators.subject, identity.subject)).get();
   if (existing) {
     if (identity.email !== undefined && identity.email !== existing.email) {
-      db.update(operators).set({ email: identity.email }).where(eq(operators.id, existing.id)).run();
+      runAsActor(existing.id, () => db.update(operators).set({ email: identity.email }).where(eq(operators.id, existing.id)).run());
     }
     return existing.id;
   }
@@ -23,9 +24,11 @@ export function upsertOperator(db: Db, identity: { subject: string; email?: stri
   const clash = db.select({ id: operators.id }).from(operators).where(eq(operators.username, base)).get();
   const id = opId();
   const username = clash ? `${base}-${id.slice(-6)}` : base;
-  db.insert(operators)
-    .values({ id, subject: identity.subject, email: identity.email ?? null, username, displayName: base })
-    .run();
-  runAsActor(id, () => writeAudit(db, { action: "operator.upserted", detail: { subject: identity.subject } }));
+  runAsActor(id, () => {
+    db.insert(operators)
+      .values({ id, subject: identity.subject, email: identity.email ?? null, username, displayName: base })
+      .run();
+    writeAudit(db, { action: "operator.upserted", detail: { subject: identity.subject } });
+  });
   return id;
 }

@@ -64,7 +64,7 @@ describe("listRunDurations", () => {
 describe("listRuns", () => {
   it("names the operator who started each run by display name", () => {
     db = openDb(":memory:");
-    db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_sample', 'sample', 'Sample Operator')").run();
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_sample', 'sample', 'Sample Operator', 'op_system', 'op_system')").run();
     seedRun({ kind: "noop", status: "planned", owner: "op_sample" });
     seedRun({ kind: "noop", status: "planned" });
     expect(listRuns(db.db).map((r) => r.owner).sort()).toEqual(["Sample Operator", "System"]);

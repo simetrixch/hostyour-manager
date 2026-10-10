@@ -5,7 +5,8 @@ import { join } from "node:path";
 import { eq } from "drizzle-orm";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers } from "../../db/schema/inventory.ts";
-import { createOperatorKey, deleteOperatorKey, listOperatorKeys, loadOperatorKey } from "./operator-keys.ts";
+import { createOperatorKey, deleteOperatorKey, listOperatorKeys, listOperatorKeyIdentities, loadOperatorKey } from "./operator-keys.ts";
+import { runAsActor } from "../../kernel/actor.ts";
 import { fingerprintPublicKey } from "../../security/fingerprint.ts";
 import { operatorKeyMarker } from "../../../shared/operator-keys.ts";
 
@@ -92,6 +93,19 @@ describe("operator keys — the rows", () => {
     // one would leave the other granting access.
     expect(() => createOperatorKey(db.db, { label: "sam", publicKey: `ssh-ed25519 ${BLOB_A}` }))
       .toThrowError(/already stored/);
+  });
+
+  it("keeps a forgotten key as a deleted row that no read returns, and frees its label and key", () => {
+    const db = setup();
+    const view = runAsActor("op_a", () => createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` }));
+    runAsActor("op_b", () => deleteOperatorKey(db.db, view.id));
+    expect(db.sqlite.prepare("SELECT owner, deleted_by, deleted IS NOT NULL AS gone FROM operator_keys WHERE id = ?").get(view.id))
+      .toEqual({ owner: "op_a", deleted_by: "op_b", gone: 1 });
+    expect(listOperatorKeys(db.db)).toEqual([]);
+    expect(listOperatorKeyIdentities(db.db)).toEqual([]);
+    expect(() => loadOperatorKey(db.db, view.id)).toThrowError(/not found/);
+    const again = createOperatorKey(db.db, { label: "pat", publicKey: `ssh-ed25519 ${BLOB_A}` });
+    expect(listOperatorKeys(db.db).map((k) => k.id)).toEqual([again.id]);
   });
 
   it("says which servers hold a key from their READINGS, never from a ledger of placements", () => {

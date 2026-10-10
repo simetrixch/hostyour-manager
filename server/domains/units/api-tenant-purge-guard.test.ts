@@ -64,7 +64,7 @@ const noSsh: SshFactory = () => Promise.reject(new Error("no ssh"));
 let db: DbHandle;
 // The session's sub owns the runs it plans, under a foreign key onto operators; in production the
 // login writes that row.
-beforeEach(() => { db = openDb(":memory:"); db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run(); });
+beforeEach(() => { db = openDb(":memory:"); db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run(); });
 afterEach(() => { db.sqlite.close(); });
 
 const authed = (cookie: string): RequestInit => ({ headers: { cookie: `${SESSION_COOKIE}=${cookie}`, "sec-fetch-site": "same-origin" } });

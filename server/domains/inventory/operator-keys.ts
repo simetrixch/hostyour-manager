@@ -1,8 +1,9 @@
-import { eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "../../db/client.ts";
 import { operatorKeys } from "../../db/schema/operator-keys.ts";
 import { servers } from "../../db/schema/inventory.ts";
+import { deletion } from "../../db/schema/stamps.ts";
 import { opkId } from "../../kernel/ids.ts";
 import { writeAudit } from "../../db/audit-writer.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
@@ -12,7 +13,6 @@ import {
 } from "../../../shared/operator-keys.ts";
 import type { OperatorKeyView } from "../../../shared/api-types.ts";
 import type { AuthorizedKeyKind } from "../../../shared/enums.ts";
-import { runActor } from "../../kernel/actor.ts";
 
 // The ONE writer of `operator_keys`: a human operator's own SSH public key, so the platform can
 // place it on a machine and take it off again.
@@ -40,7 +40,7 @@ export type CreateOperatorKeyInput = z.infer<typeof CreateOperatorKeyInput>;
  *  planned against a key that has since been deleted fails at plan time with the key's id in the
  *  message rather than placing nothing and reporting success. */
 export function loadOperatorKey(db: Db, id: string): typeof operatorKeys.$inferSelect {
-  const row = db.select().from(operatorKeys).where(eq(operatorKeys.id, id)).get();
+  const row = db.select().from(operatorKeys).where(and(eq(operatorKeys.id, id), isNull(operatorKeys.deleted))).get();
   if (!row) throw errNotFound(`operator key ${id} not found`);
   return row;
 }
@@ -81,13 +81,14 @@ export function listOperatorKeys(db: Db): OperatorKeyView[] {
   return db
     .select()
     .from(operatorKeys)
+    .where(isNull(operatorKeys.deleted))
     .all()
     .map((r): OperatorKeyView => ({
       id: r.id,
       label: r.label,
       type: r.type,
       fingerprint: r.fingerprint,
-      createdAt: r.createdAt.getTime(),
+      creation: r.creation.getTime(),
       // Only the servers a READABLE reading found it on — this is a presence claim, and an
       // undecided host is not one. Its own row on the page says so (web/src/authorizedKeysState.ts
       // operatorKeyPlacement returns "unread" for exactly those documents).
@@ -101,7 +102,7 @@ export function listOperatorKeys(db: Db): OperatorKeyView[] {
  *  authorized-keys reading takes it on every run, so a key added or forgotten since the last one is
  *  already accounted for. */
 export function listOperatorKeyIdentities(db: Db): OperatorKeyIdentity[] {
-  return db.select({ label: operatorKeys.label, fingerprint: operatorKeys.fingerprint }).from(operatorKeys).all();
+  return db.select({ label: operatorKeys.label, fingerprint: operatorKeys.fingerprint }).from(operatorKeys).where(isNull(operatorKeys.deleted)).all();
 }
 
 /** Store an operator's public key. The pasted text is normalized to `<type> <base64>` — the comment
@@ -126,7 +127,7 @@ export function createOperatorKey(db: Db, input: CreateOperatorKeyInput): Operat
   const id = opkId();
   try {
     db.insert(operatorKeys)
-      .values({ id, label, publicKey: normalized.publicKey, type: normalized.type, fingerprint, createdBy: runActor() })
+      .values({ id, label, publicKey: normalized.publicKey, type: normalized.type, fingerprint })
       .run();
   } catch (err) {
     if (err instanceof Error && /UNIQUE constraint/i.test(err.message)) {
@@ -143,16 +144,16 @@ export function createOperatorKey(db: Db, input: CreateOperatorKeyInput): Operat
 /**
  * Forget an operator's key.
  *
- * REFUSED while a stored reading still finds it on a host. Deleting the row does not touch a single
- * machine, and the removal run kind needs the row to know which line to delete — so a row deleted while
- * the key is still out there would leave a working key on the estate that nothing here can take off
- * again: the remove run kind keys on `hostyour-operator:<label>`, and the label goes with the row.
+ * REFUSED while a stored reading still finds it on a host. Deleting the key does not touch a single
+ * machine, and the removal run kind loads the live row to know which line to delete — so a key deleted
+ * while it is still out there would leave a working key on the estate that nothing here can take off
+ * again: the remove run kind keys on `hostyour-operator:<label>`, and every read skips a deleted row.
  *
  * The refusal names what clears each host, and it is not the same thing on every host. Where the
  * key sits under this platform's marker, an operator-key-remove run takes it off. Where it sits
  * under any other comment — a colleague's own `ssh-copy-id` line carrying the same key — no run
  * here reaches it, and a message saying "remove it from those servers" would name something this
- * platform cannot do: that line goes by hand on the machine, and the row stays until it has.
+ * platform cannot do: that line goes by hand on the machine, and the key stays until it has.
  *
  * A host whose reading this build CANNOT DECODE refuses the delete just the same. A host nobody has
  * read is genuinely out of the answer, but a document that exists and does not parse is a reading
@@ -167,7 +168,7 @@ export function deleteOperatorKey(db: Db, id: string): void {
     const byHand = holding.filter((s) => s.kind !== "operator").map((s) => s.name);
     throw errValidation([
       ...(holding.length > 0
-        ? [`refusing: the last reading of ${holding.map((s) => s.name).join(", ")} still found this key — once the row is gone, ` +
+        ? [`refusing: the last reading of ${holding.map((s) => s.name).join(", ")} still found this key — once the key is deleted, ` +
            `nothing here can name the line to delete.`]
         : [`refusing: whether this key is on ${undecided.join(", ")} cannot be established from here.`]),
       ...(byRun.length > 0 ? [`Take it off ${byRun.join(", ")} with an operator-key-remove run first.`] : []),
@@ -181,6 +182,6 @@ export function deleteOperatorKey(db: Db, id: string): void {
         : []),
     ].join(" "));
   }
-  db.delete(operatorKeys).where(eq(operatorKeys.id, id)).run();
+  db.update(operatorKeys).set(deletion()).where(eq(operatorKeys.id, id)).run();
   writeAudit(db, { action: "operator_key.deleted", targetKind: "credential", targetId: id, detail: { label: row.label, fingerprint: row.fingerprint } });
 }

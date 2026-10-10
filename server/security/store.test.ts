@@ -107,7 +107,7 @@ describe("CredentialStore (plaintext pass-through)", () => {
   });
 
   // WHAT ORDERS list(). Callers pick "the newest key" with `.at(-1)` (deploy-slave's install-key reads
-  // the fingerprint that way), so the last row has to be the one sealed last. createdAt is a
+  // the fingerprint that way), so the last row has to be the one sealed last. creation is a
   // millisecond DB clock and ties under load; the id breaks the tie because kernel/ids.ts mints a
   // monotonic ULID. These two are about that tie and nothing else.
   const SEALS = 120;
@@ -122,12 +122,12 @@ describe("CredentialStore (plaintext pass-through)", () => {
     const { store, sqlite } = fresh();
     await sealInOrder(store);
 
-    // How much this covered: rows whose createdAt differs are ordered by the clock and say nothing
+    // How much this covered: rows whose creation differs are ordered by the clock and say nothing
     // about the tiebreak. Only the tied neighbours exercise it, so the count of those is asserted —
     // a run where every seal got its own millisecond would pass the ordering check below while
     // measuring nothing about it.
-    const stamps = (sqlite.prepare("SELECT created_at FROM credentials ORDER BY created_at, id").all() as { created_at: number }[])
-      .map((r) => r.created_at);
+    const stamps = (sqlite.prepare("SELECT creation FROM credentials ORDER BY creation, id").all() as { creation: number }[])
+      .map((r) => r.creation);
     const tiedPairs = stamps.filter((ms, i) => i > 0 && ms === stamps[i - 1]).length;
     expect(tiedPairs, `${SEALS} seals produced no two rows inside one millisecond, so the ordering assertion below was never exercised`).toBeGreaterThan(0);
 
@@ -136,15 +136,15 @@ describe("CredentialStore (plaintext pass-through)", () => {
 
   // THE OTHER HALF, and it is the query's and not the minter's. The test above cannot see the
   // second ORDER BY key at all: SQLite scans a plain rowid table in rowid order, so a bare
-  // `ORDER BY created_at` returns a tied group in insertion order too, and every row sealed
+  // `ORDER BY creation` returns a tied group in insertion order too, and every row sealed
   // through this store has its id and its rowid rising together. So the group is built HERE, by
   // hand, with the two DISAGREEING — inserted in one order, named in the other — which is the only
-  // state in which "ordered by created_at and then by id" and "ordered by created_at and then by
+  // state in which "ordered by creation and then by id" and "ordered by creation and then by
   // whatever SQLite scans" answer differently.
-  it("a tied createdAt group comes back ordered by id, not by the order the rows were inserted in", async () => {
+  it("a tied creation group comes back ordered by id, not by the order the rows were inserted in", async () => {
     const { store, sqlite } = fresh();
     const insert = sqlite.prepare(
-      "INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint, created_at) VALUES (?, 'pat', ?, 'unit', 'acme', 'repository-identity', 'plain:v0:eA==', 'sha256:tie', 7000)",
+      "INSERT INTO credentials (id, kind, label, subject_kind, subject_id, purpose, encrypted_blob, fingerprint, creation, owner, modified_by) VALUES (?, 'pat', ?, 'unit', 'acme', 'repository-identity', 'plain:v0:eA==', 'sha256:tie', 7000, 'op_system', 'op_system')",
     );
     for (const [id, label] of [["cred_C", "third"], ["cred_A", "first"], ["cred_B", "second"]]) insert.run(id, label);
 
@@ -294,4 +294,38 @@ describe("what a planner may read off the credentials table", () => {
     expect(holdsManagerKey(db, "srv_a")).toBe(false);
   });
 
+});
+
+// The stamp columns of a credential (db/schema/stamps.ts), written by drizzle from the bound actor.
+describe("CredentialStore — the stamps of a credential", () => {
+  const closers: Array<() => void> = [];
+  afterEach(() => { for (const c of closers.splice(0)) c(); });
+  function fresh() {
+    const handle = openDb(":memory:");
+    closers.push(() => handle.sqlite.close());
+    return { store: new CredentialStore({ db: handle.db, logger }), sqlite: handle.sqlite };
+  }
+  interface Stamps { creation: number; modified: number; owner: string; modified_by: string }
+  const SEAL = { kind: "pat", subject: { kind: "owner", id: "acme" }, purpose: "repository-pat", label: "k", fingerprint: "f" } as const;
+
+  it("names the sealer on all four fields, the user of a later open on modified_by, and reports the row's own creation", async () => {
+    const { store, sqlite } = fresh();
+    const stampsOf = (id: string): Stamps => sqlite.prepare("SELECT creation, modified, owner, modified_by FROM credentials WHERE id = ?").get(id) as Stamps;
+    const ref = await runAsActor("op_a", () => store.seal({ ...SEAL, plaintext: Buffer.from("x") }));
+    const sealed = stampsOf(ref.id);
+    expect({ owner: sealed.owner, modifiedBy: sealed.modified_by, same: sealed.modified === sealed.creation }).toEqual({ owner: "op_a", modifiedBy: "op_a", same: true });
+    expect(ref.recordedAt).toBe(new Date(sealed.creation).toISOString());
+    await new Promise((r) => setTimeout(r, 5)); // the clock is read in milliseconds
+    (await runAsActor("op_b", () => store.open(ref.id, { purpose: "test" }))).fill(0);
+    const used = stampsOf(ref.id);
+    expect({ creation: used.creation, owner: used.owner, modifiedBy: used.modified_by }).toEqual({ creation: sealed.creation, owner: "op_a", modifiedBy: "op_b" });
+    expect(used.modified).toBeGreaterThan(sealed.modified);
+  });
+
+  it("refuses a credential without a value unless it is deleted", async () => {
+    const { store, sqlite } = fresh();
+    const ref = await store.seal({ ...SEAL, plaintext: Buffer.from("x") });
+    expect(() => sqlite.prepare("UPDATE credentials SET encrypted_blob = NULL WHERE id = ?").run(ref.id)).toThrow(/CHECK constraint failed: credentials_blob_ck/);
+    sqlite.prepare("UPDATE credentials SET encrypted_blob = NULL, deleted = 1, deleted_by = 'op_system' WHERE id = ?").run(ref.id);
+  });
 });

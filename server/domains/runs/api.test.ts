@@ -44,7 +44,7 @@ describe("runs API + SSE", () => {
     // The chokepoint attributes every planned run to the session's sub, and runs.owner is an
     // FK onto operators — in production upsertOperator wrote that row at login; the harness mints
     // the cookie directly, so it seeds the row itself.
-    db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const bus = new RunEventBus();
     const executor = new Executor({ db: db.db, creds: store, bus, logger, runDefinitions: buildRunDefinitions({ db: db.db }), sshFactory: noSsh });

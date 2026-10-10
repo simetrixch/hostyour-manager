@@ -143,7 +143,7 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     db.db.insert(clusters).values({
       id: "cls_2", serverId: "srv_s2", stage: "prod", domain: "s2.example.com", name: "s2", status: "active", slaveId: 2,
     }).run();
-    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
+    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name, owner, modified_by) VALUES ('op','op','op', 'op_system', 'op_system')").run();
     const claimsOf = async (runId: string, serverId: string): Promise<LockClaim[]> => {
       const plan = await DEFS["cluster-tailnet-rejoin"].plan({ serverId }, { db: db.db });
       db.sqlite
@@ -162,7 +162,7 @@ describe("the tailnet run kinds — the plan they are approved on", () => {
     // owns the master where the rejoin of a slave only drives it, so the server lock alone keeps
     // the two apart nowhere.
     const db = setup();
-    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
+    db.sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name, owner, modified_by) VALUES ('op','op','op', 'op_system', 'op_system')").run();
     const claimsOf = async (runId: string, kind: TailnetKind, serverId: string): Promise<LockClaim[]> => {
       const plan = await DEFS[kind].plan({ serverId }, { db: db.db });
       db.sqlite

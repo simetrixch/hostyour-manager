@@ -158,7 +158,7 @@ export interface OperatorKeyView {
    *  load of the page for nothing to read. */
   type: string;
   fingerprint: string;
-  createdAt: number;
+  creation: number;
   /** The servers whose LAST reading found this key's fingerprint. Derived from those readings, not
    *  from a placement ledger: what a host actually carries is the only thing worth reporting, and a
    *  ledger of what was placed would go on claiming a key a reinstall took away. */

@@ -63,7 +63,7 @@ describe("server inventory API", () => {
     // The chokepoint attributes every write to the session's sub, and runs.owner is an FK onto
     // operators — in production upsertOperator wrote that row at login; the harness mints the cookie
     // directly, so it seeds the row itself.
-    db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_test', 'test', 'Test')").run();
+    db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_test', 'test', 'Test', 'op_system', 'op_system')").run();
     const store = new CredentialStore({ db: db.db, logger });
     const probe = new FakeTcpProbe();
     const session = new SessionCodec(db.db, config);

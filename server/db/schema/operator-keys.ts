@@ -1,7 +1,6 @@
-import { sqliteTable, text, integer, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
-
-const now = sql`(unixepoch('subsec') * 1000)`;
+import { stampColumns, deletionColumns } from "./stamps.ts";
 
 // A HUMAN operator's own SSH public key, held so the platform can place it on machines and take it
 // off again. Written only by domains/inventory/operator-keys.ts.
@@ -27,13 +26,14 @@ export const operatorKeys = sqliteTable("operator_keys", {
   publicKey: text("public_key").notNull(),                         // "<type> <base64>", the pasted comment dropped
   type: text("type").notNull(),                                    // "ssh-ed25519", "ssh-rsa", …
   fingerprint: text("fingerprint").notNull(),                      // SHA256:… (== ssh-keygen -lf)
-  createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull().default(now),
-  createdBy: text("created_by").notNull(),                         // the operator who added it (audit actor)
+  ...stampColumns(),
+  ...deletionColumns(),
 }, (t) => [
+  // Both cover live rows only, so a removed key's label and fingerprint can be added again.
   // The label is the identity on every host: one line per label per machine, so two rows sharing a
   // label would place two keys the removal could not tell apart.
-  uniqueIndex("operator_keys_label_uq").on(t.label),
+  uniqueIndex("operator_keys_label_uq").on(t.label).where(sql`deleted IS NULL`),
   // The same key added twice under two labels would put two lines carrying the same blob on every
   // host, and removing one would leave the other still granting access.
-  uniqueIndex("operator_keys_fingerprint_uq").on(t.fingerprint),
+  uniqueIndex("operator_keys_fingerprint_uq").on(t.fingerprint).where(sql`deleted IS NULL`),
 ]);

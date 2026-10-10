@@ -4,6 +4,7 @@ import type { Db } from "../db/client.ts";
 import type { Logger } from "../kernel/logger.ts";
 import { credentials } from "../db/schema/credentials.ts";
 import { meta } from "../db/schema/meta.ts";
+import { deletion } from "../db/schema/stamps.ts";
 import { writeAudit } from "../db/audit-writer.ts";
 import { credId } from "../kernel/ids.ts";
 import { now } from "../kernel/clock.ts";
@@ -76,7 +77,7 @@ function toRef(row: typeof credentials.$inferSelect): CredentialRef {
     subject: { kind: row.subjectKind, id: row.subjectId },
     purpose: row.purpose,
     ...(row.publicKey ? { publicKey: row.publicKey } : {}),
-    recordedAt: row.createdAt.toISOString(),
+    recordedAt: row.creation.toISOString(),
   };
 }
 
@@ -112,6 +113,7 @@ export function holdsManagerKey(db: Db, serverId: string): boolean {
       eq(credentials.purpose, "ssh-key"),
       isNull(credentials.revokedAt),
       isNull(credentials.rotatedAt),
+      isNull(credentials.deleted),
     ))
     .get();
   return row !== undefined;
@@ -128,8 +130,8 @@ export function ownerIdentity(db: Db, org: string): { packagesCredentialId: stri
   const rows = db
     .select({ id: credentials.id, purpose: credentials.purpose })
     .from(credentials)
-    .where(and(eq(credentials.subjectKind, "owner"), eq(credentials.subjectId, org), isNull(credentials.revokedAt)))
-    .orderBy(credentials.createdAt, credentials.id)
+    .where(and(eq(credentials.subjectKind, "owner"), eq(credentials.subjectId, org), isNull(credentials.revokedAt), isNull(credentials.deleted)))
+    .orderBy(credentials.creation, credentials.id)
     .all();
   if (rows.length === 0) return null;
   const newest = (purpose: CredentialPurpose): string | null => rows.filter((r) => r.purpose === purpose).at(-1)?.id ?? null;
@@ -141,7 +143,7 @@ export function ownersWithIdentity(db: Db): string[] {
   const rows = db
     .selectDistinct({ org: credentials.subjectId })
     .from(credentials)
-    .where(and(eq(credentials.subjectKind, "owner"), isNull(credentials.revokedAt)))
+    .where(and(eq(credentials.subjectKind, "owner"), isNull(credentials.revokedAt), isNull(credentials.deleted)))
     .all();
   return rows.map((r) => r.org).sort();
 }
@@ -209,7 +211,6 @@ export class CredentialStore {
    *  credential seals no value: its row is the marker, and open() mints the token. */
   async seal(input: SealInput): Promise<CredentialRef> {
     const id = credId();
-    const sealedAt = new Date(now());
     let blob: string;
     if (input.kind === "github-app") {
       blob = GITHUB_APP_BLOB;
@@ -221,7 +222,7 @@ export class CredentialStore {
     } else {
       blob = PLAINTEXT_PREFIX + input.plaintext.toString("base64");
     }
-    this.db
+    const { creation } = this.db
       .insert(credentials)
       .values({
         id,
@@ -230,12 +231,12 @@ export class CredentialStore {
         subjectKind: input.subject.kind,
         subjectId: input.subject.id,
         purpose: input.purpose,
-        createdAt: sealedAt,
         encryptedBlob: blob,
         fingerprint: input.fingerprint,
         publicKey: input.publicKey ?? null,
       })
-      .run();
+      .returning({ creation: credentials.creation })
+      .get();
     input.plaintext.fill(0); // wipe the caller's buffer now that the row is written
     writeAudit(this.db, {
       action: "credential.created",
@@ -252,8 +253,13 @@ export class CredentialStore {
       subject: input.subject,
       purpose: input.purpose,
       ...(input.publicKey ? { publicKey: input.publicKey } : {}),
-      recordedAt: sealedAt.toISOString(),
+      recordedAt: creation.toISOString(),
     };
+  }
+
+  /** A credential's row, unless it was purged: a purged row stays, and every read here skips it. */
+  private liveRow(id: string): typeof credentials.$inferSelect | undefined {
+    return this.db.select().from(credentials).where(and(eq(credentials.id, id), isNull(credentials.deleted))).get();
   }
 
   /** Decrypt for use; audits credential.used. The caller MUST zero the returned Buffer
@@ -261,21 +267,21 @@ export class CredentialStore {
    *  MINTED here — a fresh installation token from the App every time, never a stored value — and
    *  refused by name on a Manager that holds no App. */
   async open(id: string, use: UseContext): Promise<Buffer> {
-    const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
+    const row = this.liveRow(id);
     if (!row) throw errNotFound(`credential ${id} not found`);
     if (row.revokedAt !== null) throw errNotFound(`credential ${id} is revoked`);
     let plain: Buffer;
     if (row.kind === "github-app") {
       if (!this.githubApp) throw errNotConfigured(`credential ${id} is the platform's GitHub App, and this Manager holds no GitHub App identity: set GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID and GITHUB_APP_PRIVATE_KEY and restart it`);
       plain = Buffer.from(await this.githubApp.installationToken(), "utf8");
-    } else if (row.encryptedBlob.startsWith(VAULT_REF_PREFIX)) {
+    } else if (row.encryptedBlob?.startsWith(VAULT_REF_PREFIX)) {
       if (!this.vault) throw errInternal(`credential ${id} lives in Vault but no Vault backend is configured`);
       const value = await this.vault.get(row.encryptedBlob.slice(VAULT_REF_PREFIX.length));
       if (value === undefined) throw errNotFound(`credential ${id} value missing from Vault`);
       plain = Buffer.from(value, "base64");
-    } else if (row.encryptedBlob.startsWith(V1_PREFIX)) {
+    } else if (row.encryptedBlob?.startsWith(V1_PREFIX)) {
       plain = this.decrypt(row.encryptedBlob);
-    } else if (row.encryptedBlob.startsWith(PLAINTEXT_PREFIX)) {
+    } else if (row.encryptedBlob?.startsWith(PLAINTEXT_PREFIX)) {
       plain = Buffer.from(row.encryptedBlob.slice(PLAINTEXT_PREFIX.length), "base64");
     } else {
       throw errInternal(`credential ${id} has an unrecognized blob format`);
@@ -303,7 +309,7 @@ export class CredentialStore {
 
   /** New blob for the same logical credential; sets rotated_at on the old row. */
   async rotate(oldId: string, next: { plaintext: Buffer; fingerprint: string; publicKey?: string }): Promise<CredentialRef> {
-    const old = this.db.select().from(credentials).where(eq(credentials.id, oldId)).get();
+    const old = this.liveRow(oldId);
     if (!old) throw errNotFound(`credential ${oldId} not found`);
     const ref = await this.seal({
       kind: old.kind,
@@ -326,7 +332,7 @@ export class CredentialStore {
 
   /** Soft revoke: sets revoked_at (blob kept for audit). open() then throws. */
   async revoke(id: string, reason: string): Promise<void> {
-    const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
+    const row = this.liveRow(id);
     if (!row) throw errNotFound(`credential ${id} not found`);
     this.db.update(credentials).set({ revokedAt: new Date(now()) }).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {
@@ -337,15 +343,16 @@ export class CredentialStore {
     });
   }
 
-  /** HARD-delete a credential row — the plaintext blob is removed, not just revoked
-   *. Used by the full removal of a server leaving the inventory. Audited. Idempotent. */
+  /** Purge a credential: its value is erased — the Vault entry deleted and the blob set to NULL — and
+   *  the row is marked deleted, so no read returns it. Used by the full removal of a server leaving
+   *  the inventory. Audited. Idempotent. */
   async purge(id: string): Promise<void> {
-    const row = this.db.select().from(credentials).where(eq(credentials.id, id)).get();
+    const row = this.liveRow(id);
     if (!row) return;
-    if (row.encryptedBlob.startsWith(VAULT_REF_PREFIX) && this.vault) {
+    if (row.encryptedBlob?.startsWith(VAULT_REF_PREFIX) && this.vault) {
       await this.vault.delete(row.encryptedBlob.slice(VAULT_REF_PREFIX.length));
     }
-    this.db.delete(credentials).where(eq(credentials.id, id)).run();
+    this.db.update(credentials).set({ encryptedBlob: null, ...deletion() }).where(eq(credentials.id, id)).run();
     writeAudit(this.db, {
       action: "credential.purged",
       targetKind: "credential",
@@ -354,13 +361,13 @@ export class CredentialStore {
     });
   }
 
-  /** Active (non-revoked) credentials matching the filter, ordered oldest→newest by createdAt
+  /** Active (non-revoked) credentials matching the filter, ordered oldest→newest by creation
    *  so `.at(-1)` is DETERMINISTICALLY the newest (callers rely on this to pick "the newest key";
-   *  a bare table scan had no defined order). createdAt is a millisecond DB-clock default
+   *  a bare table scan had no defined order). creation is a millisecond DB-clock default
    *  (`unixepoch('subsec') * 1000`) — two seal()/rotate() calls close enough together (a rotate
    *  right after a seal, a loaded box under test-suite contention) CAN land in the same
-   *  millisecond, and createdAt alone ties; ORDER BY on a tie is undefined, not "insertion
-   *  order". `id` breaks it: kernel/ids.ts mints a monotonic ULID, so within any tied createdAt
+   *  millisecond, and creation alone ties; ORDER BY on a tie is undefined, not "insertion
+   *  order". `id` breaks it: kernel/ids.ts mints a monotonic ULID, so within any tied creation
    *  group the row sealed later always carries the larger id.
    *
    *  SQLite's own `rowid` would break the same tie and would do it across processes, which the id
@@ -373,23 +380,23 @@ export class CredentialStore {
    *  exact — off by default to keep every existing caller's behavior unchanged (they either count
    *  presence or run their own rotate bookkeeping over the rotated rows). */
   async list(filter?: { subject?: CredentialSubject; purpose?: CredentialPurpose; kind?: CredentialKind; excludeRotated?: boolean }): Promise<CredentialRef[]> {
-    const conds = [isNull(credentials.revokedAt)];
+    const conds = [isNull(credentials.revokedAt), isNull(credentials.deleted)];
     if (filter?.subject) conds.push(eq(credentials.subjectKind, filter.subject.kind), eq(credentials.subjectId, filter.subject.id));
     if (filter?.purpose) conds.push(eq(credentials.purpose, filter.purpose));
     if (filter?.kind) conds.push(eq(credentials.kind, filter.kind));
     if (filter?.excludeRotated) conds.push(isNull(credentials.rotatedAt));
-    const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.createdAt, credentials.id).all();
+    const rows = this.db.select().from(credentials).where(and(...conds)).orderBy(credentials.creation, credentials.id).all();
     return rows.map(toRef);
   }
 
-  /** Reset support: the Vault KV ref ids referenced by ANY credential row (revoked included).
+  /** Reset support: the Vault KV ref ids referenced by ANY credential row (revoked included; a purged
+   *  row references none).
    *  Read-only — the rows themselves fall in the wipe transaction (db/reset.ts). Empty unless
    *  Vault is the backend (plaintext/keyfile stores keep the value inline, nothing to clean up). */
   collectVaultRefs(): string[] {
     if (!this.vault) return [];
     return this.db.select().from(credentials).all()
-      .filter((r) => r.encryptedBlob.startsWith(VAULT_REF_PREFIX))
-      .map((r) => r.encryptedBlob.slice(VAULT_REF_PREFIX.length));
+      .flatMap((r) => (r.encryptedBlob?.startsWith(VAULT_REF_PREFIX) ? [r.encryptedBlob.slice(VAULT_REF_PREFIX.length)] : []));
   }
 
   /** Best-effort Vault cleanup AFTER the wipe committed (the rows are already gone). Never throws.

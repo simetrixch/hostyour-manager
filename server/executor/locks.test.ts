@@ -23,7 +23,7 @@ describe("lock manager", () => {
   });
 
   function seedRun(sqlite: DbHandle["sqlite"], id: string): void {
-    sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name) VALUES ('op','op','op')").run();
+    sqlite.prepare("INSERT OR IGNORE INTO operators (id, username, display_name, owner, modified_by) VALUES ('op','op','op', 'op_system', 'op_system')").run();
     sqlite
       .prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?,?,?,?,?,?,?,?,?)")
       .run(id, "noop", "server", "srv", "{}", "{}", "approved", "op", "op");

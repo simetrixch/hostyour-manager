@@ -18,7 +18,7 @@ const ROWS = { runs: "run_1", steps: "stp_1", events: "evt_1" } as const;
 
 function open(): void {
   db = openDb(":memory:");
-  db.sqlite.prepare("INSERT INTO operators (id, username, display_name) VALUES ('op_a', 'a', 'A'), ('op_b', 'b', 'B')").run();
+  db.sqlite.prepare("INSERT INTO operators (id, username, display_name, owner, modified_by) VALUES ('op_a', 'a', 'A', 'op_system', 'op_system'), ('op_b', 'b', 'B', 'op_system', 'op_system')").run();
 }
 function seed(): void {
   db.db.insert(runs).values({ id: ROWS.runs, kind: "noop", targetKind: "server", targetId: "srv_1", paramsJson: {}, planJson: {}, status: "planned" }).run();

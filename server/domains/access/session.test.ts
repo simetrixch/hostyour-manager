@@ -119,8 +119,8 @@ describe("SessionCodec — sealed JWE session", () => {
     handles.push(db);
     const c = new SessionCodec(db.db, config);
     const now = Math.floor(Date.now() / 1000);
-    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at) VALUES (?, ?)").run("jti_past", now - 10);
-    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at) VALUES (?, ?)").run("jti_future", now + 1000);
+    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at, owner, modified_by) VALUES (?, ?, 'op_system', 'op_system')").run("jti_past", now - 10);
+    db.sqlite.prepare("INSERT INTO revoked_sessions (jti, expires_at, owner, modified_by) VALUES (?, ?, 'op_system', 'op_system')").run("jti_future", now + 1000);
 
     const token = await c.mint({ sub: "op_1", groups: ["admins"], via: "oidc" });
     const v = await c.verify(token);

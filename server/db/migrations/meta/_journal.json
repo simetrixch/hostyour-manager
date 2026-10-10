@@ -204,6 +204,13 @@
       "when": 1791624131780,
       "tag": "0028_stamp-inventory",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "6",
+      "when": 1791625076290,
+      "tag": "0029_stamp-operators-and-credentials",
+      "breakpoints": true
     }
   ]
 }
