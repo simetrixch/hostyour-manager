@@ -92,9 +92,9 @@ builds:
     containerfile: Containerfile
 tenant:
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -217,7 +217,7 @@ async function seedPointer(registrations: TenantRegistrations, guid: string, sub
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
     identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain,
-    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,

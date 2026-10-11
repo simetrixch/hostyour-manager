@@ -56,7 +56,7 @@ export function fallbackCatalog(entries: string[]): AppsManifest {
     if (name === undefined || RESERVED_OVERLAY_NAMES.has(name) || !appName.safeParse(name).success) continue;
     names.add(name);
   }
-  return { apps: [...names].sort().map((name) => ({ name, title: name, description: "", selections: { ...FALLBACK_SELECTIONS } })) };
+  return { apps: [...names].sort().map((name) => ({ name, title: name, description: "", selections: { ...FALLBACK_SELECTIONS }, needs: [] })) };
 }
 
 export interface ReadAppsManifestInput {
@@ -92,8 +92,9 @@ export async function readAppsManifest(input: ReadAppsManifestInput): Promise<Ap
   return (await readAppsTemplate(input)).manifest;
 }
 
-/** The catalog a wizard offers: the apps, and the scopes the template installs privately. */
-export type AppCatalog = AppsManifest & { packageScopes: string[] };
+/** The catalog a wizard offers: the apps, the scopes the template installs privately, and the names the
+ *  product's spec reserves for its engine, which a new website's name stays clear of. */
+export type AppCatalog = AppsManifest & { packageScopes: string[]; reservedMemberNames: string[] };
 
 export interface ReadAppCatalogInput {
   spec: TenantSpec;
@@ -115,7 +116,7 @@ export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppCat
   const { spec, deployCheckout } = input;
   const standIn = async (why: string): Promise<AppCatalog> => {
     input.warn(`${why} — the app catalog is the ${spec.perApp.engine.chart}/values-<app>.yaml overlays, with the two seed selections and no titles`);
-    return { ...fallbackCatalog(await deployCheckout.repo.listDir(deployCheckout.workdir, spec.perApp.engine.chart)), packageScopes: [] };
+    return { ...fallbackCatalog(await deployCheckout.repo.listDir(deployCheckout.workdir, spec.perApp.engine.chart)), packageScopes: [], reservedMemberNames: spec.reservedMemberNames };
   };
   const template = tenantAppsTemplate(spec);
   if (template === null) return standIn(`${TENANT_MANIFEST_PATH} declares no tenant.appsBundle`);
@@ -125,7 +126,7 @@ export async function readAppCatalog(input: ReadAppCatalogInput): Promise<AppCat
     ...(deployCheckout.credentialId ? { credentialId: deployCheckout.credentialId } : {}),
     ...(input.signal ? { signal: input.signal } : {}),
   });
-  return read.manifest ? { ...read.manifest, packageScopes: read.packageScopes } : standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
+  return read.manifest ? { ...read.manifest, packageScopes: read.packageScopes, reservedMemberNames: spec.reservedMemberNames } : standIn(`the apps template ${template.repo} carries no ${APPS_MANIFEST_PATH} at its default branch`);
 }
 
 /** The catalog a tenant that runs its own bundle is held to: each website folder the bundle carries
@@ -201,7 +202,7 @@ export interface AppCatalogProviderDeps {
 }
 
 const DEFAULT_TTL_MS = 5 * 60_000;
-const EMPTY: AppCatalog = { apps: [], packageScopes: [] };
+const EMPTY: AppCatalog = { apps: [], packageScopes: [], reservedMemberNames: [] };
 
 export function makeAppCatalogProvider(deps: AppCatalogProviderDeps): AppCatalogProvider {
   const ttlMs = deps.ttlMs ?? DEFAULT_TTL_MS;

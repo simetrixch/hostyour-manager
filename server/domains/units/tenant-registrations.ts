@@ -26,7 +26,7 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 // concrete second repo bound to the deploy repository (its workRoot + repo-qualified lock) is wired by the adapter.
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
-import { guid as guidSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
+import { guid as guidSchema, TenantAppSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
@@ -35,7 +35,6 @@ import type { SkippedTenantPointerView } from "../../../shared/api-types.ts";
 import type { BranchScope, PlatformRepo } from "../../adapters/git/port.ts";
 import { errInternal, errValidation } from "../../kernel/errors.ts";
 import { serializePointer, makeRegistrationGuard, trailer, schemaWhy } from "#unit/server/registration-laws.ts";
-import { withAppDatabases } from "./tenant-fanout.ts";
 import { applyDomainChanges, type DomainChange } from "../../../shared/domain-move.ts";
 
 /** registrations/<guid>/<stage>.yaml — the ONE per-tenant-per-stage file. The guid segment mirrors
@@ -329,10 +328,10 @@ export class TenantRegistrations {
    *  The tenant's main website moves in the same commit: an append of a website marked main takes the
    *  mark from the website that held it, and a drop of the website that holds it hands it on (heirOfMain;
    *  `mainTo` names the heir where the caller knows one). */
-  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; databases?: readonly string[]; mainTo?: string | null; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
+  async updateTenantApps(stage: Stage, guid: string, input: { op: "append" | "drop"; app: string; website?: TenantWebsite; member?: TenantMemberRecord; approved?: Record<string, string>; seedReference?: boolean; seedDemo?: boolean; selections?: Record<string, boolean>; needs?: readonly string[]; mainTo?: string | null; runId: string }): Promise<{ commit: string; approvedTags: TenantRegistration["approvedTags"] }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, databases, mainTo, runId } = input;
+    const { op, app, website, member, approved = {}, seedReference = false, seedDemo = false, selections = {}, needs = [], mainTo, runId } = input;
     const has = current.entry.apps.some((a) => a.name === app);
     if (op === "append" && has) throw errValidation(`app "${app}" already exists in tenant "${guid}"`);
     if (op === "append" && website && current.entry.apps.some((a) => a.folder === website.folder && a.site === website.site)) {
@@ -348,7 +347,7 @@ export class TenantRegistrations {
     // A later-added app carries its selections too into the registration's apps[] entry, and its
     // MEMBER into members[] — the two lists move together, which the schema then holds them to.
     const left = current.entry.apps.filter((a) => a.name !== app);
-    const appended = [...current.entry.apps, { name: app, ...(website ? { folder: website.folder, site: website.site } : {}), seedReference, seedDemo, selections, ...(databases ? { databases: [...databases] } : {}) }];
+    const appended = [...current.entry.apps, TenantAppSchema.parse({ name: app, ...(website ? { folder: website.folder, site: website.site } : {}), seedReference, seedDemo, selections, needs })];
     const holdsMain = current.entry.apps.some((a) => a.name === app && a.main);
     const apps = op === "append" ? (website?.main ? markMain(appended, app) : appended) : holdsMain ? markMain(left, heirOfMain(left, mainTo)) : left;
     const members = op === "append" ? [...current.entry.members, member!] : current.entry.members.filter((m) => m.name !== app);
@@ -440,39 +439,17 @@ export class TenantRegistrations {
   }
 
   /** Write the tenant's member entries whole, as resolved again off the product's manifest. The member
-   *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries each
-   *  app's database list as its catalog entry declares it now. Only that list is taken: every other
+   *  set stays; tenant-refresh-members refuses a plan that would change it. `listedApps` carries the
+   *  needs of each app as its catalog entry declares them now. Only the needs are taken: every other
    *  field of an app, and an app the list does not name, stays as the registration holds it at this
    *  write, so a run that changed an app since the plan keeps what it wrote. `appsImageTag`, where
-   *  given, moves the apps bundle in the same commit, because the bundle release declares the lists. */
-  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "databases">[] = [], appsImageTag?: string): Promise<{ commit: string }> {
+   *  given, moves the apps bundle in the same commit, because the bundle release declares the needs. */
+  async setMembers(stage: Stage, guid: string, members: readonly TenantMemberRecord[], runId: string, listedApps: readonly Pick<TenantRegistration["apps"][number], "name" | "needs">[] = [], appsImageTag?: string): Promise<{ commit: string }> {
     const current = await this.readTenant(stage, guid);
     if (!current) throw errValidation(`tenant "${guid}" is not onboarded`);
-    const lists = new Map(listedApps.map((a) => [a.name, a.databases]));
-    const apps = current.entry.apps.map((a) => {
-      if (!lists.has(a.name)) return a;
-      const { databases: _held, ...rest } = a;
-      const listed = lists.get(a.name);
-      return listed ? { ...rest, databases: [...listed] } : rest;
-    });
+    const needsOf = new Map(listedApps.map((a) => [a.name, a.needs]));
+    const apps = current.entry.apps.map((a) => (needsOf.has(a.name) ? { ...a, needs: [...needsOf.get(a.name)!] } : a));
     return this.write(stage, guid, { ...current.entry, members: [...members], apps, ...(appsImageTag ? { appsImageTag } : {}) }, `refresh-members(${guid}): ${members.map((m) => m.name).join(", ")} ${trailer(runId)}`);
-  }
-
-  /** Each app's database list, as `listsFor` answers it off the apps the registration holds, written
-   *  into its apps[] entries and nothing else: the forward step for a tenant registered before the
-   *  lists were carried (tenant-app-databases.ts). The read and the write are one turn on the books
-   *  branch, so no other write lands between them to be overwritten. Null where the tenant has no
-   *  registration at this stage, or every list already stands: nothing is committed. */
-  async setAppDatabases(stage: Stage, guid: string, listsFor: (apps: TenantRegistration["apps"]) => Readonly<Record<string, readonly string[]>>, writtenBy: string): Promise<{ commit: string } | null> {
-    const path = registrationPath(stage, guid);
-    return this.repo.withBranch(this.branch, async (books) => {
-      const raw = await books.readFile(path);
-      if (raw === null) return null;
-      const entry = parseRegistration(path, raw);
-      const apps = withAppDatabases(entry.apps, listsFor(entry.apps));
-      if (apps.every((a, i) => JSON.stringify(a.databases) === JSON.stringify(entry.apps[i]?.databases))) return null;
-      return books.commit({ message: `app-databases(${guid}): ${apps.map((a) => `${a.name} [${(a.databases ?? []).join(", ")}]`).join(", ")} ${trailer(writtenBy)}`, write: [tenantRegistrationWrite(stage, guid, { ...entry, apps })] });
-    });
   }
 
   /** The builds a chart's stage pin file names on the books branch (`<chart>/pins-<stage>.yaml`,

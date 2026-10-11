@@ -33,9 +33,10 @@ const GUID = "zsjs023ctne0";
 
 const CATALOG: AppCatalog = {
   packageScopes: [],
+  reservedMemberNames: ["api", "ws"],
   apps: [
-    { name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } },
-    { name: "crm", title: "CRM", description: "", selections: {} },
+    { name: "erp", title: "ERP", description: "Orders and stock.", needs: [], selections: { seedDemo: { title: "Demo data", default: true } } },
+    { name: "crm", title: "CRM", description: "", needs: [], selections: {} },
   ],
 };
 
@@ -93,15 +94,15 @@ describe("GET /api/tenants/:id/app-catalog", () => {
 
   it("answers the template's apps, each marked deployed where the registration's apps[] names it — with a bundle and without one alike", async () => {
     const template = { list: async () => CATALOG };
-    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template, readTenantManifest: async () => ({ apps: [{ name: "erp", title: "ERP", description: "", selections: {} }] }) });
+    const { app, cookie } = await serve({ registrations: registrationsWith(), appCatalog: template, readTenantManifest: async () => ({ apps: [{ name: "erp", title: "ERP", description: "", needs: [], selections: {} }] }) });
     const { status, body } = await read(app, cookie);
     expect(status).toBe(200);
     // An answered catalog names the tenant's websites even where there are none, so an absent list
     // means only that the catalog did not answer.
-    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"] });
+    expect(body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"], reservedNames: ["api", "ws"] });
     // A tenant onboarded as its platform alone (#211) has no bundle yet: the same template, nothing deployed.
     const noBundle = await serve({ registrations: registrationsWith({ appsImage: "", appsImageTag: "" }), appCatalog: template });
-    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"] });
+    expect((await read(noBundle.app, noBundle.cookie)).body).toEqual({ apps: [{ ...CATALOG.apps[0], deployed: true }, { ...CATALOG.apps[1], deployed: false }], websites: [], members: [...STANDING_MEMBER_NAMES, "erp"], reservedNames: ["api", "ws"] });
   });
 
   it("names the tenant's websites off its registration, each with its site, and every member name a new website stays clear of", async () => {
@@ -165,7 +166,8 @@ describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bun
   const RELEASE = bundleReleaseTag(TEST_BUNDLE.appsImageTag);
   const WEBSITE_CATALOG: AppCatalog = {
     packageScopes: [],
-    apps: [CATALOG.apps[0]!, { name: "web", title: "Website", description: "", selections: {}, sites: ["show", "workshop-web"] }],
+    reservedMemberNames: [],
+    apps: [CATALOG.apps[0]!, { name: "web", title: "Website", description: "", needs: [], selections: {}, sites: ["show", "workshop-web"] }],
   };
   const bundleManifest = (folder: string): string => `apps:\n  - name: erp\n    title: ERP\n${folder}`;
   const WEBSITE_FOLDER = (sites: string[]): string => `  - name: web\n    title: Website\n    sites: [${sites.join(", ")}]\n`;

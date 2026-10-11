@@ -34,7 +34,7 @@ const tenant = (status: TenantDetailView["status"]): TenantDetailView => ({
   ],
 } as TenantDetailView);
 const catalog: TenantAppCatalogView = {
-  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com"] }],
+  apps: [{ name: "web", title: "Web", description: "", needs: [], selections: {}, deployed: true, sites: ["example-com"] }],
   websites: [],
   members: ["web"],
 };

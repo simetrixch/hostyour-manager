@@ -16,7 +16,7 @@ import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy, tenantMemberAdmissionPolicyName } from "./admission-policy.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
-import { memberNamespace, tenantApplicationSet, withAppDatabases } from "./tenant-fanout.ts";
+import { memberNameRefusal, memberNamespace, tenantApplicationSet, withAppNeeds } from "./tenant-fanout.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { mintTenantCrypto, TENANT_CRYPTO_PROPERTIES } from "./tenant-crypto-mint.ts";
 import { provisionTenantStorage } from "./tenant-storage.ts";
@@ -577,7 +577,9 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
       // under the unit's name (`<bundle>-<subdomain>`, tenant-apps-tree.ts).
       let appsUnit: CreateTenantParams["appsUnit"];
       if (withApps) {
-        const resolved = await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: appFolders(req.apps), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+        const spec = await readTenantSpec(ports, ctx);
+        const reserved = spec === null ? undefined : req.apps.map((a) => memberNameRefusal(a.name, spec)).find((why) => why !== null);
+        const resolved = reserved ? { outcome: "refused" as const, why: reserved } : await resolveTenantAppsUnit(ports, { subdomain: req.subdomain, chosen: appFolders(req.apps), spec, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
         if (resolved.outcome === "refused") return refuse(resolved.why, { subdomain: req.subdomain, apps: req.apps.map((a) => a.name) });
         appsUnit = resolved.unit;
       }
@@ -659,7 +661,7 @@ export function makeCreateTenantStageDef(ports: TenantOnboardPorts, chosenGuid?:
         cluster: rc.cluster,
         chartsRef: outcome.resolvedSha,
         registryHost,
-        apps: withAppDatabases(req.apps, outcome.appDatabases), // each with its catalog database list, read by every member
+        apps: withAppNeeds(req.apps, outcome.appNeeds), // each with the standing members its catalog entry says it needs, read by every chart
         seedUsers: req.seedUsers, displayName: req.displayName,
         demo: req.demo,
         size: req.size,

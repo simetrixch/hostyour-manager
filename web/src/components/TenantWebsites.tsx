@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router";
 import type { TenantAppCatalogView } from "../../../shared/apps-manifest.ts";
 import type { TenantStatus } from "../../../shared/enums.ts";
-import { appPath, websitePath } from "../../../shared/tenant.ts";
+import { memberPath, websitePath } from "../../../shared/tenant.ts";
 import { newWebsiteName, websiteFolder, websiteSiteDialogConfirm } from "../tenantAppRows.ts";
 import { appPurgeable } from "../tenantRows.ts";
 import { setTenantWebsiteMain, setTenantWebsiteSite } from "../api-tenant-websites.ts";
@@ -11,7 +11,7 @@ import { OwnerCredentialStep } from "./OwnerCredentialStep.tsx";
 import { TenantDeployWebsiteDialog } from "./TenantDeployWebsiteDialog.tsx";
 
 /** The Websites section of the tenant page: every website of the tenant with its site and the path it
- *  answers at on the tenant's host (websitePath) and the path of its engine (appPath), a row with Deploy for every site of the tenant's
+ *  answers at on the tenant's host (websitePath) and the path of its admin (memberPath), a row with Deploy for every site of the tenant's
  *  bundle that is not deployed, and the dialog that moves one to another site of the tenant's bundle,
  *  or marks it as the tenant's main website ("Hauptseite unter /": at most one website holds it, and
  *  marking one clears it on the other). A website is named after its site when it is deployed. Deploy waits while the owner's packages reader is not recorded, and the step that
@@ -55,7 +55,7 @@ export function TenantWebsites(props: {
               {w.main && <span className="chip">main</span>}
               <span className="row__title">{w.name}</span>
               <span className="row__meta">
-                site {w.site} · at {websitePath(w)} · admin at {appPath(w.name)}
+                site {w.site} · at {websitePath(w)} · admin at {memberPath(w)}
               </span>
               <span className="row__end">
                 <button type="button" className="btn" disabled={busy} onClick={() => { setNextSite(""); setBundleTag(""); setMarkMain(false); setResiting({ name: w.name, site: w.site, main: w.main }); }}>

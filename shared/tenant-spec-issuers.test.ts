@@ -3,7 +3,7 @@ import { TenantSpecSchema } from "./consumer.ts";
 
 describe("TenantSpecSchema senderDomainIssuers (where a stage's issuer is bound, as the Manager)", () => {
   const spec = (url: string): unknown => ({
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
     senderDomainIssuers: { url, unit: "digita-post" },
   });
@@ -22,7 +22,7 @@ describe("TenantSpecSchema senderDomainIssuers (where a stage's issuer is bound,
 
 describe("TenantSpecSchema senderDomainDkim", () => {
   const dkimSpec = (recordUrl: string, checkUrl: string, unit = "digita-post", dmarcRecordUrl?: string): unknown => ({
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
     senderDomainDkim: { recordUrl, checkUrl, unit, ...(dmarcRecordUrl === undefined ? {} : { dmarcRecordUrl }) },
   });

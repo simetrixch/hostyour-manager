@@ -36,7 +36,7 @@ function seed(stage: Stage, withOverride = false): void {
   const members = structuredClone(testMembers(["web"]));
   if (withOverride) members[0]!.sources[0]!.values = { cookieDomain: `.shop.${FROM}` };
   const tenant = { cluster: "s1", members, identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", subdomain: "shop",
-    apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {} }], seedUsers: false, quota: seedQuota("small"), resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" };
+    apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }], seedUsers: false, quota: seedQuota("small"), resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "" };
   const write = tenantRegistrationWrite(stage, GUID, tenant);
   deploy.seed(deploy.booksBranch, write.path, write.content);
   const unitHost = consumerUnitHost(name, stage, FROM), tenantHost = tenantZone("shop", stage, FROM);

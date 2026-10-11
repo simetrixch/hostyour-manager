@@ -42,7 +42,7 @@ function entry(guid: string, subdomain: string, over: Partial<TenantRegistration
       members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
       identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
       subdomain,
-      apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+      apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }],
       seedUsers: false, quota: seedQuota("small"),
       resetNonce: "1",
       suspended: false,

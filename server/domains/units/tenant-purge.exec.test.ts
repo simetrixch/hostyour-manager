@@ -66,7 +66,7 @@ afterEach(() => { db.sqlite.close(); });
 function entry(cluster = "s1"): TenantRegistration {
   return {
     members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
-    cluster, subdomain: SUB, apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+    cluster, subdomain: SUB, apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
 }

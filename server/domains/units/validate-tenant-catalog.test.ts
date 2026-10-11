@@ -1,5 +1,5 @@
 // validateTenant with the app catalog (app-catalog.ts): the apps repository read through the
-// deploy repository's or a registered unit's credential, the `{databases}` token filled from the manifest,
+// deploy repository's or a registered unit's credential, each app's needs read off the manifest,
 // the value files held against the checkout, and T4 judging the request by the manifest's words.
 // Split from validate-tenant.test.ts so both files stay under the file-size doctrine.
 import { describe, it, expect } from "vitest";
@@ -32,26 +32,26 @@ builds:
     containerfile: Containerfile
 tenant:
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
 `;
 const SPEC = TenantSpecSchema.parse({
   members: [
-    { name: "auth", chart: "charts/example-auth", identityProvider: true },
-    { name: "jobs", chart: "charts/example-jobs" },
-    { name: "report", chart: "charts/example-report" },
+    { name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true },
+    { name: "jobs", path: "/jobs", chart: "charts/example-jobs" },
+    { name: "report", path: "/reports", chart: "charts/example-report" },
   ],
   perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui", override: { web: { chart: "charts/example-web" } } } },
 });
 /** A catalog the T4 gate tests hold apps against: erp offers the two seed selections, crm none. */
 const CATALOG: AppsManifest = {
   apps: [
-    { name: "erp", title: "ERP", description: "", selections: { seedReference: { title: "Reference data", default: true }, seedDemo: { title: "Demo data", default: false } } },
-    { name: "crm", title: "CRM", description: "", selections: {} },
+    { name: "erp", title: "ERP", description: "", needs: [], selections: { seedReference: { title: "Reference data", default: true }, seedDemo: { title: "Demo data", default: false } } },
+    { name: "crm", title: "CRM", description: "", needs: [], selections: {} },
   ],
 };
 const NS_DOC: RenderedDoc = { apiVersion: "v1", kind: "Namespace", name: "namespace-x", namespace: "", raw: { kind: "Namespace" } };
@@ -89,7 +89,7 @@ describe("gateT4Apps", () => {
     expect(g.found).toBe(`app "shop" is not in the app catalog (erp, crm).`);
     expect(g.reason).toMatch(/no folder to mount/);
     // Counter-probe: the same request passes once the catalog names the app.
-    expect(gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: { apps: [...CATALOG.apps, { name: "shop", title: "Shop", description: "", selections: {} }] } }).status).toBe("pass");
+    expect(gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: { apps: [...CATALOG.apps, { name: "shop", title: "Shop", description: "", needs: [], selections: {} }] } }).status).toBe("pass");
   });
 
   it("rejects a selection the catalog does not declare for the app — a field set true, or any selections key", () => {
@@ -110,7 +110,7 @@ describe("gateT4Apps", () => {
   it("rejects a reserved app name", () => {
     const apps = [app("erp")];
     // an apps[] entry named after a STANDING member of this tenant (the schema would also refuse it)
-    const g = gateT4Apps({ apps: [{ name: "auth" }], members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: { apps: [...CATALOG.apps, { name: "auth", title: "auth", description: "", selections: {} }] } });
+    const g = gateT4Apps({ apps: [{ name: "auth" }], members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog: { apps: [...CATALOG.apps, { name: "auth", title: "auth", description: "", needs: [], selections: {} }] } });
     expect(g.status).toBe("fail");
     expect(g.reason).toMatch(/standing member/);
   });
@@ -134,7 +134,7 @@ describe("gateT4Apps", () => {
   });
 
   it("holds a website to a site its folder lists", () => {
-    const withWeb: AppsManifest = { apps: [...CATALOG.apps, { name: "web", title: "Website", description: "", selections: {}, sites: ["main", "shop"] }] };
+    const withWeb: AppsManifest = { apps: [...CATALOG.apps, { name: "web", title: "Website", description: "", needs: [], selections: {}, sites: ["main", "shop"] }] };
     const judge = (apps: AppRef[], catalog: AppsManifest = withWeb) =>
       gateT4Apps({ apps, members: membersFor(apps), renderedMembers: renderedNames(apps), standingMembers: STANDING, catalog });
     const site = (over: Partial<AppRef> = {}): AppRef => ({ name: "example-ch", folder: "web", site: "main", ...over });
@@ -147,7 +147,7 @@ describe("gateT4Apps", () => {
 
   // A standing tenant's Versions run. The catalog of today names only the folder web, with no sites:
   // erp, crm and the website the tenant runs stand in its own repository alone.
-  const TODAY: AppsManifest = { apps: [{ name: "web", title: "Website", description: "", selections: {} }] };
+  const TODAY: AppsManifest = { apps: [{ name: "web", title: "Website", description: "", needs: [], selections: {} }] };
   const runs: (AppRef & { selections?: Record<string, boolean> })[] = [app("erp"), { name: "crm", selections: { seedPrices: true } }, { name: "example-ch", folder: "web", site: "main" }];
   const judgeToday = (apps: (AppRef & { selections?: Record<string, boolean> })[], over: { isStandingTenant?: boolean; renderedMembers?: string[] } = {}) =>
     gateT4Apps({ apps, members: membersFor(apps), renderedMembers: over.renderedMembers ?? renderedNames(apps), standingMembers: STANDING, catalog: TODAY, ...(over.isStandingTenant ? { isStandingTenant: true } : {}) });
@@ -170,18 +170,18 @@ describe("gateT4Apps", () => {
 describe("validateTenant — the app catalog", () => {
   const APPS_REPO = "https://github.com/acme/acme-apps.git";
   /** The fixture manifest with an apps template (the bundle's name and its repository, built by no
-   *  buildRepos entry), and a `{databases}` token where the product wants the app's database list. */
+   *  buildRepos entry). */
   const WITH_BUNDLE = MANIFEST_YAML.replace(
     "tenant:\n",
     `tenant:\n  appsBundle: acme-apps\n  appsRepo: ${APPS_REPO}\n`,
   ).replace(
     "    engine: { chart: charts/example-engine }",
-    "    engine: { chart: charts/example-engine, valueFiles: [\"values-{app}.yaml\"], values: { databases: { mongodb: { databases: \"{databases}\" } } } }",
+    "    engine: { chart: charts/example-engine, valueFiles: [\"values-{app}.yaml\"] }",
   );
-  const APPS_YAML = `apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n    databases: [core, logs]\n  - name: crm\n    title: CRM\n`;
+  const APPS_YAML = `apps:\n  - name: erp\n    title: ERP\n    selections:\n      seedDemo: { title: Demo data }\n    needs: [report]\n  - name: crm\n    title: CRM\n`;
   const filesOf = (helm: FakeHelmRenderer, member: string): string[] | undefined => helm.requests.find((r) => r.releaseName === `${PROBE}-${member}`)?.valueFiles;
 
-  it("reads apps.yaml off the apps repository, fills {databases} for an app that declares a list, drops the key for one that does not, and layers only overlays that exist", async () => {
+  it("reads apps.yaml off the apps repository and layers only overlays that exist", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, [APPS_MANIFEST_PATH]: APPS_YAML, "charts/example-engine/values-erp.yaml": "" } });
     const lines: string[] = [];
@@ -190,37 +190,34 @@ describe("validateTenant — the app catalog", () => {
     // The template was cloned after the deploy repository, at its default branch head, with the deploy repository's
     // credential — the template is no unit, so no registration and no unit credential is asked for.
     expect(repo.clones).toEqual([{ repoURL: REPO_OF_REQ, ref: "master", credentialId: "cred_deploy" }, { repoURL: APPS_REPO, ref: "HEAD", credentialId: "cred_deploy" }]);
-    // erp's engine: the list from the manifest, and its overlay, which stands; crm's engine: no
-    // databases key at all (the token's key is gone) and no overlay (absent, and said).
+    // erp's engine: its overlay, which stands; crm's engine: no overlay (absent, and said).
     const erp = helm.requests.find((r) => r.releaseName === `${PROBE}-erp-1`);
-    expect(erp?.valuesObject).toMatchObject({ databases: { mongodb: { databases: ["core", "logs"] } } });
     expect(filesOf(helm, "erp-1")).toEqual(["values.yaml", "values-prod.yaml", "values-erp.yaml"]);
-    const crm = helm.requests.find((r) => r.releaseName === `${PROBE}-crm-1`);
-    expect(crm?.valuesObject).not.toHaveProperty("databases");
     expect(filesOf(helm, "crm-1")).toEqual(["values.yaml", "values-prod.yaml"]);
     expect(lines.some((l) => l.includes("charts/example-engine/values-crm.yaml is absent in the deploy repository checkout — not layered on crm"))).toBe(true);
-    // The registration records what was rendered: the resolved list, and only the file that stands.
+    // The registration records what was rendered: only the file that stands.
     const erpRecord = outcome.memberRecords.find((m) => m.name === "erp");
-    expect(erpRecord?.sources[0]).toEqual({ chart: "charts/example-engine", valueFiles: ["values-erp.yaml"], values: { databases: { mongodb: { databases: ["core", "logs"] } } } });
+    expect(erpRecord?.sources[0]).toEqual({ chart: "charts/example-engine", valueFiles: ["values-erp.yaml"], values: {} });
     expect(outcome.memberRecords.find((m) => m.name === "crm")?.sources[0]).toEqual({ chart: "charts/example-engine", valueFiles: [], values: {} });
     // The chosen selections ride to the charts as the appset delivers them.
     expect(erp?.valuesObject).toMatchObject({ tenant: { apps: [{ name: "erp", seedDemo: true }, { name: "crm" }] } });
   });
 
-  it("hands EVERY member each app's database list in tenant.apps, and answers the lists by app", async () => {
+  it("hands EVERY member each app's needs in tenant.apps, and answers the needs by app", async () => {
     const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: [NS_DOC] } });
     const repo = new FakeRepoReader({ resolvedSha: SHA, files: { [TENANT_MANIFEST_PATH]: WITH_BUNDLE, [APPS_MANIFEST_PATH]: APPS_YAML } });
-    // PLANTED DEFECT: both entries carry a list of their own, and the catalog's replaces it — erp's
-    // with the list it declares, crm's with none, since its entry declares none.
-    const outcome = await validateTenant(req({ apps: [{ name: "erp", databases: ["stale"] }, { name: "crm", databases: ["stale"] }] }), deps(repo, helm));
+    // PLANTED DEFECT: both entries carry needs of their own, and the catalog's replace them — erp's
+    // with the needs it declares, crm's with none, since its entry declares none.
+    const carried = [{ name: "erp", needs: ["stale"] }, { name: "crm", needs: ["stale"] }];
+    const outcome = await validateTenant(req({ apps: carried }), deps(repo, helm));
     expect(outcome.verdict).toBe("pass");
-    expect(outcome.appDatabases).toEqual({ erp: ["core", "logs"] });
+    expect(outcome.appNeeds).toEqual({ erp: ["report"], crm: [] });
     // Every member, the product's own as much as the apps', renders with the same tenant.apps.
     expect(helm.requests.length).toBeGreaterThan(2);
     for (const r of helm.requests) {
-      const apps = (r.valuesObject as { tenant: { apps: { name: string; databases?: string[] }[] } }).tenant.apps;
-      expect(apps.find((a) => a.name === "erp")?.databases, r.releaseName).toEqual(["core", "logs"]);
-      expect(apps.find((a) => a.name === "crm"), r.releaseName).not.toHaveProperty("databases");
+      const apps = (r.valuesObject as { tenant: { apps: { name: string; needs: string[] }[] } }).tenant.apps;
+      expect(apps.find((a) => a.name === "erp")?.needs, r.releaseName).toEqual(["report"]);
+      expect(apps.find((a) => a.name === "crm")?.needs, r.releaseName).toEqual([]);
     }
   });
 
@@ -242,8 +239,8 @@ describe("validateTenant — the app catalog", () => {
     const outcome = await validateTenant(req({ apps: [{ name: "erp", seedReference: true }] }), deps(repo, helm, (l) => lines.push(l)));
     expect(outcome.verdict).toBe("pass"); // the stand-in offers the two seed selections
     expect(lines.some((l) => l.includes(`carries no ${APPS_MANIFEST_PATH}`) && l.includes("values-<app>.yaml overlays"))).toBe(true);
-    // No list from a manifest, so the token's key is gone and the overlay decides.
-    expect(helm.requests.find((r) => r.releaseName === `${PROBE}-erp-1`)?.valuesObject).not.toHaveProperty("databases");
+    // An overlay says nothing of what an app needs.
+    expect(outcome.appNeeds).toEqual({ erp: [] });
   });
 
   it("a failing clone of the apps repository throws like a failing clone of the deploy repository (a preflight rejection)", async () => {

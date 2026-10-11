@@ -202,7 +202,7 @@ export function makeTenantSetSizeDef(ports: TenantOnboardPorts): RunDefinition<T
       const outcome = await validateTenant({
         repoURL: ports.deployRepoUrl, ref: ports.registrations.branch, stage: tc.stage,
         apps: e.apps, members: e.members, identityProvider: e.identityProvider, isStandingTenant: true,
-        appDatabases: Object.fromEntries(e.apps.filter((a) => a.databases).map((a) => [a.name, a.databases!])),
+        appNeeds: Object.fromEntries(e.apps.map((a) => [a.name, a.needs])),
         probeGuid: tc.guid, subdomain: e.subdomain, seedUsers: e.seedUsers, demo: e.demo === true,
         appsImage: e.appsImage, appsImageTag: e.appsImageTag, ownDomain: e.ownDomain, ownDomainRedirects: e.ownDomainRedirects,
         approvedTags: e.approvedTags, quota, size: params.size,

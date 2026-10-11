@@ -62,9 +62,9 @@ builds:
     containerfile: Containerfile
 tenant:
 ${TEMPLATE_SPEC}  members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -93,7 +93,7 @@ async function seededRegistrations(): Promise<TenantRegistrations> {
   const registrations = new TenantRegistrations(new FakePlatformRepo());
   const registration: TenantRegistration = {
     cluster: "s1", subdomain: "acme",
-    members: testMembers(APPS), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {} })),
+    members: testMembers(APPS), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", apps: APPS.map((a) => ({ name: a.name, seedReference: false, seedDemo: false, selections: {}, needs: [], path: `/app/${a.name}` })),
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
   await registrations.commitTenant({ stage: "prod", guid: GUID, registration, runId: "run_onb" });

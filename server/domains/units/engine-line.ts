@@ -14,11 +14,12 @@
 // (tenant-line-move.run.ts): everywhere else a pairing across lines is refused, and the refusal names it.
 import type { AppsEngine, AppsManifest } from "../../../shared/apps-manifest.ts";
 import { parseAppsManifest, APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
-import { approvedImageTag } from "../../../shared/tenant.ts";
+import { approvedImageTag, type TenantRegistration } from "../../../shared/tenant.ts";
 import type { RepoReader } from "../../adapters/git/port.ts";
 import type { StepCtx } from "../../executor/types.ts";
 import { errUpstream, errValidation } from "../../kernel/errors.ts";
 import { DEFAULT_BRANCH_HEAD } from "#unit/server/build-chain.ts";
+import { catalogNeeds } from "./tenant-fanout.ts";
 
 /** The versions a tenant's members run, member -> build -> image tag (tenant.approvedTags). */
 type MemberVersions = Readonly<Record<string, Readonly<Record<string, string>>>>;
@@ -109,6 +110,26 @@ export async function tenantBundleManifest(ports: RepositoryRead, bundle: { apps
   const text = await repositoryAppsYaml(ports, { repoURL: bundle.appsRepo, ref }, "the apps the tenant runs cannot be read", signal);
   if (text === null) throw errValidation(`${bundle.appsRepo} carries no ${APPS_MANIFEST_PATH} at ${ref}, so the apps the tenant runs cannot be read`);
   return parseAppsManifest(text);
+}
+
+/** Reads a standing tenant's own bundle manifest (tenantBundleManifest): null where it runs no bundle;
+ *  throws where it cannot be read. */
+export type TenantManifestReader = (bundle: Pick<TenantRegistration, "appsRepo" | "appsImageTag">, signal?: AbortSignal) => Promise<AppsManifest | null>;
+
+/** The standing members each app of a standing tenant needs, by app name, as its own repository
+ *  declares them. Where that repository cannot be read, or the tenant runs no bundle, the needs stay
+ *  as the registration holds them and the log says why: a failed read never drops a need. */
+export async function standingAppNeeds(read: TenantManifestReader, entry: Pick<TenantRegistration, "apps" | "appsRepo" | "appsImageTag">, ctx: PlanLog): Promise<Record<string, string[]>> {
+  let why: string;
+  try {
+    const own = await read(entry, ctx.signal);
+    if (own) return catalogNeeds(entry.apps, own);
+    why = "the tenant runs no apps bundle";
+  } catch (err) {
+    why = err instanceof Error ? err.message : String(err);
+  }
+  ctx.log(`${why}; the apps' needs stay as the registration holds them`);
+  return Object.fromEntries(entry.apps.map((a) => [a.name, [...a.needs]]));
 }
 
 /** The sites a bundle manifest lists under the website folder `folder`, or undefined where the bundle

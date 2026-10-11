@@ -32,9 +32,9 @@ ${appsBundle === null ? "" : `  appsBundle: ${appsBundle}\n  appsRepo: ${APPS_RE
     - repo: https://github.com/acme/acme-engine.git
       builds: [acme-engine]
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: ${ENGINE_CHART} }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -47,7 +47,7 @@ const APPS_YAML = `apps:
     selections:
       seedReference: { title: Reference data, default: true }
       seedDemo: { title: Demo data, default: false }
-    databases: [core, logs, master]
+    needs: [report, jobs]
   - name: web
     title: Website
     selections: {}
@@ -66,7 +66,7 @@ const files = (over: { bundle?: string | null; appsYaml?: string; overlays?: str
 const spec = (bundle: string | null): ReturnType<typeof TenantSpecSchema.parse> =>
   TenantSpecSchema.parse({
     ...(bundle === null ? {} : { appsBundle: bundle, appsRepo: APPS_REPO }),
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: ENGINE_CHART }, front: { chart: "charts/example-ui" } },
   });
 
@@ -77,7 +77,7 @@ describe("fallbackCatalog (the overlay stand-in, pure)", () => {
     expect(c.apps[0]).toMatchObject({ name: "erp", title: "erp", description: "" });
     expect(Object.keys(c.apps[0]!.selections).sort()).toEqual(["seedDemo", "seedReference"]);
     expect(c.apps[0]!.selections.seedReference?.default).toBe(false);
-    expect(c.apps[0]!.databases).toBeUndefined(); // the overlay carries the list; nothing here invents one
+    expect(c.apps[0]!.needs).toEqual([]); // an overlay says nothing of what an app needs
   });
 
   it("excludes the bare values.yaml, the stage/common overlays, and names outside the app grammar", () => {
@@ -111,7 +111,7 @@ describe("readAppCatalog (the manifest of the apps template, else the stand-in)"
     const repo = new FakeRepoReader({ files: files({ appsYaml: APPS_YAML }) });
     const c = await catalogOf(repo);
     expect(c.apps.map((a) => a.name)).toEqual(["erp", "web"]);
-    expect(c.apps[0]).toMatchObject({ title: "ERP", description: "Orders, stock and accounting.", databases: ["core", "logs", "master"] });
+    expect(c.apps[0]).toMatchObject({ title: "ERP", description: "Orders, stock and accounting.", needs: ["report", "jobs"] });
     expect(c.apps[0]!.selections.seedReference).toEqual({ title: "Reference data", default: true });
     expect(c.apps[1]!.selections).toEqual({});
     expect(repo.clones).toEqual([{ repoURL: APPS_REPO, ref: "HEAD", credentialId: "deploy-read-pat" }]);
@@ -225,7 +225,7 @@ describe("makeAppCatalogProvider (TTL cache + fail-soft)", () => {
     repo.fail = true;
     const warnings: string[] = [];
     const p = makeAppCatalogProvider({ repo, repoURL: REPO_URL, ref: "master", warn: (_f, msg) => warnings.push(msg), ttlMs: 1000, now: () => 0 });
-    expect(await p.list()).toEqual({ apps: [], packageScopes: [] });
+    expect(await p.list()).toEqual({ apps: [], packageScopes: [], reservedMemberNames: [] });
     expect(warnings).toHaveLength(1);
   });
 

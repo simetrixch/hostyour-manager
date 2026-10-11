@@ -31,8 +31,8 @@ function find(node: ReactNode, match: (el: El) => boolean): El[] {
 const deployButtons = (node: ReactNode): El[] => find(node, (el) => el.type === "button" && el.props.children === "Deploy");
 
 const selections = { seedReference: { title: "Reference data", default: true }, seedDemo: { title: "Demo data", default: true } };
-const workshop: TenantCatalogAppView = { name: "workshop", title: "Workshop", description: "Job cards and invoices", selections, deployed: false };
-const crm: TenantCatalogAppView = { name: "crm", title: "CRM", description: "", selections: {}, deployed: true };
+const workshop: TenantCatalogAppView = { name: "workshop", title: "Workshop", description: "Job cards and invoices", needs: [], selections, deployed: false };
+const crm: TenantCatalogAppView = { name: "crm", title: "CRM", description: "", needs: [], selections: {}, deployed: true };
 const catalog: TenantAppCatalogView = { apps: [crm, workshop], websites: [], members: ["crm"] };
 const tenant = { id: "tnt_1", guid: "abc123", stage: "prod", status: "active", apps: [{ id: "tna_crm", name: "crm", status: "active", lastRunId: null }] } as unknown as TenantDetailView;
 const act = vi.fn(async (fn: () => Promise<{ runId: string }>) => { await fn(); });

@@ -11,7 +11,7 @@ import { TenantWebsites } from "./TenantWebsites.tsx";
 // purge can be offered.
 
 const catalog: TenantAppCatalogView = {
-  apps: [{ name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] }],
+  apps: [{ name: "web", title: "Web", description: "", needs: [], selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] }],
   websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }],
   members: ["web"],
 };
@@ -65,9 +65,9 @@ describe("the Websites section marks the tenant's main website", () => {
     const html = render([], [{ ...live[0]!, main: true }, { name: "blog", site: "blog", main: false }]);
     expect(rowOf(html, "simplidigita-ai")).toContain('<span class="chip">main</span>');
     expect(rowOf(html, "blog")).not.toContain(">main<");
-    // The main website answers at / of the tenant's host, every other at /web/<site>, and each one's engine at /app/<website>.
-    expect(rowOf(html, "simplidigita-ai")).toContain("site simplidigita-ai · at / · admin at /app/simplidigita-ai<");
-    expect(rowOf(html, "blog")).toContain("site blog · at /web/blog · admin at /app/blog<");
+    // The main website answers at / of the tenant's host, every other at /web/<site>, and each one's admin at /admin/<website>.
+    expect(rowOf(html, "simplidigita-ai")).toContain("site simplidigita-ai · at / · admin at /admin/simplidigita-ai<");
+    expect(rowOf(html, "blog")).toContain("site blog · at /web/blog · admin at /admin/blog<");
   });
 
   it("PLANTED INNOCENT: shows no main chip where no website holds the mark", () => {

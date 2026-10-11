@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
+  catalogNeeds,
   fanoutOf,
   memberAppProject,
   memberApplication,
+  memberNameRefusal,
   memberNamespace,
   resolveFanout,
   resolveMembers,
@@ -10,9 +12,10 @@ import {
   tenantNamespaces,
   type AppRef,
   type FanoutMember,
-  withAppDatabases,
+  withAppNeeds,
 } from "./tenant-fanout.ts";
 import { TenantSpecSchema, type TenantSpec } from "../../../shared/consumer.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 
 /** The standing members the product under test declares, and the members a tenant of it ends up with
  *  once its apps are added. Stated by the fixture, the way a real tenant's registration states its own
@@ -24,9 +27,9 @@ const membersOf = (...apps: string[]): string[] => [...STANDING, ...apps];
 // the contract. `{app}` appears where the product's own file and resource names carry the app name.
 const SPEC: TenantSpec = TenantSpecSchema.parse({
   members: [
-    { name: "auth", chart: "charts/example-auth", identityProvider: true, namespaceLabels: { "platform/redis-consumer": "true" } },
-    { name: "jobs", chart: "charts/example-jobs" },
-    { name: "report", chart: "charts/example-report" },
+    { name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true, namespaceLabels: { "platform/redis-consumer": "true" } },
+    { name: "jobs", path: "/jobs", chart: "charts/example-jobs" },
+    { name: "report", path: "/reports", chart: "charts/example-report" },
   ],
   perApp: {
     engine: {
@@ -143,34 +146,18 @@ describe("resolveMembers — the ONE resolution the registration records and the
 
   it("leaves a standing member's strings alone — it has no app to substitute", () => {
     const withToken = TenantSpecSchema.parse({
-      members: [{ name: "idp", chart: "charts/x", identityProvider: true, values: { note: "literal {app}" } }],
+      members: [{ name: "idp", path: "/idp", chart: "charts/x", identityProvider: true, values: { note: "literal {app}" } }],
       perApp: { engine: { chart: "charts/e" }, front: { chart: "charts/f" } },
     });
     expect(resolveMembers(withToken, []).find((x) => x.name === "idp")!.sources[0]!.values).toEqual({ note: "literal {app}" });
   });
 
-  it("fills {databases} with the app's list where it declares one, and drops the key — and every object left empty by it — where it does not", () => {
-    const withList = TenantSpecSchema.parse({
-      members: [{ name: "idp", chart: "charts/x", identityProvider: true, values: { note: "literal {databases}" } }],
-      perApp: {
-        engine: { chart: "charts/e", values: { fullnameOverride: "e-{app}", databases: { mongodb: { databases: "{databases}" } } } },
-        front: { chart: "charts/f", values: { databases: { mongodb: { databases: "{databases}", user: "app" } } } },
-      },
-    });
-    const declared = resolveMembers(withList, [{ name: "erp", databases: ["core", "logs"] }]).find((x) => x.name === "erp")!;
-    expect(declared.sources[0]!.values).toEqual({ fullnameOverride: "e-erp", databases: { mongodb: { databases: ["core", "logs"] } } });
-    const none = resolveMembers(withList, [app("crm")]).find((x) => x.name === "crm")!;
-    // The whole `databases` branch is gone, because nothing but the token stood under it.
-    expect(none.sources[0]!.values).toEqual({ fullnameOverride: "e-crm" });
-    // A sibling key keeps its branch; only the token's key goes.
-    expect(none.sources[1]!.values).toEqual({ databases: { mongodb: { user: "app" } } });
-    // A standing member has no app, so its token stays as written — the product's own mistake, loud.
-    expect(resolveMembers(withList, []).find((x) => x.name === "idp")!.sources[0]!.values).toEqual({ note: "literal {databases}" });
-    // The list is copied, never shared with the request's array.
-    const list = ["core"];
-    const copied = resolveMembers(withList, [{ name: "erp", databases: list }]).find((x) => x.name === "erp")!;
-    list.push("logs");
-    expect((copied.sources[0]!.values as { databases: { mongodb: { databases: string[] } } }).databases.mongodb.databases).toEqual(["core"]);
+  it("records each member's path: a standing member's off the manifest, an app's /app/<name>, a website's admin /admin/<name>", () => {
+    const website: AppRef = { name: "example-ch", folder: "web", site: "main" };
+    const m = resolveMembers(SPEC, [app("erp"), website]);
+    expect(m.map((x) => [x.name, x.path])).toEqual([
+      ["auth", "/auth"], ["jobs", "/jobs"], ["report", "/reports"], ["erp", "/app/erp"], ["example-ch", "/admin/example-ch"],
+    ]);
   });
 
   it("swaps the WHOLE front source for an app the product's override map names", () => {
@@ -184,7 +171,7 @@ describe("resolveMembers — the ONE resolution the registration records and the
 
   it("gives a website the front of its folder with its own name and site, and drops a site key of an app that has none", () => {
     const sites = TenantSpecSchema.parse({
-      members: [{ name: "idp", chart: "charts/x", identityProvider: true }],
+      members: [{ name: "idp", path: "/idp", chart: "charts/x", identityProvider: true }],
       perApp: {
         engine: { chart: "charts/e", valueFiles: ["values-{folder}.yaml"], values: { fullnameOverride: "e-{app}", appFolder: "{folder}", site: { id: "{site}" } } },
         front: {
@@ -336,10 +323,47 @@ describe("single-source-of-truth invariant", () => {
   });
 });
 
-describe("withAppDatabases", () => {
-  it("sets each app's list as the catalog names it, and drops a list the catalog names none for", () => {
-    const apps = [{ name: "erp", databases: ["stale"] }, { name: "crm", databases: ["stale"] }, { name: "web" }];
-    expect(withAppDatabases(apps, { erp: ["core", "logs"] })).toEqual([{ name: "erp", databases: ["core", "logs"] }, { name: "crm" }, { name: "web" }]);
+describe("catalogNeeds and withAppNeeds", () => {
+  const catalog: AppsManifest = {
+    apps: [
+      { name: "erp", title: "ERP", description: "", selections: {}, needs: ["report"] },
+      { name: "crm", title: "CRM", description: "", selections: {}, needs: [] },
+      { name: "web", title: "Website", description: "", selections: {}, needs: ["jobs"], sites: ["main"] },
+    ],
+  };
+
+  it("reads each app's needs off the catalog entry of its folder, a website's off the folder it runs, and gives an app the catalog does not name none", () => {
+    const apps: AppRef[] = [app("erp"), app("crm"), { name: "example-ch", folder: "web", site: "main" }, app("ghost")];
+    expect(catalogNeeds(apps, catalog)).toEqual({ erp: ["report"], crm: [], "example-ch": ["jobs"] });
+  });
+
+  it("sets each app's needs as listed, and none where none is listed, replacing what an entry carried", () => {
+    const apps = [{ name: "erp", needs: ["stale"] }, { name: "crm", needs: ["stale"] }, { name: "web" }];
+    expect(withAppNeeds(apps, { erp: ["report"] })).toEqual([{ name: "erp", needs: ["report"] }, { name: "crm", needs: [] }, { name: "web", needs: [] }]);
   });
 });
 
+describe("memberNameRefusal — the names an app or a website may not take", () => {
+  const PRODUCT = TenantSpecSchema.parse({
+    members: [
+      { name: "auth", path: "/auth", chart: "charts/auth", identityProvider: true },
+      { name: "jobs", path: "/jobs", chart: "charts/jobs" },
+      { name: "report", path: "/reports", chart: "charts/report" },
+      { name: "web", path: "/", chart: "charts/web" },
+    ],
+    reservedMemberNames: ["api", "ws", "health", "tenant", "admin", "app"],
+    perApp: { engine: { chart: "charts/e" }, front: { chart: "charts/f" } },
+  });
+
+  it.each(["api", "ws", "health", "tenant", "admin", "app"])("refuses %s, naming it and the product's reserved words", (name) => {
+    expect(memberNameRefusal(name, PRODUCT)).toBe(`"${name}" is reserved by the product for its engine (api, ws, health, tenant, admin, app)`);
+  });
+
+  it.each(["auth", "jobs", "report", "web"])("refuses %s, naming it as a standing member of every tenant", (name) => {
+    expect(memberNameRefusal(name, PRODUCT)).toBe(`"${name}" is a standing member of every tenant of this product`);
+  });
+
+  it("PLANTED INNOCENT: lets an ordinary app name pass", () => {
+    expect(memberNameRefusal("workshop", PRODUCT)).toBeNull();
+  });
+});

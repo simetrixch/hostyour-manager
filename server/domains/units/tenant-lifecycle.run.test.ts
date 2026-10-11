@@ -24,19 +24,19 @@ describe("remove-app run", () => {
   it("drops only the named app, prunes only its Application, and marks the tenant_app offboarded", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const reg = new TenantRegistrations(new FakePlatformRepo());
-    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }], members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }]) }), runId: "run_onb" });
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }], members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }]) }), runId: "run_onb" });
 
     const logs: string[] = [];
     await runAll(makeRemoveAppDef(ports(reg)).steps({ tenantId: "tnt_1", app: "web" }), "run_rma", { tenantId: "tnt_1", app: "web" }, logs);
 
     // The registration keeps erp; every sibling member is untouched.
-    expect((await reg.readTenant("prod", GUID))?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]);
+    expect((await reg.readTenant("prod", GUID))?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }]);
     expect(db.db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, "tnt_1"), eq(tenantApps.name, "web"))).get()?.status).toBe("offboarded");
     expect(db.db.select().from(tenantApps).where(and(eq(tenantApps.tenantId, "tnt_1"), eq(tenantApps.name, "erp"))).get()?.status).toBe("active");
     expect(logs.some((l) => l.includes("every sibling member is untouched"))).toBe(true);
   });
 
-  const TWO_APPS = [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }];
+  const TWO_APPS = [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }];
   // The bundle goes with the last app (#217): its build registration goes and the registration is its
   // platform alone again; the repository STANDS (#241). A sibling standing keeps the bundle.
   it("the last app removed takes the tenant's apps build registration and the bundle fields with it, and leaves the repository standing; a sibling standing keeps them", async () => {
@@ -103,7 +103,7 @@ describe("tenant-offboard run", () => {
   it("removes the registration, waits for the whole fan-out to drain, deletes EVERY member AppProject, and marks the rows offboarded (kept)", async () => {
     seedTenant({ apps: ["erp", "web"] });
     const reg = new TenantRegistrations(new FakePlatformRepo());
-    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }], members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }]) }), runId: "run_onb" });
+    await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }], members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }]) }), runId: "run_onb" });
     const projects = new FakeMasterProjectWriter();
     const members = ["auth", "jobs", "report", "erp", "web"];
     for (const member of members) {
@@ -233,7 +233,7 @@ describe("tenant-offboard run", () => {
 // Applications. Every projection of the fan-out therefore filters "everything except offboarded", never
 // "active" — these two tests pin what the old filter would have cost.
 describe("a still-provisioning tenant offboards COMPLETELY", () => {
-  const twoApps = [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, { name: "web", seedReference: false, seedDemo: false, selections: {} }];
+  const twoApps = [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }, { name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }];
 
   it("its watch set counts the provisioning app rows — an \"active\" filter would report a false success", async () => {
     seedTenant({ status: "provisioning", appStatus: "provisioning", apps: ["erp", "web"] });

@@ -13,7 +13,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter } from
 import { FakeRegistryProbe } from "../../adapters/registry/testing/fake.ts";
 import { type TenantValidationReport } from "../../../shared/tenant.ts";
 import type { Cleanup } from "../../executor/types.ts";
-import { APP_OVERLAYS, TEST_BUNDLE, TEST_RESOURCES } from "./tenant-members.fixture.ts";
+import { APP_OVERLAYS, TEST_BUNDLE, TEST_RESOURCES, testMembers } from "./tenant-members.fixture.ts";
 import { ORG } from "./tenant-apps-repo.fixture.ts";
 import { buildUnitStepName } from "./tenant-builds.ts";
 import { CLEAN_DOCS, GUID, MANIFEST_YAML, NEW_APP, NS_DOC, REGISTRY_HOST, SHA, TEMPLATE_APPS, ctx, db, doc, params, planCtx, ports, runAll, seedClusters, seededPlatformRepo, useMemoryDb } from "./add-app.fixture.ts";
@@ -80,26 +80,37 @@ describe("add-app run definition", () => {
     const read = await prt.registrations.readTenant("prod", GUID);
     // The pre-seeded "erp" keeps its default-false tiers; the appended "crm" carries both tiers true.
     expect(read?.entry.apps).toEqual([
-      { name: "erp", seedReference: false, seedDemo: false, selections: {} },
-      { name: "crm", seedReference: true, seedDemo: true, selections: {} },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" },
+      { name: "crm", seedReference: true, seedDemo: true, selections: {}, needs: [], path: "/app/crm" },
     ]);
   });
 
-  it("plans the new app with the database list its catalog entry declares, and appends it into its apps[] entry", async () => {
+  it("plans the new app with the needs its catalog entry declares, and appends it with its path into its apps[] entry", async () => {
     seedClusters();
-    const prt = ports({}, TEMPLATE_APPS("    databases: [core, logs]\n"));
+    const prt = ports({}, TEMPLATE_APPS("    needs: [report]\n"));
     const result = await makeAddAppDef(prt).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
     expect(result.outcome).toBe("planned");
     const planned = (result as { params: AddAppParams }).params;
-    expect(planned.databases).toEqual(["core", "logs"]);
-    await runAll(params({ databases: planned.databases }), prt, []);
-    expect((await prt.registrations.readTenant("prod", GUID))?.entry.apps.find((a) => a.name === NEW_APP)?.databases).toEqual(["core", "logs"]);
+    expect(planned.needs).toEqual(["report"]);
+    await runAll(params({ needs: planned.needs }), prt, []);
+    const appended = (await prt.registrations.readTenant("prod", GUID))?.entry.apps.find((a) => a.name === NEW_APP);
+    expect(appended).toMatchObject({ needs: ["report"], path: `/app/${NEW_APP}` });
+    expect(appended).not.toHaveProperty("sitePath");
   });
 
-  it("plans an app whose catalog entry declares no databases with no list", async () => {
+  it("plans an app whose catalog entry declares no needs with an empty list", async () => {
     seedClusters();
     const result = await makeAddAppDef(ports()).planStream!({ tenantId: "tnt_1", app: NEW_APP }, planCtx());
-    expect((result as { params: AddAppParams }).params).not.toHaveProperty("databases");
+    expect((result as { params: AddAppParams }).params.needs).toEqual([]);
+  });
+
+  it("appends a website with its admin path and the path it answers at", async () => {
+    seedClusters();
+    const prt = ports();
+    const p = params({ app: "starter", website: { folder: "web", site: "starter", main: true }, member: testMembers([{ name: "starter", site: "starter" }])[3]! });
+    await makeAddAppDef(prt).steps(p).find((s) => s.name === "append-app")!.run(ctx(p, "append-app", []));
+    const website = (await prt.registrations.readTenant("prod", GUID))?.entry.apps.find((a) => a.name === "starter");
+    expect(website).toMatchObject({ folder: "web", site: "starter", main: true, path: "/admin/starter", sitePath: "/" });
   });
 
   it("apply-appproject creates the NEW member's own AppProject and touches no sibling's (no delete cleanup registered)", async () => {
@@ -215,6 +226,13 @@ describe("add-app streaming planner", () => {
   it("refuses a standing member from a stale add-app form before reading or building the catalog", async () => {
     seedClusters();
     await expect(makeAddAppDef(ports()).planStream!({ tenantId: "tnt_1", app: "auth" }, planCtx())).rejects.toThrow(/already exists/);
+  });
+
+  it("refuses an app named with a word the product reserves for its engine, before any validation runs", async () => {
+    seedClusters();
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: CLEAN_DOCS } });
+    await expect(makeAddAppDef(ports({ helm })).planStream!({ tenantId: "tnt_1", app: "api" }, planCtx())).rejects.toThrow(/"api" is reserved by the product for its engine \(api, ws, health, tenant, admin, app\)/);
+    expect(helm.requests).toEqual([]);
   });
 
   // A standing bundle carries every app of its tenant: adding one the bundle lacks extends it —

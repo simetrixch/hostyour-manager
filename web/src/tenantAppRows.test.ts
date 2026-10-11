@@ -5,7 +5,7 @@ import type { TenantCatalogAppView } from "../../shared/apps-manifest.ts";
 // The tenant page's Apps list: the bundle's apps folded with the inventory's rows. Pure, so it is
 // tested here rather than through the page — the factoring tenantRows.test.ts describes.
 
-const entry = (name: string, deployed: boolean): TenantCatalogAppView => ({ name, title: name.toUpperCase(), description: "", selections: {}, deployed });
+const entry = (name: string, deployed: boolean): TenantCatalogAppView => ({ name, title: name.toUpperCase(), description: "", needs: [], selections: {}, deployed });
 const row = (name: string, status = "active") => ({ id: `tna_${name}`, name, status, lastRunId: null });
 
 describe("tenantAppRows", () => {
@@ -48,6 +48,9 @@ describe("undeployedApps", () => {
     expect(newWebsiteName(catalog, "auth")).toBe("auth-2");
     expect(newWebsiteName(catalog, "cycleshop")).toBe("cycleshop-2");
     expect(newWebsiteName(catalog, "workshop")).toBe("workshop-2");
+    // A word the product reserves for its engine is never a website's name, though no member holds it.
+    expect(newWebsiteName({ ...catalog, reservedNames: ["api", "admin"] }, "api")).toBe("api-2");
+    expect(newWebsiteName({ ...catalog, reservedNames: ["api", "admin"] }, "show")).toBe("show");
   });
 
   it("keeps a removed website out of the Apps list and hands it to the Websites section, with its site and last run", () => {

@@ -39,7 +39,7 @@ import type { ArgoAppStatus } from "../../adapters/kube/port.ts";
 import type { Stage } from "../../../shared/enums.ts";
 import type { TenantSource, TenantSpec } from "../../../shared/consumer.ts";
 import type { AppsManifest } from "../../../shared/apps-manifest.ts";
-import { appFolder, type TenantMemberRecord, type TenantSourceRecord } from "../../../shared/tenant.ts";
+import { appFolder, memberPath, type TenantMemberRecord, type TenantSourceRecord } from "../../../shared/tenant.ts";
 import { errValidation } from "../../kernel/errors.ts";
 
 /** One RENDER unit of the fan-out: a chart plus the value files layered on it. `member` is the member
@@ -62,50 +62,39 @@ export interface FanoutMember {
 }
 
 /** A tenant app reference — structural (a parsed TenantRegistration["apps"][number] or a request app
- *  both satisfy it) so this pure module stays decoupled from the registration schema. `databases` is
- *  what the app's manifest entry declares (shared/apps-manifest.ts), handed in by the validator that
- *  read the catalog; it fills the `{databases}` token and nothing else. */
+ *  both satisfy it) so this pure module stays decoupled from the registration schema. */
 export interface AppRef {
   name: string;
   /** The app folder the app runs, where it is not the folder of its own name: a website's. */
   folder?: string;
   /** A website's site (TenantAppSchema). */
   site?: string;
-  databases?: readonly string[];
 }
 
-/** [apps] with the database list [lists] names for each, and no list where [lists] names none: the
- *  catalog's list replaces whatever an entry carried, so a list the catalog dropped is dropped here
- *  too. What every member reads in `tenant.apps` and what fills an app's `{databases}` token. */
-export function withAppDatabases<T extends AppRef>(apps: readonly T[], lists: Readonly<Record<string, readonly string[]>>): T[] {
-  return apps.map((a) => {
-    const { databases: _carried, ...rest } = a;
-    const listed = lists[a.name];
-    return (listed === undefined ? rest : { ...rest, databases: [...listed] }) as T;
-  });
+/** [apps] with the standing members [needsByApp] names for each, and none where it names none: the
+ *  catalog's list replaces whatever an entry carried, so a need the catalog dropped is dropped here
+ *  too. What every chart reads in `tenant.apps`. */
+export function withAppNeeds<T extends AppRef>(apps: readonly T[], needsByApp: Readonly<Record<string, readonly string[]>>): (T & { needs: string[] })[] {
+  return apps.map((a) => ({ ...a, needs: [...(needsByApp[a.name] ?? [])] }));
 }
 
-/** The database list the catalog entry of each app's folder declares, by app name: what fills the
- *  app's `{databases}` token and stands in its `tenant.apps` entry. An app the catalog does not name,
- *  or whose entry declares none, has no list. */
-export function catalogDatabases(apps: readonly { name: string; folder?: string }[], catalog: AppsManifest): Record<string, string[]> {
+/** The standing members the catalog entry of each app's folder says the app needs, by app name: what
+ *  stands in the app's `tenant.apps` entry. An app the catalog does not name has no entry. */
+export function catalogNeeds(apps: readonly { name: string; folder?: string }[], catalog: AppsManifest): Record<string, string[]> {
   const byFolder = new Map(catalog.apps.map((a) => [a.name, a]));
   return Object.fromEntries(apps.flatMap((a) => {
-    const databases = byFolder.get(appFolder(a))?.databases;
-    return databases === undefined ? [] : [[a.name, [...databases]]];
+    const needs = byFolder.get(appFolder(a))?.needs;
+    return needs === undefined ? [] : [[a.name, [...needs]]];
   }));
 }
 
 /** The tokens the manifest defines. `{app}` (the member name) and `{folder}` (the app folder, the
  *  member name for every app that is no website) are replaced inside any string. `{site}` is a
- *  website's: replaced inside any string, and a whole value of it is
- *  DROPPED with its key for an app that has none, as `{databases}` is: a whole string value replaced
- *  by the app's database list, or dropped when the app declares none, so a chart's own value files
- *  decide then. */
+ *  website's: replaced inside any string, and a whole value of it is DROPPED with its key for an app
+ *  that has none, so a chart's own value files decide then. */
 export const APP_TOKEN = "{app}";
 export const FOLDER_TOKEN = "{folder}";
 export const SITE_TOKEN = "{site}";
-export const DATABASES_TOKEN = "{databases}";
 
 /** The tenant's own identity provider — the member the whole tenant authenticates against, so a
  *  caller that needs THAT member rather than the set can name it: the bootstrap-token Secret lives in
@@ -120,6 +109,15 @@ export function identityProviderMember(spec: TenantSpec): string {
     throw errValidation("the tenant spec declares no identityProvider member — TenantSpecSchema requires exactly one, so this spec did not come through it");
   }
   return m.name;
+}
+
+/** Why `name` cannot be an app or a website of a tenant of this product, or null: the product's engine
+ *  reserves it for itself, or it is a standing member of every tenant. An app named so would claim the
+ *  engine's route or the member's own namespace and Application. */
+export function memberNameRefusal(name: string, spec: Pick<TenantSpec, "members" | "reservedMemberNames">): string | null {
+  if (spec.reservedMemberNames.includes(name)) return `"${name}" is reserved by the product for its engine (${spec.reservedMemberNames.join(", ")})`;
+  if (spec.members.some((m) => m.name === name)) return `"${name}" is a standing member of every tenant of this product`;
+  return null;
 }
 
 /** ONE member's namespace at one stage: <guid>-<member>-<stage>. THE name source — never hand-rolled
@@ -163,15 +161,12 @@ export function tenantNamespaces(members: readonly string[], guid: string, stage
 
 /** Substitute the tokens the manifest defines throughout a source. `{app}` reaches every
  *  valueFiles entry and every STRING inside values, at any depth — `values-{app}.yaml`,
- *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`. `{databases}`
- *  stands as a whole string value inside values, where the product puts its database list key —
- *  `{ databases: { mongodb: { databases: "{databases}" } } }` — and becomes the app's list.
+ *  `example-engine-{app}`, `{ ingress: { engineService: "example-engine-{app}" } }`.
  *
  *  The tokens exist because a per-app chart's file names, its resource names and its value keys are
  *  the product's own convention, and the platform must not compose them: building `values-<app>.yaml`
- *  and `example-ui-<app>-tls` in the appsets, or writing a chart's database key here, composes them
- *  out of literals no schema could see. The product writes the whole string and the platform only
- *  fills in which app this is and what its manifest declares. */
+ *  and `example-ui-<app>-tls` in the appsets composes them out of literals no schema could see. The
+ *  product writes the whole string and the platform only fills in which app this is. */
 function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSourceRecord {
   // A standing member has no app, so nothing is substituted for it — a `{app}` left in a standing
   // member's source is the product's own mistake and reaches the chart as written, where it fails
@@ -180,13 +175,11 @@ function substituteApp(source: TenantSource, app: AppRef | undefined): TenantSou
     [APP_TOKEN, app.name], [FOLDER_TOKEN, appFolder(app)], [SITE_TOKEN, app.site],
   ];
   const text = (s: string): string => tokens.reduce((out, [token, value]) => (value === undefined ? out : out.split(token).join(value)), s);
-  // DROPPED marks the list token of an app that declares no list, and a site token of an app
-  // that has none: the key goes, and so does every object the drop leaves empty, so the chart's own
-  // value files (an overlay that still carries the list) decide, rather than an empty list or an
-  // empty map from here standing over them.
+  // DROPPED marks the site token of an app that has no site: the key goes, and so does every object
+  // the drop leaves empty, so the chart's own value files decide, rather than an empty map from here
+  // standing over them.
   const DROPPED = Symbol("dropped");
   const walk = (v: unknown): unknown => {
-    if (app !== undefined && v === DATABASES_TOKEN) return app.databases === undefined ? DROPPED : [...app.databases];
     if (app !== undefined && v === SITE_TOKEN && app.site === undefined) return DROPPED;
     if (typeof v === "string") return text(v);
     if (Array.isArray(v)) return v.map(walk);
@@ -224,12 +217,13 @@ function appSources(spec: TenantSpec, app: AppRef): TenantSourceRecord[] {
 export function resolveMembers(spec: TenantSpec, apps: readonly AppRef[]): TenantMemberRecord[] {
   const standing: TenantMemberRecord[] = spec.members.map((m) => ({
     name: m.name,
+    path: m.path,
     namespaceLabels: m.namespaceLabels ?? {},
     sources: [substituteApp(m, undefined)],
   }));
   // An app member carries no extra namespace labels: every app gets the same namespace, and a label
   // one app needs and another does not is a per-member fact the product would state on a member.
-  return [...standing, ...apps.map((a) => ({ name: a.name, namespaceLabels: {}, sources: appSources(spec, a) }))];
+  return [...standing, ...apps.map((a) => ({ name: a.name, path: memberPath(a), namespaceLabels: {}, sources: appSources(spec, a) }))];
 }
 
 /** The EXPECTED set of ArgoCD Application names for a tenant — the completeness gate the set-watch and

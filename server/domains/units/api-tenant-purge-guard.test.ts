@@ -93,7 +93,7 @@ function registration(over: Partial<TenantRegistration> = {}): TenantRegistratio
   return {
     cluster: "s1", subdomain: SUB,
     members: TEST_MEMBER_RECORDS, identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
-    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }],
     seedUsers: false, quota: seedQuota("small"), resetNonce: "1", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
     ...over,
   };

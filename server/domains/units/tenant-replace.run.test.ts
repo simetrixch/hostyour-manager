@@ -65,9 +65,9 @@ builds:
     containerfile: Containerfile
 tenant:
 ${TEMPLATE_SPEC}  members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -468,7 +468,7 @@ describe("resolveTeardownTarget resolves ONE guid, with or without an inventory 
     seedClusters();
     seedOldRow(); // inventory: app "legacy"
     const registrations = makeRegistrations();
-    await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }], members: testMembers(["erp"]) }), runId: "run_old" }); // pointer: app "erp"
+    await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }], members: testMembers(["erp"]) }), runId: "run_old" }); // pointer: app "erp"
     const target = await resolveTeardownTarget({ db: db.db, registrations }, "prod", OLD);
     expect(target?.watchNames).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...[{ name: "erp" }, { name: "legacy" }].map((a) => a.name)], OLD, "prod"));
     // The MEMBERS union the same way — the pointer names "erp", the inventory names "legacy", and a

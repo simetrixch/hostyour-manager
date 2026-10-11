@@ -2,8 +2,8 @@
 // engine starts at its stage pin (create-tenant-registration.ts writes the pins as the tenant's
 // versions), so the catalog's `engine` is held against those pins before anything is created
 // (engine-line.ts). write-registration judges again with the pins as they stand when it writes, against
-// the bundle release the run built. Kept apart from create-tenant.run.test.ts, which stands at the line
-// budget.
+// the bundle release the run built. A word the product reserves for its engine is refused at the same
+// plan. Kept apart from create-tenant.run.test.ts, which stands at the line budget.
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { DbHandle } from "../../db/client.ts";
 import { openUnitDb } from "#unit/server/plugin.fixture.ts";
@@ -32,9 +32,10 @@ owner: platform
 envs: [dev, prod]
 tenant:
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
+  reservedMemberNames: [api, ws]
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }
@@ -73,6 +74,16 @@ function ports(engine: string, books = new FakePlatformRepo()): TenantOnboardPor
 
 const plan = (prt: TenantOnboardPorts, logs: string[] = []) =>
   makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [{ name: "erp" }] }, { db: db.db, log: (l) => logs.push(l), signal: new AbortController().signal } satisfies PlanStreamCtx);
+
+describe("create-tenant refuses a name the product reserves for its engine", () => {
+  it("PLANTED DEFECT: rejects an app named so, before any validation runs", async () => {
+    const helm = new FakeHelmRenderer({ fallback: { ok: true, docs: DOCS } });
+    const prt = { ...ports(ENGINE_03), helm };
+    const result = await makeCreateTenantDef(prt).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: "acme", owner: "team-acme", size: "small", apps: [{ name: "api" }] }, { db: db.db, log: () => undefined, signal: new AbortController().signal });
+    expect(result.outcome === "rejected" && result.summary).toContain('"api" is reserved by the product for its engine (api, ws)');
+    expect(helm.requests).toEqual([]);
+  });
+});
 
 describe("create-tenant holds the catalog's engine line against the engine stage pin", () => {
   it("plans a tenant whose catalog bundle is written for the line its engines start on", async () => {

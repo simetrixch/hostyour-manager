@@ -82,11 +82,11 @@ export function websiteFolder(catalog: readonly TenantCatalogAppView[], websites
   return folder && sites.length > 0 ? { ...folder, sites } : null;
 }
 
-/** The name a new website of `site` gets: clear of every member the tenant has and every app its
- *  catalog offers. An app is named by its folder, so a website holding that name would block the app
- *  for good. */
-export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "members">, site: string): string {
-  return websiteAppName(site, new Set([...(catalog.members ?? []), ...catalog.apps.map((a) => a.name)]));
+/** The name a new website of `site` gets: clear of every member the tenant has, every name the product
+ *  reserves for its engine and every app its catalog offers. An app is named by its folder, so a
+ *  website holding that name would block the app for good. */
+export function newWebsiteName(catalog: Pick<TenantAppCatalogView, "apps" | "members" | "reservedNames">, site: string): string {
+  return websiteAppName(site, new Set([...(catalog.members ?? []), ...(catalog.reservedNames ?? []), ...catalog.apps.map((a) => a.name)]));
 }
 
 /** The confirm label of a website's move to another site on the bundle release `appsImageTag`, or

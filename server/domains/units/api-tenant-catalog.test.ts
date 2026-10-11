@@ -39,7 +39,7 @@ tenant:
   appsBundle: acme-apps
   appsRepo: https://github.com/acme/acme-apps.git
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }
@@ -76,8 +76,9 @@ describe("GET /api/tenants/app-catalog", () => {
     const repo = new FakeRepoReader({ files: { "deploy/platform.yaml": TENANT_MANIFEST, "apps.yaml": APPS_YAML } });
     const { app, cookie } = await makeTenant(makeAppCatalogProvider({ repo, repoURL: DEPLOY_URL, ref: "master", credentialId: "deploy-read-pat", warn: () => {} }));
     expect(await (await app.request("/api/tenants/app-catalog", authed(cookie))).json()).toEqual({
-      apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", selections: { seedDemo: { title: "Demo data", default: true } } }],
+      apps: [{ name: "erp", title: "ERP", description: "Orders and stock.", needs: [], selections: { seedDemo: { title: "Demo data", default: true } } }],
       packageScopes: [], // the template routes no scope to GitHub Packages (#233)
+      reservedMemberNames: [],
     });
     // The deploy repository at the books ref, then the template at its default branch head.
     expect(repo.clones.map((c) => [c.repoURL, c.ref])).toEqual([[DEPLOY_URL, "master"], ["https://github.com/acme/acme-apps.git", "HEAD"]]);

@@ -41,9 +41,9 @@ builds:
     containerfile: Containerfile
 tenant:
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
 ${TEMPLATE_SPEC}  perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -64,8 +64,8 @@ export function staleMembers(): TenantMemberRecord[] {
 }
 
 /** The books branch: `earlier` is what releases wrote before `files`, which stands now. */
-/** The registration's apps as create-tenant writes them: each with the database list its catalog entry declares. */
-const LISTED_APPS: { name: string; databases?: string[] }[] = [{ name: "erp", databases: ["core", "sales"] }];
+/** The registration's apps as create-tenant writes them: each with the needs its catalog entry declares. */
+const LISTED_APPS: { name: string; needs?: string[] }[] = [{ name: "erp", needs: ["report"] }];
 
 function platformRepo(members: TenantMemberRecord[], files: Record<string, string> = {}, earlier: Record<string, string> = {}, apps = LISTED_APPS): FakePlatformRepo {
   const repo = new FakePlatformRepo();

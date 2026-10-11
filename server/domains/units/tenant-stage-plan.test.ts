@@ -181,7 +181,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     const p = stagePorts();
     (p.dns as FakeDnsProvider).zones = ["example.org"];
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", databases: ["core"] }];
+    const apps = [{ name: "cycleshop", folder: "web", site: "cycleshop", needs: ["report"] }];
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members: testMembers(apps), ownDomain: "show.example.org", ownDomainRedirects: ["www.show.example.org"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
     const write = tenantRegistrationWrite("prod", GUID, entry); books.seed(books.booksBranch, write.path, write.content);
@@ -210,7 +210,7 @@ describe("tenant stages share identity while provisioning independently", () => 
   it("stage-scopes the own domain, carries the websites and their members unchanged, and takes no alias domain", async () => {
     const p = stagePorts();
     const current = (await p.registrations.readTenant("prod", GUID))!.entry;
-    const apps = [{ name: "company", folder: "web", site: "main", databases: ["core"] }, { name: "erp", databases: ["core"] }];
+    const apps = [{ name: "company", folder: "web", site: "main", needs: ["report"] }, { name: "erp", needs: ["report"] }];
     const members = testMembers(apps).map((m) => m.name === "company" ? { ...m, sources: m.sources.map((s) => ({ ...s, values: { ...s.values, site: { id: "main" } } })) } : m);
     const entry = TenantRegistrationSchema.parse({ ...current, apps, members, ownDomain: "show.example", ownDomainRedirects: ["www.show.example"], ownDomainAliases: ["show.example.it"], quota: seedQuota("small") });
     const books = new FakePlatformRepo();
@@ -223,7 +223,7 @@ describe("tenant stages share identity while provisioning independently", () => 
     // An alias is another domain of the tenant, held by the stage it was given on: the new stage
     // answers at none until it is given its own.
     expect(result.params).not.toHaveProperty("ownDomainAliases");
-    expect(result.params.apps.map((a) => a.name)).toEqual(["company", "erp"]);
+    expect(result.params.apps.map((a) => [a.name, a.needs])).toEqual([["company", ["report"]], ["erp", ["report"]]]);
     expect(result.params.members.find((m) => m.name === "company")!.sources[0]!.values["site"]).toEqual({ id: "main" });
     // The own domain and its www. get their records; the abort takes them back.
     const cleanups: Cleanup[] = [];

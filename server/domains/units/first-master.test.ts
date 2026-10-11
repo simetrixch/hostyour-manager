@@ -109,7 +109,7 @@ describe("readUngatedOnboard", () => {
     const fanout = JSON.stringify({
       apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", name: "hostyour", owner: "platform", envs: ["dev"],
       tenant: {
-        members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+        members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
         perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
       },
     });

@@ -72,9 +72,9 @@ owner: platform
 envs: [prod]
 tenant:
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }

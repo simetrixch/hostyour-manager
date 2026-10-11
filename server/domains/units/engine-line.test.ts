@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { builtBundleEngine, bundleReleaseRefusal, bundleReleaseTag, declaredEngine, engineLineRefusal, ENGINE_NOT_CHECKED, movesLine, repositoryEngine, throwEngineLineRefusal, versionLine } from "./engine-line.ts";
+import { builtBundleEngine, bundleReleaseRefusal, bundleReleaseTag, declaredEngine, engineLineRefusal, ENGINE_NOT_CHECKED, movesLine, repositoryEngine, standingAppNeeds, throwEngineLineRefusal, versionLine } from "./engine-line.ts";
 import { newMembersRefusal } from "./tenant-versions.ts";
 import { FakeRepoReader } from "../../adapters/git/testing/fake.ts";
-import type { TenantMemberRecord } from "../../../shared/tenant.ts";
+import type { TenantMemberRecord, TenantRegistration } from "../../../shared/tenant.ts";
+import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 
 const ENGINE = { build: "example-engine", line: "0.3" };
 const APPS = (engine: string): string => `apps:\n  - name: erp\n    title: ERP\n${engine}`;
@@ -112,5 +113,30 @@ describe("the engine line a bundle is written for", () => {
     const ctx = { log: () => undefined, signal: new AbortController().signal };
     expect(await bundleReleaseRefusal(unreadable, { appsRepo: BUNDLE_REPO, appsImageTag: "0.0.0-placeholder" }, {}, { erp: { "example-engine": ON_04 } }, ctx))
       .toContain('the apps bundle stands at "0.0.0-placeholder", which is no image tag');
+  });
+});
+
+describe("the needs of a standing tenant's apps, as its own repository declares them", () => {
+  const app = (name: string, needs: string[]): TenantRegistration["apps"][number] => ({ name, seedReference: false, seedDemo: false, selections: {}, needs, path: `/app/${name}` });
+  const entry = (appsRepo: string): Pick<TenantRegistration, "apps" | "appsRepo" | "appsImageTag"> => ({ apps: [app("erp", ["held"]), app("workshop", [])], appsRepo, appsImageTag: BUNDLE_TAG });
+  const own: AppsManifest = { apps: [
+    { name: "erp", title: "ERP", description: "", selections: {}, needs: ["report"] },
+    { name: "workshop", title: "Workshop", description: "", selections: {}, needs: ["report", "jobs"] },
+  ] };
+  const unreadableRepo = async (): Promise<never> => { throw new Error(`${BUNDLE_REPO} could not be read at ${BUNDLE_TAG}`); };
+
+  it("reads each app's needs off the tenant's own repository, also for an app the template never offered", async () => {
+    const logs: string[] = [];
+    expect(await standingAppNeeds(async () => own, entry(BUNDLE_REPO), { log: (l) => logs.push(l), signal: new AbortController().signal })).toEqual({ erp: ["report"], workshop: ["report", "jobs"] });
+    expect(logs).toEqual([]);
+  });
+
+  it("PLANTED DEFECT: keeps the registration's needs and says why where the repository cannot be read or there is no bundle", async () => {
+    const logs: string[] = [];
+    const ctx = { log: (l: string) => logs.push(l), signal: new AbortController().signal };
+    expect(await standingAppNeeds(unreadableRepo, entry(BUNDLE_REPO), ctx)).toEqual({ erp: ["held"], workshop: [] });
+    expect(logs[0]).toMatch(/could not be read at .*; the apps' needs stay as the registration holds them$/);
+    expect(await standingAppNeeds(async () => null, entry(""), ctx)).toEqual({ erp: ["held"], workshop: [] });
+    expect(logs[1]).toBe("the tenant runs no apps bundle; the apps' needs stay as the registration holds them");
   });
 });

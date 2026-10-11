@@ -11,7 +11,7 @@ import { UnitQuotaSchema, UnitSizeSchema } from "#unit/shared/unit-size.ts";
 // tenant, and tenant is a pure leaf (it imports consumer/gates/enums; nothing imports it back).
 import { z } from "zod";
 import { GateResultSchema } from "./gates.ts";
-import { ConsumerManifestSchema, publicFqdn } from "./consumer.ts";
+import { ConsumerManifestSchema, memberName, memberPathSchema, publicFqdn } from "./consumer.ts";
 import { HOST_LABEL_RE, PLATFORM_HOST_LABEL, RESERVED_HOST_LABELS } from "#unit/shared/unit-host.ts";
 import { SEED_SELECTIONS } from "./app-selections.ts";
 
@@ -29,11 +29,6 @@ export const guid = z.string().regex(/^[0-9a-hjkmnp-tv-z]{12}$/);
 /** A tenant app name: a lower-case DNS-1123-style label, 2..30 chars. Each app is a MEMBER of the
  *  tenant: namespace <guid>-<name>, AppProject <guid>-<name>, Application <guid>-<name>-<stage>. */
 export const appName = z.string().regex(/^[a-z][a-z0-9-]{0,28}[a-z0-9]$/);
-
-/** The databases one app declares in its catalog entry (apps.yaml), by name. The same list fills the
- *  `{databases}` token of the app's own member and stands in its `tenant.apps` entry, which every
- *  member of the tenant reads. */
-export const appDatabases = z.array(z.string().regex(/^[a-z][a-z0-9_-]*$/)).min(1);
 
 /** A site of a website app folder: the id its content carries (a WebSite's `_id`, a WebPage's `site`). */
 export const siteId = z.string().regex(/^[a-z][a-z0-9-]{0,62}$/);
@@ -83,10 +78,7 @@ export function appFolders(apps: readonly { name: string; folder?: string }[]): 
   return [...new Set(apps.map(appFolder))];
 }
 
-/** A member's name — a standing member's or an app's. Both name the SAME thing: the suffix of a
- *  namespace, an AppProject and an Application, all `<guid>-<name>`. One grammar, because a
- *  collision between the two kinds is exactly what has to be impossible. */
-export const memberName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/);
+export { memberName };
 
 /** A build's name, as a product's deploy/platform.yaml and tenant.buildRepos spell it. */
 export const buildName = z.string().regex(/^[a-z0-9-]+$/);
@@ -137,6 +129,8 @@ export type TenantSourceRecord = z.infer<typeof TenantSourceRecordSchema>;
  *  rather than an empty one. */
 export const TenantMemberRecordSchema = z.object({
   name: memberName,
+  /** The path the member's chart serves on the tenant's host. */
+  path: memberPathSchema,
   /** Extra labels this member's namespace is granted beyond the ones every tenant namespace carries. */
   namespaceLabels: z.record(z.string(), z.string()).default({}),
   /** The charts this member deploys into its ONE namespace, in render order. */
@@ -150,11 +144,15 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  operator app is USABLE) and `seedDemo` → SEED_DEMO_DATA_ON_BOOT (demo tier `seeds-demo/`: showcase
  *  records). `seed` is the LEGACY demo alias — READ-ONLY: a pre-existing pointer
  *  carrying {name, seed} folds seed → seedDemo here and is NEVER re-emitted (the writer always
- *  serializes the canonical {name, seedReference, seedDemo, selections}, with folder and site on a
- *  website). Both default false, so a bare
+ *  serializes the canonical {name, seedReference, seedDemo, selections, needs, path}, with folder and
+ *  site and sitePath on a website). Both default false, so a bare
  *  {name} from before the tiers parses unchanged and seeds nothing. `selections` carries every
  *  further selection the app's manifest declares; the two above are refused there, so one selection
  *  has one place. Imported everywhere the apps element is validated.
+ *
+ *  `needs` names the standing members the app needs (the report service, say), copied off the catalog
+ *  entry of the app's folder by the Manager; `path` is where the app's own chart serves on the tenant's
+ *  host and `sitePath` where a website answers, both read by every chart in `tenant.apps`.
  *
  *  A WEBSITE is an app whose folder's catalog entry lists `sites`. It carries the folder it runs and
  *  the site it serves, and has no domain of its own: the tenant's main website answers at `/` of the
@@ -163,8 +161,8 @@ export type TenantMemberRecord = z.infer<typeof TenantMemberRecordSchema>;
  *  its own name. One website of a tenant may carry `main: true`: the tenant's main website. */
 /** The path a website answers at on the tenant's host: `/` for the main website, `/web/<site>` for every other. */
 export const websitePath = (website: { site: string; main?: boolean | undefined }): string => (website.main ? "/" : `/web/${website.site}`);
-/** The path an app's engine answers at on the tenant's host, a website's engine too: `/app/<app>`. */
-export const appPath = (app: string): string => `/app/${app}`;
+/** The path a member's own chart serves on the tenant's host: a website's admin at `/admin/<name>`, every other app at `/app/<name>`. */
+export const memberPath = (app: { name: string; site?: string | undefined }): string => (app.site === undefined ? `/app/${app.name}` : `/admin/${app.name}`);
 
 export const TenantAppSchema = z
   .object({
@@ -177,15 +175,18 @@ export const TenantAppSchema = z
     seedReference: z.boolean().default(false),
     seedDemo: z.boolean().default(false),
     seed: z.boolean().optional(),
-    // Copied off the catalog entry of the app's folder by the Manager, never typed by a person: every
-    // member of the tenant reads it in `tenant.apps`, and the key is absent where the entry declares none.
-    databases: appDatabases.optional(),
+    // Copied off the catalog entry of the app's folder by the Manager, never typed by a person: the
+    // standing members the app needs, which a chart that serves one reads in `tenant.apps`.
+    needs: z.array(memberName).default([]),
     selections: z
       .record(z.string(), z.boolean())
       .default({})
       .refine((s) => !SEED_SELECTIONS.some((k) => k in s), { message: `${SEED_SELECTIONS.join(" and ")} are fields of the app entry, never keys of selections` }),
   })
-  .transform(({ name, folder, site, main, seedReference, seedDemo, seed, databases, selections }) => ({
+  // `path` and `sitePath` are not in the input object, so zod strips a value a file carries and the
+  // transform derives both from the one rule: a value standing in a registration is that rule's
+  // output, written again from it on every write, never a second source of the path.
+  .transform(({ name, folder, site, main, seedReference, seedDemo, seed, needs, selections }) => ({
     name,
     ...(folder === undefined ? {} : { folder }),
     ...(site === undefined ? {} : { site }),
@@ -193,7 +194,9 @@ export const TenantAppSchema = z
     seedReference,
     seedDemo: seedDemo || (seed ?? false),
     selections,
-    ...(databases === undefined ? {} : { databases }),
+    needs,
+    path: memberPath({ name, site }),
+    ...(folder === undefined || site === undefined ? {} : { sitePath: websitePath({ site, main }) }),
   }));
 
 /** subdomain — ONE DNS label (zero PII). The tenant's zone is `<subdomain>.<stage apex>`

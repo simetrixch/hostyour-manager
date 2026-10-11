@@ -56,9 +56,9 @@ builds:
     containerfile: Containerfile
 tenant:
 ${TEMPLATE_SPEC}  members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true, namespaceLabels: { platform/redis-consumer: "true" } }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui, override: { web: { chart: charts/example-web } } }
@@ -227,7 +227,7 @@ describe("create-tenant run definition", () => {
     // cluster field, which the appsets read off registrations/<guid>/<stage>.yaml
     const read = await prt.registrations.readTenant("prod", GUID);
     expect(read?.entry.subdomain).toBe("acme");
-    expect(read?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]); // default-absent seed tiers fold back false through the full run
+    expect(read?.entry.apps).toEqual([{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }]); // default-absent seed tiers fold back false through the full run
     expect(read?.entry.suspended).toBe(false);
     expect(read?.entry.cluster).toBe("s1");
     expect(read?.entry.approvedTags).toEqual(pinned); // the newest available version, fixed as the tenant's own
@@ -312,7 +312,7 @@ describe("create-tenant streaming planner", () => {
     expect(result.params.guid).toMatch(/^[0-9a-hjkmnp-tv-z]{12}$/);
     expect(result.params.size).toBe("large"); // the wizard's size reaches the run, never the default in its place
     expect(result.params.chartsRef).toBe(SHA);
-    expect(result.params.apps.map((a) => [a.name, a.databases])).toEqual([["erp", ["core", "sales"]]]); // as the template catalog declares erp's databases
+    expect(result.params.apps.map((a) => [a.name, a.needs, a.path])).toEqual([["erp", ["report"], "/app/erp"]]); // as the template catalog declares erp's needs
     expect(result.params.expectedApps).toEqual(tenantApplicationSet([...TEST_MEMBERS, ...APPS.map((a) => a.name)], result.params.guid, "prod"));
     expect(result.plan.targetKind).toBe("cluster");
     expect(result.plan.targetId).toBe("cls_1");
@@ -440,7 +440,7 @@ describe("seed-tenant-crypto (the entry every member namespace reads)", () => {
     const keyed: string[] = [];
     await seedStep({ seedTenantAppKey: async (i) => { keyed.push(`${i.stage}/${i.guid}/${i.kind}/${i.app}`); return { created: true }; }, seedTenantE2ePassword: async (i) => { keyed.push(`${i.stage}/${i.guid}/e2e`); return { created: true }; } }, new FakeObjectStore(), {
       stage, ...(stage === "test" ? { sourceTenantId: "tnt_prod" } : {}),
-      apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {} }, { ...APPS[0]!, name: "site", folder: "website", site: "company", seedReference: false, seedDemo: false, selections: {} }],
+      apps: [{ ...APPS[0]!, seedReference: false, seedDemo: false, selections: {}, needs: [], path: `/app/${APPS[0]!.name}` }, { ...APPS[0]!, name: "site", folder: "website", site: "company", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/admin/site", sitePath: "/web/company" }],
     });
     expect(keyed).toEqual([`password-field-key/${APPS[0]!.name}`, "password-field-key/site", `service-key/${APPS[0]!.name}`, "service-key/site", "revalidate-secret/web", "form-signing-key/web"].map((key) => `${stage}/${GUID}/${key}`));
   });

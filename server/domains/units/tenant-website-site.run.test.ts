@@ -89,7 +89,7 @@ describe("tenant-set-website-site", () => {
     expect(books.commits.length).toBe(commits + 1);
     const moved = (await registrations.readTenant("prod", GUID))!.entry;
     expect(moved.appsImageTag).toBe(TARGET);
-    expect(moved.apps.find((a) => a.name === "example-ch")).toEqual({ ...before.apps.find((a) => a.name === "example-ch"), site: "renamed" });
+    expect(moved.apps.find((a) => a.name === "example-ch")).toEqual({ ...before.apps.find((a) => a.name === "example-ch"), site: "renamed", sitePath: "/web/renamed" });
     expect(moved.members.find((m) => m.name === "example-ch")).toEqual(planned.params.member);
     // Nothing else of the tenant moves: its other apps and members stay as they stood.
     expect(moved.apps.filter((a) => a.name !== "example-ch")).toEqual(before.apps.filter((a) => a.name !== "example-ch"));

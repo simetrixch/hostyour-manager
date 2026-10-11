@@ -45,8 +45,7 @@ import { tenantUnitProbes } from "../domains/units/tenant-unit-probes.ts";
 import type { UnitProbes } from "#unit/server/check-units.ts";
 import { HttpTenantHealthReader } from "../adapters/tenant-health/tenant-health-http.ts";
 import { makeAppCatalogProvider, type AppCatalogProvider } from "../domains/units/app-catalog.ts";
-import { tenantBundleManifest } from "../domains/units/engine-line.ts";
-import { ensureTenantAppDatabases, type TenantManifestReader } from "../domains/units/tenant-app-databases.ts";
+import { tenantBundleManifest, type TenantManifestReader } from "../domains/units/engine-line.ts";
 import { makeAddAppDef } from "../domains/units/add-app.run.ts";
 import { makeTenantSetWebsiteSiteDef } from "../domains/units/tenant-website-site.run.ts";
 import { makeTenantSetWebsiteMainDef } from "../domains/units/tenant-website-main.run.ts";
@@ -121,9 +120,6 @@ export interface TenantFamily {
   /** The deploy repository's `tenant.libraryRepos` off the books branch, which the boot's kit sync
    *  writes the release kit into. Undefined when the family is not configured. */
   libraryRepos?: () => Promise<string[]>;
-  /** The boot's forward step for the app database lists of every standing tenant
-   *  (tenant-app-databases.ts ensureTenantAppDatabases). Undefined when the family is not configured. */
-  writeTenantAppDatabases?: (db: Db) => Promise<void>;
   /** The tenants that follow releases (hostyour-manager#328), built once the executor stands, which
    *  plans and approves their Versions runs. Undefined when the family is not configured. */
   follow?: (executor: Executor, db: Db) => TenantFollowWiring;
@@ -421,12 +417,9 @@ export function buildTenantOnboarding(
   const lineMoves = (db: Db, tenantId: string, signal?: AbortSignal): Promise<LineMoveView> => readTenantLineMoves(onboardPorts, db, tenantId, signal, (line) => logger.info({ tenantId }, line));
   const libraryRepos = async (): Promise<string[]> => (await readTenantSpec(onboardPorts, {}))?.libraryRepos ?? [];
   // A tenant's own bundle, read with the deploy repository's credential as the engine line is
-  // (engine-line.ts tenantBundleManifest): the standing tenants' database lists and the tenant page's
+  // (engine-line.ts tenantBundleManifest): the standing tenants' needs and the tenant page's
   // website sites come off it.
   const readTenantManifest: TenantManifestReader = (bundle, signal) => tenantBundleManifest({ repo, deployCredentialId: onboardPorts.deployCredentialId }, bundle, signal);
-  const writeTenantAppDatabases = async (db: Db): Promise<void> => {
-    await ensureTenantAppDatabases({ db, registrations: tenantRegistrations, logger, readTenantManifest });
-  };
   // A unit registered after the start is watched from the next start; a release of it before then is
   // caught by that start's check.
   const follow = (executor: Executor, db: Db): TenantFollowWiring => {
@@ -450,5 +443,5 @@ export function buildTenantOnboarding(
     readTenantSpec: (signal) => readTenantSpec(onboardPorts, signal ? { signal } : {}),
     unitCall, resolver, deployRepoUrl: repoURL, argoWatchTimeoutMs: TENANT_WATCH_TIMEOUT_MS,
   };
-  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, installationIssuers, appCatalog, readTenantManifest, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, writeTenantAppDatabases, follow };
+  return { defs, enabled: true, resolver, deployRepoUrl: repoURL, installationIssuers, appCatalog, readTenantManifest, tenantRegistrations, versions, lineMoves, carryTrunkToBooksBranch, libraryRepos, follow };
 }

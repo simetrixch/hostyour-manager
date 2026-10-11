@@ -7,7 +7,7 @@
 // Import boundary: shared/ is isomorphic. The web reads the TYPES here; the parser is the server's.
 import { z } from "zod";
 import { parse as parseYaml } from "yaml";
-import { appDatabases, appName, siteId } from "./tenant.ts";
+import { appName, memberName, siteId } from "./tenant.ts";
 
 /** WHERE an apps repository keeps its manifest — the root, so a bundle built from the repository
  *  and the repository itself describe the same apps. */
@@ -27,17 +27,16 @@ export const AppSelectionSchema = z.object({
 export type AppSelection = z.infer<typeof AppSelectionSchema>;
 
 /** ONE app of the bundle. `name` is the folder, and the member name the tenant deploys it as, so it
- *  carries the app-name grammar of the registration. `databases` is the list of databases the app
- *  opens, which the engine's ServiceClaim grants; the deploy repository's manifest says WHERE it goes through
- *  the `{databases}` token (tenant-fanout.ts), and an entry without one leaves that to the chart's
- *  own value files. An entry that lists `sites` is a website folder: it is deployed once per
+ *  carries the app-name grammar of the registration. `needs` names the standing members the app
+ *  needs, such as the report service; the Manager copies it into the app's entry of the registration.
+ *  An entry that lists `sites` is a website folder: it is deployed once per
  *  website, each named by its own domain and serving one of these sites (TenantAppSchema). */
 export const AppEntrySchema = z.object({
   name: appName,
   title: z.string().min(1),
   description: z.string().default(""),
   selections: z.record(selectionName, AppSelectionSchema).default({}),
-  databases: appDatabases.optional(),
+  needs: z.array(memberName).default([]),
   sites: z.array(siteId).min(1).refine((s) => new Set(s).size === s.length, { message: "a site is listed once" }).optional(),
 });
 export type AppEntry = z.infer<typeof AppEntrySchema>;
@@ -86,7 +85,7 @@ export function parseAppsManifest(text: string): AppsManifest {
   const parsed = AppsManifestSchema.safeParse(doc);
   if (!parsed.success) {
     const why = parsed.error.issues.slice(0, 6).map((i) => `${i.path.length > 0 ? i.path.map(String).join(".") : "(root)"}: ${i.message}`).join("; ");
-    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, databases?, sites?; engine?{build, line}; catalogOnly?[path]): ${why}`);
+    throw new Error(`${APPS_MANIFEST_PATH} does not match the apps manifest shape (apps[]: name, title, description, selections{title, default}, needs?, sites?; engine?{build, line}; catalogOnly?[path]): ${why}`);
   }
   return parsed.data;
 }
@@ -120,6 +119,9 @@ export interface TenantAppCatalogView {
   /** The name of every member the tenant has, off its registration: its standing members and its apps,
    *  websites included. A new website is named clear of these and of the catalog's apps. */
   members?: string[];
+  /** The names the product's engine reserves for itself, which no app or website may take: a new
+   *  website is named clear of these too. Present beside `members`. */
+  reservedNames?: string[];
   /** Present where the template's `.npmrc` routes scopes to GitHub Packages: the owner whose reader
    *  the bundle's build installs them with, and whether one is recorded. The tenant page asks for
    *  the token, and holds every Deploy, while `recorded` is null — the FIRST tenant onboarding asks, none after. */

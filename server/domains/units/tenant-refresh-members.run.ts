@@ -12,7 +12,7 @@ import { loadTenantCluster, refreshTenantApplications } from "./lifecycle.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { publishIssuerRecord, tenantIssuerRecord } from "#unit/server/unit-dns.ts";
 import { tenantSyncUnits } from "#unit/server/build-rbac.ts";
-import { memberApplication, withAppDatabases } from "./tenant-fanout.ts";
+import { memberApplication, withAppNeeds } from "./tenant-fanout.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { BuildUnitSchema, buildUnitStep, planBuildUnits, provisionArgoSyncStep, tenantImageSteps, type TenantBuildRuntime } from "./tenant-builds.ts";
 import { probeBuildUnit } from "./tenant-probes.ts";
@@ -23,8 +23,7 @@ import { renderTenantMemberAdmissionPolicy, TENANT_STAGE_LABEL } from "./admissi
 import { syncedAt, describeUnsynced } from "#unit/server/argo-app-status.ts";
 import type { ArgoAppStatus, ArgoAppStatusMap } from "../../adapters/kube/port.ts";
 import { isDeepStrictEqual } from "node:util";
-import { bundleReleaseRefusal, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
-import { standingAppDatabases } from "./tenant-app-databases.ts";
+import { bundleReleaseRefusal, standingAppNeeds, tenantBundleManifest, throwEngineLineRefusal } from "./engine-line.ts";
 import {
   restoreVersionsCleanup, sameApprovals, stagePinsAndNamesOf, tenantBundlePart, tenantVersionParts, versionRefusal, watchVersionsStep, withChosenVersions, writeVersionsStep,
   type Approvals, type TenantVersionPart,
@@ -98,7 +97,7 @@ export const TenantRefreshMembersParams = z.object({
   /** The tenant's own apps bundle and the tag the run puts it at ("" where it has none). */
   appsImage: z.string(),
   appsImageTag: z.string(),
-  /** The bundle's tag and the apps with their database lists when this was planned; an abort writes them back. */
+  /** The bundle's tag and the apps with their needs when this was planned; an abort writes them back. */
   previousAppsImageTag: z.string(),
   previousApps: z.array(TenantAppSchema),
   /** The units that build what the registry lacks, resolved at plan time (planBuildUnits). */
@@ -166,11 +165,11 @@ function renderedAt(p: TenantRefreshMembersParams, members: readonly TenantMembe
 }
 
 /** Whether the registration's bundle tag is one this run planned from or writes: anything else was
- *  written by another run or a release since, together with the database lists of that bundle. */
+ *  written by another run or a release since, together with the needs of that bundle. */
 const ownBundleTag = (p: TenantRefreshMembersParams, tag: string | undefined): boolean =>
   (tag ?? "") === p.previousAppsImageTag || (tag ?? "") === p.appsImageTag;
 
-/** On abort: write back the member entries, the apps' database lists and the bundle tag the
+/** On abort: write back the member entries, the apps' needs and the bundle tag the
  *  registration carried before this run — only while it still carries this run's own entries and
  *  bundle. Entries another run wrote since are that run's, and stay. */
 function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMembersParams): Cleanup {
@@ -186,7 +185,7 @@ function restoreMembersCleanup(ports: TenantOnboardPorts, p: TenantRefreshMember
       await refreshMemberPolicies(ports, p, p.previous);
       const { commit } = await ports.registrations.setMembers(p.stage, p.guid, p.previous, ctx.runId, p.previousApps, p.previousAppsImageTag || undefined);
       await refreshTenantApplications(ports.resolver, p.clusterId, p.expectedApps, ctx);
-      ctx.log("meta", `tenant ${p.guid} members, database lists and bundle back to what they were before this run (${commit})`);
+      ctx.log("meta", `tenant ${p.guid} members, needs and bundle back to what they were before this run (${commit})`);
     },
   };
 }
@@ -266,7 +265,7 @@ function tenantRefreshMembersSteps(ports: TenantOnboardPorts, p: TenantRefreshMe
         if (!sameMembers(current.entry.members, p.previous) && !sameMembers(current.entry.members, p.members)) {
           throw errValidation(`tenant ${p.guid}'s ${MEMBERS_CHANGED} — plan it again`);
         }
-        // The database lists were resolved at the bundle the plan saw; beside another they are wrong.
+        // The needs were resolved at the bundle the plan saw; beside another they are wrong.
         if (!ownBundleTag(p, current.entry.appsImageTag)) {
           throw errValidation(`tenant ${p.guid}'s apps bundle moved to ${current.entry.appsImageTag ?? "none"} since this run was planned at ${p.previousAppsImageTag || "none"} — plan it again`);
         }
@@ -372,13 +371,13 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           }
         }
       };
-      // The bundle release declares the apps' database lists the members are resolved with, so its move
+      // The bundle release declares the apps' needs the members are resolved with, so its move
       // is settled first.
       const bundle = await tenantBundlePart(ports, tc.stage, current.entry);
       const bundleTag = bundle ? req.versions[bundle.name] : undefined;
       if (bundle && bundleTag) await assertChoice(bundle, bundleTag);
       const appsImageTag = bundleTag ?? current.entry.appsImageTag;
-      const appDatabases = await standingAppDatabases((b, signal) => tenantBundleManifest(ports, b, signal), { ...current.entry, ...(appsImageTag ? { appsImageTag } : {}) }, ctx);
+      const appNeeds = await standingAppNeeds((b, signal) => tenantBundleManifest(ports, b, signal), { ...current.entry, ...(appsImageTag ? { appsImageTag } : {}) }, ctx);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
@@ -387,7 +386,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           stage: tc.stage,
           apps,
           isStandingTenant: true,
-          appDatabases,
+          appNeeds,
           probeGuid: tc.guid,
           subdomain,
           quota, size,
@@ -454,9 +453,9 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
       });
       if (planned.outcome === "rejected") return { outcome: "rejected", summary: planned.summary, planJson: outcome.report };
       // Current entries still pass through the policy refresh before their idempotent write.
-      // Each app with the database list the tenant's own repository declares now, which every member reads.
-      const listedApps = withAppDatabases(apps, outcome.appDatabases);
-      const relisted = listedApps.filter((a, i) => JSON.stringify(a.databases ?? []) !== JSON.stringify(apps[i]?.databases ?? [])).map((a) => a.name);
+      // Each app with the needs the tenant's own repository declares now, which every chart reads.
+      const listedApps = withAppNeeds(apps, outcome.appNeeds);
+      const relisted = listedApps.filter((a, i) => JSON.stringify(a.needs) !== JSON.stringify(apps[i]?.needs)).map((a) => a.name);
       const isCurrent = changed.length === 0 && relisted.length === 0 && sameApprovals(approved, current.entry.approvedTags) && appsImageTag === current.entry.appsImageTag && planned.builds.units.length === 0;
       const params: TenantRefreshMembersParams = {
         tenantId: tc.tenantId,
@@ -487,7 +486,7 @@ export function makeTenantRefreshMembersDef(ports: TenantOnboardPorts): RunDefin
           `Versions of tenant ${tc.guid} on ${tc.domain} (${tc.stage}), its member entries resolved again off the product's manifest at ${outcome.resolvedSha.slice(0, 7)}: ` +
           `${isCurrent ? "Every member entry matches the product's manifest and every part runs the version asked for. " : ""}` +
           `${changed.length ? `${changed.map((m) => describeChange(previous.find((b) => b.name === m.name)!, m)).join("; ")}. ` : "the member entries are unchanged. "}` +
-          `${relisted.length ? `The database lists of ${relisted.join(", ")} are written into tenant.apps as the tenant's own repository declares them. ` : ""}` +
+          `${relisted.length ? `The needs of ${relisted.join(", ")} are written into tenant.apps as the tenant's own repository declares them. ` : ""}` +
           `${moves.forward.length ? `Versions: ${moves.forward.join("; ")}. ` : ""}` +
           `${moves.back.length ? `Downgrade: ${moves.back.join("; ")}, older than what runs now. ` : ""}` +
           `${recorded.length ? `Recorded as the tenant's own at the stage pin it renders now: ${recorded.join("; ")}. ` : ""}` +

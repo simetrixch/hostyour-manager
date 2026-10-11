@@ -7,7 +7,7 @@
 //     charts it deploys — that is what the ApplicationSet fans out over;
 //   - a tenants ROW carries the standing names only, because an app's presence is its tenant_apps row
 //     and its status, and every reader unions the two.
-import type { TenantMemberRecord } from "../../../shared/tenant.ts";
+import { memberPath, type TenantMemberRecord } from "../../../shared/tenant.ts";
 import type { ChannelStages } from "../inventory/channel-stages.ts";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 
@@ -22,9 +22,13 @@ export const STANDING_MEMBER_NAMES: string[] = ["auth", "jobs", "report"];
  *  namespace on the master — so this is the test's own choice, not a production constant. */
 export const ARGO_NS = "argocd";
 
+/** The path each standing member's chart serves, as the test product's manifest declares it. */
+export const STANDING_MEMBER_PATHS: Record<string, string> = { auth: "/auth", jobs: "/jobs", report: "/reports" };
+
 /** Those three as the records a registration carries: one chart each, no extra namespace labels. */
 export const STANDING_MEMBERS: TenantMemberRecord[] = STANDING_MEMBER_NAMES.map((name) => ({
   name,
+  path: STANDING_MEMBER_PATHS[name]!,
   namespaceLabels: {},
   sources: [{ chart: `charts/example-${name}`, valueFiles: [], values: {} }],
 }));
@@ -33,11 +37,12 @@ export const STANDING_MEMBERS: TenantMemberRecord[] = STANDING_MEMBER_NAMES.map(
  *  member per app carrying the two sources a selected app renders (an engine and a front), the way
  *  the test product's manifest declares them under perApp. */
 export function testMembers(apps: readonly ({ name: string; [k: string]: unknown } | string)[] = []): TenantMemberRecord[] {
-  const names = apps.map((a) => (typeof a === "string" ? a : a.name));
+  const entries = apps.map((a) => (typeof a === "string" ? { name: a } : a));
   return [
     ...STANDING_MEMBERS,
-    ...names.map((name) => ({
+    ...entries.map(({ name, site }) => ({
       name,
+      path: memberPath({ name, ...(typeof site === "string" ? { site } : {}) }),
       namespaceLabels: {},
       sources: [
         { chart: "charts/example-engine", valueFiles: [`values-${name}.yaml`], values: { fullnameOverride: `example-engine-${name}` } },

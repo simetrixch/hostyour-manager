@@ -47,9 +47,8 @@ export async function boot(): Promise<void> {
   // second and the liveness probe has nothing to kill (#166). The release kit this Manager ships
   // follows it, into every registered unit's and every library's repository where it differs: once,
   // behind the listener, and after the carry, because the libraries are read off the books branch the
-  // carry brings to the deploy repository's trunk. The app database lists of every standing tenant
-  // follow the carry too, because the catalog is read off the manifest on the books branch. None rejects.
-  void wired.carryDeployTrunk().then(() => Promise.all([wired.syncReleaseKits(), wired.writeTenantAppDatabases()]));
+  // carry brings to the deploy repository's trunk. None rejects.
+  void wired.carryDeployTrunk().then(() => wired.syncReleaseKits());
   // The shared Headlamp offers every active slave this Manager finds standing (hostyour-cloud#255).
   void wired.syncHeadlampContexts();
   // The tenants that follow releases (#328): the release runs watched from now on, and one check for

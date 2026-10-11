@@ -57,7 +57,7 @@ export async function planStandingStage(
   const outcome = await validateTenant({
     repoURL: ports.deployRepoUrl, ref: ports.registrations.branch, stage: placement.stage,
     apps, members, identityProvider: entry.identityProvider, isStandingTenant: true,
-    appDatabases: Object.fromEntries(apps.filter((app) => app.databases).map((app) => [app.name, app.databases!])),
+    appNeeds: Object.fromEntries(apps.map((app) => [app.name, app.needs])),
     probeGuid: source.guid, subdomain: entry.subdomain, seedUsers: false, demo: entry.demo === true,
     quota: resolveUnitQuota(ctx.db, request.size, TENANT_BRINGS), size: request.size,
     appsImage: entry.appsImage, appsImageTag: entry.appsImageTag, ownDomain, ownDomainRedirects,

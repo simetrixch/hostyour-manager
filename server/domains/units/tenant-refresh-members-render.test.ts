@@ -6,7 +6,7 @@ import { DEPLOY_URL, SHA } from "./tenant-refresh-members.fixture.ts";
 
 describe("rendersEntry, clause by clause", () => {
   const src = (over: Partial<TenantMemberRecord["sources"][number]> = {}): TenantMemberRecord["sources"][number] => ({ chart: "charts/x", valueFiles: [], values: {}, ...over });
-  const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", namespaceLabels: {}, sources: [src()], ...over });
+  const entry = (over: Partial<TenantMemberRecord> = {}): TenantMemberRecord => ({ name: "erp", path: "/app/erp", namespaceLabels: {}, sources: [src()], ...over });
   const render = (m: TenantMemberRecord, labels: Record<string, string> = {}): ArgoAppStatus => ({
     syncRevision: null, targetRevision: null, sync: "Synced", health: "Healthy", namespaceLabels: { "platform/tenant-stage": "prod", ...labels },
     syncSources: m.sources.map((s) => ({ repoURL: DEPLOY_URL, revision: SHA, path: s.chart, valueFiles: ["values.yaml", ...s.valueFiles], valuesObject: { tenant: {}, ...s.values } })),

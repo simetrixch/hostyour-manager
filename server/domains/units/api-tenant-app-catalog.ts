@@ -9,7 +9,7 @@ import type { CredentialStore } from "../../security/store.ts";
 import type { GitHubApp } from "../../adapters/github-app/port.ts";
 import type { TenantRegistrations } from "./tenant-registrations.ts";
 import { withBundleSites, type AppCatalogProvider } from "./app-catalog.ts";
-import type { TenantManifestReader } from "./tenant-app-databases.ts";
+import type { TenantManifestReader } from "./engine-line.ts";
 import { packagesReaderView } from "#unit/server/owners.ts";
 
 // The catalog of ONE tenant, apart from api.ts the way api-tenant-apps-repo.ts is: the apps the
@@ -57,7 +57,7 @@ export function registerTenantAppCatalogRoute(app: Hono<AppEnv>, deps: TenantApp
         ? await (async () => { const owner = await githubApp.installationOrg(c.req.raw.signal); return { owner, scopes: template.packageScopes, recorded: await packagesReaderView({ db, store }, owner) }; })()
         : undefined;
       const websites = current.entry.apps.flatMap((a) => (a.site ? [{ name: a.name, site: a.site, ...(a.main ? { main: true } : {}) }] : []));
-      return c.json({ apps: catalog.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), websites, members: current.entry.members.map((m) => m.name), ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
+      return c.json({ apps: catalog.apps.map((a) => ({ ...a, deployed: deployed.has(a.name) })), websites, members: current.entry.members.map((m) => m.name), reservedNames: template.reservedMemberNames, ...(packagesReader ? { packagesReader } : {}) } satisfies TenantAppCatalogView);
     } catch (e) {
       return c.json({ apps: [], error: errText(e) } satisfies TenantAppCatalogView);
     }

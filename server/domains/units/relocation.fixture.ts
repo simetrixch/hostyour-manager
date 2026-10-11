@@ -20,7 +20,7 @@ import { FakeMasterArgoReader, FakeClusterReader, FakeMasterProjectWriter, FakeC
 import { Registrations } from "#unit/server/registrations.ts";
 import { TenantRegistrations } from "./tenant-registrations.ts";
 import { tenantApplicationSet } from "./tenant-fanout.ts";
-import type { TenantRegistration } from "../../../shared/tenant.ts";
+import { memberPath, type TenantRegistration } from "../../../shared/tenant.ts";
 import type { ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import type { TenantRelocationPorts } from "./relocation-world-tenant.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
@@ -92,7 +92,7 @@ export function tenantEntry(over: Partial<TenantRegistration> = {}): TenantRegis
     members: testMembers(TENANT_APPS),
     identityProvider: TENANT_IDP, ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain: SUBDOMAIN,
-    apps: TENANT_APPS.map((a) => ({ ...a, seedReference: false, seedDemo: false, selections: {} })),
+    apps: TENANT_APPS.map((a) => ({ ...a, seedReference: false, seedDemo: false, selections: {}, needs: [], path: memberPath(a) })),
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,

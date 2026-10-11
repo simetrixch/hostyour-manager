@@ -31,9 +31,9 @@ tenant:
   ${over.appsOrg ? `appsOrg: ${over.appsOrg}` : ""}
   ${over.appsBundle ? `appsBundle: ${over.appsBundle}\n  appsRepo: ${TEMPLATE_URL}` : ""}
   members:
-    - { name: auth, chart: charts/example-auth, identityProvider: true }
-    - { name: jobs, chart: charts/example-jobs }
-    - { name: report, chart: charts/example-report }
+    - { name: auth, path: /auth, chart: charts/example-auth, identityProvider: true }
+    - { name: jobs, path: /jobs, chart: charts/example-jobs }
+    - { name: report, path: /reports, chart: charts/example-report }
   perApp:
     engine: { chart: charts/example-engine }
     front: { chart: charts/example-ui }
@@ -48,7 +48,7 @@ apps:
       split per domain.
     selections:
       seedReference: { title: "Reference data", default: true }
-    databases: [core, sales]
+    needs: [report]
   - name: web
     title: Website content
     selections:

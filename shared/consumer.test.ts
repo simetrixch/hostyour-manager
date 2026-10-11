@@ -15,7 +15,7 @@ describe("ConsumerManifestSchema appsBundle — a tenant's apps bundle declares 
   it("refuses appsBundle naming no build, and one beside a chart or a tenant block", () => {
     expect(why({ ...buildOnly, appsBundle: "other" })).toMatch(/appsBundle "other" names no build/);
     expect(why({ ...buildOnly, appsBundle: "acme-apps", chart: { path: "deploy/chart" } })).toMatch(/declared by a build-only manifest/);
-    expect(why({ ...buildOnly, appsBundle: "acme-apps", tenant: { members: [{ name: "auth", chart: "charts/auth", identityProvider: true }], perApp: { engine: { chart: "charts/engine" }, front: { chart: "charts/ui" } } } })).toMatch(/declared by a build-only manifest/);
+    expect(why({ ...buildOnly, appsBundle: "acme-apps", tenant: { members: [{ name: "auth", path: "/auth", chart: "charts/auth", identityProvider: true }], perApp: { engine: { chart: "charts/engine" }, front: { chart: "charts/ui" } } } })).toMatch(/declared by a build-only manifest/);
   });
 });
 
@@ -79,7 +79,7 @@ describe("ConsumerManifestSchema activation block", () => {
 describe("ConsumerManifestSchema deploy requirement (C1: chart | builds[] | tenant)", () => {
   const meta = { apiVersion: "hostyour.cloud/v1", kind: "ConsumerManifest", mongodb: "shared" as const, name: "hostyour", owner: "platform", envs: ["prod"] } as const;
   const tenantBlock = {
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }, { name: "jobs", chart: "charts/example-jobs" }, { name: "report", chart: "charts/example-report" }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }, { name: "jobs", path: "/jobs", chart: "charts/example-jobs" }, { name: "report", path: "/reports", chart: "charts/example-report" }],
     perApp: {
       engine: { chart: "charts/example-engine" },
       front: { chart: "charts/example-ui", override: { web: { chart: "charts/example-web" } } },
@@ -359,7 +359,7 @@ describe("consumerArgocdUrl", () => {
 describe("TenantSpecSchema appsOrg (the owner a tenant's own repository is created in)", () => {
   // The smallest valid tenant block: one member carrying the IdP flag and the two per-app sources.
   const spec = (over: Record<string, unknown> = {}): unknown => ({
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
     ...over,
   });
@@ -386,7 +386,7 @@ describe("TenantSpecSchema appsOrg (the owner a tenant's own repository is creat
 
 describe("TenantSpecSchema libraryRepos (the product's libraries the boot writes the release kit into)", () => {
   const spec = (over: Record<string, unknown> = {}): unknown => ({
-    members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }],
     perApp: { engine: { chart: "charts/example-engine" }, front: { chart: "charts/example-ui" } },
     ...over,
   });

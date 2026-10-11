@@ -91,20 +91,20 @@ describe("tenant-refresh-members", () => {
     expect(reader.admissionPolicies.get(`tenant-${GUID}-${previous[0]!.name}-prod`)!.policy.spec.validations[1]!.expression).toContain("platform/previous-reach");
   });
 
-  it("writes each app's database list as the tenant's own repository declares it, not the template, with no change to its members", async () => {
+  it("writes each app's needs as the tenant's own repository declares them, not the template, with no change to its members", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
     const prt = ports(resolved.members, { apps: [{ name: "erp" }] });
-    // The template's erp lists [core, sales]; the tenant's own bundle release lists its own.
-    (prt.repo as FakeRepoReader).scriptFor(BUNDLE_REPO, { resolvedSha: SHA, files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n    databases: [core, bikes]\n" } });
+    // The template's erp needs [report]; the tenant's own bundle release lists its own.
+    (prt.repo as FakeRepoReader).scriptFor(BUNDLE_REPO, { resolvedSha: SHA, files: { "apps.yaml": "apps:\n  - name: erp\n    title: ERP\n    needs: [report, jobs]\n" } });
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1" }, planCtx());
     if (out.outcome !== "planned") throw new Error(`rejected: ${out.summary}`);
-    expect(out.plan.summary).toContain("the member entries are unchanged. The database lists of erp are written into tenant.apps as the tenant's own repository declares them.");
+    expect(out.plan.summary).toContain("the member entries are unchanged. The needs of erp are written into tenant.apps as the tenant's own repository declares them.");
     expect(out.plan.summary).not.toMatch(/nothing changes/);
     const p = out.params;
     await makeTenantRefreshMembersDef(prt).steps(p).find((s) => s.name === "write-members")!.run(stepCtx(p, [], []));
     const after = await prt.registrations.readTenant("prod", GUID);
-    expect(after?.entry.apps.map((a) => [a.name, a.databases])).toEqual([["erp", ["core", "bikes"]]]);
+    expect(after?.entry.apps.map((a) => [a.name, a.needs])).toEqual([["erp", ["report", "jobs"]]]);
     expect(after?.entry.members).toEqual(resolved.members);
   });
 
@@ -185,7 +185,7 @@ describe("tenant-refresh-members", () => {
     const prt = bundleWith(ports(resolved.members, { files: RELEASED_NEXT_LINE }), "0.2");
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEXT_LINE } }, planCtx());
     expect(out.outcome).toBe("planned");
-    // Read twice at its release: for the engine line, and for the apps' database lists.
+    // Read twice at its release: for the engine line, and for the apps' needs.
     expect(bundleClones(prt)).toEqual(["0.1.0-stable-20260101000000", "0.1.0-stable-20260101000000"]);
   });
 
@@ -197,7 +197,7 @@ describe("tenant-refresh-members", () => {
       .rejects.toThrow(`tenant acme cannot run these versions: the apps bundle is written for example-engine 0.1, and erp would run example-engine ${NEXT_LINE}, of another line`);
   });
 
-  it("keeps every line without depending on the tenant's own repository: an unreadable one still plans, its lists as they stand", async () => {
+  it("keeps every line without depending on the tenant's own repository: an unreadable one still plans, its needs as they stand", async () => {
     seedTenant();
     const resolved = await planned(ports(staleMembers()));
     // No script for the bundle: its release carries no apps.yaml to read.
@@ -205,9 +205,9 @@ describe("tenant-refresh-members", () => {
     const logs: string[] = [];
     const out = await makeTenantRefreshMembersDef(prt).planStream!({ tenantId: "tnt_1", versions: { "example-platform": NEW } }, { ...planCtx(), log: (l) => logs.push(l) });
     expect(out.outcome).toBe("planned");
-    expect(bundleClones(prt)).toEqual(["0.1.0-stable-20260101000000"]); // for the lists alone, never for the engine line
-    expect(logs.some((l) => l.endsWith("the apps' database lists stay as the registration holds them"))).toBe(true);
-    expect(out.outcome === "planned" && out.plan.summary).not.toMatch(/database lists of/);
+    expect(bundleClones(prt)).toEqual(["0.1.0-stable-20260101000000"]); // for the needs alone, never for the engine line
+    expect(logs.some((l) => l.endsWith("the apps' needs stay as the registration holds them"))).toBe(true);
+    expect(out.outcome === "planned" && out.plan.summary).not.toMatch(/needs of/);
   });
 
   it("PLANTED DEFECT: write-versions judges the versions as it writes them, and writes none off the bundle's line", async () => {
@@ -426,8 +426,8 @@ describe("tenant-refresh-members", () => {
 
 describe("the Versions run's params", () => {
   it("keep a website's folder and site, so the render after the builds finds the website's folder", () => {
-    const website = { name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {} };
-    const erp = { name: "erp", seedReference: true, seedDemo: false, selections: {} };
+    const website = { name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/admin/example-ch", sitePath: "/web/main" };
+    const erp = { name: "erp", seedReference: true, seedDemo: false, selections: {}, needs: [], path: "/app/erp" };
     expect(TenantRefreshMembersParams.shape.apps.parse([erp, website])).toEqual([erp, website]);
   });
 });

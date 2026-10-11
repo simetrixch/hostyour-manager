@@ -28,10 +28,10 @@ export const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 export function entry(over: Partial<TenantRegistration> = {}): TenantRegistration {
   return {
     cluster: "s1",
-    members: testMembers([{ name: "erp", seedReference: false, seedDemo: false, selections: {} }]),
+    members: testMembers(["erp"]),
     identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     subdomain: "example",
-    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }],
+    apps: [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }],
     seedUsers: false, quota: seedQuota("small"),
     resetNonce: "1",
     suspended: false,

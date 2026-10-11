@@ -26,8 +26,8 @@ import { ConsumerManifestSchema, tenantAppsTemplate } from "./consumer.ts";
 function testMembers(apps: readonly ({ name: string } | string)[] = []): unknown[] {
   const names = apps.map((a) => (typeof a === "string" ? a : a.name));
   return [
-    ...["auth", "jobs", "report"].map((name) => ({ name, sources: [{ chart: `charts/example-${name}` }] })),
-    ...names.map((name) => ({ name, sources: [{ chart: "charts/example-engine" }, { chart: "charts/example-ui" }] })),
+    ...["auth", "jobs", "report"].map((name) => ({ name, path: name === "report" ? "/reports" : `/${name}`, sources: [{ chart: `charts/example-${name}` }] })),
+    ...names.map((name) => ({ name, path: `/app/${name}`, sources: [{ chart: "charts/example-engine" }, { chart: "charts/example-ui" }] })),
   ];
 }
 
@@ -78,21 +78,21 @@ describe("appName + memberName", () => {
     // The app is named after a standing member: the resolver emits TWO members called auth, and the
     // duplicate-name check refuses the pair before either can claim <guid>-auth.
     expect(TenantRegistrationSchema.safeParse({ ...base, members: [
-      { name: "auth", namespaceLabels: {}, sources: src },
-      { name: "jobs", namespaceLabels: {}, sources: src },
-      { name: "auth", namespaceLabels: {}, sources: src },
+      { name: "auth", path: "/auth", namespaceLabels: {}, sources: src },
+      { name: "jobs", path: "/jobs", namespaceLabels: {}, sources: src },
+      { name: "auth", path: "/auth", namespaceLabels: {}, sources: src },
     ] }).success).toBe(false);
     // And a registration that simply left the app's member out is refused too — it would be recorded
     // as owned and never deployed.
     expect(TenantRegistrationSchema.safeParse({ ...base, members: [
-      { name: "auth", namespaceLabels: {}, sources: src },
-      { name: "jobs", namespaceLabels: {}, sources: src },
+      { name: "auth", path: "/auth", namespaceLabels: {}, sources: src },
+      { name: "jobs", path: "/jobs", namespaceLabels: {}, sources: src },
     ] }).success).toBe(false);
     // The same app name is fine for a tenant whose STANDING members do not include it.
     expect(TenantRegistrationSchema.safeParse({ ...base, identityProvider: "idp", members: [
-      { name: "idp", namespaceLabels: {}, sources: src },
-      { name: "jobs", namespaceLabels: {}, sources: src },
-      { name: "auth", namespaceLabels: {}, sources: src },
+      { name: "idp", path: "/idp", namespaceLabels: {}, sources: src },
+      { name: "jobs", path: "/jobs", namespaceLabels: {}, sources: src },
+      { name: "auth", path: "/auth", namespaceLabels: {}, sources: src },
     ] }).success).toBe(true);
   });
 
@@ -151,7 +151,7 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
   });
 
   it("applies defaults for apps/seedUsers/resetNonce/suspended/quiesced when omitted", () => {
-    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", path: "/auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.apps).toEqual([]);
     expect(parsed.seedUsers).toBe(false);
     expect(parsed.resetNonce).toBe("1");
@@ -170,18 +170,18 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
     ];
     const parsed = TenantRegistrationSchema.parse(registration({ apps, members: testMembers(apps) }));
     expect(parsed.apps).toEqual([
-      { name: "erp", seedReference: false, seedDemo: false, selections: {} },
-      { name: "web", seedReference: true, seedDemo: false, selections: {} },
-      { name: "crm", seedReference: false, seedDemo: true, selections: {} },
-      { name: "shop", seedReference: false, seedDemo: true, selections: {} },
+      { name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" },
+      { name: "web", seedReference: true, seedDemo: false, selections: {}, needs: [], path: "/app/web" },
+      { name: "crm", seedReference: false, seedDemo: true, selections: {}, needs: [], path: "/app/crm" },
+      { name: "shop", seedReference: false, seedDemo: true, selections: {}, needs: [], path: "/app/shop" },
     ]);
   });
 
   it("carries a website's folder and site", () => {
     // A website added before names followed the site keeps its name, so any app name stands.
     expect(TenantAppSchema.parse({ name: "example-ch", folder: "web", site: "main" }))
-      .toEqual({ name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {} });
-    expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {} });
+      .toEqual({ name: "example-ch", folder: "web", site: "main", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/admin/example-ch", sitePath: "/web/main" });
+    expect(TenantAppSchema.parse({ name: "erp" })).toEqual({ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" });
     // Two websites run one folder, so their bundle carries it once.
     expect(appFolders([{ name: "erp" }, { name: "example-ch", folder: "web" }, { name: "example-com", folder: "web" }])).toEqual(["erp", "web"]);
   });
@@ -216,7 +216,7 @@ describe("TenantRegistrationSchema — the registrations/<guid>/<stage>.yaml bod
   it("carries every further selection under selections, and refuses the two seed selections there — one selection has one place", () => {
     const apps = [{ name: "erp", seedReference: true, selections: { seedPrices: true, seedFixtures: false } }];
     const parsed = TenantRegistrationSchema.parse(registration({ apps, members: testMembers(apps) }));
-    expect(parsed.apps).toEqual([{ name: "erp", seedReference: true, seedDemo: false, selections: { seedPrices: true, seedFixtures: false } }]);
+    expect(parsed.apps).toEqual([{ name: "erp", seedReference: true, seedDemo: false, selections: { seedPrices: true, seedFixtures: false }, needs: [], path: "/app/erp" }]);
     for (const k of SEED_SELECTIONS) {
       const dup = [{ name: "erp", selections: { [k]: true } }];
       const r = TenantRegistrationSchema.safeParse(registration({ apps: dup, members: testMembers(dup) }));
@@ -313,7 +313,7 @@ describe("ConsumerManifest tenant: fan-out block", () => {
       envs: ["dev", "test", "prod"],
       builds: [{ name: "hostyour-tenant-operator", containerfile: "operator/Dockerfile" }],
       tenant: {
-        members: [{ name: "auth", chart: "charts/example-auth", identityProvider: true }, { name: "jobs", chart: "charts/example-jobs" }, { name: "report", chart: "charts/example-report" }],
+        members: [{ name: "auth", path: "/auth", chart: "charts/example-auth", identityProvider: true }, { name: "jobs", path: "/jobs", chart: "charts/example-jobs" }, { name: "report", path: "/reports", chart: "charts/example-report" }],
         perApp: {
           engine: { chart: "charts/example-engine" },
           front: { chart: "charts/example-ui", override: { web: { chart: "charts/example-web" } } },
@@ -462,7 +462,7 @@ describe("tenantDisplayName", () => {
   });
 
   it("defaults a registration written before the field existed to the empty name", () => {
-    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
+    const parsed = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "example", members: [{ name: "auth", path: "/auth", sources: [{ chart: "charts/a" }] }], identityProvider: "auth", quota: seedQuota("small") });
     expect(parsed.displayName).toBe("");
   });
 });

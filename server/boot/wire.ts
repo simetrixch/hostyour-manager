@@ -94,12 +94,6 @@ export interface Wired {
    *  and then every 45 minutes. Never rejects — every failure is logged per unit. A no-op where the
    *  consumer family is not wired: there are then no build registrations. */
   refreshAppTokens: () => Promise<void>;
-  /** The database list of every app of every standing tenant, as its catalog entry declares it, written
-   *  into the registration's apps[] entries where it differs (server/domains/units/tenant-app-databases.ts
-   *  ensureTenantAppDatabases): the forward step for the tenants registered before the lists were
-   *  carried. boot.ts runs it once behind the listening server, after the deploy carry. Never rejects.
-   *  A no-op where tenant onboarding is not wired. */
-  writeTenantAppDatabases: () => Promise<void>;
   /** The current release kit written into the repository of every registered unit and of every library
    *  the deploy repository names, where it differs (plugins/unit/server/inject-release-kit.ts
    *  syncReleaseKits): a release made there by hand runs the kit this Manager ships. boot.ts runs it
@@ -433,7 +427,6 @@ export async function wire(): Promise<Wired> {
     checks,
     carryDeployTrunk,
     refreshAppTokens: refreshAppTokensLater,
-    writeTenantAppDatabases: units.writeTenantAppDatabases ? () => units.writeTenantAppDatabases!(db.db) : async () => undefined,
     syncReleaseKits: registrations && consumerRepo
       ? () => syncReleaseKits({
         registrations, writer: consumerRepo, version: config.version, logger,

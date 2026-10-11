@@ -26,7 +26,7 @@ import type { AppsManifest } from "../../../shared/apps-manifest.ts";
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { gateT5Fit } from "./gates/tenant-fit.ts";
 import { gateT6SecretOrder } from "./gates/tenant-secret-order.ts";
-import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogDatabases, withAppDatabases, type FanoutMember } from "./tenant-fanout.ts";
+import { fanoutOf, identityProviderMember, memberNamespace, resolveMembers, catalogNeeds, withAppNeeds, type FanoutMember } from "./tenant-fanout.ts";
 import { readAppCatalog, withBundleSites } from "./app-catalog.ts";
 import { stageApex, tenantZone } from "#unit/shared/unit-host.ts";
 import { deployPinFile } from "../../../shared/pin.ts";
@@ -69,9 +69,9 @@ export interface ValidateTenantRequest {
   ownDomain?: string;
   ownDomainRedirects?: readonly string[];
   approvedTags?: Record<string, Record<string, string>>;
-  /** Each app's database list as the caller read it off the tenant's own repository (a standing tenant,
-   *  tenant-app-databases.ts standingAppDatabases); absent, the template catalog's list of its folder. */
-  appDatabases?: Readonly<Record<string, readonly string[]>>;
+  /** Each app's needs as the caller read them off the tenant's own repository (a standing tenant,
+   *  engine-line.ts standingAppNeeds); absent, the template catalog's needs of its folder. */
+  appNeeds?: Readonly<Record<string, readonly string[]>>;
   /** The apps manifest of the tenant's own bundle where add-app serves a website from it: T4 holds the
    *  website's site to the sites the bundle lists under its folder, not to the template's
    *  (app-catalog.ts withBundleSites). */
@@ -142,10 +142,10 @@ export interface TenantValidationOutcome {
   identityProvider: string;
   /** The fan-out spec T1 parsed — what the plan reads `buildRepos` off; null where T1 could not read one. */
   spec: TenantSpec | null;
-  /** The database list each requested app's catalog entry declares, by app name, for the plan to write
-   *  into the registration's apps[] entries (tenant-fanout.ts withAppDatabases). Empty where T1 could
-   *  not read a spec. */
-  appDatabases: Record<string, string[]>;
+  /** The needs each requested app's catalog entry declares, by app name, for the plan to write into
+   *  the registration's apps[] entries (tenant-fanout.ts withAppNeeds). Empty where T1 could not read
+   *  a spec. */
+  appNeeds: Record<string, string[]>;
 }
 
 const abortError = (): Error => Object.assign(new Error("aborted"), { name: "AbortError" });
@@ -228,7 +228,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
     let resolvedMembers: string[] = [];
     let images: string[] = [];
     let memberRecords: TenantMemberRecord[] = [];
-    let appDatabases: Record<string, string[]> = {};
+    let appNeeds: Record<string, string[]> = {};
     let identityProvider = "";
 
     if (t1.spec) {
@@ -239,8 +239,8 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // own facts (guid, subdomain, stage, member, appName, apps, seedUsers, suspended, quiesced,
       // appsImage, appsImageTag),
       // which every source gets and each chart uses what it needs.
-      // The app catalog first: what the apps repository's manifest declares fills the fan-out
-      // (`{databases}`) and is what T4 holds the request against — the template's, for a new tenant
+      // The app catalog first: what the apps repository's manifest declares fills the apps' needs
+      // and is what T4 holds the request against — the template's, for a new tenant
       // and for an app added to a standing one alike. A stand-in is said in the log.
       const catalog = await readAppCatalog({
         spec: t1.spec,
@@ -248,11 +248,10 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
         warn: deps.log,
         signal: deps.signal,
       });
-      // An app the catalog does not name gets no list: T4 refuses it below, and until then it renders
-      // as the chart's own files say.
-      appDatabases = req.appDatabases ? Object.fromEntries(Object.entries(req.appDatabases).map(([app, list]) => [app, [...list]])) : catalogDatabases(req.apps, catalog);
+      // An app the catalog does not name has no needs: T4 refuses it below.
+      appNeeds = req.appNeeds ? Object.fromEntries(Object.entries(req.appNeeds).map(([app, list]) => [app, [...list]])) : catalogNeeds(req.apps, catalog);
       // What every member reads in `tenant.apps` at render, as the ApplicationSet will hand it over.
-      const apps = withAppDatabases(req.apps, appDatabases);
+      const apps = withAppNeeds(req.apps, appNeeds);
       memberRecords = await layerExistingValueFiles(req.members ? [...req.members] : resolveMembers(t1.spec, apps), deps, cloned.workdir);
       identityProvider = req.identityProvider ?? identityProviderMember(t1.spec);
       const members = fanoutOf(memberRecords, req.stage);
@@ -269,7 +268,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       // charts switch their tenant mode on `tenant.guid` and require `tenant.zone` and
       // `global.stageApex` there, so a render without these proves a mode the cluster never deploys
       // (hostyour-manager#137). OVER ALL OF IT the source's own values, resolved off the product's
-      // manifest (`{app}` filled, `{databases}` filled) — the appset renders them last for the same
+      // manifest (`{app}` filled) — the appset renders them last for the same
       // member, so a product key it sets is judged here as it is deployed. A helm failure is DATA on
       // the result, never a throw (helm port contract).
       const chainValues = foldChain(req.clusterValueFiles);
@@ -371,7 +370,7 @@ export async function validateTenant(req: ValidateTenantRequest, deps: ValidateT
       manifest: t1.manifest,
       gates,
     });
-    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider, spec: t1.spec ?? null, appDatabases };
+    return { verdict: report.verdict, resolvedSha: cloned.resolvedSha, report, images, memberRecords, identityProvider, spec: t1.spec ?? null, appNeeds };
   } finally {
     await deps.repo.dispose(cloned.workdir);
   }

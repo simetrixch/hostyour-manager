@@ -79,7 +79,7 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
   const tenantReg = {
     cluster: "s1", members: structuredClone(testMembers(["web"])), identityProvider: "auth",
     ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain, displayName: "", subdomain: "shop",
-    apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {} }], seedUsers: false, quota: TEST_QUOTA,
+    apps: [{ name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }], seedUsers: false, quota: TEST_QUOTA,
     resetNonce: "keep-data", suspended: false, quiesced: false, appsImage: "", appsImageTag: "",
   };
   const write = tenantRegistrationWrite("prod", GUID, tenantReg);
@@ -111,7 +111,8 @@ export async function makeIssuerTestHarness(opts: TestHarnessOptions = {}, handl
   const post = fakePost(lists);
 
   const defaultSpec: TenantSpec = {
-    members: [{ name: "auth", chart: "charts/auth", identityProvider: true }],
+    members: [{ name: "auth", path: "/auth", chart: "charts/auth", identityProvider: true }],
+    reservedMemberNames: [],
     perApp: { engine: { chart: "charts/engine" }, front: { chart: "charts/front" } },
     buildRepos: [],
     libraryRepos: [],

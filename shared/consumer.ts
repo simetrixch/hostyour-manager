@@ -103,6 +103,17 @@ const TenantSourceSchema = z.object({
 });
 export type TenantSource = z.infer<typeof TenantSourceSchema>;
 
+/** A member's name — a standing member's or an app's. Both name the SAME thing, so one grammar holds
+ *  both, because a collision between the two kinds is exactly what has to be impossible. The product
+ *  declares the standing members' names and the names its engine reserves; the platform composes with
+ *  them and never compares against a literal. Declared here and not in tenant.ts, which imports this
+ *  file, so the graph stays acyclic. */
+export const memberName = z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/);
+
+/** A path a member's chart serves on the tenant's host: `/`, or `/` and segments of lower-case
+ *  letters, digits and hyphens, none empty and none starting with a hyphen, joined by `/`. */
+export const memberPathSchema = z.string().regex(/^(\/|(\/[a-z0-9][a-z0-9-]*)+)$/, "a member path is / or / and lower-case segments joined by /, such as /auth or /app/workshop");
+
 /** ONE standing member of every tenant of this product — a member that exists whether or not the
  *  tenant selects any app, with its own namespace and its own AppProject.
  *
@@ -117,10 +128,10 @@ export type TenantSource = z.infer<typeof TenantSourceSchema>;
  *  member the platform genuinely has to know, and the only reason a member name was ever a constant
  *  here. Exactly one member carries it. */
 export const TenantMemberSchema = TenantSourceSchema.extend({
-  /** The member's name — the middle of its namespace, its AppProject and its Application, all
-   *  `<guid>-<name>-<stage>`. Free text within the DNS-label grammar: the platform composes with it and
-   *  never compares against a literal. */
-  name: z.string().regex(/^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?$/),
+  /** The member's name: free text within the DNS-label grammar. */
+  name: memberName,
+  /** The path the member's chart serves on the tenant's host. */
+  path: memberPathSchema,
   /** The tenant's own IdP. Exactly one member declares it; create-tenant's activation and every
    *  relocation path resolve the IdP through this flag instead of through a hardcoded name. */
   identityProvider: z.boolean().optional(),
@@ -139,6 +150,10 @@ export const TenantSpecSchema = z.object({
   // The members every tenant always has, one namespace + one AppProject each. No flag and no file
   // gates them: a tenant's apps require these services to exist.
   members: z.array(TenantMemberSchema).min(1),
+  // The names the product's engine reserves for itself (its route words), which no app or website may
+  // take. A standing member's name is reserved by being a member and need not be listed. The platform
+  // names no product's words, so the product states them.
+  reservedMemberNames: z.array(memberName).default([]),
   // The sources ONE selected app renders, in order. Every app of every tenant renders all of them;
   // `override` swaps a whole source for the apps of a folder the product names (every app running the
   // folder `web` renders a different front chart with different values from the operator apps).

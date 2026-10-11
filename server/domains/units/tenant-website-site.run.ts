@@ -10,8 +10,7 @@ import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
 import { tenantLocks } from "./tenant-lifecycle.run.ts";
 import { validateTenant } from "./validate-tenant.ts";
 import type { AddAppPorts } from "./add-app.run.ts";
-import { bundleFolderSites, bundleLacksSite, bundleReleaseTag, engineLineRefusal, tenantBundleManifest } from "./engine-line.ts";
-import { standingAppDatabases } from "./tenant-app-databases.ts";
+import { bundleFolderSites, bundleLacksSite, bundleReleaseTag, engineLineRefusal, standingAppNeeds, tenantBundleManifest } from "./engine-line.ts";
 import { registryHostFromChain } from "./tenant-values.ts";
 
 // `tenant-set-website-site` — move one website of a standing tenant to another site of its bundle.
@@ -59,9 +58,10 @@ function websiteSiteSteps(ports: AddAppPorts, p: TenantSetWebsiteSiteParams): St
       run: async (ctx) => {
         const tc = loadTenantCluster(ctx.db, p.tenantId);
         const entry = (await ports.registrations.readTenant(tc.stage, tc.guid))?.entry;
+        // The entry the write leaves: parsed again with the site, because the schema derives the path the website answers at from it.
         const stands = (site: string, tag: string, member: unknown): boolean =>
           entry?.appsImageTag === tag &&
-          isDeepStrictEqual(entry.apps.find((a) => a.name === p.app), { ...p.previousEntry, site }) &&
+          isDeepStrictEqual(entry.apps.find((a) => a.name === p.app), TenantAppSchema.parse({ ...p.previousEntry, site })) &&
           isDeepStrictEqual(entry.members.find((m) => m.name === p.app), member);
         // A resume finds its own write standing.
         if (stands(p.site, p.appsImageTag, p.member)) {
@@ -121,7 +121,7 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
       if (!previousMember) throw errValidation(`website ${req.app} has no member entry in tenant ${tc.guid}'s registration`);
       // The member resolved again with the new site and bundle, by the same validation add-app renders
       // the website with.
-      const appDatabases = await standingAppDatabases((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
+      const appNeeds = await standingAppNeeds((bundle, signal) => tenantBundleManifest(ports, bundle, signal), current.entry, ctx);
       const outcome = await validateTenant(
         {
           repoURL: ports.deployRepoUrl,
@@ -129,7 +129,7 @@ export function makeTenantSetWebsiteSiteDef(ports: AddAppPorts): RunDefinition<T
           stage: tc.stage,
           apps: [{ name: req.app, folder: entry.folder, site: req.site, seedReference: entry.seedReference, seedDemo: entry.seedDemo, selections: entry.selections }],
           isStandingTenant: true,
-          appDatabases,
+          appNeeds,
           probeGuid: tc.guid,
           subdomain: current.entry.subdomain,
           quota: current.entry.quota, size: current.entry.size,

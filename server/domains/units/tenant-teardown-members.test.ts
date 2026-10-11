@@ -38,7 +38,7 @@ const SUB = "example";
 const DEPLOY_REPO = "https://github.com/acme/acme-deploy.git";
 const PLATFORM_REPO = "https://github.com/simetrixch/hostyour-cloud.git";
 const THREE_APPS = ["erp", "web", "buildproject"];
-const APP_ENTRIES = THREE_APPS.map((name) => ({ name, seedReference: false, seedDemo: false, selections: {} }));
+const APP_ENTRIES = THREE_APPS.map((name) => ({ name, seedReference: false, seedDemo: false, selections: {}, needs: [], path: `/app/${name}` }));
 // The standing members in the row's own order, then the app rows by name.
 const SIX = [...TEST_MEMBERS, ...[...THREE_APPS].sort()];
 

@@ -30,7 +30,7 @@ function find(node: ReactNode, match: (el: El) => boolean): El[] {
 }
 const deployButtons = (node: ReactNode): El[] => find(node, (el) => el.type === "button" && el.props.children === "Deploy");
 
-const folder = { name: "web", title: "Web", description: "", selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] };
+const folder = { name: "web", title: "Web", description: "", needs: [], selections: {}, deployed: true, sites: ["example-com", "simplidigita-ai"] };
 const catalog: TenantAppCatalogView = { apps: [folder], websites: [{ name: "simplidigita-ai", site: "simplidigita-ai" }], members: ["web", "simplidigita-ai"] };
 const live = [{ name: "simplidigita-ai", site: "simplidigita-ai", main: false }];
 const act = vi.fn(async (fn: () => Promise<{ runId: string }>) => { await fn(); });

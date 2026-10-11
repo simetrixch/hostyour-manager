@@ -4,7 +4,7 @@ import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { tenantAppId as mintTenantAppId } from "../../kernel/ids.ts";
 import { STAGE } from "../../../shared/enums.ts";
-import { guid as guidSchema, appName, appDatabases, appFolder, siteId, TenantMemberRecordSchema, TenantValidationReportSchema, websitePath } from "../../../shared/tenant.ts";
+import { guid as guidSchema, appName, appFolder, memberName, siteId, TenantMemberRecordSchema, TenantValidationReportSchema, websitePath } from "../../../shared/tenant.ts";
 import { errNotFound, errValidation, errInternal } from "../../kernel/errors.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import { validateTenant } from "./validate-tenant.ts";
@@ -15,7 +15,7 @@ import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { renderTenantAppProject } from "./appproject.ts";
 import { renderTenantMemberAdmissionPolicy } from "./admission-policy.ts";
 import { renderTenantArgoSync, tenantSyncUnits } from "#unit/server/build-rbac.ts";
-import { memberApplication, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
+import { memberApplication, memberNameRefusal, memberNamespace, tenantApplicationSet } from "./tenant-fanout.ts";
 import { tenantAppsUnit, type ServedSites } from "./tenant-apps-tree.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
 import { placeholderTagFromChain } from "./tenant-values.ts";
@@ -65,8 +65,8 @@ export const AddAppParams = z.object({
   // The registry host the new app's images are pulled from and probed against — the tenant
   // cluster's own chain (ports.resolveClusterValueFiles -> registryHostFromChain), frozen at plan time.
   registryHost: z.string().min(1),
-  app: appName, // the new app being fanned in, with the database list its catalog entry declares
-  databases: appDatabases.optional(),
+  app: appName, // the new app being fanned in, with the standing members its catalog entry says it needs
+  needs: z.array(memberName).default([]),
   // The new app's MEMBER, resolved from the product manifest at the revision this run validated. The
   // registration's members[] is what the ApplicationSet fans out over, so an appended app that added
   // no member would be recorded as owned and never deployed; frozen here so the append writes what
@@ -235,7 +235,7 @@ function addAppSteps(ports: AddAppPorts, p: AddAppParams): Step[] {
         // The app starts on the newest available version of every build, fixed as its own (#296), beside
         // the bundle the registration names, which record-apps-repo moved to this pass's build.
         const approved = await addedMemberVersions(ports, p.stage, current.entry, p.app, p.member, ctx);
-        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, ...(p.databases ? { databases: p.databases } : {}), runId: ctx.runId });
+        const { commit, approvedTags } = await ports.registrations.updateTenantApps(p.stage, p.guid, { op: "append", app: p.app, ...(p.website ? { website: p.website } : {}), member: p.member, approved, seedReference: p.seedReference, seedDemo: p.seedDemo, selections: p.selections, needs: p.needs, runId: ctx.runId });
         ctx.db.update(tenants).set({ approvedTags }).where(eq(tenants.id, p.tenantId)).run();
         ctx.checkpoint({ commit, app: p.app });
         ctx.log("meta", `app "${p.app}" appended to tenant ${p.guid} (${commit}) — the master ArgoCD will now generate the new Application`);
@@ -325,6 +325,10 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       if ([...current.entry.apps, ...current.entry.members].some((a) => a.name === req.app)) {
         throw errValidation(`app "${req.app}" already exists in tenant ${tc.guid}`);
       }
+      // The product's spec names the words an app may not take; the bundle's plan below reuses this read.
+      const spec = await readTenantSpec(ports, ctx);
+      const reserved = spec === null ? null : memberNameRefusal(req.app, spec);
+      if (reserved !== null) throw errValidation(reserved);
       const website = req.folder !== undefined && req.site !== undefined ? { folder: req.folder, site: req.site, ...(req.main ? { main: true as const } : {}) } : undefined;
       let bundle: AppsManifest | null = null;
       if (website) {
@@ -350,7 +354,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
       const clusterValueFiles = await ports.resolveClusterValueFiles(tc.domain, tc.stage);
       const registryHost = registryHostFromChain(clusterValueFiles);
       if (!ports.githubApp) throw errValidation(NO_GITHUB_APP);
-      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], ...(website ? { sites: templateSites(website, siteFromBundle) } : {}), spec: await readTenantSpec(ports, ctx), owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
+      const resolved = await resolveTenantAppsUnit(ports, { subdomain: current.entry.subdomain, chosen: [appFolder({ name: req.app, ...website })], ...(website ? { sites: templateSites(website, siteFromBundle) } : {}), spec, owners: (org) => readOwnerIdentity(ctx.db, org), signal: ctx.signal, log: ctx.log });
       if (resolved.outcome === "refused") throw errValidation(resolved.why);
       const appsUnit = resolved.unit;
       const appsImage = tenantAppsUnit(appsUnit.templateBuild, current.entry.subdomain);
@@ -435,7 +439,7 @@ export function makeAddAppDef(ports: AddAppPorts): RunDefinition<AddAppParams> {
         member: newMember,
         seedReference: req.seedReference, // reference tier for the appended apps[] entry
         seedDemo: req.seedDemo, // demo tier for the appended apps[] entry
-        ...(outcome.appDatabases[req.app] ? { databases: outcome.appDatabases[req.app] } : {}),
+        needs: outcome.appNeeds[req.app] ?? [],
         selections: req.selections, // every further selection, as T4 held it against the catalog
         report: outcome.report,
         expectedApps,

@@ -82,7 +82,7 @@ async function world(left: { namespace?: boolean; workloads?: string[]; serviceC
   };
   // The tenant's registration names its standing apps; a removed app is no longer among them.
   const registrations = new TenantRegistrations(new FakePlatformRepo());
-  const apps = [{ name: "erp", seedReference: false, seedDemo: false, selections: {} }, ...(left.registered ? [{ name: "web", seedReference: false, seedDemo: false, selections: {} }] : [])];
+  const apps = [{ name: "erp", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/erp" }, ...(left.registered ? [{ name: "web", seedReference: false, seedDemo: false, selections: {}, needs: [], path: "/app/web" }] : [])];
   await registrations.commitTenant({
     stage: "prod", guid: GUID, runId: "run_onb",
     registration: {
