@@ -560,14 +560,14 @@ export function registerTenantRoutes(app: Hono<AppEnv>, deps: TenantApiDeps): vo
     const token = await clusterReader.readSecretValue(ns, TENANT_SECRET, BOOTSTRAP_TOKEN_KEY);
     if (!token) throw errValidation(`the tenant bootstrap token (Secret ${TENANT_SECRET} key ${BOOTSTRAP_TOKEN_KEY}) is absent in ${ns} — cannot invite the first admin`);
     // WHERE the tenant's own example-auth serves: the address `tenantMemberUrl` gives the IdP
-    // member, the one its ingress renders and its record covers. The apex comes off the
-    // target cluster's values chain, never off `found.domain` — that column is where the CLUSTER is reached,
-    // and install.sh defaults the apex to the cluster FQDN minus its first label, so composing from
-    // the domain posts the bootstrap token at a host nothing serves.
+    // member, the one its ingress renders and its record covers, at the path its row records.
+    // The apex comes off the target cluster's values chain, never off `found.domain` — that column is
+    // where the CLUSTER is reached, and install.sh defaults the apex to the cluster FQDN minus its first
+    // label, so composing from the domain posts the bootstrap token at a host nothing serves.
     const result = await inviteOrResendTenantAdmin({
       activator,
       token,
-      idpUrl: tenantMemberUrl(found.identityProvider, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage), found.ownDomain),
+      idpUrl: tenantMemberUrl(found.identityProviderPath, found.stage, found.subdomain, await resolveUnitApex(found.domain, found.stage), found.ownDomain),
       email: parsed.data.email,
       signal: c.req.raw.signal,
     });

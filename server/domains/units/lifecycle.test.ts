@@ -19,7 +19,7 @@ afterEach(() => { db.sqlite.close(); });
 function seedTenant(): void {
   db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth" }).run();
 }
 
 // attest-target reads only ctx.db + the resolved clusterReader, so the rest of the ports (registrations)
@@ -74,7 +74,7 @@ describe("loadTenantCluster", () => {
       domain: "s1.example", clusterId: "cls_1",
       // The tenant's own recorded facts ride along: every caller that names a namespace, an
       // AppProject or the tenant's auth host reads them from here.
-      members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "example", // no owner recorded ⇒ the subdomain
+      members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: "", ownDomainRedirects: [], ownDomainAliases: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "example", // no owner recorded ⇒ the subdomain
     });
   });
 

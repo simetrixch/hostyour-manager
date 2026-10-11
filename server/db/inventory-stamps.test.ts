@@ -21,7 +21,7 @@ function seed(): void {
   db.db.insert(servers).values({ id: ROWS.servers, name: "s1", host: "10.0.0.1", sshUser: "root" }).run();
   db.db.insert(clusters).values({ id: ROWS.clusters, serverId: ROWS.servers, stage: "prod", domain: "s1.example", name: "s1" }).run();
   db.db.insert(apps).values({ id: ROWS.apps, clusterId: ROWS.clusters, name: "post", stage: "prod", host: "post.example" }).run();
-  db.db.insert(tenants).values({ id: ROWS.tenants, clusterId: ROWS.clusters, guid: "abcdefghjkmn", subdomain: "acme", stage: "prod", identityProvider: "idp", members: [] }).run();
+  db.db.insert(tenants).values({ id: ROWS.tenants, clusterId: ROWS.clusters, guid: "abcdefghjkmn", subdomain: "acme", stage: "prod", identityProvider: "idp", identityProviderPath: "/idp", members: [] }).run();
   db.db.insert(tenantApps).values({ id: ROWS.tenant_apps, tenantId: ROWS.tenants, name: "erp" }).run();
 }
 function change(): void {

@@ -31,7 +31,7 @@ function books(engine: string): TenantRegistrations {
   const repo = new FakePlatformRepo();
   for (const [guid, subdomain] of [[GUID, "acme"], [GUID2, "beta"]] as const) {
     const registration = TenantRegistrationSchema.parse({
-      cluster: "s1", subdomain, members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
+      cluster: "s1", subdomain, members: testMembers(["erp"]), identityProvider: "auth", identityProviderPath: "/auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
       approvedTags: { erp: { "example-engine": engine } }, ...TEST_BUNDLE,
     });
     const w = tenantRegistrationWrite("prod", guid, registration);
@@ -88,7 +88,7 @@ beforeEach(() => {
   h = openDb(":memory:");
   h.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   h.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-  h.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report", "erp"], identityProvider: "auth", status: "active", followReleases: true }).run();
+  h.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report", "erp"], identityProvider: "auth", identityProviderPath: "/auth", status: "active", followReleases: true }).run();
 });
 afterEach(() => { h.sqlite.close(); });
 
@@ -212,7 +212,7 @@ describe("the follower — which tenants an event checks", () => {
   });
 
   it("PLANTED DEFECT: a tenant whose lock is held waits in the queue, the other tenant still follows, and the first is checked again once its run ends", async () => {
-    h.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_1", guid: GUID2, subdomain: "beta", stage: "prod", members: ["auth", "jobs", "report", "erp"], identityProvider: "auth", status: "active", followReleases: true }).run();
+    h.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_1", guid: GUID2, subdomain: "beta", stage: "prod", members: ["auth", "jobs", "report", "erp"], identityProvider: "auth", identityProviderPath: "/auth", status: "active", followReleases: true }).run();
     const executor = fakeExecutor({ queuedFor: ["tnt_1"] });
     const follower = makeTenantFollower(deps(executor));
     await follower.releaseSucceeded({ unit: "example-platform", stage: "prod", runName: "r-1", releaseTag: "0.1.12-stable-20260925120000" });

@@ -48,7 +48,7 @@ describe("inventory tenants + tenant_apps", () => {
       clusterId: "cls_1",
       guid: "zsjs023ctne0",
       subdomain: "example.example",
-      stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth",
+      stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth",
       seedUsers: true,
       lastRunId: "run_1",
     }).run();
@@ -78,7 +78,7 @@ describe("inventory tenants + tenant_apps", () => {
     seedCluster(db);
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "1.2.3.5", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
-    const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth" };
+    const base = { clusterId: "cls_1", guid: "e2e8ymj86dk8", subdomain: "acme", stage: "prod" as const, members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth" };
     const first = tenantId();
     db.db.insert(tenants).values({ id: first, ...base }).run();
     // Same (guid, stage) -> unique-index violation, on this cluster and on any other: one tenant
@@ -165,8 +165,8 @@ describe("apps.stage", () => {
 
     db.sqlite
       .prepare(
-        "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, members, owner, modified_by) " +
-          "VALUES ('tnt_d','cls_1','zsjs023ctne0','acme','prod','auth','[\"auth\"]', 'op_system', 'op_system')",
+        "INSERT INTO tenants (id, cluster_id, guid, subdomain, stage, identity_provider, identity_provider_path, members, owner, modified_by) " +
+          "VALUES ('tnt_d','cls_1','zsjs023ctne0','acme','prod','auth','/auth','[\"auth\"]', 'op_system', 'op_system')",
       )
       .run();
     expect(db.sqlite.prepare("SELECT provenance FROM tenants WHERE id='tnt_d'").get()).toEqual({ provenance: "manager" });

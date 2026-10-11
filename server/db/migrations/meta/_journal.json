@@ -218,6 +218,13 @@
       "when": 1791625879915,
       "tag": "0030_stamp-dns-secret-and-backup-books",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1791682720511,
+      "tag": "0031_tenant-identity-provider-path",
+      "breakpoints": true
     }
   ]
 }

@@ -59,8 +59,8 @@ export interface RelocationWorld {
   /** The source cluster's SHORT name (what the registration's cluster field carries). */
   sourceCluster: string;
   /** The unit's public base URL — a consumer's `https://<label>.<stage apex>`, a tenant's IdP member
-   *  (every tenant has one) at `<zone>/<member>`, which is what verify-quiesced
-   *  probes from the outside. */
+   *  (every tenant has one) at the path its row records, which is what verify-quiesced probes from
+   *  the outside. */
   publicUrl: string;
   /** Every namespace of the unit on its cluster (a consumer: one; a tenant: one per member). */
   namespaces: string[];

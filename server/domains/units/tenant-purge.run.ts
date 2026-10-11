@@ -642,7 +642,7 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
         .select({
           senderDomain: tenants.senderDomain,
           subdomain: tenants.subdomain,
-          identityProvider: tenants.identityProvider,
+          identityProviderPath: tenants.identityProviderPath,
         })
         .from(tenants)
         .where(and(eq(tenants.guid, req.guid), eq(tenants.stage, req.stage)))
@@ -655,7 +655,7 @@ export function makeTenantPurgeDef(ports: TenantPurgePorts): RunDefinition<Tenan
         const unitApex = await ports.resolveUnitApex(c.domain, req.stage);
         const issuer = stageServiceIssuer(
           {
-            identityProvider: source.identityProvider,
+            identityProviderPath: source.identityProviderPath,
             stage: req.stage,
             subdomain: source.subdomain,
           },

@@ -74,7 +74,7 @@ export function useOwnDomainHarness() {
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage, domain: CLUSTER, name: "s1", status: "active" }).run();
     db.db.insert(tenants).values({
       id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage,
-      members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain, ownDomainRedirects, suspended: false, status: "active",
+      members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain, ownDomainRedirects, suspended: false, status: "active",
     }).run();
     await reg.commitTenant({
       stage, guid: GUID, runId: "run_crt",

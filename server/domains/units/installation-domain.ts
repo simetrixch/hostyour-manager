@@ -12,6 +12,7 @@ import { consumerUnitHost, tenantOwnHosts, tenantZone, tenantMemberUrl } from "#
 import { STAGE } from "../../../shared/enums.ts";
 import { clusterMapPath } from "../../../shared/cluster-values.ts";
 import { applyDomainChanges, domainChanges, moveDomain, movePublicAddress } from "../../../shared/domain-move.ts";
+import { memberPathOf } from "../../../shared/tenant.ts";
 import { InstallationDomainSnapshotSchema, type InstallationDomainSnapshot } from "../../../shared/installation-domain.ts";
 import type { CredentialStore } from "../../security/store.ts";
 import type { TenantSpec } from "../../../shared/consumer.ts";
@@ -149,14 +150,14 @@ export async function readInstallationDomain(db: Db, optional: InstallationDomai
       const entry = read.entry, owner = { kind: "tenant", name: pointer.guid, stage };
       const row = db.select().from(tenants).where(and(eq(tenants.guid, pointer.guid), eq(tenants.stage, stage))).get();
       if (row && (row.clusterId !== cluster.id || row.subdomain !== entry.subdomain || row.ownDomain !== entry.ownDomain || JSON.stringify(row.ownDomainRedirects) !== JSON.stringify(entry.ownDomainRedirects))) throw errValidation(`tenant ${pointer.guid}/${stage} inventory disagrees with its registration`);
-      const identityProvider = entry.identityProvider;
-      if (row && row.identityProvider !== identityProvider) throw errValidation(`tenant ${pointer.guid}/${stage} identity-provider inventory disagrees with its registration`);
+      if (row && row.identityProvider !== entry.identityProvider) throw errValidation(`tenant ${pointer.guid}/${stage} identity-provider inventory disagrees with its registration`);
+      const identityProviderPath = memberPathOf(entry, entry.identityProvider);
       const changes = domainChanges(entry, fromDomain, toDomain, ["ownDomain", "ownDomainRedirects", "apps", "members"], path => snapshot.blockers.push(`tenant ${pointer.guid}/${stage}: domain field ${path.join(".")} cannot be safely journaled; its private address must be resolved before cutover`));
       snapshot.registrations.push({ kind: "tenant", name: pointer.guid, stage, changes });
       const ownDomainAfter = movePublicAddress(entry.ownDomain, fromDomain, toDomain), redirectsAfter = entry.ownDomainRedirects.map(h => moveDomain(h, fromDomain, toDomain));
       snapshot.tenants.push({ id: row?.id ?? null, guid: pointer.guid, stage,
-        issuerBefore: tenantMemberUrl(identityProvider, stage, entry.subdomain, cluster.apexBefore, entry.ownDomain),
-        issuerAfter: tenantMemberUrl(identityProvider, stage, entry.subdomain, cluster.apexAfter, ownDomainAfter),
+        issuerBefore: tenantMemberUrl(identityProviderPath, stage, entry.subdomain, cluster.apexBefore, entry.ownDomain),
+        issuerAfter: tenantMemberUrl(identityProviderPath, stage, entry.subdomain, cluster.apexAfter, ownDomainAfter),
         cookieBefore: entry.ownDomain ? "" : tenantZone(entry.subdomain, stage, cluster.apexBefore),
         cookieAfter: ownDomainAfter ? "" : tenantZone(entry.subdomain, stage, cluster.apexAfter),
         cookieOverrides: cookieOverrides(entry.members, fromDomain, toDomain),

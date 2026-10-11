@@ -20,7 +20,7 @@ describe("customerHostProblem — another tenant's host, and confirmed nesting",
   let db: DbHandle;
   const tenant = (id: string, guid: string, subdomain: string, ownDomain: string): void => {
     db.db.insert(tenants).values({
-      id, clusterId: "cls_1", guid, subdomain, stage: "prod", members: ["auth"], identityProvider: "auth",
+      id, clusterId: "cls_1", guid, subdomain, stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth",
       ownDomain, ownDomainRedirects: ownDomain ? [`www.${ownDomain}`] : [], suspended: false, status: "active",
     }).run();
   };

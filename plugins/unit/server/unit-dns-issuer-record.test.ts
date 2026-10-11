@@ -14,8 +14,8 @@ import { publishIssuerRecord, removeIssuerRecords, tenantIssuerRecord } from "./
 
 const GUID = "zsjs023ctne0";
 const REPLACED = "ak64h58875qw";
-const MARK = tenantIssuerRecord("_digita-idp", "auth", "prod", "show", "digitacloud.app");
-const SECOND_MARK = tenantIssuerRecord("_second-idp", "auth", "prod", "show", "digitacloud.app");
+const MARK = tenantIssuerRecord("_digita-idp", "/auth", "prod", "show", "digitacloud.app");
+const SECOND_MARK = tenantIssuerRecord("_second-idp", "/auth", "prod", "show", "digitacloud.app");
 const CLUSTER = "s1.example";
 
 let db: DbHandle;

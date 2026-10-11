@@ -50,7 +50,7 @@ describe("check-units", () => {
   it("records every active consumer's and tenant's findings on its row, and the drift among them", async () => {
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
     db.db.insert(apps).values({ id: "app_off", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", repoUrl: "https://github.com/x/gone.git", provenance: "manager", status: "offboarded" }).run();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "shop", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "shop", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", provenance: "manager", status: "active" }).run();
     const dns = emptyZone();
     dns.seed("shop.example.com", "A", "198.51.100.7"); // the tenant's zone record moved to an address nobody here carries
     const github = new FakeGitHubConsumer();
@@ -100,7 +100,7 @@ describe("check-units", () => {
   });
 
   it("a tenant's row carries the build hooks of the units that build its images, and of no other unit", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", provenance: "manager", status: "active" }).run();
     const dns = emptyZone();
     const github = new FakeGitHubConsumer();
     const expected = webhookTargetUrl("m1.example", "build");
@@ -126,7 +126,7 @@ describe("check-units", () => {
 
   it("a hook read GitHub does not answer (5xx, 429, no answer) is not measured in both walks; one it refuses still fails, by repository", async () => {
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "prod", host: "acme", repoUrl: "https://github.com/x/acme.git", provenance: "manager", status: "active" }).run();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "acme1234abcd", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", provenance: "manager", status: "active" }).run();
     const github = new FakeGitHubConsumer();
     const o = onboardPorts({ github });
     const units = [{ unit: "digita-jobs", entry: { repoURL: "https://github.com/x/digita-jobs.git", builds: ["digita-jobs"] } }];

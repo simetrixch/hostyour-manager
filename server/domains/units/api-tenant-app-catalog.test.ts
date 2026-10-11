@@ -45,7 +45,7 @@ beforeEach(() => {
   db = openDb(":memory:");
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
 
@@ -53,7 +53,7 @@ afterEach(() => { db.sqlite.close(); });
 function registrationsWith(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): TenantRegistrations {
   const repo = new FakePlatformRepo();
   const registration = TenantRegistrationSchema.parse({
-    cluster: "s1", subdomain: "acme", members: testMembers([{ name: "erp" }]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...bundle,
+    cluster: "s1", subdomain: "acme", members: testMembers([{ name: "erp" }]), identityProvider: "auth", identityProviderPath: "/auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...bundle,
   });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   repo.seed(repo.booksBranch, w.path, w.content);
@@ -85,7 +85,7 @@ const read = async (app: Hono<AppEnv>, cookie: string, id = "tnt_1"): Promise<{ 
 describe("GET /api/tenants/:id/app-catalog", () => {
   it("PLANTED DEFECT: marks a live member deployed even when apps[] does not list it", async () => {
     const repo = new FakePlatformRepo();
-    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(["crm", "erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...TEST_BUNDLE });
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(["crm", "erp"]), identityProvider: "auth", identityProviderPath: "/auth", apps: [{ name: "erp" }], quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
@@ -108,7 +108,7 @@ describe("GET /api/tenants/:id/app-catalog", () => {
   it("names the tenant's websites off its registration, each with its site, and every member name a new website stays clear of", async () => {
     const repo = new FakePlatformRepo();
     const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main" }];
-    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", identityProviderPath: "/auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
@@ -120,7 +120,7 @@ describe("GET /api/tenants/:id/app-catalog", () => {
   it("marks the tenant's main website in the websites it names, and no other", async () => {
     const repo = new FakePlatformRepo();
     const apps = [{ name: "erp" }, { name: "example-ch", folder: "web", site: "main", main: true }, { name: "shop", folder: "web", site: "shop" }];
-    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", identityProviderPath: "/auth", apps, quota: seedQuota("small"), ...TEST_BUNDLE });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     const { app, cookie } = await serve({ registrations: new TenantRegistrations(repo), appCatalog: { list: async () => CATALOG } });
@@ -176,7 +176,7 @@ describe("GET /api/tenants/:id/app-catalog — the sites of the tenant's own bun
   function websiteRegistrations(bundle: { appsRepo?: string; appsImage?: string; appsImageTag?: string } = TEST_BUNDLE): TenantRegistrations {
     const repo = new FakePlatformRepo();
     const apps = [{ name: "erp" }, { name: "show", folder: "web", site: "show" }, { name: "cycleshop", folder: "web", site: "cycleshop" }];
-    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", apps, quota: seedQuota("small"), ...bundle });
+    const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: testMembers(apps), identityProvider: "auth", identityProviderPath: "/auth", apps, quota: seedQuota("small"), ...bundle });
     const w = tenantRegistrationWrite("prod", GUID, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
     return new TenantRegistrations(repo);

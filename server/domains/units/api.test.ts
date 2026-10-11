@@ -396,7 +396,7 @@ async function makeTenant(enabled: boolean): Promise<{ app: Hono<AppEnv>; execut
 // routes). Reuses seedCluster (srv_1 + cls_1 @ s1.example/prod, tier rehearsal).
 function seedTenant(): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", provenance: "manager", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: TGUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", provenance: "manager", status: "active" }).run();
   db.db.insert(tenantApps).values({ id: "tna_1", tenantId: "tnt_1", name: "erp" }).run();
 }
 

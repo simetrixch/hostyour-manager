@@ -183,7 +183,7 @@ function params(over: Partial<CreateTenantParams> = {}): CreateTenantParams {
   return CreateTenantParams.parse({
     guid: GUID, subdomain: SUB, stage: "prod", clusterId: "cls_1", domain: "s1.example",
     members: testMembers(APPS),
-    identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
+    identityProvider: "auth", identityProviderPath: "/auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "",
     cluster: "s1", chartsRef: SHA, registryHost: REGISTRY_HOST,
     apps: APPS, seedUsers: false, quota: seedQuota("small"), owner: "team-acme", size: "small",
     report: passReport(), expectedApps: EXPECTED, deployRepoUrl: DEPLOY_URL,
@@ -215,7 +215,7 @@ function seedClusters(): void {
 
 /** Insert an inventory row for the old tenant (the INVENTORIED replace case). */
 function seedOldRow(): void {
-  db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
   db.db.insert(tenantApps).values({ id: "tna_old", tenantId: "tnt_old", name: "legacy", status: "active" }).run();
 }
 
@@ -275,7 +275,7 @@ describe("create-tenant idempotent-by-subdomain — planStream resolves the repl
     seedClusters();
     db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
-    db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_old", clusterId: "cls_2", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration({ cluster: "s2" }), runId: "run_old" });
     await expect(makeCreateTenantDef(withAppsTemplate(ports(registrations))).planStream!({ clusterId: "cls_1", stage: "prod", subdomain: SUB, owner: "team-acme", size: "small", apps: APPS }, planCtx()))
@@ -363,7 +363,7 @@ describe("resolveReplaceTargets unions the DB inventory and the GitOps pointer s
 
   it("ignores an already-offboarded inventory row and a different subdomain", async () => {
     seedClusters();
-    db.db.insert(tenants).values({ id: "tnt_off", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "offboarded" }).run();
+    db.db.insert(tenants).values({ id: "tnt_off", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "offboarded" }).run();
     const registrations = makeRegistrations(); // no live pointer either
     expect(await resolveReplaceTargets({ db: db.db, registrations }, "prod", SUB)).toEqual([]);
     expect(await resolveReplaceTargets({ db: db.db, registrations }, "prod", "other.example")).toEqual([]);
@@ -377,7 +377,7 @@ describe("resolveReplaceTargets unions the DB inventory and the GitOps pointer s
     // empty watch set that teardown resolves to is refused outright, so re-creating that subdomain would
     // not merely waste steps, it would FAIL.
     seedClusters();
-    db.db.insert(tenants).values({ id: "tnt_purged", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "purged" }).run();
+    db.db.insert(tenants).values({ id: "tnt_purged", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "purged" }).run();
     expect(await resolveReplaceTargets({ db: db.db, registrations: makeRegistrations() }, "prod", SUB)).toEqual([]);
   });
 });
@@ -407,7 +407,7 @@ describe("resolveTeardownTarget resolves ONE guid, with or without an inventory 
 
   it("an OFFBOARDED row is not authoritative — a live pointer still resolves, as an orphan would", async () => {
     seedClusters();
-    db.db.insert(tenants).values({ id: "tnt_off", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "offboarded" }).run();
+    db.db.insert(tenants).values({ id: "tnt_off", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "offboarded" }).run();
     const registrations = makeRegistrations();
     await registrations.commitTenant({ stage: "prod", guid: OLD, registration: oldRegistration(), runId: "run_old" });
     // The settled row is not flipped again: tenantId stays null, so the record step soft-skips.
@@ -421,7 +421,7 @@ describe("resolveTeardownTarget resolves ONE guid, with or without an inventory 
     // target and have its record step re-flip a row nothing removed. With no live
     // pointer beside it there is nothing safe to tear down, so the answer is null and the caller skips it.
     seedClusters();
-    db.db.insert(tenants).values({ id: "tnt_purged", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "purged" }).run();
+    db.db.insert(tenants).values({ id: "tnt_purged", clusterId: "cls_1", guid: OLD, subdomain: SUB, stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "purged" }).run();
     expect(await resolveTeardownTarget({ db: db.db, registrations: makeRegistrations() }, "prod", OLD)).toBeNull();
   });
 

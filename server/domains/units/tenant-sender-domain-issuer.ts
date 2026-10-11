@@ -18,10 +18,11 @@ export interface SenderDomainIssuers {
   unit: string;
 }
 
-/** The tenant stage's service issuer: its identity provider's address on the tenant's zone, the issuer
- *  its service tokens carry and the one its DNS mark holds (tenantIssuerRecord). */
-export function stageServiceIssuer(tc: Pick<TenantCluster, "identityProvider" | "stage" | "subdomain">, unitApex: string): string {
-  return tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, unitApex, "");
+/** The tenant stage's service issuer: its identity provider's address on the tenant's zone, at the path
+ *  recorded for it, the issuer its service tokens carry and the one its DNS mark holds
+ *  (tenantIssuerRecord). */
+export function stageServiceIssuer(tc: Pick<TenantCluster, "identityProviderPath" | "stage" | "subdomain">, unitApex: string): string {
+  return tenantMemberUrl(tc.identityProviderPath, tc.stage, tc.subdomain, unitApex, "");
 }
 
 const mintRepair = (unit: string, stage: Stage): string =>

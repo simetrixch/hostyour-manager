@@ -62,6 +62,7 @@ interface Candidate {
   stage: Stage;
   domain: string;
   identityProvider: string;
+  identityProviderPath: string;
   ownDomain: string;
   clusterId: string;
 }
@@ -109,6 +110,7 @@ function checkStep(ports: CheckTenantsPorts): Step {
           subdomain: tenants.subdomain,
           stage: tenants.stage,
           identityProvider: tenants.identityProvider,
+          identityProviderPath: tenants.identityProviderPath,
           ownDomain: tenants.ownDomain,
           clusterId: tenants.clusterId,
           suspended: tenants.suspended,
@@ -152,9 +154,10 @@ function checkStep(ports: CheckTenantsPorts): Step {
           } else {
             // WHERE the tenant's own auth serves: at the address `tenantMemberUrl` gives its IdP member,
             // under the apex off the target cluster's values chain and never off the cluster's own
-            // domain — composing from the domain asks a host nothing serves.
+            // domain — composing from the domain asks a host nothing serves. The path is the one the
+            // tenant's row recorded for that member.
             const apex = await ports.resolveUnitApex(t.domain, t.stage);
-            const idpUrl = tenantMemberUrl(t.identityProvider, t.stage, t.subdomain, apex, t.ownDomain);
+            const idpUrl = tenantMemberUrl(t.identityProviderPath, t.stage, t.subdomain, apex, t.ownDomain);
             const answer = await ports.health.read({
               url: `${idpUrl}/api/v1/bootstrap/status`,
               tokenHeader: BOOTSTRAP_TOKEN_HEADER,

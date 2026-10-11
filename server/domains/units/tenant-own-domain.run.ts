@@ -128,7 +128,7 @@ function tenantHost(tc: TenantCluster, apex: string, domain: string): string {
  *  member, and its Ingress requests the host's certificate, so its 2xx proves the host is served with
  *  it. A website's server is no such member: a tenant without a website runs none. */
 function idpHealthUrl(tc: TenantCluster, apex: string, domain: string): string {
-  return `${tenantMemberUrl(tc.identityProvider, tc.stage, tc.subdomain, apex, domain)}/health`;
+  return `${tenantMemberUrl(tc.identityProviderPath, tc.stage, tc.subdomain, apex, domain)}/health`;
 }
 
 /** On abort: put the previous own domain and redirect hosts back on the registration and the row. */

@@ -96,7 +96,7 @@ function planCtx(logs: string[]): PlanStreamCtx {
 function seedTenant(opts: { status?: TenantStatus; appStatus?: TenantStatus; apps?: string[] } = {}): void {
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "1.2.3.4", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", status: opts.status ?? "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", status: opts.status ?? "active" }).run();
   for (const name of opts.apps ?? THREE_APPS) db.db.insert(tenantApps).values({ id: `tna_${name}`, tenantId: "tnt_1", name, status: opts.appStatus ?? "active" }).run();
 }
 

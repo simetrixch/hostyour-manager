@@ -82,7 +82,7 @@ describe("runs API + SSE", () => {
     db.db.insert(servers).values({ id: "srv_1", name: "m1", host: "1.2.3.4", sshUser: "root", role: "master", status: "healthy" }).run();
     db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
     db.db.insert(apps).values({ id: "app_1", clusterId: "cls_1", name: "acme", stage: "test", host: "acme", repoUrl: "https://github.com/x/acme.git", chartPath: "deploy/chart", provenance: "manager", status: "suspended" }).run();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "example", stage: "test", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "example", stage: "test", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
     const run = db.sqlite.prepare("INSERT INTO runs (id, kind, target_kind, target_id, params_json, plan_json, status, owner, modified_by) VALUES (?, ?, ?, ?, '{}', '{}', 'succeeded', 'op_test', 'op_test')");
     run.run("run_app", "consumer-suspend", "app", "app_1");
     run.run("run_tenant", "tenant-suspend", "tenant", "tnt_1");

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { consumerUnitHost, HOST_LABEL_RE, RESERVED_HOST_LABELS, stageApex, tenantIssuerRecord, tenantMemberUrl, tenantZone, ownDomainEntryProblem, ownDomainHosts, stageHost, prodHostOf, stageHostProblem } from "./unit-host.ts";
 import { ConsumerManifestSchema, consumerHostLabel, hostLabel } from "#core/shared/consumer.ts";
+import { memberPathOf } from "#core/shared/tenant.ts";
 
 /** THE ONE composition of a unit's public host (simetrixch/hostyour-cloud#208): the stage is a
  *  zone and prod is the apex itself, for consumers and tenants alike. */
@@ -24,20 +25,31 @@ describe("a consumer's host — <label>.<stage apex>", () => {
   });
 });
 
-describe("a tenant's zone and members — <subdomain>.<stage apex>/<member>", () => {
+describe("a tenant's zone and members — <subdomain>.<stage apex><path>", () => {
   it("puts the tenant one level below the stage zone, and every member one level below the tenant", () => {
     expect(tenantZone("example", "prod", "digitacloud.app")).toBe("example.digitacloud.app");
     expect(tenantZone("example", "dev", "digitacloud.app")).toBe("example.dev.digitacloud.app");
   });
 
-  it("addresses a member under a path of the zone", () => {
-    expect(tenantMemberUrl("idp", "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
-    expect(tenantMemberUrl("idp", "dev", "acme", "example.test", "")).toBe("https://acme.dev.example.test/idp");
+  it("addresses a member at the path given, under the zone, and adds nothing for the root path", () => {
+    expect(tenantMemberUrl("/idp", "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
+    expect(tenantMemberUrl("/idp", "dev", "acme", "example.test", "")).toBe("https://acme.dev.example.test/idp");
+    expect(tenantMemberUrl("/", "prod", "acme", "example.test", "")).toBe("https://acme.example.test");
   });
 
   it("addresses a member under a path of the tenant's own domain where it has one, instead of its zone", () => {
-    expect(tenantMemberUrl("idp", "prod", "acme", "example.test", "www.customer.example")).toBe("https://www.customer.example/idp");
-    expect(tenantMemberUrl("idp", "dev", "acme", "example.test", "customer.example")).toBe("https://customer.example/idp");
+    expect(tenantMemberUrl("/idp", "prod", "acme", "example.test", "www.customer.example")).toBe("https://www.customer.example/idp");
+    expect(tenantMemberUrl("/idp", "dev", "acme", "example.test", "customer.example")).toBe("https://customer.example/idp");
+  });
+
+  // The product names its identity provider and the path its chart serves it at; the Manager composes
+  // neither. A member named `idp` that the product serves at /idp is reached at /idp, and the same name
+  // served at /auth is reached at /auth: the address follows the recorded path, never the name.
+  it("PLANTED DEFECT: an identity provider named idp is reached at the path its registration records, not at /<name>", () => {
+    const at = (path: string) => ({ members: [{ name: "idp", path, namespaceLabels: {}, sources: [{ chart: "charts/idp", valueFiles: [], values: {} }] }] });
+    expect(tenantMemberUrl(memberPathOf(at("/idp"), "idp"), "prod", "acme", "example.test", "")).toBe("https://acme.example.test/idp");
+    expect(tenantMemberUrl(memberPathOf(at("/auth"), "idp"), "prod", "acme", "example.test", "")).toBe("https://acme.example.test/auth");
+    expect(() => memberPathOf(at("/auth"), "auth")).toThrow(/no member named "auth"/);
   });
 });
 
@@ -89,14 +101,14 @@ describe("a tenant's own domain — typed without www, served at the apex", () =
 
 describe("a tenant identity provider's DNS mark — the issuer under the zone", () => {
   it("names the record under the zone and holds the identity provider's address on it", () => {
-    expect(tenantIssuerRecord("_digita-idp", "auth", "prod", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.digitacloud.app", content: "https://show.digitacloud.app/auth" });
-    expect(tenantIssuerRecord("_digita-idp", "auth", "dev", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.dev.digitacloud.app", content: "https://show.dev.digitacloud.app/auth" });
+    expect(tenantIssuerRecord("_digita-idp", "/auth", "prod", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.digitacloud.app", content: "https://show.digitacloud.app/auth" });
+    expect(tenantIssuerRecord("_digita-idp", "/auth", "dev", "show", "digitacloud.app")).toEqual({ name: "_digita-idp.show.dev.digitacloud.app", content: "https://show.dev.digitacloud.app/auth" });
   });
 
   it("PLANTED DEFECT: never names the own domain, whose DNS the customer controls", () => {
-    const mark = tenantIssuerRecord("_idp", "auth", "prod", "show", "digitacloud.app");
-    expect(mark.content).toBe(tenantMemberUrl("auth", "prod", "show", "digitacloud.app", ""));
-    expect(mark.content).not.toBe(tenantMemberUrl("auth", "prod", "show", "digitacloud.app", "show.example.org"));
+    const mark = tenantIssuerRecord("_idp", "/auth", "prod", "show", "digitacloud.app");
+    expect(mark.content).toBe(tenantMemberUrl("/auth", "prod", "show", "digitacloud.app", ""));
+    expect(mark.content).not.toBe(tenantMemberUrl("/auth", "prod", "show", "digitacloud.app", "show.example.org"));
   });
 });
 

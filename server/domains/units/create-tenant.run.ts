@@ -4,7 +4,7 @@ import { TenantSizeSchema, TENANT_BRINGS } from "#unit/shared/unit-size.ts";
 import { resolveUnitQuota } from "#unit/server/unit-size.ts";
 import type { RunDefinition, Step, Plan } from "../../executor/types.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
-import { appFolders, appsBundleFields, guid as guidSchema, memberName, subdomain as subdomainSchema, tenantDisplayName, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
+import { appFolders, appsBundleFields, guid as guidSchema, memberName, memberPathOf, subdomain as subdomainSchema, tenantDisplayName, TenantAppSchema, TenantMemberRecordSchema, TenantValidationReportSchema } from "../../../shared/tenant.ts";
 import { errValidation, errInternal } from "../../kernel/errors.ts";
 import { refreshTenantApplications } from "./lifecycle.ts";
 import { upsertTenantInventory } from "./create-tenant-inventory.ts";
@@ -468,7 +468,7 @@ export function createTenantSteps(ports: TenantOnboardPorts, p: CreateTenantStag
         // The mark the product's mail service trusts the tenant's identity provider by, published long
         // before `activate` sends the first invite through that service.
         if (p.issuerRecordLabel) {
-          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, p.identityProvider, p.stage, p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
+          await publishIssuerRecord(ctx, { dns: ports.dns, guid: p.guid, stage: p.stage, record: tenantIssuerRecord(p.issuerRecordLabel, memberPathOf(p, p.identityProvider), p.stage, p.subdomain, unitApex), clusterFqdn: p.domain, runKind: "tenant-create" });
         } else {
           ctx.log("meta", "the product's tenant spec declares no issuerRecordLabel, so no DNS mark of the identity provider is published");
         }

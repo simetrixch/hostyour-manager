@@ -22,7 +22,7 @@ beforeEach(() => {
   db.db.insert(apps).values({ id: "app_post", clusterId: "cls_1", name: "post", stage: "prod", host: "post", provenance: "manager", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_auth", clusterId: "cls_1", name: "auth", stage: "prod", host: "auth", provenance: "manager", status: "active" }).run();
   db.db.insert(apps).values({ id: "app_gone", clusterId: "cls_1", name: "gone", stage: "prod", host: "gone", provenance: "manager", status: "offboarded" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
 

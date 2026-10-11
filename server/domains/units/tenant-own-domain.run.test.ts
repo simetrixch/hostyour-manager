@@ -154,7 +154,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect(await refusal(OWN, ["www.example.com"])).toMatch(/platform's own name space/);
     h.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: "beta.test", ownDomainRedirects: [BARE], suspended: false, status: "active",
     }).run();
     expect(await refusal(OWN, [BARE])).toMatch(/overlaps a host of tenant beta/);
     expect(await refusal("www.other.test", [BARE])).toMatch(/already a host of tenant beta/);
@@ -166,7 +166,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     const h = await make({ answers: [OWN] });
     h.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", ownDomain: BARE, suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: BARE, suspended: false, status: "active",
     }).run();
     expect((await plan(h, { ownDomain: OWN, previous: "" })).error).toMatch(/overlaps a host of tenant beta \(customer.test\) — where both tenants are one owner's/);
     expect((await plan(h, { ownDomain: OWN, previous: "", nestsUnder: "nobody" })).error).toMatch(/no other live tenant has the subdomain "nobody"/);
@@ -270,7 +270,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     const other = (id: string, guid: string, domain: string, status: "active" | "offboarded"): void => {
       h.db.db.insert(tenants).values({
         id, clusterId: "cls_1", guid, subdomain: id, stage: "prod",
-        members: ["auth"], identityProvider: "auth", ownDomain: domain, suspended: false, status,
+        members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: domain, suspended: false, status,
       }).run();
     };
     other("tnt_old", "oooooooooooo", OWN, "offboarded");
@@ -300,7 +300,7 @@ describe("tenant-set-own-domain through the Executor", () => {
     expect((await plan(platform, { ownDomain: "shop.example.com", previous: "" })).error).toMatch(/platform's own name space/);
     platform.db.db.insert(tenants).values({
       id: "tnt_2", clusterId: "cls_1", guid: "zzzzzzzzzzzz", subdomain: "beta", stage: "prod",
-      members: ["auth"], identityProvider: "auth", ownDomain: OTHER, suspended: false, status: "active",
+      members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: OTHER, suspended: false, status: "active",
     }).run();
     expect((await plan(platform, { ownDomain: OTHER, previous: "" })).error).toMatch(/already a host of tenant beta/);
   });

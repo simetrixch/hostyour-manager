@@ -82,7 +82,7 @@ export function seedConsumerRow(db: DbHandle, status: AppStatus = "active", stag
 }
 
 export function seedTenantRows(db: DbHandle, status: TenantStatus = "active", stage: Stage = "prod"): void {
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: SOURCE.clusterId, guid: GUID, subdomain: SUBDOMAIN, stage, members: TENANT_MEMBERS, identityProvider: TENANT_IDP, status }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: SOURCE.clusterId, guid: GUID, subdomain: SUBDOMAIN, stage, members: TENANT_MEMBERS, identityProvider: TENANT_IDP, identityProviderPath: `/${TENANT_IDP}`, status }).run();
   db.db.insert(tenantApps).values({ id: "tna_web", tenantId: "tnt_1", name: "web", status }).run();
 }
 

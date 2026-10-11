@@ -40,7 +40,7 @@ function seed(stage: Stage, withOverride = false): void {
   const write = tenantRegistrationWrite(stage, GUID, tenant);
   deploy.seed(deploy.booksBranch, write.path, write.content);
   const unitHost = consumerUnitHost(name, stage, FROM), tenantHost = tenantZone("shop", stage, FROM);
-  const issuerName = tenantIssuerRecord("_idp", "auth", stage, "shop", FROM).name, issuer = tenantMemberUrl("auth", stage, "shop", FROM, "");
+  const issuerName = tenantIssuerRecord("_idp", "/auth", stage, "shop", FROM).name, issuer = tenantMemberUrl("/auth", stage, "shop", FROM, "");
   for (const [host, kind, owner] of [[unitHost, "consumer", name], [tenantHost, "tenant", GUID]] as const) {
     dns.seed(host, "CNAME", OLD_HOST);
     recordDnsWrite(db.db, { name: host, type: "CNAME", content: OLD_HOST, act: "inserted", owner: { kind, name: owner, stage }, runId: "run_seed" });
@@ -152,7 +152,7 @@ describe("installation domain unit phase", () => {
     await expect(readInstallationDomain(db.db, ports(), FROM, TO)).rejects.toThrow(/book entry disagrees/);
   });
   it("refuses an unrelated private TXT issuer without exposing its value", async () => {
-    seed("prod"); const mark = tenantIssuerRecord("_idp", "auth", "prod", "shop", FROM).name;
+    seed("prod"); const mark = tenantIssuerRecord("_idp", "/auth", "prod", "shop", FROM).name;
     const content = "https://outside.example/auth?token=private-fixture";
     dns.seed(mark, "TXT", content);
     recordDnsWrite(db.db, { name: mark, type: "TXT", content, act: "inserted", owner: { kind: "tenant", name: GUID, stage: "prod" }, runId: "run_seed" });
@@ -169,7 +169,7 @@ describe("installation domain unit phase", () => {
     await applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move");
     await applyInstallationDomain(ctx("run_rollback"), ports(), snapshot, true, "run_move");
     expect(dns.record(`post.${TO}`, "CNAME")).toBeUndefined(); expect(dns.record(`post.${FROM}`, "CNAME")).toBe(OLD_HOST);
-    expect(await dns.listRecordContents({ name: tenantIssuerRecord("_idp", "auth", "prod", "shop", FROM).name, type: "TXT" })).toContain("unrelated-TXT");
+    expect(await dns.listRecordContents({ name: tenantIssuerRecord("_idp", "/auth", "prod", "shop", FROM).name, type: "TXT" })).toContain("unrelated-TXT");
     expect((await tenantRegistrations.readTenant("prod", GUID))?.entry).toMatchObject({ resetNonce: "keep-data", suspended: true });
     expect(parseDocument(cloud.read(cloud.booksBranch, mapPath)!).getIn(["global", "unrelated"])).toBe("keep");
     expect(findDnsWrite(db.db, { name: `post.${TO}`, type: "CNAME" })).toBeNull();

@@ -136,7 +136,7 @@ function seedSecondCluster(): void {
  *  non-offboarded row, and the record step flips whatever it finds. */
 function seedTenantRow(status: TenantStatus = "provisioning"): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", status }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", status }).run();
   db.db.insert(tenantApps).values({ id: "tna_erp", tenantId: "tnt_1", name: "erp", status }).run();
 }
 

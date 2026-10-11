@@ -136,6 +136,8 @@ export interface TenantCluster {
    *  constant `auth` plus an implied trio stood here instead. */
   members: string[];
   identityProvider: string;
+  /** The path its IdP serves on the tenant's host, as recorded on its row. */
+  identityProviderPath: string;
   /** The tenant's own domain, or "" where it is reached at its zone (plugins/unit/shared/unit-host.ts). */
   ownDomain: string;
   /** The hosts that redirect to the own domain; empty without one. */
@@ -165,6 +167,7 @@ export function loadTenantCluster(db: Db, tenantId: string): TenantCluster {
     clusterId: cluster.id,
     members: tenant.members,
     identityProvider: tenant.identityProvider,
+    identityProviderPath: tenant.identityProviderPath,
     ownDomain: tenant.ownDomain,
     ownDomainRedirects: tenant.ownDomainRedirects,
     ownDomainAliases: tenant.ownDomainAliases,

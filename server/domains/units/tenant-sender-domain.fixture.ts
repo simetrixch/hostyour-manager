@@ -179,7 +179,7 @@ export async function make(opts: MakeOptions = {}, handles: DbHandle[] = [], dir
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: CLUSTER, name: "s1", status: "active" }).run();
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod",
-    members: MEMBERS, identityProvider: "auth", senderDomain, suspended: opts.suspended ?? false, status: "active",
+    members: MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", senderDomain, suspended: opts.suspended ?? false, status: "active",
   }).run();
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",

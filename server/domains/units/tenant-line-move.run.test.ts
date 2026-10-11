@@ -61,13 +61,13 @@ beforeEach(() => {
   db = openDb(":memory:");
   db.db.insert(servers).values({ id: "srv_1", name: "s1", host: "10.1.1.11", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_1", serverId: "srv_1", stage: "prod", domain: "s1.example", name: "s1", status: "active" }).run();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
 });
 afterEach(() => { db.sqlite.close(); });
 
 function world(pairing = ON_03): { ports: TenantLineMovePorts; registrations: TenantRegistrations; argo: StatusArgo; books: FakePlatformRepo } {
   const books = new FakePlatformRepo();
-  const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: MEMBERS, identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"), appsRepo: REPO, appsImage: "example-apps-acme", ...pairing });
+  const registration = TenantRegistrationSchema.parse({ cluster: "s1", subdomain: "acme", members: MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", apps: [{ name: "erp" }], quota: seedQuota("small"), appsRepo: REPO, appsImage: "example-apps-acme", ...pairing });
   const w = tenantRegistrationWrite("prod", GUID, registration);
   books.seed(books.booksBranch, w.path, w.content);
   books.seed(books.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile({ "example-engine": P03, "example-app": P03 }));

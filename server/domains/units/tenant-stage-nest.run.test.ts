@@ -21,7 +21,7 @@ function world(stage: Stage, own: string, other: { guid: string; stage: Stage; o
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
   db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: other.stage, domain: "s2.example", name: "s2", status: "active" }).run();
   db.db.insert(tenants).values({ id: "tnt_2", clusterId: "cls_2", guid: other.guid, subdomain: other.guid === GUID ? "example" : "other", stage: other.stage,
-    members: ["auth"], identityProvider: "auth", ownDomain: other.own, ownDomainRedirects: [`www.${other.own}`], status: "active" }).run();
+    members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: other.own, ownDomainRedirects: [`www.${other.own}`], status: "active" }).run();
 }
 
 /** What the own-domain plan says of `host` for tnt_1: nothing, or why it refuses it. */

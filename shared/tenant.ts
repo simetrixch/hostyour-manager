@@ -415,6 +415,15 @@ export const TenantRegistrationSchema = z
   });
 export type TenantRegistration = z.infer<typeof TenantRegistrationSchema>;
 
+/** The path a standing member of a registration serves on the tenant's host, as the product declared
+ *  it and the registration recorded it. Every address of a member comes from here, so no caller
+ *  composes a path from the member's name. */
+export function memberPathOf(entry: Pick<TenantRegistration, "members">, member: string): string {
+  const found = entry.members.find((m) => m.name === member);
+  if (!found) throw new Error(`the registration has no member named "${member}" (it has ${entry.members.map((m) => `"${m.name}"`).join(", ")}), so there is no path to address it at`);
+  return found.path;
+}
+
 /** The ArgoCD UI deep-link for a tenant's fan-out — the tenant analogue of consumer.ts:consumerArgocdUrl.
  *  A tenant is one Application per member, not one, so this links to the
  *  argocd applications LIST filtered to the tenant's own label (platform/tenant=<guid>, the same

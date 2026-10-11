@@ -136,7 +136,7 @@ function seedMasterCluster(): void {
  *  non-offboarded row, and the record step flips whatever it finds. */
 function seedTenantRow(status: TenantStatus = "provisioning"): void {
   seedCluster();
-  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", status }).run();
+  db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", status }).run();
   db.db.insert(tenantApps).values({ id: "tna_erp", tenantId: "tnt_1", name: "erp", status }).run();
 }
 
@@ -391,7 +391,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("plans sender from tenant row with senderDomain and step calls DELETE with issuer at filled route URL", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -428,7 +428,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("PLANTED INNOCENT: a tenant with senderDomain: \"\" → sender null, no unit call, the log says so", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: "", status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", senderDomain: "", status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -450,7 +450,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("PLANTED DEFECT: the fake answers 500 → the step throws and the purge fails, the error naming the domain", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 
@@ -468,7 +468,7 @@ describe("unbind-sender-issuer step in tenant-purge", () => {
 
   it("the route absent (senderDomainIssuers answers null) → no call, the log names the binding left", async () => {
     seedCluster();
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: SUB, stage: "prod", members: TEST_MEMBERS, identityProvider: "auth", identityProviderPath: "/auth", senderDomain: SENDER_DOMAIN, status: "provisioning" }).run();
     const reg = new TenantRegistrations(new FakePlatformRepo());
     await reg.commitTenant({ stage: "prod", guid: GUID, registration: entry(), runId: "run_onb" });
 

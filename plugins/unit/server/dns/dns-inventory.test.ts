@@ -131,7 +131,7 @@ describe("readDnsInventory", () => {
   });
 
   it("lists the identity provider marks the book holds, removable, owned by the tenant's subdomain or, where no row names it, its guid", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
     recordDnsWrite(db.db, { name: "_digita-idp.acme.example.net", type: "TXT", content: "https://acme.example.net/auth", act: "inserted", owner: { kind: "tenant", name: "zsjs023ctne0", stage: "prod" }, runId: "run_a" });
     recordDnsWrite(db.db, { name: "_digita-idp.gone.example.net", type: "TXT", content: "https://gone.example.net/auth", act: "inserted", owner: { kind: "tenant", name: "ak64h58875qw", stage: "prod" }, runId: "run_b" });
     dns.seed("_digita-idp.acme.example.net", "TXT", "https://acme.example.net/auth");
@@ -144,7 +144,7 @@ describe("readDnsInventory", () => {
   });
 
   it("lists a booked tenant DKIM write with its tenant", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_m", guid: "zsjs023ctne0", subdomain: "acme", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
     recordDnsWrite(db.db, {
       name: "sel1._domainkey.customer.test",
       type: "TXT",

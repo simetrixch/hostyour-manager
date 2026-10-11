@@ -17,6 +17,7 @@ export const TENANT_COLUMNS = {
   // the tenant's auth host derives it from these two, so they belong in the one projection.
   members: tenants.members,
   identityProvider: tenants.identityProvider,
+  identityProviderPath: tenants.identityProviderPath,
   ownDomain: tenants.ownDomain,
   ownDomainRedirects: tenants.ownDomainRedirects,
   ownDomainAliases: tenants.ownDomainAliases,

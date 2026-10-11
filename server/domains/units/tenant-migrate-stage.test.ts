@@ -17,7 +17,7 @@ const move = { tenantId: "tnt_1", stage: "prod" as const, sourceClusterId: SOURC
 
 function sibling(stage: Stage, clusterId: string = SOURCE.clusterId): void {
   db.db.insert(tenants).values({ id: "tnt_sibling", guid: GUID, subdomain: SUBDOMAIN, clusterId,
-    stage, members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+    stage, members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
 }
 
 describe("one-stage tenant Move", () => {

@@ -96,7 +96,7 @@ async function seedTenant(reg: TenantRegistrations): Promise<void> {
   seedCluster();
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod",
-    members: ["auth", "jobs", "report"], identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", suspended: false, status: "active",
+    members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", suspended: false, status: "active",
   }).run();
   await reg.commitTenant({
     stage: "prod", guid: GUID, runId: "run_crt",

@@ -26,7 +26,7 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 // concrete second repo bound to the deploy repository (its workRoot + repo-qualified lock) is wired by the adapter.
 import type { UnitQuota, UnitSize } from "#unit/shared/unit-size.ts";
 import { parse as parseYaml } from "yaml";
-import { guid as guidSchema, TenantAppSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
+import { guid as guidSchema, memberPathOf, TenantAppSchema, TenantRegistrationSchema, type TenantMemberRecord, type TenantRegistration, type TenantWebsite } from "../../../shared/tenant.ts";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
 // The scan's skipped-registration shape is a WIRE shape: the orphan scan (tenant-orphans.ts) hands these
 // to the browser verbatim, so it is declared once in shared/api-types.ts and used here rather than
@@ -87,6 +87,8 @@ export interface ScannedTenant {
    *  product names the members that tenant actually has. */
   members: string[];
   identityProvider: string;
+  /** Where the identity provider serves on the tenant's host, as the registration records it. */
+  identityProviderPath: string;
   /** The tenant's own domain, or "" — the inventory lists its record beside the zone's. */
   ownDomain: string;
   /** The hosts that redirect to the own domain, and its alias domains — the inventory lists their records too. */
@@ -225,7 +227,8 @@ export class TenantRegistrations {
       status: "read",
       entry: {
         guid, stage, subdomain: r.data.subdomain, cluster: r.data.cluster, apps: r.data.apps,
-        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider, ownDomain: r.data.ownDomain,
+        members: r.data.members.map((m) => m.name), identityProvider: r.data.identityProvider,
+        identityProviderPath: memberPathOf(r.data, r.data.identityProvider), ownDomain: r.data.ownDomain,
         ownDomainRedirects: r.data.ownDomainRedirects, ownDomainAliases: r.data.ownDomainAliases ?? [],
         senderDomain: r.data.senderDomain ?? "", appsImage: r.data.appsImage ?? "",
       },

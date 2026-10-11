@@ -26,7 +26,7 @@ import { ARGO_NS, testMembers } from "./tenant-members.fixture.ts";
 // whatever serves that host next. The fixtures are the purge tests' own, cut to what remove-dns reads.
 
 const GUID = "zsjs023ctne0";
-const MARK = tenantIssuerRecord("_digita-idp", "auth", "prod", "acme", "example.com");
+const MARK = tenantIssuerRecord("_digita-idp", "/auth", "prod", "acme", "example.com");
 const REQUEST: TenantPurgeRequest = { guid: GUID, stage: "prod", clusterId: "cls_1" };
 
 let db: DbHandle;
@@ -90,7 +90,7 @@ async function purgeRemoveDns(p: TenantPurgePorts): Promise<void> {
 
 describe("the identity provider's DNS mark goes with its tenant", () => {
   it("tenant-offboard removes the mark beside the zone record, and the book forgets it", async () => {
-    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", status: "active" }).run();
+    db.db.insert(tenants).values({ id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "acme", stage: "prod", members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", status: "active" }).run();
     const dns = new FakeDnsProvider();
     await marked(dns);
     await makeOffboardTenantDef(ports(new TenantRegistrations(new FakePlatformRepo()), dns)).steps({ tenantId: "tnt_1" }).find((s) => s.name === "remove-dns")!.run(ctx({ tenantId: "tnt_1" }));
@@ -141,7 +141,7 @@ describe("the pointer-only teardowns take the mark too", () => {
     const prt = ports(new TenantRegistrations(new FakePlatformRepo()), dns) as unknown as TenantOnboardPorts;
     const p = CreateTenantParams.parse({
       guid: GUID, subdomain: "acme", stage: "prod", clusterId: "cls_1", domain: "s1.example", cluster: "s1", chartsRef: "a".repeat(40), registryHost: "zot.m1.example",
-      members: testMembers([]), identityProvider: "auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: "https://github.com/acme/acme-deploy.git",
+      members: testMembers([]), identityProvider: "auth", identityProviderPath: "/auth", ownDomain: "", ownDomainRedirects: [], approvedTags: {}, senderDomain: "", displayName: "", owner: "team-acme", size: "small", expectedApps: [], deployRepoUrl: "https://github.com/acme/acme-deploy.git",
       report: composeTenantReport({ resolvedSha: "a".repeat(40), probeGuid: GUID, appsValidated: [], resolvedMembers: [], startedAt: 1, finishedAt: 2, manifest: null, gates: [] }),
     });
     const cleanup = createTenantCleanups(prt, p).find((c) => c.name === `abort-${GUID}-remove-issuer-records`);

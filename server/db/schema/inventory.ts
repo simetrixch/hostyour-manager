@@ -204,6 +204,10 @@ export const tenants = sqliteTable("tenants", {
   // THIS tenant, resolved from the product's manifest when it was created. A constant `auth` stood in
   // the code instead, which is the platform knowing what one product calls its IdP.
   identityProvider: text("identity_provider").notNull(),
+  // The path that member serves on the tenant's host, as the product's manifest declared it when the
+  // tenant was created, beside its name for the same reason: the purge of an offboarded tenant addresses
+  // the identity provider after its registration is gone, and no other place records the path.
+  identityProviderPath: text("identity_provider_path").notNull(),
   // The tenant's STANDING member names, as they stood in the product's manifest when it was created.
   // Beside the IdP and for the same reason. Here rather than only in the registration because the
   // paths that need the whole SET do not hold one: the tenant view, the watch-set projection and the

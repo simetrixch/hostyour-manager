@@ -84,7 +84,7 @@ function seedTenant(): void {
   seedCluster();
   db.db.insert(tenants).values({
     id: "tnt_1", clusterId: "cls_1", guid: GUID, subdomain: "example", stage: "prod",
-    members: ["auth", "jobs", "report"], identityProvider: "auth", suspended: false, status: "active",
+    members: ["auth", "jobs", "report"], identityProvider: "auth", identityProviderPath: "/auth", suspended: false, status: "active",
   }).run();
   db.db.insert(tenantApps).values({ id: "tna_erp", tenantId: "tnt_1", name: "erp", status: "active" }).run();
 }

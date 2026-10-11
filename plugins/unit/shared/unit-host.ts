@@ -69,21 +69,24 @@ export function tenantZone(subdomain: string, stage: Stage, unitApex: string): s
   return `${subdomain}.${stageApex(unitApex, stage)}`;
 }
 
-/** A standing member's public base URL at one stage, for the callers that must ADDRESS a member rather
- *  than resolve it (the first-admin invite over the identity provider, the administrator check, the
- *  relocation probe): `https://<host>/<member>`, where the host is the tenant's own domain if it has
- *  one ("" = none) and its zone otherwise. A caller appends its API path to it. */
-export function tenantMemberUrl(member: string, stage: Stage, subdomain: string, unitApex: string, ownDomain: string): string {
-  return `https://${ownDomain || tenantZone(subdomain, stage, unitApex)}/${member}`;
+/** A member's public base URL at one stage, for the callers that must ADDRESS a member rather than
+ *  resolve it (the first-admin invite over the identity provider, the administrator check, the
+ *  relocation probe): `https://<host><path>`, where the host is the tenant's own domain if it has one
+ *  ("" = none) and its zone otherwise. The path is the product's, as the tenant's registration
+ *  records it (shared/tenant.ts memberPathOf); this composes only the host, and the root path `/`
+ *  adds nothing to it. A caller appends its API path to the result. */
+export function tenantMemberUrl(path: string, stage: Stage, subdomain: string, unitApex: string, ownDomain: string): string {
+  return `https://${ownDomain || tenantZone(subdomain, stage, unitApex)}${path === "/" ? "" : path}`;
 }
 
 /** The TXT record that marks a tenant's identity provider for the product's mail service: named
  *  `<label>.<zone>` and holding the issuer, which is the identity provider member's address on the
  *  tenant's ZONE and never on its own domain. The zone lies under a stage apex this platform alone
  *  writes, while a customer controls the DNS of its own domain, so only a mark under the zone can be
- *  trusted. The label is the product's (tenant spec `issuerRecordLabel`). */
-export function tenantIssuerRecord(label: string, identityProvider: string, stage: Stage, subdomain: string, unitApex: string): { name: string; content: string } {
-  const issuer = tenantMemberUrl(identityProvider, stage, subdomain, unitApex, "");
+ *  trusted. The label is the product's (tenant spec `issuerRecordLabel`); the path is the identity
+ *  provider's, as the registration records it. */
+export function tenantIssuerRecord(label: string, identityProviderPath: string, stage: Stage, subdomain: string, unitApex: string): { name: string; content: string } {
+  const issuer = tenantMemberUrl(identityProviderPath, stage, subdomain, unitApex, "");
   return { name: `${label}.${new URL(issuer).host}`, content: issuer };
 }
 

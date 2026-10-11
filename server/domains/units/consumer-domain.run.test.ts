@@ -135,7 +135,7 @@ describe("consumer-set-domain through the Executor", () => {
     await expect(plan(`x.${APEX}`, SHOP)).rejects.toThrow();
     await expect(plan(`api.${CLUSTER}`, SHOP)).rejects.toThrow();
     h.db.db.insert(tenants).values({
-      id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "beta", stage: "prod", members: ["auth"], identityProvider: "auth",
+      id: "tnt_1", clusterId: "cls_1", guid: "zsjs023ctne0", subdomain: "beta", stage: "prod", members: ["auth"], identityProvider: "auth", identityProviderPath: "/auth",
       ownDomain: `www.${STORE}`, ownDomainRedirects: [STORE], suspended: false, status: "active",
     }).run();
     await expect(plan(STORE, SHOP)).rejects.toThrow(/tenant beta/);

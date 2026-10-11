@@ -7,6 +7,7 @@ import { tenantId as mintTenantRowId, tenantAppId as mintTenantAppId } from "../
 import type { TenantStatus } from "../../../shared/enums.ts";
 import { localTx } from "../../executor/stepkit.ts";
 import type { CreateTenantParams } from "./create-tenant.run.ts";
+import { memberPathOf } from "../../../shared/tenant.ts";
 
 /** WHICH of create-tenant's two inventory writes is running. Named once, as one value, so it can never
  *  degenerate into a pair of booleans a caller could combine into a nonsense state:
@@ -48,7 +49,7 @@ export function upsertTenantInventory(ctx: StepCtx, p: CreateTenantParams, phase
       // the tenant card, the relocation world), so the app names are never lost — they are just kept
       // where their status lives. Derived from the two fields rather than carried as a third, which
       // could drift out of step with them.
-      identityProvider: p.identityProvider, members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
+      identityProvider: p.identityProvider, identityProviderPath: memberPathOf(p, p.identityProvider), members: p.members.map((m) => m.name).filter((n) => !p.apps.some((a) => a.name === n)),
       ...(p.ownDomain ? { ownDomain: p.ownDomain, ownDomainRedirects: p.ownDomainRedirects ?? [] } : {}),
       seedUsers: p.seedUsers,
       displayName: p.displayName,
