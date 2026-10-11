@@ -3,13 +3,14 @@ import { eq } from "drizzle-orm";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { openDb, type DbHandle } from "../../db/client.ts";
 import { servers, clusters, tenants } from "../../db/schema/inventory.ts";
-import { FakePlatformRepo } from "../../adapters/git/testing/fake.ts";
+import { FakePlatformRepo, FakeRepoReader } from "../../adapters/git/testing/fake.ts";
 import { errIllegalTransition } from "../../kernel/errors.ts";
 import pino from "pino";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
+import { APPS_MANIFEST_PATH } from "../../../shared/apps-manifest.ts";
 import { TenantRegistrations, tenantRegistrationWrite } from "./tenant-registrations.ts";
 import { testMembers, TEST_BUNDLE } from "./tenant-members.fixture.ts";
-import { followedVersions, followTenant, makeTenantFollower, type TenantFollowDeps } from "./tenant-follow.ts";
+import { followedVersions, followTenant, makeTenantFollower, movesInsideLine, type TenantFollowDeps } from "./tenant-follow.ts";
 import { MEMBERS_CHANGED } from "./tenant-refresh-members.run.ts";
 import type { RunStatus } from "../../../shared/enums.ts";
 import type { QueuedRunView } from "../../../shared/api-types.ts";
@@ -22,23 +23,26 @@ const GUID = "zsjs023ctne0";
 const GUID2 = "q7mx4ke9ta21";
 const NEW = "0.1.12-stable-20260925120000-abc1234";
 const OLD = "0.1.11-stable-20260920120000-def5678";
+/** A release of the next engine line: the bundle the tenants run is written for line 0.1. */
+const NEXT_LINE = "0.2.0-stable-20261010120000-0a1b2c3";
 
 const pinsFile = (builds: Record<string, string>): string =>
   `builds:\n${Object.entries(builds).map(([name, tag]) => `  - { name: ${name}, image: ${name}, tag: "${tag}" }`).join("\n")}\n`;
 
-/** The books: two tenants at prod whose erp member holds `engine`, and the engine pinned at NEW. */
-function books(engine: string): TenantRegistrations {
+/** The books: two tenants at prod whose erp member holds `engine` and whose auth member holds `auth`
+ *  where one is given, the engine pinned at `enginePin` and auth at NEW. */
+function books(engine: string, enginePin = NEW, auth?: string): TenantRegistrations {
   const repo = new FakePlatformRepo();
   for (const [guid, subdomain] of [[GUID, "acme"], [GUID2, "beta"]] as const) {
     const registration = TenantRegistrationSchema.parse({
       cluster: "s1", subdomain, members: testMembers(["erp"]), identityProvider: "auth", apps: [{ name: "erp" }], quota: seedQuota("small"),
-      approvedTags: { erp: { "example-engine": engine } }, ...TEST_BUNDLE,
+      approvedTags: { erp: { "example-engine": engine }, ...(auth ? { auth: { "example-auth": auth } } : {}) }, ...TEST_BUNDLE,
     });
     const w = tenantRegistrationWrite("prod", guid, registration);
     repo.seed(repo.booksBranch, w.path, w.content);
   }
   repo.seed(repo.booksBranch, "charts/example-auth/pins-prod.yaml", pinsFile({ "example-auth": NEW }));
-  repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile({ "example-engine": NEW }));
+  repo.seed(repo.booksBranch, "charts/example-engine/pins-prod.yaml", pinsFile({ "example-engine": enginePin }));
   return new TenantRegistrations(repo);
 }
 
@@ -92,12 +96,19 @@ beforeEach(() => {
 });
 afterEach(() => { h.sqlite.close(); });
 
-function deps(executor: ReturnType<typeof fakeExecutor>, engine = OLD): TenantFollowDeps {
+/** The tenants' own repository: the bundle they run is written for example-engine on line 0.1. */
+function bundleRepository(): FakeRepoReader {
+  const repo = new FakeRepoReader();
+  repo.scriptFor(TEST_BUNDLE.appsRepo, { files: { [APPS_MANIFEST_PATH]: 'apps: []\nengine:\n  build: example-engine\n  line: "0.1"\n' } });
+  return repo;
+}
+
+function deps(executor: ReturnType<typeof fakeExecutor>, engine = OLD, enginePin = NEW, auth?: string, repo = bundleRepository()): TenantFollowDeps {
   return {
     db: h.db,
     executor,
     runEnding: executor.runEnding,
-    ports: { registrations: books(engine), attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-auth", build: "example-auth" }] },
+    ports: { registrations: books(engine, enginePin, auth), attestedBuilds: async () => [{ unit: "example-platform", build: "example-engine" }, { unit: "example-auth", build: "example-auth" }], repo },
     logger: pino({ level: "silent" }),
   };
 }
@@ -115,7 +126,58 @@ describe("followedVersions — what a following tenant moves", () => {
   });
 });
 
+describe("movesInsideLine — a following tenant stays on its engine line", () => {
+  const engineOf = (lines: Record<string, string>) => vi.fn(async (tag: string) => (lines[tag] ? { build: "engine-0", line: lines[tag] } : undefined));
+  const BUNDLE_NOW = "0.1.0-stable-20260101000000-abc1234";
+  const BUNDLE_NEXT = "0.1.1-stable-20261010000000-abc5678";
+
+  it("PLANTED DEFECT: leaves out a bundle pin whose release declares another line, and keeps the engine move inside the line", async () => {
+    const parts = [part("engine", [NEW], [OLD]), part("bundle", [BUNDLE_NEXT], [BUNDLE_NOW])];
+    const read = engineOf({ [BUNDLE_NOW]: "0.1", [BUNDLE_NEXT]: "0.2" });
+    expect(await movesInsideLine({ engine: NEW, bundle: BUNDLE_NEXT }, parts, { part: "bundle", tag: BUNDLE_NOW }, read))
+      .toEqual({ versions: { engine: NEW }, leftOut: [`bundle pin ${BUNDLE_NEXT} is on line 0.2 and the bundle runs line 0.1, so Move to line moves it`] });
+  });
+
+  it("PLANTED INNOCENT: keeps a bundle pin on the line, and reads no bundle where no move can leave the line", async () => {
+    const parts = [part("engine", [NEW], [OLD]), part("bundle", [BUNDLE_NEXT], [BUNDLE_NOW])];
+    expect((await movesInsideLine({ engine: NEW, bundle: BUNDLE_NEXT }, parts, { part: "bundle", tag: BUNDLE_NOW }, engineOf({ [BUNDLE_NOW]: "0.1", [BUNDLE_NEXT]: "0.1" }))).versions).toEqual({ engine: NEW, bundle: BUNDLE_NEXT });
+    const unread = engineOf({});
+    expect(await movesInsideLine({ engine: NEW }, parts, { part: "bundle", tag: BUNDLE_NOW }, unread)).toEqual({ versions: { engine: NEW }, leftOut: [] });
+    expect(unread).not.toHaveBeenCalled();
+  });
+
+  it("keeps every move where the tenant runs no bundle, or its bundle declares no engine", async () => {
+    const parts = [part("engine", [NEXT_LINE], [OLD])];
+    expect((await movesInsideLine({ engine: NEXT_LINE }, parts, undefined, engineOf({}))).versions).toEqual({ engine: NEXT_LINE });
+    expect((await movesInsideLine({ engine: NEXT_LINE }, parts, { part: "bundle", tag: "0.1.0-stable-20260101000000-abc1234" }, engineOf({}))).versions).toEqual({ engine: NEXT_LINE });
+  });
+});
+
 describe("followTenant — one check of one tenant", () => {
+  it("PLANTED DEFECT: moves auth and leaves out the engine pin on the next line, which the bundle's line refuses", async () => {
+    const executor = fakeExecutor();
+    const info = vi.fn();
+    const logger = { ...pino({ level: "silent" }), info } as unknown as TenantFollowDeps["logger"];
+    expect(await followTenant({ ...deps(executor, OLD, NEXT_LINE, OLD), logger }, "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moved example-auth to ${NEW}`);
+    expect(executor.planned).toEqual([{ tenantId: "tnt_1", versions: { "example-auth": NEW } }]);
+    expect(info).toHaveBeenCalledWith({ tenantId: "tnt_1" }, `tenant acme at prod follows inside its engine line only: example-platform pin ${NEXT_LINE} is on line 0.2 and the bundle runs line 0.1, so Move to line moves it`);
+  });
+
+  it("PLANTED DEFECT: plans no run where the only move leaves the engine line, and says why", async () => {
+    const executor = fakeExecutor();
+    expect(await followTenant(deps(executor, OLD, NEXT_LINE), "tnt_1")).toBe(`tenant acme at prod moves no part inside its engine line: example-platform pin ${NEXT_LINE} is on line 0.2 and the bundle runs line 0.1, so Move to line moves it`);
+    expect(executor.planned).toEqual([]);
+  });
+
+  it("PLANTED INNOCENT: moves the engine and auth inside the line together, without reading the tenant's repository", async () => {
+    const executor = fakeExecutor();
+    const repo = bundleRepository();
+    expect(await followTenant(deps(executor, OLD, NEW, OLD, repo), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moved example-auth to ${NEW}, example-platform to ${NEW}`);
+    expect(executor.planned).toEqual([{ tenantId: "tnt_1", versions: { "example-auth": NEW, "example-platform": NEW } }]);
+    expect(repo.clones).toEqual([]);
+  });
+
+
   it("moves a following tenant that lags its stage pin through the Versions run, planned and approved", async () => {
     const executor = fakeExecutor();
     expect(await followTenant(deps(executor), "tnt_1")).toBe(`tenant acme at prod: the Versions run run_1 moved example-platform to ${NEW}`);

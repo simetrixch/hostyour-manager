@@ -15,6 +15,9 @@ import type { Executor } from "../../executor/executor.ts";
 import type { Logger } from "../../kernel/logger.ts";
 import type { RunStatus, Stage } from "../../../shared/enums.ts";
 import type { ReleaseRunSucceeded } from "../../adapters/build-plane/port.ts";
+import type { AppsEngine } from "../../../shared/apps-manifest.ts";
+import type { TenantRegistration } from "../../../shared/tenant.ts";
+import { bundleReleaseTag, repositoryEngine, versionLine } from "./engine-line.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
 import { tenantVersionParts, type TenantVersionPart } from "./tenant-versions.ts";
 import type { TenantOnboardPorts } from "./create-tenant.run.ts";
@@ -28,7 +31,7 @@ export interface TenantFollowDeps {
   executor: Pick<Executor, "planStreamed" | "settle" | "approve" | "discard" | "listQueue">;
   /** How a run stands once it settled: its status and, where it failed, its error (executor/read.ts getRunEnding). */
   runEnding: (runId: string) => { status: RunStatus; error: string | null } | undefined;
-  ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds">;
+  ports: Pick<TenantOnboardPorts, "registrations" | "attestedBuilds" | "repo" | "deployCredentialId">;
   logger: Logger;
 }
 
@@ -45,6 +48,51 @@ export function followedVersions(parts: readonly TenantVersionPart[]): Record<st
     moves[part.name] = pin;
   }
   return moves;
+}
+
+/** The moves of `versions` that keep the tenant on the engine line of the bundle it runs, and why each
+ *  other one is left out. The line binds two parts: the one that renders the bundle's engine build,
+ *  whose pin must be on that line, and the bundle, whose pinned release must declare it. The Versions
+ *  run refuses a pairing across lines (engine-line.ts), and a move to another line takes both parts at
+ *  once, through tenant-line-move. `engineOf` reads the engine a bundle tag's release declares; it is
+ *  asked only where a move may leave the line: the bundle moves, or a part's pin is on another version
+ *  line than a version it runs. A bundle that declares no engine is judged by nobody, so every move stays. */
+export async function movesInsideLine(
+  versions: Readonly<Record<string, string>>,
+  parts: readonly TenantVersionPart[],
+  bundle: { part: string; tag: string } | undefined,
+  engineOf: (appsImageTag: string) => Promise<AppsEngine | undefined>,
+): Promise<{ versions: Record<string, string>; leftOut: string[] }> {
+  const kept = { ...versions };
+  const leftOut: string[] = [];
+  const mayLeaveLine = Object.entries(versions).some(([name, pin]) =>
+    name === bundle?.part || (parts.find((p) => p.name === name)?.running ?? []).some((tag) => versionLine(tag) !== versionLine(pin)));
+  if (!bundle || !mayLeaveLine) return { versions: kept, leftOut };
+  const engine = await engineOf(bundle.tag);
+  if (!engine) return { versions: kept, leftOut };
+  for (const [name, pin] of Object.entries(versions)) {
+    const pinLine = name === bundle.part ? (await engineOf(pin))?.line
+      : parts.find((p) => p.name === name)?.builds.some((b) => b.name === engine.build) ? versionLine(pin) : undefined;
+    if (pinLine === undefined || pinLine === engine.line) continue;
+    delete kept[name];
+    leftOut.push(`${name} pin ${pin} is on line ${pinLine} and the bundle runs line ${engine.line}, so Move to line moves it`);
+  }
+  return { versions: kept, leftOut };
+}
+
+/** The tenant's bundle as movesInsideLine takes it, and the reader of the engine a tag of it declares;
+ *  no bundle where the tenant runs none. The bundle's pin file names its one build after its image
+ *  (tenant-versions.ts bundlePart). */
+function tenantBundle(deps: TenantFollowDeps, entry: TenantRegistration, parts: readonly TenantVersionPart[], tenantId: string) {
+  const { appsRepo, appsImage, appsImageTag } = entry;
+  const part = parts.find((p) => p.builds.some((b) => b.name === appsImage));
+  const read = { repo: deps.ports.repo, ...(deps.ports.deployCredentialId ? { deployCredentialId: deps.ports.deployCredentialId } : {}) };
+  // A check has no abort: it runs to its end like the run it plans.
+  const ctx = { log: (line: string) => deps.logger.info({ tenantId }, line), signal: new AbortController().signal };
+  return {
+    bundle: appsRepo && appsImage && appsImageTag ? { part: part?.name ?? appsImage, tag: appsImageTag } : undefined,
+    engineOf: (tag: string) => repositoryEngine(read, { repoURL: appsRepo!, ref: bundleReleaseTag(tag) }, ctx),
+  };
 }
 
 /** Wait until `runId` settles. The checks wait one after another, so a run that never settles holds
@@ -80,9 +128,13 @@ export async function followTenant(deps: TenantFollowDeps, tenantId: string): Pr
   for (let attempt = 1; ; attempt++) {
     const read = await deps.ports.registrations.readTenant(tc.stage, tc.guid);
     if (!read) return `tenant ${tc.guid} has no registration at ${tc.stage}`;
-    const versions = followedVersions(await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags, read.entry));
+    const parts = await tenantVersionParts(deps.ports, tc.stage, read.entry.members, read.entry.approvedTags, read.entry);
+    const { bundle, engineOf } = tenantBundle(deps, read.entry, parts, tenantId);
+    const { versions, leftOut } = await movesInsideLine(followedVersions(parts), parts, bundle, engineOf);
     const moves = Object.entries(versions).map(([part, tag]) => `${part} to ${tag}`).join(", ");
-    if (moves === "") return `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin`;
+    const outside = leftOut.join("; ");
+    if (moves === "") return outside === "" ? `tenant ${tc.subdomain} at ${tc.stage} runs every part at its stage pin` : `tenant ${tc.subdomain} at ${tc.stage} moves no part inside its engine line: ${outside}`;
+    if (outside !== "" && attempt === 1) deps.logger.info({ tenantId }, `tenant ${tc.subdomain} at ${tc.stage} follows inside its engine line only: ${outside}`);
     const { runId } = await deps.executor.planStreamed("tenant-refresh-members", { tenantId, versions });
     await settle(deps, runId);
     try {
