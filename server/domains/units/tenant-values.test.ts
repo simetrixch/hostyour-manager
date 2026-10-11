@@ -29,7 +29,7 @@ describe("registryHostFromChain", () => {
   });
 });
 
-describe("resolveTenantCluster — a tenant stage stands only on a machine that serves its stage", () => {
+describe("resolveTenantCluster — tenant placement is independent of the machine stage", () => {
   let db: DbHandle;
   beforeEach(() => {
     db = openDb(":memory:");
@@ -38,18 +38,18 @@ describe("resolveTenantCluster — a tenant stage stands only on a machine that 
   });
   afterEach(() => { db.sqlite.close(); });
 
-  it("PLANTED INNOCENT: resolves the domain, the short name and the stage of an active machine of the tenant's stage", () => {
+  it("resolves the domain, the short name and the stage of an active cluster at the tenant's stage", () => {
     expect(resolveTenantCluster(db.db, "cls_1", "prod")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
   });
 
-  it("PLANTED DEFECT: refuses TEST on a PROD machine, naming the machine and both stages", () => {
-    expect(() => resolveTenantCluster(db.db, "cls_1", "test")).toThrow("machine s1 (s1.example.com) serves prod environments only and cannot take a test environment");
+  it("PLANTED INNOCENT: takes a TEST stage on a machine whose stage is prod, which holds tenant-eso-test beside tenant-eso-prod", () => {
+    expect(resolveTenantCluster(db.db, "cls_1", "test")).toEqual({ clusterId: "cls_1", domain: "s1.example.com", cluster: "s1", stage: "prod" });
   });
 
-  it("PLANTED DEFECT: refuses PROD on a TEST machine, and takes TEST there", () => {
+  it("places every tenant stage independently of the machine's platform stage", () => {
+    for (const stage of ["dev", "test", "prod"] as const) expect(resolveTenantCluster(db.db, "cls_1", stage).clusterId).toBe("cls_1");
     db.db.update(clusters).set({ stage: "test" }).run();
-    expect(() => resolveTenantCluster(db.db, "cls_1", "prod")).toThrow("machine s1 (s1.example.com) serves test environments only and cannot take a prod environment");
-    expect(resolveTenantCluster(db.db, "cls_1", "test").clusterId).toBe("cls_1");
+    expect(resolveTenantCluster(db.db, "cls_1", "prod").stage).toBe("test");
   });
 
   it("refuses a cluster that is not active, and an unknown one", () => {

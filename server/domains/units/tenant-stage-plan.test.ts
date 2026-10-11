@@ -41,15 +41,15 @@ async function changeSource(p: ReturnType<typeof stagePorts>, change: Partial<Te
 }
 
 describe("tenant stages share identity while provisioning independently", () => {
-  it("plans all selected stages with one guid, each on a machine of its own stage", async () => {
+  it("plans all selected stages with one guid, TEST on a machine of its own", async () => {
     const p = stagePorts();
-    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: [{ stage: "dev", clusterId: "cls_3" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }, planCtx());
+    const result = await makeCreateTenantDef(p).planStream!({ ...request, stages: [{ stage: "dev", clusterId: "cls_1" }, { stage: "test", clusterId: "cls_2" }, { stage: "prod", clusterId: "cls_1" }] }, planCtx());
     expect(result.outcome).toBe("planned");
     if (result.outcome !== "planned") throw new Error(result.summary);
     const stages = [result.params, ...result.params.additionalStages!];
     expect(stages.map((s) => s.stage)).toEqual(["prod", "test", "dev"]);
     expect(new Set(stages.map((s) => s.guid)).size).toBe(1);
-    expect(stages.map((s) => s.clusterId)).toEqual(["cls_1", "cls_2", "cls_3"]);
+    expect(stages.map((s) => s.clusterId)).toEqual(["cls_1", "cls_2", "cls_1"]);
     const steps = makeCreateTenantDef(p).steps(result.params);
     expect(steps[0]!.name).toBe("attest-target");
     expect(new Set(steps.map((s) => s.name)).size).toBe(steps.length);

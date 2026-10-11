@@ -326,12 +326,12 @@ describe("create-tenant streaming planner", () => {
     expect(result.plan.steps.map((s) => s.name)).toEqual(def.steps(result.params).map((s) => s.name));
   });
 
-  it("PLANTED DEFECT: refuses a dev tenant on a machine that serves prod, before anything is cloned", async () => {
+  it("plans a dev tenant on a machine whose platform stage is prod", async () => {
     seedClusters();
     const reader = repoWithManifest();
-    await expect(makeCreateTenantDef(withAppsTemplate(ports({ repo: reader }))).planStream!({ clusterId: "cls_1", stage: "dev", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx()))
-      .rejects.toThrow("machine s1 (s1.example) serves prod environments only and cannot take a dev environment");
-    expect(reader.clones).toEqual([]);
+    const result = await makeCreateTenantDef(withAppsTemplate(ports({ repo: reader }))).planStream!({ clusterId: "cls_1", stage: "dev", subdomain: "acme", owner: "team-acme", size: "small", apps: APPS }, planCtx());
+    expect(result.outcome).toBe("planned");
+    expect(reader.clones.length).toBeGreaterThan(0);
   });
 
   it("validates the member CHARTS at the same books branch the registration is locked on, and never at the trunk", async () => {

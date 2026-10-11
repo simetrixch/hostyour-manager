@@ -11,8 +11,8 @@ import { readOnlyPlatformRepo } from "../../adapters/git/port.ts";
 //
 // ONE FILE per tenant per stage: registrations/<guid>/<stage>.yaml. The guid is the DIRECTORY and the
 // stage is the FILE NAME, so the path IS the identity and the body repeats neither. The stage is the
-// tenant's own, and the `cluster` field names the machine that stage stands on, which serves that stage
-// (resolveTenantCluster), so the stages of one guid stand on machines of their own. Every field of
+// tenant's own, and the `cluster` field names any active cluster — a tenant may stand at several
+// stages under one guid, on one cluster or on several. Every field of
 // TenantRegistrationSchema is written on EVERY commit, which is what makes the read-modify-write ops
 // below safe: a field a writer does not re-emit is silently dropped from the file, and a dropped
 // cluster would mis-target a LIVE tenant's fan-out (prune+selfHeal cascade). The round-trip tests pin

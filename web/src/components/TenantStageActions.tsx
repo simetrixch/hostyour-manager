@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { STAGE, type Stage } from "../../../shared/enums.ts";
+import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
 import { TENANT_SIZE, UNIT_SIZE_LETTER, type UnitSize } from "#unit/shared/unit-size.ts";
 import { addTenantStage, listTenants, listTenantTargets, type TenantView, type TenantTargetView } from "../api.ts";
-import { machinesServing } from "../tenantPlacement.ts";
 
 export function TenantStageActions({ tenant }: { tenant: TenantView }) {
   const nav = useNavigate();
@@ -33,9 +33,9 @@ export function TenantStageActions({ tenant }: { tenant: TenantView }) {
     }).catch((e: unknown) => { if (active) setError(e instanceof Error ? e.message : String(e)); });
     return () => { active = false; };
   }, [tenant.guid, asked]);
-  // Only machines that serve the stage are offered, and a machine chosen before the stage changed
-  // counts as chosen only while it is still offered.
-  const offered = machinesServing(targets, stage);
+  // TEST never stands on its tenant's PROD machine (nor PROD on its TEST's): that machine is not offered,
+  // and a machine chosen before the stage changed counts as chosen only while it is still offered.
+  const offered = targets.filter((target) => !findStagePlacementConflict(siblings, stage, target.id));
   const machine = offered.some((target) => target.id === clusterId) ? clusterId : "";
   const missing = STAGE.filter((s) => !siblings.some((t) => t.stage === s && t.status !== "purged"));
   return <div className="card">

@@ -10,8 +10,8 @@ import type { Registrations } from "./registrations.ts";
 
 /** Fail-closed deploy-state gate, shared by every consumer AND tenant attest-target step: the target
  *  cluster must still be a provisioned hostyour cluster (its deploy-state ConfigMap present) whose
- *  DOMAIN agrees with the unit's cluster row. The deploy-state's stage is not compared: whether a
- *  machine may take a unit's stage is decided from the inventory before the run. `subject` names the unit in the
+ *  DOMAIN agrees with the unit's cluster row. The deploy-state's stage is the platform's and is not
+ *  compared: a unit at any stage stands on a cluster of any stage. `subject` names the unit in the
  *  mismatch message ("app" / "tenant"). Returns the (now-non-null) DeployState so the caller can log
  *  its generation. */
 export function assertDeployState(state: DeployState | null, domain: string, subject: string): DeployState {

@@ -4,6 +4,7 @@ import type { PlanStreamCtx, PlanStreamResult, Step } from "../../executor/types
 import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
+import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
 import { CONSUMER_MANIFEST_PATH, ConsumerManifestSchema } from "../../../shared/consumer.ts";
 import type { CreateTenantRequest, CreateTenantStageParams, TenantOnboardPorts } from "./create-tenant.run.ts";
 import { loadTenantCluster } from "./lifecycle.ts";
@@ -35,6 +36,9 @@ export async function planStandingStage(
   const existing = ctx.db.select({ id: tenants.id, status: tenants.status }).from(tenants).where(and(eq(tenants.guid, source.guid), eq(tenants.stage, placement.stage))).get();
   if ((existing && existing.status !== "purged") || (await ports.registrations.scanTenant(placement.stage, source.guid)).status !== "absent") throw errValidation(`tenant ${source.guid} already has a ${placement.stage} stage; finish or purge it before adding that stage`);
   const rc = resolveTenantCluster(ctx.db, placement.clusterId, placement.stage);
+  const standing = ctx.db.select({ stage: tenants.stage, clusterId: tenants.clusterId, status: tenants.status }).from(tenants).where(eq(tenants.guid, source.guid)).all();
+  const clash = findStagePlacementConflict(standing, placement.stage, rc.clusterId);
+  if (clash) throw errValidation(`tenant ${source.guid} ${placement.stage} cannot stand on ${rc.domain}: its ${clash.stage} stage stands there, and TEST and PROD cannot share a machine`);
   if (ports.carryTrunkToBooksBranch) await ports.carryTrunkToBooksBranch();
   const clusterValueFiles = await ports.resolveClusterValueFiles(rc.domain, placement.stage);
   const registryHost = registryHostFromChain(clusterValueFiles);

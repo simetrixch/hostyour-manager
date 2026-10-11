@@ -8,7 +8,7 @@ import type { Stage } from "../../../shared/enums.ts";
 import { clusters, tenants } from "../../db/schema/inventory.ts";
 import type { TenantOnboardPorts, CreateTenantParams } from "./create-tenant.run.ts";
 import { buildUnitTitle, probeBuildUnit, probeTenantDns } from "./tenant-probes.ts";
-import { failedProbe, stagePlacementFinding, unitProbeCtx, type UnitProbes } from "#unit/server/check-units.ts";
+import { failedProbe, unitProbeCtx, type UnitProbes } from "#unit/server/check-units.ts";
 import type { ProbeCtx } from "../../executor/probe.ts";
 
 type TenantProbePorts = Pick<TenantOnboardPorts, "dns" | "resolveUnitApex"> &
@@ -48,12 +48,12 @@ export function tenantUnitProbes(ports: TenantProbePorts): UnitProbes {
         return hooks.get(unit)!;
       };
       const rows = ctx.db
-        .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, clusterId: tenants.clusterId, domain: clusters.domain, clusterStage: clusters.stage })
+        .select({ id: tenants.id, guid: tenants.guid, subdomain: tenants.subdomain, stage: tenants.stage, clusterId: tenants.clusterId, domain: clusters.domain })
         .from(tenants).innerJoin(clusters, eq(tenants.clusterId, clusters.id)).where(and(eq(tenants.status, "active"), eq(tenants.suspended, false))).all();
       for (const t of rows) {
         if (ctx.signal.aborted) break;
         const probeCtx = unitProbeCtx(ctx, t.subdomain);
-        const findings: PreflightCheck[] = [stagePlacementFinding(`${t.subdomain} ${t.stage}`, t.stage, { domain: t.domain, stage: t.clusterStage })];
+        const findings: PreflightCheck[] = [];
         try {
           const p = { guid: t.guid, subdomain: t.subdomain, stage: t.stage, clusterId: t.clusterId, domain: t.domain } as CreateTenantParams;
           findings.push(...(await probeTenantDns(ports as TenantOnboardPorts, p, probeCtx)));

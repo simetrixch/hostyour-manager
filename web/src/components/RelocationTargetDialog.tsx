@@ -15,10 +15,10 @@ export interface RelocationTargetView {
 
 /** The target picker of the two relocation run kinds that need one: MOVE takes the unit to a
  *  DIFFERENT active cluster, RESTORE rebuilds it on any active cluster — its own included (the
- *  disaster-recovery case). The unit keeps its own stage through either. The choices are filtered to
- *  what the run would accept (active, and for a move never the current cluster; a tenant's caller
- *  hands only machines of its stage), so the dialog can only aim where assertMovableTo / the target
- *  check would let the plan through. Plan-then-approve: confirming only PLANS the run and opens the Run screen.
+ *  disaster-recovery case). The unit keeps its own stage through either, whatever stage the cluster
+ *  carries. The choices are filtered to what the run would accept (active, and for a move never the
+ *  current cluster), so the dialog can only aim where assertMovableTo / the target check would let
+ *  the plan through. Plan-then-approve: confirming only PLANS the run and opens the Run screen.
  *  Reuses the shared .dialog shell. */
 export function RelocationTargetDialog(props: {
   title: string;
@@ -96,7 +96,7 @@ export function RelocationTargetDialog(props: {
                 </option>
               ))}
             </select>
-            <span className="field__hint">Every active cluster the unit may stand on — it keeps its own stage.</span>
+            <span className="field__hint">Any active cluster — the unit keeps its own stage; the cluster&apos;s stage is the platform&apos;s.</span>
           </label>
           {picksGeneration && (
             <label className="field" htmlFor={generationId}>
