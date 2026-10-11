@@ -24,7 +24,6 @@ import {
 } from "#unit/server/relocation-restore.ts";
 import { consumerWorld, type ConsumerRelocationPorts } from "./relocation-world-consumer.ts";
 import { tenantWorld, type TenantRelocationPorts } from "./relocation-world-tenant.ts";
-import { resolveTenantCluster } from "./tenant-values.ts";
 import { planRestoreSecrets } from "./restore-seed-secrets.ts";
 import { restoreCleanups, restoreCeremonySecretsCleanup } from "./restore-cleanups.ts";
 import { planUnitBuildRestore, repoUrlOf, restoreUnitBuildSteps } from "./restore-unit-build.ts";
@@ -113,7 +112,7 @@ export function makeTenantRestoreDef(ports: TenantRelocationPorts): RunDefinitio
     mutating: true,
     plan: async (params, { db }) => {
       const tc = loadTenantCluster(db, params.tenantId);
-      const target = resolveTenantCluster(db, params.targetClusterId, tc.stage);
+      const target = loadActiveTargetCluster(db, params.targetClusterId);
       assertRestorable(db, { kind: "tenant", unit: tc.guid, stage: tc.stage }, params.generation);
       const stepDefs = restoreSteps(ports, tenantWorld(ports, params.tenantId), params.targetClusterId, params.generation, "restored tenant");
       return {

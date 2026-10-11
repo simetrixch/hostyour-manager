@@ -27,7 +27,7 @@ function render(tenant: TenantView): string {
   hooks.cursor = 0;
   return renderToStaticMarkup(createElement(TenantStageActions, { tenant }));
 }
-const machine = (n: number, stage = "prod") => ({ id: `cls_${n}`, domain: `apps${n}.example`, stage, status: "active" });
+const machine = (n: number) => ({ id: `cls_${n}`, domain: `apps${n}.example`, status: "active" });
 const pageOf = (siblings: TenantView[]) => siblings.find((t) => t.stage === "prod") ?? siblings[0]!;
 async function loaded(siblings: TenantView[], machines = [machine(1)]): Promise<string> {
   api.listTenants.mockResolvedValue(siblings);
@@ -68,24 +68,27 @@ describe("Add stage chooses its own machine and size", () => {
   });
 });
 
-describe("Add stage offers only the machines that serve its stage", () => {
-  const machines = [machine(1, "prod"), machine(2, "test"), machine(3, "dev"), { ...machine(4, "test"), status: "removed" }];
+describe("Add stage leaves out the machine its stage must stand apart from", () => {
+  const machines = [machine(1), machine(2), { ...machine(3), status: "removed" }];
   const offered = (html: string) => [...html.matchAll(/<option value="(cls_\d)">/g)].map((m) => m[1]);
 
-  it("PLANTED DEFECT: offers TEST no PROD machine, and PROD no TEST machine", async () => {
+  it("PLANTED DEFECT: offers TEST no machine PROD stands on, and PROD none TEST stands on", async () => {
     search.params = new URLSearchParams("addStage=test");
     expect(offered(await loaded([row("prod", "active")], machines))).toEqual(["cls_2"]);
     hooks.states = [];
     search.params = new URLSearchParams("addStage=prod");
-    expect(offered(await loaded([row("test", "active")], machines))).toEqual(["cls_1"]);
+    expect(offered(await loaded([row("test", "active")], machines))).toEqual(["cls_2"]);
   });
 
-  it("PLANTED INNOCENT: offers DEV the machine that serves dev", async () => {
+  it("PLANTED INNOCENT: offers DEV every active machine, and TEST the machine of a purged PROD", async () => {
     search.params = new URLSearchParams("addStage=dev");
-    expect(offered(await loaded([row("prod", "active")], machines))).toEqual(["cls_3"]);
+    expect(offered(await loaded([row("prod", "active")], machines))).toEqual(["cls_1", "cls_2"]);
+    hooks.states = [];
+    search.params = new URLSearchParams("addStage=test");
+    expect(offered(await loaded([row("prod", "purged"), row("dev", "active")], machines))).toEqual(["cls_1", "cls_2"]);
   });
 
-  it("PLANTED DEFECT: a machine chosen that does not serve the stage counts as not chosen", async () => {
+  it("PLANTED DEFECT: a machine chosen for DEV is dropped once the stage becomes TEST and PROD stands on it", async () => {
     search.params = new URLSearchParams("addStage=test");
     const prod = row("prod", "active");
     await loaded([prod], machines);
@@ -94,7 +97,7 @@ describe("Add stage offers only the machines that serve its stage", () => {
     expect(render(prod)).toMatch(/<button class="btn" disabled="">Validate/);
   });
 
-  it("PLANTED INNOCENT: a machine chosen stays chosen while it serves the stage", async () => {
+  it("PLANTED INNOCENT: a machine chosen earlier stays chosen while the stage still allows it", async () => {
     search.params = new URLSearchParams("addStage=test");
     const prod = row("prod", "active");
     await loaded([prod], machines);

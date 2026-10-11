@@ -13,7 +13,7 @@ import { probeIdentity, probeWebhook } from "#unit/server/build-probes.ts";
 import { probeDns } from "./onboard-deploy-probes.ts";
 import { resolveRepoCredentialId } from "#unit/server/repo-identity.ts";
 import { readOwnerIdentity } from "#unit/server/owners.ts";
-import { failedProbe, stagePlacementFinding, unitProbeCtx, type UnitProbes } from "#unit/server/check-units.ts";
+import { failedProbe, unitProbeCtx, type UnitProbes } from "#unit/server/check-units.ts";
 
 export interface ConsumerUnitProbesPorts {
   /** The consumer onboarding's ports, handed late (the consumer family is wired after the tenant's).
@@ -56,12 +56,10 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
       const perRepo = new Map<string, Promise<PreflightCheck[]>>();
       const onboard = ports.onboard();
       const consumers = ctx.db
-        .select({ id: apps.id, name: apps.name, stage: apps.stage, host: apps.host, repoUrl: apps.repoUrl, clusterId: apps.clusterId, domain: clusters.domain, clusterStage: clusters.stage })
+        .select({ id: apps.id, name: apps.name, stage: apps.stage, host: apps.host, repoUrl: apps.repoUrl, clusterId: apps.clusterId, domain: clusters.domain })
         .from(apps).innerJoin(clusters, eq(apps.clusterId, clusters.id)).where(eq(apps.status, "active")).all();
       for (const c of consumers) {
         if (ctx.signal.aborted) break;
-        // Read off the row and its cluster, so it is measured even where the probes below are not.
-        const placement = stagePlacementFinding(`${c.name} ${c.stage}`, c.stage, { domain: c.domain, stage: c.clusterStage });
         let findings: PreflightCheck[];
         if (!onboard) {
           findings = [{ id: "check", title: `The unit ${c.name}`, severity: "soft", status: "warn", detail: "not measured: the consumer onboarding is not wired on this manager" }];
@@ -75,17 +73,16 @@ export function consumerUnitProbes(ports: ConsumerUnitProbesPorts): UnitProbes {
           try {
             repoCredentialId = await resolveRepoCredentialId({ repoURL: c.repoUrl, githubApp: ports.githubApp, owners: (org) => readOwnerIdentity(ctx.db, org), store: ctx.creds, signal: ctx.signal });
           } catch (e) {
-            findings = [placement, { id: "identity", title: `The unit ${c.name}`, severity: "hard", status: "fail", detail: e instanceof Error ? e.message : String(e) }];
+            findings = [{ id: "identity", title: `The unit ${c.name}`, severity: "hard", status: "fail", detail: e instanceof Error ? e.message : String(e) }];
             ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(apps.id, c.id)).run();
             done.probed += 1;
-            done.attention += findings.filter((f) => f.status !== "pass").length;
+            done.attention += 1;
             continue;
           }
           // The slice of the onboarding's params the three probes read, off the row and the cluster.
           const p = { consumerName: c.name, repoURL: c.repoUrl, repoCredentialId, host: c.host, stage: c.stage, unitApex, domain: c.domain, clusterId: c.clusterId } as DeployableOnboardParams;
           findings = await consumerFindings(onboard, p, unitProbeCtx(ctx, c.name), perRepo);
         }
-        findings = [placement, ...findings];
         ctx.db.update(apps).set({ checkJson: { checkedAt: now.getTime(), findings } }).where(eq(apps.id, c.id)).run();
         done.probed += 1;
         done.attention += findings.filter((f) => f.status !== "pass").length;

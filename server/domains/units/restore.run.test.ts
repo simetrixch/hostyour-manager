@@ -4,7 +4,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { seedQuota } from "#unit/shared/unit-size.ts";
 import { eq } from "drizzle-orm";
 import type { DbHandle } from "../../db/client.ts";
-import { apps, clusters, tenants, tenantApps } from "../../db/schema/inventory.ts";
+import { apps, tenants, tenantApps } from "../../db/schema/inventory.ts";
 import { TenantRegistrationSchema } from "../../../shared/tenant.ts";
 import { ConsumerRegistrationSchema } from "../../../shared/consumer.ts";
 import { serializePointer } from "#unit/server/registration-laws.ts";
@@ -114,16 +114,6 @@ describe("tenant-restore", () => {
     await expect(plan("20260101T000000Z")).rejects.toThrow(/has no backup generation 20260101T000000Z/);
     recordBackupStarted(db.db, { kind: "tenant", unit: GUID, stage: "prod", generation: "20260928T030000Z", folder: "x", trigger: "nightly", runId: "run_nightly" });
     await expect(plan("20260928T030000Z")).rejects.toThrow(/is taking — only a written and verified generation is restored/);
-  });
-
-  it("PLANTED DEFECT: refuses at plan a target machine that does not serve the tenant's stage; PLANTED INNOCENT: plans on one that does", async () => {
-    seedClusters(db);
-    seedTenantRows(db, "offboarded");
-    seedGeneration(db, "tenant", GUID);
-    const plan = () => makeTenantRestoreDef(tenantPorts(makeFakes())).plan({ tenantId: "tnt_1", targetClusterId: TARGET.clusterId, generation: GENERATION }, { db: db.db });
-    expect((await plan()).steps.map((s) => s.name)).toEqual(STEP_ORDER);
-    db.db.update(clusters).set({ stage: "test" }).where(eq(clusters.id, TARGET.clusterId)).run();
-    await expect(plan()).rejects.toThrow(`machine ${TARGET.cluster} (${TARGET.domain}) serves test environments only and cannot take a prod environment`);
   });
 
   it("refuses a generation without a readable registration — a restore never guesses what the unit was", async () => {

@@ -11,8 +11,6 @@
 import type { Step, StepCtx } from "#core/server/executor/types.ts";
 import type { ProbeCtx } from "#core/server/executor/probe.ts";
 import type { PreflightCheck } from "#core/shared/preflight.ts";
-import type { Stage } from "#core/shared/enums.ts";
-import { clusterServesStage } from "#core/shared/cluster-stage.ts";
 
 /** One family's probes of its standing units. */
 export interface UnitProbes {
@@ -31,15 +29,6 @@ export function unitProbeCtx(ctx: StepCtx, prefix: string): ProbeCtx {
 /** The one finding a probe that threw leaves under its own name. */
 export const failedProbe = (id: string, title: string, err: unknown): PreflightCheck =>
   ({ id, title, severity: "hard", status: "fail", detail: `the probe could not measure: ${err instanceof Error ? err.message : String(err)}` });
-
-/** Whether a unit stands on a machine that serves its stage. A breach is reported here and never
- *  repaired: the unit stays where it is until somebody moves it. */
-export function stagePlacementFinding(unit: string, stage: Stage, machine: { domain: string; stage: string }): PreflightCheck {
-  const title = `The machine ${unit} stands on`;
-  return clusterServesStage(machine.stage, stage)
-    ? { id: "placement.stage", title, severity: "soft", status: "pass", detail: `${stage} on ${machine.domain}, which serves ${machine.stage}` }
-    : { id: "placement.stage", title, severity: "soft", status: "warn", detail: `${stage} runs on ${machine.domain}, which serves ${machine.stage} environments only` };
-}
 
 /** Every registered family's units probed, in the order the families registered. */
 export function checkUnitsStep(registered: () => readonly UnitProbes[]): Step {

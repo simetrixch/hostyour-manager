@@ -6,21 +6,17 @@ import { fakeTenantSeeder } from "./tenant-seeder.fixture.ts";
 import { testMembers } from "./tenant-members.fixture.ts";
 import { db, ports, seedTenant } from "./tenant-refresh-members.fixture.ts";
 
-// PROD stands on cls_1, a PROD machine; cls_2 serves TEST and cls_3 DEV, so a stage added beside PROD goes to
-// the machine of its own stage.
+// PROD stands on cls_1; TEST never may, so a stage added beside it goes to the second machine.
 export function stagePorts() {
   seedTenant();
   db.db.insert(servers).values({ id: "srv_2", name: "s2", host: "10.1.1.12", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "test", domain: "s2.example", name: "s2", status: "active" }).run();
-  db.db.insert(servers).values({ id: "srv_3", name: "s3", host: "10.1.1.13", sshUser: "root", role: "slave", status: "healthy" }).run();
-  db.db.insert(clusters).values({ id: "cls_3", serverId: "srv_3", stage: "dev", domain: "s3.example", name: "s3", status: "active" }).run();
+  db.db.insert(clusters).values({ id: "cls_2", serverId: "srv_2", stage: "prod", domain: "s2.example", name: "s2", status: "active" }).run();
   const p = ports(testMembers(["erp"]));
-  const machine = (domain: string, stage: "dev" | "test" | "prod") => ({ clusterReader: new FakeClusterReader({
-    deployState: { domain, stage, writtenAt: "2026-10-01T00:00:00Z", generation: 1 },
+  const machine = (domain: string) => ({ clusterReader: new FakeClusterReader({
+    deployState: { domain, stage: "prod", writtenAt: "2026-10-01T00:00:00Z", generation: 1 },
   }), argoReader: new FakeMasterArgoReader(), projectWriter: new FakeMasterProjectWriter(), argoNamespace: "argocd" });
-  const resolver = new FakeClusterKubeResolver(machine("s1.example", "prod"));
-  resolver.set("cls_2", machine("s2.example", "test"));
-  resolver.set("cls_3", machine("s3.example", "dev"));
+  const resolver = new FakeClusterKubeResolver(machine("s1.example"));
+  resolver.set("cls_2", machine("s2.example"));
   p.resolver = resolver;
   p.seeder = fakeTenantSeeder();
   p.objectStore = new FakeObjectStore();

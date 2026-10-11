@@ -21,18 +21,21 @@ function sibling(stage: Stage, clusterId: string = SOURCE.clusterId): void {
 }
 
 describe("one-stage tenant Move", () => {
-  it("PLANTED DEFECT: refuses PROD onto a TEST machine, and TEST onto a PROD machine, at plan, naming the machine and both stages", async () => {
-    const def = makeTenantMigrateDef(tenantPorts(makeFakes()));
-    db.db.update(clusters).set({ stage: "test" }).where(eq(clusters.id, TARGET.clusterId)).run();
-    await expect(def.plan(move, { db: db.db })).rejects.toThrow(`machine ${TARGET.cluster} (${TARGET.domain}) serves test environments only and cannot take a prod environment`);
-    db.db.update(clusters).set({ stage: "prod" }).where(eq(clusters.id, TARGET.clusterId)).run();
-    db.db.update(clusters).set({ stage: "test" }).where(eq(clusters.id, SOURCE.clusterId)).run();
-    db.db.update(tenants).set({ stage: "test" }).where(eq(tenants.id, move.tenantId)).run();
-    await expect(def.plan({ ...move, stage: "test" }, { db: db.db })).rejects.toThrow(`machine ${TARGET.cluster} (${TARGET.domain}) serves prod environments only and cannot take a test environment`);
+  it.each(["prod", "dev"] as const)("allows %s to share a target with a sibling DEV/PROD stage without moving the sibling", async (stage) => {
+    const other: Stage = stage === "prod" ? "dev" : "prod";
+    db.db.update(tenants).set({ stage }).where(eq(tenants.id, move.tenantId)).run(); sibling(other, TARGET.clusterId);
+    const before = db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get();
+    const plan = await makeTenantMigrateDef(tenantPorts(makeFakes())).plan({ ...move, stage }, { db: db.db });
+    expect(plan.steps).toHaveLength(16);
+    expect(db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get()).toEqual(before);
   });
 
-  it("PLANTED INNOCENT: plans PROD onto a PROD machine", async () => {
-    expect((await makeTenantMigrateDef(tenantPorts(makeFakes())).plan(move, { db: db.db })).steps).toHaveLength(16);
+  it("refuses PROD onto the machine of its active TEST at plan, and lets a purged TEST stay there", async () => {
+    const def = makeTenantMigrateDef(tenantPorts(makeFakes()));
+    sibling("test", TARGET.clusterId);
+    await expect(def.plan(move, { db: db.db })).rejects.toThrow("another stage of this tenant requires a separate machine: TEST and PROD cannot share a machine");
+    db.db.update(tenants).set({ status: "purged" }).where(eq(tenants.id, "tnt_sibling")).run();
+    expect((await def.plan(move, { db: db.db })).steps).toHaveLength(16);
   });
 
   it("keeps stored legacy runs recoverable, while refusing legacy-shaped new plans and half-specified bindings", async () => {
@@ -94,8 +97,8 @@ describe("one-stage tenant Move", () => {
     db.db.update(tenants).set({ stage: "prod", clusterId: TARGET.clusterId }).where(eq(tenants.id, move.tenantId)).run();
     await expect(first.run(stepCtx(db, first.name, move, []))).rejects.toThrow(/source.*changed/i);
     db.db.update(tenants).set({ clusterId: SOURCE.clusterId }).where(eq(tenants.id, move.tenantId)).run();
-    db.db.update(clusters).set({ stage: "test" }).where(eq(clusters.id, TARGET.clusterId)).run();
-    await expect(first.run(stepCtx(db, first.name, move, []))).rejects.toThrow(/serves test environments only/i);
+    sibling("test", TARGET.clusterId);
+    await expect(first.run(stepCtx(db, first.name, move, []))).rejects.toThrow(/another stage/i);
     expect(f.source.reader.jobs).toEqual([]); expect(f.target.reader.jobs).toEqual([]);
     expect(f.source.reader.deletedNamespaces).toEqual([]);
   });
@@ -129,7 +132,6 @@ describe("one-stage tenant Move", () => {
   it.each(["prod", "test"] as const)("moves every member of %s while preserving the sibling stage", async (stage) => {
     const other: Stage = stage === "prod" ? "test" : "prod";
     db.db.update(tenants).set({ stage }).where(eq(tenants.id, move.tenantId)).run(); sibling(other);
-    db.db.update(clusters).set({ stage }).where(eq(clusters.id, TARGET.clusterId)).run();
     const beforeRow = db.db.select().from(tenants).where(eq(tenants.id, "tnt_sibling")).get();
     const f = makeFakes(); const ports = tenantPorts(f);
     await ports.registrations.commitTenant({ stage, guid: GUID, registration: tenantEntry(), runId: "run_seed" });

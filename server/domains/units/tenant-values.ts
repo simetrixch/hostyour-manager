@@ -2,7 +2,7 @@
 // into the facts a tenant run needs, extracted from create-tenant.run.ts the way onboard.run.ts
 // extracted plugins/unit/server/seed-repo-pat.ts. The manager DB is the sole authority for cluster
 // coordinates — never a hardcoded name:
-//   - resolveTenantCluster:     the cluster a tenant stage is placed on, which must serve that stage.
+//   - resolveTenantCluster:     the cluster a tenant is created on, at the tenant's stage.
 //   - registryHostFromChain:    the registry host a cluster pulls its first-party images from, read
 //                               off the cluster's OWN values chain (global.endpoints.registry.host).
 //
@@ -13,12 +13,10 @@ import type { Db } from "../../db/client.ts";
 import { clusters } from "../../db/schema/inventory.ts";
 import { errNotFound, errValidation } from "../../kernel/errors.ts";
 import type { Stage } from "../../../shared/enums.ts";
-import { clusterServesStage } from "../../../shared/cluster-stage.ts";
 import type { ClusterValueFile } from "../../../shared/cluster-values.ts";
 
-/** Resolve the active machine a tenant stage is placed on. Every placement of a tenant stage (create, add
- *  stage, move, restore) passes here, so a machine of another stage is refused in this one place. */
-export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): ResolvedTenantCluster {
+/** Resolve an active machine. The tenant stage has its own namespaces and Vault role on every machine. */
+export function resolveTenantCluster(db: Db, clusterId: string, _stage: Stage): ResolvedTenantCluster {
   const row = db
     .select({ id: clusters.id, domain: clusters.domain, name: clusters.name, status: clusters.status, stage: clusters.stage })
     .from(clusters)
@@ -26,7 +24,6 @@ export function resolveTenantCluster(db: Db, clusterId: string, stage: Stage): R
     .get();
   if (!row) throw errNotFound(`cluster ${clusterId}`);
   if (row.status !== "active") throw errValidation(`cluster ${clusterId} is not active (status "${row.status}")`);
-  if (!clusterServesStage(row.stage, stage)) throw errValidation(`machine ${row.name} (${row.domain}) serves ${row.stage} environments only and cannot take a ${stage} environment`);
   return { clusterId: row.id, domain: row.domain, cluster: row.name, stage: row.stage };
 }
 

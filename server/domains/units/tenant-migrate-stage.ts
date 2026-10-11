@@ -2,9 +2,9 @@ import { eq } from "drizzle-orm";
 import type { Db } from "../../db/client.ts";
 import { tenants } from "../../db/schema/inventory.ts";
 import { errValidation } from "../../kernel/errors.ts";
+import { findStagePlacementConflict } from "../../../shared/tenant-stage-placement.ts";
 import { assertDeployState } from "#unit/server/lifecycle.ts";
 import { assertMovableTo } from "#unit/server/relocation-target.ts";
-import { resolveTenantCluster } from "./tenant-values.ts";
 import type { WorldOf } from "#unit/server/relocation.ts";
 import type { Step, StepCtx } from "../../executor/types.ts";
 import { attestTenantTargetStep, loadTenantCluster } from "./lifecycle.ts";
@@ -25,8 +25,10 @@ export function loadTenantMove(db: Db, p: StageMove) {
   const rows = db.select().from(tenants).where(eq(tenants.guid, source.guid)).all();
   const row = rows.find((r) => r.id === p.tenantId)!;
   if (row.status !== "active" || row.suspended) throw errValidation("Move needs an active, unsuspended tenant stage");
-  assertMovableTo(db, source.clusterId, p.targetClusterId);
-  const target = resolveTenantCluster(db, p.targetClusterId, p.stage);
+  const target = assertMovableTo(db, source.clusterId, p.targetClusterId);
+  if (findStagePlacementConflict(rows, p.stage, target.clusterId)) {
+    throw errValidation("another stage of this tenant requires a separate machine: TEST and PROD cannot share a machine");
+  }
   return { source, target };
 }
 
